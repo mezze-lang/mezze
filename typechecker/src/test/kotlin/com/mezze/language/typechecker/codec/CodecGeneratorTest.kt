@@ -31,7 +31,7 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(MezzeType.IntType))
         assertTrue(generator.isSerializable(MezzeType.FloatType))
         assertTrue(generator.isSerializable(MezzeType.StringType))
-        assertTrue(generator.isSerializable(MezzeType.BooleanType))
+        assertTrue(generator.isSerializable(MezzeType.BoolType))
         assertTrue(generator.isSerializable(MezzeType.NatType))
         assertTrue(generator.isSerializable(MezzeType.FracType))
         assertTrue(generator.isSerializable(MezzeType.CharType))

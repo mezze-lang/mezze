@@ -79,7 +79,7 @@ object CoopTypes {
             MezzeType.RecordType(mapOf(
                 "p" to promiseType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // === Structured Concurrency ===
@@ -161,7 +161,7 @@ object CoopTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "cont" to contType
             )),

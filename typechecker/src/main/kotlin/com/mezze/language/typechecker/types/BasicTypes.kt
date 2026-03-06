@@ -207,17 +207,17 @@ object BasicTypes {
         // Float classification
         context["__native_float_is_nan"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_float_is_infinite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_float_is_finite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // Float sign
@@ -367,17 +367,17 @@ object BasicTypes {
 
         context["nat::is_zero"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["nat::is_even"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["nat::is_odd"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_nat_to_frac"] = MezzeType.FunctionType(
@@ -419,59 +419,59 @@ object BasicTypes {
     private fun registerBoolTypes(context: MutableMap<String, MezzeType>) {
         // Native bool operations for stdlib bool module
         context["__native_bool_and"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["__native_bool_or"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["__native_bool_not"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("b" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("b" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["__native_bool_xor"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["__native_bool_to_string"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("b" to MezzeType.BooleanType)),
+            MezzeType.RecordType(mapOf("b" to MezzeType.BoolType)),
             MezzeType.StringType
         )
 
         // Module-qualified functions for boolean
         context["boolean::and"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["boolean::or"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["boolean::not"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("b" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("b" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["boolean::xor"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["boolean::implies"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         context["boolean::iff"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
-            MezzeType.BooleanType
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
         )
 
         // Aliases for std::bool module (module name is bool, not boolean)
@@ -522,17 +522,17 @@ object BasicTypes {
 
         context["__native_string_starts_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "prefix" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_string_ends_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "suffix" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_string_contains"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "substring" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_string_split"] = MezzeType.FunctionType(
@@ -576,7 +576,7 @@ object BasicTypes {
 
         context["string::is_empty"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["string::to_upper"] = MezzeType.FunctionType(
@@ -601,17 +601,17 @@ object BasicTypes {
 
         context["string::starts_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "prefix" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["string::ends_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "suffix" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["string::contains"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "substring" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["string::repeat"] = MezzeType.FunctionType(
@@ -706,7 +706,7 @@ object BasicTypes {
         // Glob pattern matching
         context["__native_string_glob_match"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("pattern" to MezzeType.StringType, "s" to MezzeType.StringType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 
@@ -749,7 +749,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_frac_less_than"] = MezzeType.FunctionType(
@@ -757,7 +757,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_frac_greater_than"] = MezzeType.FunctionType(
@@ -765,7 +765,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // Ordering comparison type
@@ -864,7 +864,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["frac::less_than"] = MezzeType.FunctionType(
@@ -872,7 +872,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["frac::greater_than"] = MezzeType.FunctionType(
@@ -880,7 +880,7 @@ object BasicTypes {
                 "l" to MezzeType.FracType,
                 "r" to MezzeType.FracType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["frac::to_float"] = MezzeType.FunctionType(

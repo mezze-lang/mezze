@@ -47,11 +47,11 @@ object HttpTypes {
     private val httpConfigType = MezzeType.RecordType(mapOf(
         "timeout_ms" to MezzeType.IntType,
         "connect_timeout_ms" to MezzeType.IntType,
-        "follow_redirects" to MezzeType.BooleanType,
+        "follow_redirects" to MezzeType.BoolType,
         "max_redirects" to MezzeType.IntType,
-        "verify_ssl" to MezzeType.BooleanType,
-        "auto_decompress" to MezzeType.BooleanType,
-        "keep_alive" to MezzeType.BooleanType
+        "verify_ssl" to MezzeType.BoolType,
+        "auto_decompress" to MezzeType.BoolType,
+        "keep_alive" to MezzeType.BoolType
     ))
 
     // UrlPattern variant type: | Glob { pattern: String } |

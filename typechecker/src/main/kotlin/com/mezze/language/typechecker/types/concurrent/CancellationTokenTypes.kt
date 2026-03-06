@@ -38,7 +38,7 @@ object CancellationTokenTypes {
             MezzeType.RecordType(mapOf(
                 "token" to cancellationTokenType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_cancellation_token_get_reason: {token: CancellationToken} -> Option String

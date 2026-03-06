@@ -335,7 +335,8 @@ class SubstitutionApplier(
             val abilityConstraints = constraintResult?.abilityConstraints?.map { constraint ->
                 AbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeParam = constraint.typeVar.name
+                    typeParam = constraint.typeVar.name,
+                    typeArgs = constraint.typeArgs  // Preserve type args for multi-parameter abilities
                 )
             } ?: emptyList()
 
@@ -837,7 +838,7 @@ class SubstitutionApplier(
                     "Int" -> MezzeType.IntType
                     "Float" -> MezzeType.FloatType
                     "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BooleanType
+                    "Bool" -> MezzeType.BoolType
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Char" -> MezzeType.CharType
@@ -1232,7 +1233,7 @@ class SubstitutionApplier(
                     "Int" -> MezzeType.IntType
                     "Float" -> MezzeType.FloatType
                     "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BooleanType
+                    "Bool" -> MezzeType.BoolType
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Char" -> MezzeType.CharType
@@ -1573,7 +1574,7 @@ class SubstitutionApplier(
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "String" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BooleanType
+                    "Bool" -> type is MezzeType.BoolType
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
                     "Char" -> type is MezzeType.CharType
@@ -1690,7 +1691,7 @@ class SubstitutionApplier(
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
+            is MezzeType.BoolType -> "Bool"
             is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.VarType -> "'${type.variable.name}"
@@ -2249,7 +2250,7 @@ class SubstitutionApplier(
                     "Int" -> MezzeType.IntType
                     "Float" -> MezzeType.FloatType
                     "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BooleanType
+                    "Bool" -> MezzeType.BoolType
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Ordering" -> MezzeType.OrderingType
@@ -2415,7 +2416,7 @@ class SubstitutionApplier(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.OrderingType,

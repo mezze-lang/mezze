@@ -64,7 +64,7 @@ object MapTypes {
                 "m" to mapType,
                 "k" to MezzeType.VarType(mapKeyTypeVar)
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_map_size"] = MezzeType.FunctionType(
@@ -109,7 +109,7 @@ object MapTypes {
                         "k" to MezzeType.VarType(mapKeyTypeVar),
                         "v" to MezzeType.VarType(mapValTypeVar)
                     )),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             mapType
@@ -179,7 +179,7 @@ object MapTypes {
                 "m1" to mapType,
                 "m2" to mapType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 }

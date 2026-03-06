@@ -153,7 +153,7 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
                 "Int" -> MezzeType.IntType
                 "Float" -> MezzeType.FloatType
                 "String" -> MezzeType.StringType
-                "Boolean" -> MezzeType.BooleanType
+                "Boolean" -> MezzeType.BoolType
                 "Nat" -> MezzeType.NatType
                 "Frac" -> MezzeType.FracType
                 "Ordering" -> MezzeType.OrderingType

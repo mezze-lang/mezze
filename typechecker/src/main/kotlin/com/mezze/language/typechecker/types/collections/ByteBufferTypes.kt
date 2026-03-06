@@ -71,7 +71,7 @@ object ByteBufferTypes {
         // __native_buffer_is_empty: {buf: ByteBuffer} -> Bool
         context["__native_buffer_is_empty"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("buf" to MezzeType.ByteBufferType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_buffer_clear: {buf: ByteBuffer} -> ByteBuffer

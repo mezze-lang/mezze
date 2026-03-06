@@ -214,7 +214,7 @@ class AbilityConstraintAnnotationsTest {
 
         val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "areEqual" }
         val funcType = binding.inferredType as MezzeType.FunctionType
-        val isBoolType = funcType.returnType is MezzeType.BooleanType ||
+        val isBoolType = funcType.returnType is MezzeType.BoolType ||
             (funcType.returnType is MezzeType.TypeApplication &&
              (funcType.returnType as MezzeType.TypeApplication).constructor == "Bool") ||
             (funcType.returnType is MezzeType.VariantType &&

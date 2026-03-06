@@ -943,7 +943,7 @@ class ContextBuilder {
             is MezzeType.SuspendedType -> collectTypeVarsFromType(type.valueType, typeVars)
             // Primitive types have no type variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> {}
         }

@@ -31,7 +31,7 @@ class TypeDisplayIntegrationTest {
             "x" to MezzeType.VarType(typeVar),
             "y" to MezzeType.VarType(typeVar)
         ))
-        val returnType = MezzeType.BooleanType
+        val returnType = MezzeType.BoolType
         val functionType = MezzeType.FunctionType(paramType, returnType)
         val constraints = listOf(
             InspectAbilityConstraint("'a", "Eq")

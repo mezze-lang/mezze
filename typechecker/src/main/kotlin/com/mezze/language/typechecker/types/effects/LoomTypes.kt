@@ -131,13 +131,13 @@ object LoomTypes {
             MezzeType.RecordType(mapOf(
                 "p" to promiseType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_loom_is_cancelled: {} -> Bool
         context["__native_loom_is_cancelled"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_loom_check: {} -> {}
@@ -151,7 +151,7 @@ object LoomTypes {
             MezzeType.RecordType(mapOf(
                 "p" to promiseType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // === Structured Concurrency ===
@@ -228,7 +228,7 @@ object LoomTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "f" to effectPolymorphicMapper(
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
@@ -314,7 +314,7 @@ object LoomTypes {
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 }

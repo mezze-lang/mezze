@@ -47,7 +47,7 @@ object SetTypes {
                 "s" to setType,
                 "x" to MezzeType.VarType(setElemTypeVar)
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_set_size"] = MezzeType.FunctionType(
@@ -84,7 +84,7 @@ object SetTypes {
                 "s1" to setType,
                 "s2" to setType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_set_to_array"] = MezzeType.FunctionType(
@@ -112,7 +112,7 @@ object SetTypes {
                 "s" to setType,
                 "p" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             setType
@@ -166,7 +166,7 @@ object SetTypes {
                 "s1" to setType,
                 "s2" to setType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 }

@@ -87,7 +87,7 @@ object FilesystemTypes {
         context["__native_fs_exists"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
             resultType(
-                MezzeType.BooleanType,
+                MezzeType.BoolType,
                 MezzeType.VariantType(permissionDeniedError + ioError)
             )
         )
@@ -159,7 +159,7 @@ object FilesystemTypes {
         context["__native_memfs_exists"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
             resultType(
-                MezzeType.BooleanType,
+                MezzeType.BoolType,
                 MezzeType.VariantType(permissionDeniedError + ioError)
             )
         )

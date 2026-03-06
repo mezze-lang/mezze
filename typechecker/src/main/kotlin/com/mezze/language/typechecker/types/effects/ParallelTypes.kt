@@ -52,7 +52,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))
@@ -140,7 +140,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
@@ -152,10 +152,10 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_parallel_all: {xs: ['a], f: {x: 'a} -> Bool} -> Bool
@@ -164,10 +164,10 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_parallel_partition: {xs: ['a], f: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]}
@@ -176,7 +176,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             MezzeType.RecordType(mapOf(
@@ -235,7 +235,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
@@ -285,7 +285,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
@@ -298,12 +298,12 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_parallel_all_cfg"] = MezzeType.FunctionType(
@@ -311,12 +311,12 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_parallel_partition_cfg"] = MezzeType.FunctionType(
@@ -324,7 +324,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
@@ -402,7 +402,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
@@ -493,7 +493,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
@@ -506,12 +506,12 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_forkjoin_all"] = MezzeType.FunctionType(
@@ -519,12 +519,12 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         context["__native_forkjoin_partition"] = MezzeType.FunctionType(
@@ -532,7 +532,7 @@ object ParallelTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 ),
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType

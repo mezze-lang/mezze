@@ -68,7 +68,7 @@ object JsonTypes {
         context["__native_json_serialize"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "json" to jsonType,
-                "pretty" to MezzeType.BooleanType
+                "pretty" to MezzeType.BoolType
             )),
             resultType(MezzeType.StringType, encodeErrorType)
         )

@@ -56,7 +56,7 @@ object SemaphoreTypes {
         // __native_semaphore_try_acquire: {sem: Semaphore} -> Bool
         context["__native_semaphore_try_acquire"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("sem" to semType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_semaphore_try_acquire_n: {sem: Semaphore, permits: Int} -> Bool
@@ -65,7 +65,7 @@ object SemaphoreTypes {
                 "sem" to semType,
                 "permits" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_semaphore_available: {sem: Semaphore} -> Int

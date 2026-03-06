@@ -86,7 +86,7 @@ object AgentTypes {
                     "agent" to agentType,
                     "timeout_ms" to MezzeType.IntType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 

@@ -65,10 +65,10 @@ class ArrayListTypeCheckerTest {
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.ArrayType
 
-        // Should infer [Bool] - either BooleanType or VariantType with True/False
+        // Should infer [Bool] - either BoolType or VariantType with True/False
         val elemType = inferredType.elementType
         assertTrue(
-            elemType is MezzeType.BooleanType ||
+            elemType is MezzeType.BoolType ||
             (elemType is MezzeType.VariantType && elemType.constructors.keys == setOf("True", "False"))
         )
     }

@@ -711,7 +711,7 @@ class ImportResolver(
             is MezzeType.NatType,
             is MezzeType.FloatType,
             is MezzeType.FracType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.StringType,
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType,

@@ -104,7 +104,7 @@ object AtomTypes {
                     "expected" to elementType,
                     "new" to elementType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -169,7 +169,7 @@ object AtomTypes {
             val atomType = MezzeType.TypeApplication("Atom", listOf(elementType))
             val validatorType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("val" to elementType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_atom_new_validated"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -186,7 +186,7 @@ object AtomTypes {
             val atomType = MezzeType.TypeApplication("Atom", listOf(elementType))
             val validatorType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("val" to elementType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_atom_set_validator"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -204,7 +204,7 @@ object AtomTypes {
             val atomType = MezzeType.TypeApplication("Atom", listOf(elementType))
             val validatorType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("val" to elementType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             val optionType = MezzeType.TypeApplication("Option", listOf(validatorType))
             context["__native_atom_get_validator"] = MezzeType.FunctionType(

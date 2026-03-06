@@ -56,7 +56,7 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             context["__native_list_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -181,7 +181,7 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_list_filter"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -270,14 +270,14 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_list_any"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to listType,
                     "p" to predicateType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -287,14 +287,14 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_list_all"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to listType,
                     "p" to predicateType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -307,7 +307,7 @@ object ListTypes {
                     "xs" to listType,
                     "x" to elemType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -441,7 +441,7 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_list_find"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
@@ -455,7 +455,7 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_list_find_index"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
@@ -469,7 +469,7 @@ object ListTypes {
             val listType = MezzeType.ListType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             val resultType = MezzeType.RecordType(mapOf(
                 "matching" to listType,

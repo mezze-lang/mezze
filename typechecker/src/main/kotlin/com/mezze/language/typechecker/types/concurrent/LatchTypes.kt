@@ -40,7 +40,7 @@ object LatchTypes {
                 "latch" to latchType,
                 "ms" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_latch_get_count: {latch: Latch} -> Int

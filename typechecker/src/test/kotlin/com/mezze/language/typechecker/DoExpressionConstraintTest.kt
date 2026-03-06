@@ -153,7 +153,7 @@ class DoExpressionConstraintTest {
         // Parameters should have types (could be concrete or type variables)
         assertNotNull(paramType.fields["x"], "x should have a type")
         assertNotNull(paramType.fields["y"], "y should have a type")
-        // For now, accept that comparison operations may not return BooleanType correctly
+        // For now, accept that comparison operations may not return BoolType correctly
         assertNotNull(compareType.returnType)
     }
 
@@ -294,10 +294,10 @@ class DoExpressionConstraintTest {
         val testType = getVariableType(typedProgram, "test") as MezzeType.FunctionType
         val returnType = testType.returnType as MezzeType.RecordType
 
-        // The field 'val' should have Bool type (either BooleanType or VariantType with True/False), not a type variable
+        // The field 'val' should have Bool type (either BoolType or VariantType with True/False), not a type variable
         val valType = returnType.fields["val"]
         assertTrue(
-            valType is MezzeType.BooleanType ||
+            valType is MezzeType.BoolType ||
             (valType is MezzeType.VariantType && valType.constructors.keys == setOf("True", "False")),
             "Expected Bool type but got: $valType"
         )

@@ -2222,7 +2222,7 @@ class ASTToTruffleConverterV2(
             is MezzeType.IntType -> ReadLocalNode.KIND_LONG
             is MezzeType.NatType -> ReadLocalNode.KIND_LONG
             is MezzeType.FloatType -> ReadLocalNode.KIND_DOUBLE
-            is MezzeType.BooleanType -> ReadLocalNode.KIND_BOOLEAN
+            is MezzeType.BoolType -> ReadLocalNode.KIND_BOOLEAN
             else -> ReadLocalNode.KIND_OBJECT
         }
     }

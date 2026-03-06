@@ -104,14 +104,14 @@ fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, Type
  */
 private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, TypeDeclaration>): UnificationResult {
     // SPECIAL CASE: Bool primitive unifies with Bool variant
-    // BooleanType (primitive) can unify with VariantType([True, False])
+    // BoolType (primitive) can unify with VariantType([True, False])
     // This allows pattern matching on True/False while keeping Bool as a primitive
-    if (type1 is MezzeType.BooleanType && type2 is MezzeType.VariantType) {
+    if (type1 is MezzeType.BoolType && type2 is MezzeType.VariantType) {
         if (isBoolVariant(type2)) {
             return UnificationResult.Success(Substitution.empty)
         }
     }
-    if (type1 is MezzeType.VariantType && type2 is MezzeType.BooleanType) {
+    if (type1 is MezzeType.VariantType && type2 is MezzeType.BoolType) {
         if (isBoolVariant(type1)) {
             return UnificationResult.Success(Substitution.empty)
         }
@@ -393,7 +393,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.IntType && type2 is MezzeType.IntType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.StringType && type2 is MezzeType.StringType -> UnificationResult.Success(Substitution.empty)
-        type1 is MezzeType.BooleanType && type2 is MezzeType.BooleanType -> UnificationResult.Success(Substitution.empty)
+        type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.NatType && type2 is MezzeType.NatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> UnificationResult.Success(Substitution.empty)
@@ -1010,7 +1010,7 @@ private fun formatTypeRaw(type: MezzeType): String {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
         is MezzeType.StringType -> "String"
-        is MezzeType.BooleanType -> "Bool"
+        is MezzeType.BoolType -> "Bool"
         is MezzeType.NatType -> "Nat"
         is MezzeType.FracType -> "Frac"
         is MezzeType.OrderingType -> "Ordering"

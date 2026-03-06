@@ -378,7 +378,7 @@ class ConstructorResolutionTest {
         }
 
         assertNotNull(tBinding, "Should find t binding")
-        // The type might be BooleanType or a VariantType with True/False constructors
+        // The type might be BoolType or a VariantType with True/False constructors
         // Either way, it should type check successfully
         assertNotNull(tBinding?.inferredType, "True should have a type")
     }

@@ -268,10 +268,10 @@ object NonEmptyListTypes {
                     "xs" to nelType(a),
                     "p" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("x" to a)),
-                        MezzeType.BooleanType
+                        MezzeType.BoolType
                     )
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -283,10 +283,10 @@ object NonEmptyListTypes {
                     "xs" to nelType(a),
                     "p" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("x" to a)),
-                        MezzeType.BooleanType
+                        MezzeType.BoolType
                     )
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -298,7 +298,7 @@ object NonEmptyListTypes {
                     "xs" to nelType(a),
                     "x" to a
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
     }

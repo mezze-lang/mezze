@@ -130,7 +130,7 @@ object ContinuationTypes {
                 "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             )),
             // Return type: Bool
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_continuation_extract_suspended: { delim: 'c, suspended: 'a } -> Option { value: 'v, cont: 'c }

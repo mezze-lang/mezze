@@ -108,7 +108,7 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             context["__native_arraylist_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to arrayType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -138,7 +138,7 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_arraylist_filter"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -206,7 +206,7 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_arraylist_find"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -226,7 +226,7 @@ object ArrayListTypes {
                     "xs" to arrayType,
                     "x" to elemType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -306,7 +306,7 @@ object ArrayListTypes {
                     "l" to arrayType,
                     "r" to arrayType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -359,11 +359,11 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_arraylist_any"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -373,11 +373,11 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_arraylist_all"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -387,7 +387,7 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             val resultType = MezzeType.RecordType(mapOf(
                 "matching" to arrayType,
@@ -405,7 +405,7 @@ object ArrayListTypes {
             val arrayType = MezzeType.ArrayType(elemType)
             val predicateType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
             context["__native_arraylist_find_index"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),

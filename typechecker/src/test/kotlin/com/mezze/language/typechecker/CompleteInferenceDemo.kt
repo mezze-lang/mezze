@@ -146,9 +146,9 @@ class CompleteInferenceDemo {
         assertTrue(isWorkingType is MezzeType.FunctionType)
         
         val functionType = isWorkingType as MezzeType.FunctionType
-        // Bool can be BooleanType or VariantType with True/False constructors
+        // Bool can be BoolType or VariantType with True/False constructors
         val returnType = functionType.returnType
-        assertTrue(returnType is MezzeType.BooleanType ||
+        assertTrue(returnType is MezzeType.BoolType ||
                    (returnType is MezzeType.VariantType && returnType.constructors.keys == setOf("True", "False")),
                    "Should return Boolean")
     }

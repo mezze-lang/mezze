@@ -74,7 +74,7 @@ object SortedSetTypes {
                     "s" to MezzeType.SortedSetType(elementType),
                     "x" to elementType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -92,7 +92,7 @@ object SortedSetTypes {
             val elementType = MezzeType.VarType(TypeVar("a"))
             context["__native_sorted_set_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to MezzeType.SortedSetType(elementType))),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -194,7 +194,7 @@ object SortedSetTypes {
                     "s1" to MezzeType.SortedSetType(elementType),
                     "s2" to MezzeType.SortedSetType(elementType)
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
     }

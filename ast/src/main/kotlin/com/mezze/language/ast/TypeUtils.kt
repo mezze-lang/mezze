@@ -133,7 +133,7 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
         is MezzeType.SuspendedType -> collectTypeVarsRecursive(type.valueType, collector, sortFields)
         // Base types don't contain type variables
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType, is MezzeType.EffectRow -> { }
     }
@@ -307,7 +307,7 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
         }
         // Base types and effect rows remain unchanged
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType, is MezzeType.EffectRow -> type
     }

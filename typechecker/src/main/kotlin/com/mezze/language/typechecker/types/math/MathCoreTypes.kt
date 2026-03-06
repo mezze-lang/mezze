@@ -103,19 +103,19 @@ object MathCoreTypes {
         // Check if float is NaN
         context["__native_float_is_nan"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // Check if float is infinite
         context["__native_float_is_infinite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // Check if float is finite
         context["__native_float_is_finite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 
@@ -196,15 +196,15 @@ object MathCoreTypes {
         // Float classification
         context["core::is_nan"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
         context["core::is_infinite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
         context["core::is_finite"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // Sign functions

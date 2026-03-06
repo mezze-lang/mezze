@@ -69,7 +69,7 @@ object MutexTypes {
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -80,7 +80,7 @@ object MutexTypes {
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
     }

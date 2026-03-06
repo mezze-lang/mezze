@@ -144,7 +144,9 @@
       "WebFetch(domain:tapir.softwaremill.com)",
       "WebFetch(domain:hono.dev)",
       "Bash(do echo \"=== Run $i ===\")",
-      "Bash(git ls-files:*)"
+      "Bash(git ls-files:*)",
+      "Bash(2. During validation, the code prepended the resolved concreteType)",
+      "Bash(3. Result: [Int, Int] instead of [Int] for \"Show ''a\" with 'a=Int\n\nThis caused impl matching to fail since \"\"impl Show Int\"\" has 1 type arg,\nnot 2. Similarly for multi-parameter abilities like \"\"Encode Json 'a\",\nthe order could be wrong: [''a, Json] instead of [Json, ''a].\n\n## Solution\n\n- ConstraintGenerator: When extracting ability constraints from explicit\n  type annotations, preserve ALL type args in their original order\n- TypeValidator: Detect when resolved typeArgs already contains the\n  constrained type and use them directly \\(avoiding prepend\\)\n- AbilityResolver: Same detection logic for checkUserDefinedAbilityImpl\n\n## Key Changes\n\n1. ConstraintGenerator.kt: Use FunctionType.abilityConstraints directly\n   when user explicitly declares constraints, preserving type arg order\n\n2. TypeValidator.kt: Check if resolved typeArgs contain the constrained\n   type before prepending, avoiding duplicates like [Int, Int]\n\n3. AbilityResolver.kt: Same fix for checkUserDefinedAbilityImpl to\n   handle both annotation-based and method-call-based constraints\n\n## New Tests\n\nAdded 7 comprehensive tests covering:\n- Single-parameter abilities \\(Show ''a\\) not duplicating types\n- Multi-parameter abilities \\(Convert ''a ''b\\) preserving order\n- Chained ability constraints through nested function calls\n- Mixed concrete and polymorphic type args \\(Encode Json ''a\\)\n- Multiple different constraints on same function\n- Missing implementation error detection\n- Higher-order functions with ability constraints\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

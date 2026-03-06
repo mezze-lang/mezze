@@ -93,7 +93,7 @@ object BuiltinAbilities {
             is MezzeType.IntType -> hasAutomaticImplementation("Int", abilityName)
             is MezzeType.FloatType -> hasAutomaticImplementation("Float", abilityName)
             is MezzeType.StringType -> hasAutomaticImplementation("String", abilityName)
-            is MezzeType.BooleanType -> hasAutomaticImplementation("Boolean", abilityName)
+            is MezzeType.BoolType -> hasAutomaticImplementation("Boolean", abilityName)
             is MezzeType.NatType -> hasAutomaticImplementation("Nat", abilityName)
             is MezzeType.FracType -> hasAutomaticImplementation("Frac", abilityName)
             is MezzeType.OrderingType -> hasAutomaticImplementation("Ordering", abilityName)

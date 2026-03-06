@@ -83,7 +83,7 @@ object SortedMapTypes {
                     "m" to MezzeType.SortedMapType(keyType, valueType),
                     "k" to keyType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -103,7 +103,7 @@ object SortedMapTypes {
             val valueType = MezzeType.VarType(TypeVar("v"))
             context["__native_sorted_map_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -206,7 +206,7 @@ object SortedMapTypes {
                     "m1" to MezzeType.SortedMapType(keyType, valueType),
                     "m2" to MezzeType.SortedMapType(keyType, valueType)
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
     }

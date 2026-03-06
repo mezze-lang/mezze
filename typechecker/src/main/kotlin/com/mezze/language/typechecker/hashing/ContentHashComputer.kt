@@ -194,7 +194,7 @@ object ContentHashComputer {
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
+            is MezzeType.BoolType -> "Bool"
             is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"

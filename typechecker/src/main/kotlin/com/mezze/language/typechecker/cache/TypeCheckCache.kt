@@ -305,7 +305,7 @@ object TypeCheckCache {
         MezzeType.NatType -> "Nat"
         MezzeType.FloatType -> "Float"
         MezzeType.StringType -> "String"
-        MezzeType.BooleanType -> "Bool"
+        MezzeType.BoolType -> "Bool"
         MezzeType.FracType -> "Frac"
         MezzeType.BytesType -> "Bytes"
         MezzeType.ByteBufferType -> "ByteBuffer"

@@ -96,7 +96,7 @@ class ModuleTypePreservationComprehensiveTest {
                 "Int" -> actualType is MezzeType.IntType
                 "Float" -> actualType is MezzeType.FloatType
                 "String" -> actualType is MezzeType.StringType
-                "Boolean" -> actualType is MezzeType.BooleanType ||
+                "Boolean" -> actualType is MezzeType.BoolType ||
                     (actualType is MezzeType.VariantType &&
                      actualType.constructors.keys.containsAll(listOf("True", "False")))
                 else -> false

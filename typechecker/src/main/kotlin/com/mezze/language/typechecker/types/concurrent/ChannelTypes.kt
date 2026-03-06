@@ -66,7 +66,7 @@ object ChannelTypes {
                 "ch" to chanType,
                 "value" to elementType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_channel_try_recv: { ch: Chan 'a } -> Option 'a
@@ -90,7 +90,7 @@ object ChannelTypes {
             MezzeType.RecordType(mapOf(
                 "ch" to chanType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a }
@@ -145,7 +145,7 @@ object ChannelTypes {
                 "ch" to chanType,
                 "value" to elementType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_mock_channel_try_recv: { ch: Chan 'a } -> Option 'a
@@ -169,7 +169,7 @@ object ChannelTypes {
             MezzeType.RecordType(mapOf(
                 "ch" to chanType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_mock_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a }

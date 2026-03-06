@@ -236,7 +236,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.IntType -> "Int"
     is MezzeType.FloatType -> "Float"
     is MezzeType.StringType -> "String"
-    is MezzeType.BooleanType -> "Bool"
+    is MezzeType.BoolType -> "Bool"
     is MezzeType.NatType -> "Nat"
     is MezzeType.FracType -> "Frac"
     is MezzeType.CharType -> "Char"
@@ -566,7 +566,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is MezzeType.IntType -> "Int"
     is MezzeType.FloatType -> "Float"
     is MezzeType.StringType -> "String"
-    is MezzeType.BooleanType -> "Bool"
+    is MezzeType.BoolType -> "Bool"
     is MezzeType.NatType -> "Nat"
     is MezzeType.FracType -> "Frac"
     is MezzeType.CharType -> "Char"
@@ -899,7 +899,7 @@ fun isBuiltinType(type: MezzeType): Boolean {
     return when (type) {
         // Primitive built-in types
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
         is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> true
 
@@ -938,7 +938,7 @@ fun getBuiltinTypeName(type: MezzeType): String? {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
         is MezzeType.StringType -> "String"
-        is MezzeType.BooleanType -> "Bool"
+        is MezzeType.BoolType -> "Bool"
         is MezzeType.NatType -> "Nat"
         is MezzeType.FracType -> "Frac"
         is MezzeType.OrderingType -> "Ordering"
@@ -979,7 +979,7 @@ private fun alphaEquivHelper(
         type1 is MezzeType.IntType && type2 is MezzeType.IntType -> true
         type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> true
         type1 is MezzeType.StringType && type2 is MezzeType.StringType -> true
-        type1 is MezzeType.BooleanType && type2 is MezzeType.BooleanType -> true
+        type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> true
         type1 is MezzeType.NatType && type2 is MezzeType.NatType -> true
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> true
         type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> true

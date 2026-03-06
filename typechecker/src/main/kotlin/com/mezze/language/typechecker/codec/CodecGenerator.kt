@@ -51,7 +51,7 @@ class CodecGenerator {
             is MezzeType.IntType -> true
             is MezzeType.FloatType -> true
             is MezzeType.StringType -> true
-            is MezzeType.BooleanType -> true
+            is MezzeType.BoolType -> true
             is MezzeType.NatType -> true
             is MezzeType.FracType -> true
             is MezzeType.CharType -> true
@@ -152,7 +152,7 @@ class CodecGenerator {
             dataType is MezzeType.IntType -> generatePrimitiveEncode(formatType, dataType, "encode_int", "val")
             dataType is MezzeType.FloatType -> generatePrimitiveEncode(formatType, dataType, "encode_float", "val")
             dataType is MezzeType.StringType -> generatePrimitiveEncode(formatType, dataType, "encode_string", "val")
-            dataType is MezzeType.BooleanType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "val")
+            dataType is MezzeType.BoolType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "val")
             dataType is MezzeType.NatType -> generateNatEncode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "val")
             dataType is MezzeType.CharType -> generateCharEncode(formatType)
@@ -203,7 +203,7 @@ class CodecGenerator {
             member(encodeFormatImpl(formatType), "encode_bool"),
             record("val" to id("val"), "path" to id("path"))
         )
-        // Use BooleanType for the impl to ensure proper dispatch
+        // Use BoolType for the impl to ensure proper dispatch
         return createEncodeImpl(formatType, MezzeType.VariantType(
             constructors = mapOf("True" to null, "False" to null),
             rowVar = null
@@ -222,7 +222,7 @@ class CodecGenerator {
             dataType is MezzeType.IntType -> generatePrimitiveDecode(formatType, dataType, "decode_int")
             dataType is MezzeType.FloatType -> generatePrimitiveDecode(formatType, dataType, "decode_float")
             dataType is MezzeType.StringType -> generatePrimitiveDecode(formatType, dataType, "decode_string")
-            dataType is MezzeType.BooleanType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
+            dataType is MezzeType.BoolType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
             dataType is MezzeType.NatType -> generateNatDecode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
             dataType is MezzeType.CharType -> generateCharDecode(formatType)
@@ -627,7 +627,7 @@ class CodecGenerator {
                 member(formatImpl, "encode_string"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
-            is MezzeType.BooleanType -> call(
+            is MezzeType.BoolType -> call(
                 member(formatImpl, "encode_bool"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
@@ -716,7 +716,7 @@ class CodecGenerator {
                 member(formatImpl, "decode_string"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
-            is MezzeType.BooleanType -> call(
+            is MezzeType.BoolType -> call(
                 member(formatImpl, "decode_bool"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
@@ -1553,7 +1553,7 @@ class CodecGenerator {
                 member(formatImpl, "decode_string"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
-            is MezzeType.BooleanType -> call(
+            is MezzeType.BoolType -> call(
                 member(formatImpl, "decode_bool"),
                 record("val" to valueExpr, "path" to pathExpr)
             )
@@ -2012,7 +2012,7 @@ class CodecGenerator {
             is MezzeType.IntType -> IdentifierTypeAnnotation("Int")
             is MezzeType.FloatType -> IdentifierTypeAnnotation("Float")
             is MezzeType.StringType -> IdentifierTypeAnnotation("String")
-            is MezzeType.BooleanType -> IdentifierTypeAnnotation("Bool")
+            is MezzeType.BoolType -> IdentifierTypeAnnotation("Bool")
             is MezzeType.NatType -> IdentifierTypeAnnotation("Nat")
             is MezzeType.FracType -> IdentifierTypeAnnotation("Frac")
             is MezzeType.CharType -> IdentifierTypeAnnotation("Char")
@@ -2115,7 +2115,7 @@ class CodecGenerator {
             is MezzeType.IntType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_int")
             is MezzeType.FloatType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_float")
             is MezzeType.StringType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_string")
-            is MezzeType.BooleanType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bool")
+            is MezzeType.BoolType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bool")
             is MezzeType.FracType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_frac")
             is MezzeType.BytesType -> generatePrimitiveStreamEncode(formatType, dataType, "stream_bytes")
             is MezzeType.NatType -> generateNatStreamEncode(formatType)
@@ -2142,7 +2142,7 @@ class CodecGenerator {
             is MezzeType.IntType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_int")
             is MezzeType.FloatType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_float")
             is MezzeType.StringType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_string")
-            is MezzeType.BooleanType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bool")
+            is MezzeType.BoolType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bool")
             is MezzeType.FracType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_frac")
             is MezzeType.BytesType -> generatePrimitiveStreamDecode(formatType, dataType, "stream_decode_bytes")
             is MezzeType.NatType -> generateNatStreamDecode(formatType)

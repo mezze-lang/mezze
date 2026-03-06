@@ -111,7 +111,7 @@ object STMTypes {
         // __native_stm_check: {cond: Bool} -> {}
         context["__native_stm_check"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "cond" to MezzeType.BooleanType
+                "cond" to MezzeType.BoolType
             )),
             MezzeType.RecordType(emptyMap())
         )
@@ -205,7 +205,7 @@ object STMTypes {
         // __native_stm_check_cfg
         context["__native_stm_check_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "cond" to MezzeType.BooleanType,
+                "cond" to MezzeType.BoolType,
                 "max_retries" to MezzeType.IntType,
                 "spin_count" to MezzeType.IntType
             )),
@@ -267,7 +267,7 @@ object STMTypes {
         // Explicitly commit the current transaction
         context["__native_stm_commit"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 }

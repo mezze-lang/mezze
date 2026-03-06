@@ -158,7 +158,7 @@ class TypeSubstitutor(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.OrderingType,
@@ -397,7 +397,7 @@ class TypeSubstitutor(
             is MezzeType.IntType -> IdentifierTypeAnnotation("Int")
             is MezzeType.FloatType -> IdentifierTypeAnnotation("Float")
             is MezzeType.StringType -> IdentifierTypeAnnotation("String")
-            is MezzeType.BooleanType -> IdentifierTypeAnnotation("Bool")
+            is MezzeType.BoolType -> IdentifierTypeAnnotation("Bool")
             is MezzeType.NatType -> IdentifierTypeAnnotation("Nat")
             is MezzeType.FracType -> IdentifierTypeAnnotation("Frac")
             is MezzeType.OrderingType -> IdentifierTypeAnnotation("Ordering")

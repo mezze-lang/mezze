@@ -154,7 +154,7 @@ object DequeTypes {
             val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
             context["__native_deque_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
 
@@ -223,7 +223,7 @@ object DequeTypes {
                     "d" to dequeType,
                     "p" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("x" to elemType)),
-                        MezzeType.BooleanType
+                        MezzeType.BoolType
                     )
                 )),
                 dequeType
@@ -287,7 +287,7 @@ object DequeTypes {
                     "d1" to dequeType,
                     "d2" to dequeType
                 )),
-                MezzeType.BooleanType
+                MezzeType.BoolType
             )
         }
     }

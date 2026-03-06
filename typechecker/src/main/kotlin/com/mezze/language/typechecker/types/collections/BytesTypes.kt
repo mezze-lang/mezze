@@ -81,7 +81,7 @@ object BytesTypes {
         // __native_bytes_is_empty: {b: Bytes} -> Bool
         context["__native_bytes_is_empty"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_bytes_slice: {b: Bytes, start: Int, end: Int} -> Bytes
@@ -128,25 +128,25 @@ object BytesTypes {
         // __native_bytes_contains: {b: Bytes, pattern: Bytes} -> Bool
         context["__native_bytes_contains"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType, "pattern" to MezzeType.BytesType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_bytes_starts_with: {b: Bytes, prefix: Bytes} -> Bool
         context["__native_bytes_starts_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType, "prefix" to MezzeType.BytesType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_bytes_ends_with: {b: Bytes, suffix: Bytes} -> Bool
         context["__native_bytes_ends_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType, "suffix" to MezzeType.BytesType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_bytes_equals: {b1: Bytes, b2: Bytes} -> Bool
         context["__native_bytes_equals"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b1" to MezzeType.BytesType, "b2" to MezzeType.BytesType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_bytes_to_string: {b: Bytes} -> Result String String

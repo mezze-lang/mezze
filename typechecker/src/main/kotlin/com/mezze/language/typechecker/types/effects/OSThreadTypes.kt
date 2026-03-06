@@ -79,13 +79,13 @@ object OSThreadTypes {
         val isDonePromise = MezzeType.VarType(TypeVar("Promise"))
         context["__native_os_is_done"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("p" to isDonePromise)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_os_is_cancelled: {} -> Bool
         context["__native_os_is_cancelled"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_os_check: {} -> {}
@@ -169,7 +169,7 @@ object OSThreadTypes {
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BooleanType
+                    MezzeType.BoolType
                 )
             )),
             MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))

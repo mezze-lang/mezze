@@ -71,37 +71,37 @@ object CharTypes {
         // __native_char_is_digit: {c: Char} -> Bool
         context["__native_char_is_digit"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_is_letter: {c: Char} -> Bool
         context["__native_char_is_letter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_is_alpha_numeric: {c: Char} -> Bool
         context["__native_char_is_alpha_numeric"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_is_whitespace: {c: Char} -> Bool
         context["__native_char_is_whitespace"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_is_upper: {c: Char} -> Bool
         context["__native_char_is_upper"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_is_lower: {c: Char} -> Bool
         context["__native_char_is_lower"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
     }
 
@@ -109,7 +109,7 @@ object CharTypes {
         // __native_char_eq: {a: Char, b: Char} -> Bool
         context["__native_char_eq"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_char_compare: {a: Char, b: Char} -> Ordering

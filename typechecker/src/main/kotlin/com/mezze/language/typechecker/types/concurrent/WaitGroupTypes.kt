@@ -50,7 +50,7 @@ object WaitGroupTypes {
                 "wg" to wgType,
                 "ms" to MezzeType.IntType
             )),
-            MezzeType.BooleanType
+            MezzeType.BoolType
         )
 
         // __native_waitgroup_get_count: {wg: WaitGroup} -> Int
