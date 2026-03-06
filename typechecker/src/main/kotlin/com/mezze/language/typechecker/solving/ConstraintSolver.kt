@@ -978,8 +978,11 @@ class ConstraintSolver(
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
                     if (abilityName == "Inspect") continue
                     // Substitute the type variable in typeArgs with the bound type
+                    // Compare by ID or name since different TypeVar instances may represent the same variable
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
-                        if (typeArg is MezzeType.VarType && typeArg.variable == typeVar) {
+                        if (typeArg is MezzeType.VarType &&
+                            (typeArg.variable.id == typeVar.id ||
+                             typeArg.variable.name.removePrefix("'") == typeVar.name.removePrefix("'"))) {
                             boundType
                         } else {
                             substitution.apply(typeArg)
@@ -1044,9 +1047,21 @@ class ConstraintSolver(
         // so that later when 'a = Int is unified, we can validate Int has Parse implementation.
         //
         // Build full list of type arguments for the ability
-        // For Convert 'a 'b, the constraint has typeVar='a and typeArgs=['b]
-        // We need trackingArgs = ['a, 'b] for proper matching against implementations
-        val trackingArgs = listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs
+        // For single-parameter abilities: typeArgs = ['a], trackingArgs = ['a]
+        // For multi-parameter abilities from method calls: typeVar='from, typeArgs=['to], trackingArgs = ['from, 'to]
+        // For multi-parameter abilities from annotations: typeArgs = [Json, 'a], trackingArgs = [Json, 'a]
+        //
+        // If typeArgs already contains a type variable matching the constrained one by NAME (from annotations),
+        // use typeArgs directly. Otherwise prepend typeVar (from method calls).
+        val constraintVarName = constraint.typeVar.name.removePrefix("'")
+        val typeVarInArgs = typeArgs.any { arg ->
+            arg is MezzeType.VarType && arg.variable.name.removePrefix("'") == constraintVarName
+        }
+        val trackingArgs = if (typeVarInArgs) {
+            typeArgs  // Already contains all args in order
+        } else {
+            listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs  // Prepend the constrained var
+        }
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
             .add(Triple(abilityName, trackingArgs, constraint.sourceLocation))
 
@@ -1212,7 +1227,7 @@ class ConstraintSolver(
                     "Int" -> MezzeType.IntType
                     "Float" -> MezzeType.FloatType
                     "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BooleanType
+                    "Bool" -> MezzeType.BoolType
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Char" -> MezzeType.CharType
@@ -1337,7 +1352,7 @@ class ConstraintSolver(
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "String" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BooleanType || isBoolVariant(type)
+                    "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
                     "Char" -> type is MezzeType.CharType
@@ -1761,7 +1776,7 @@ class ConstraintSolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,
@@ -1794,7 +1809,7 @@ class ConstraintSolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,
@@ -1857,7 +1872,7 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.StringType ||
-                unwrappedType is MezzeType.BooleanType ||
+                unwrappedType is MezzeType.BoolType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType ||
                 unwrappedType is MezzeType.OrderingType ||
@@ -1998,7 +2013,7 @@ class ConstraintSolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,
@@ -2155,7 +2170,7 @@ class ConstraintSolver(
                 "Int" -> MezzeType.IntType
                 "Float" -> MezzeType.FloatType
                 "String" -> MezzeType.StringType
-                "Bool" -> MezzeType.BooleanType
+                "Bool" -> MezzeType.BoolType
                 "Nat" -> MezzeType.NatType
                 "Frac" -> MezzeType.FracType
                 "Char" -> MezzeType.CharType
@@ -2872,10 +2887,10 @@ class ConstraintSolver(
             )
         }
 
-        // Special handling for BooleanType - allows pattern matching with True/False
-        // Bool is internally BooleanType for optimization, but users can pattern match
+        // Special handling for BoolType - allows pattern matching with True/False
+        // Bool is internally BoolType for optimization, but users can pattern match
         // on it as if it were `type Bool = | True | False |`
-        if (variantType is MezzeType.BooleanType) {
+        if (variantType is MezzeType.BoolType) {
             if (constructorName == "True" || constructorName == "False") {
                 // Valid Bool constructor with no payload
                 if (expectedPayloadType != null) {
@@ -3164,7 +3179,7 @@ class ConstraintSolver(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.OrderingType,
@@ -3275,7 +3290,7 @@ class ConstraintSolver(
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
+            is MezzeType.BoolType -> "Bool"
             is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.OrderingType -> "Ordering"
@@ -3358,7 +3373,7 @@ class ConstraintSolver(
             is MezzeType.SuspendedType -> collectTypeVars(type.valueType)
             // Primitives have no type variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> emptySet()
         }
@@ -3422,7 +3437,7 @@ class ConstraintSolver(
             )
             // Primitives unchanged
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> type
         }

@@ -130,9 +130,9 @@ class ExpressionConstraintGenerator {
     }
 
     private fun generateBooleanLiteral(expr: BooleanLiteral, context: ConstraintContext): ConstraintResult {
-        // Boolean literal has type Bool (the built-in BooleanType)
+        // Boolean literal has type Bool (the built-in BoolType)
         // This matches OldTypeChecker behavior (line 4649)
-        return ConstraintResult.simple(MezzeType.BooleanType)
+        return ConstraintResult.simple(MezzeType.BoolType)
     }
 
     private fun generateFractionLiteral(expr: FractionLiteral, context: ConstraintContext): ConstraintResult {
@@ -307,11 +307,12 @@ class ExpressionConstraintGenerator {
 
                         // Convert FreshAbilityConstraints to typechecker Constraint.AbilityRequired
                         // The fresh constraints now contain the actual TypeVar (not just a name string)
+                        // and typeArgs for multi-parameter abilities like Encode Json 'a
                         val abilityConstraints = instantiation.freshConstraints.map { freshConstraint ->
                             Constraint.AbilityRequired(
                                 typeVar = freshConstraint.typeVar,
                                 abilityName = freshConstraint.abilityName,
-                                typeArgs = emptyList(),
+                                typeArgs = freshConstraint.typeArgs,
                                 context = "Polymorphic instantiation of '${expr.name}'",
                                 sourceLocation = expr.sourceLocation
                             )
@@ -1461,7 +1462,7 @@ class ExpressionConstraintGenerator {
             )
             // Primitive types and VarType unchanged
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> type
         }
@@ -1585,7 +1586,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             // Primitive types have no variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> emptySet()
         }
@@ -1648,7 +1649,7 @@ class ExpressionConstraintGenerator {
             )
             // Primitive types unchanged
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType, is MezzeType.EffectRow -> type
         }
@@ -1753,7 +1754,7 @@ class ExpressionConstraintGenerator {
                     "Int" -> constraintType is MezzeType.IntType
                     "Float" -> constraintType is MezzeType.FloatType
                     "String" -> constraintType is MezzeType.StringType
-                    "Bool" -> constraintType is MezzeType.BooleanType || isBoolVariant(constraintType)
+                    "Bool" -> constraintType is MezzeType.BoolType || isBoolVariant(constraintType)
                     "Nat" -> constraintType is MezzeType.NatType
                     "Frac" -> constraintType is MezzeType.FracType
                     "Char" -> constraintType is MezzeType.CharType
@@ -1868,7 +1869,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.IntType -> implTypeName == "Int"
             is MezzeType.FloatType -> implTypeName == "Float"
             is MezzeType.StringType -> implTypeName == "String"
-            is MezzeType.BooleanType -> implTypeName == "Bool"
+            is MezzeType.BoolType -> implTypeName == "Bool"
             is MezzeType.NatType -> implTypeName == "Nat"
             is MezzeType.FracType -> implTypeName == "Frac"
             is MezzeType.CharType -> implTypeName == "Char"
@@ -2942,18 +2943,29 @@ class ExpressionConstraintGenerator {
                         val typeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(annotatedType)
 
                         // Convert annotation's ability constraints to AbilityConstraint
-                        // FunctionAbilityConstraint has typeArgs, extract the type param name from the first one
+                        // FunctionAbilityConstraint has typeArgs - find the type variable(s) among them
+                        // For Encode Json 'a: typeArgs = [Json, 'a], typeParam = 'a, allTypeArgs = [Json, 'a]
                         val abilityConstraints = annotation.abilityConstraints.mapNotNull { constraint ->
-                            // Get the type parameter name from the first typeArg (e.g., "'a")
-                            val firstArg = constraint.typeArgs.firstOrNull()
-                            val typeParamName = when (firstArg) {
-                                is IdentifierTypeAnnotation -> firstArg.name
+                            // Find the first type variable in the type args - that's the constrained parameter
+                            // For multi-param abilities like Encode Json 'a, 'a is the type var
+                            val typeVarArg = constraint.typeArgs.find { arg ->
+                                arg is IdentifierTypeAnnotation &&
+                                (arg.name.startsWith("'") || arg.name.first().isLowerCase())
+                            }
+                            val typeParamName = when (typeVarArg) {
+                                is IdentifierTypeAnnotation -> typeVarArg.name
                                 else -> null
                             }
                             if (typeParamName != null) {
+                                // Convert ALL type args to MezzeTypes, preserving order
+                                // For Encode Json 'a, this gives us [Json, 'a]
+                                val allTypeArgs = constraint.typeArgs.map { typeArg ->
+                                    contextBuilder.convertTypeAnnotation(typeArg)
+                                }
                                 AbilityConstraint(
                                     abilityName = constraint.abilityName,
-                                    typeParam = typeParamName
+                                    typeParam = typeParamName,
+                                    typeArgs = allTypeArgs
                                 )
                             } else null
                         }
@@ -3441,7 +3453,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,
@@ -3473,7 +3485,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.CharType,

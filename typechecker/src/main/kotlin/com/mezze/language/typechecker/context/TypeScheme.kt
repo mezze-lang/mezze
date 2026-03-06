@@ -31,7 +31,8 @@ data class TypeScheme(
             val monoConstraints = constraints.map { constraint ->
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeVar = TypeVar(constraint.typeParam)
+                    typeVar = TypeVar(constraint.typeParam),
+                    typeArgs = constraint.typeArgs  // Preserve type args
                 )
             }
             return InstantiationResult(
@@ -67,16 +68,20 @@ data class TypeScheme(
         val freshConstraintsWithVars = constraints.mapNotNull { constraint ->
             val baseName = constraint.typeParam.removePrefix("'")
             val freshTypeVar = nameToFreshVar[baseName] ?: nameToFreshVar[constraint.typeParam]
+            // Apply substitution to type args (they may contain type variables)
+            val instantiatedTypeArgs = constraint.typeArgs.map { applySubstitutionToType(it, substitution) }
             if (freshTypeVar != null) {
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeVar = freshTypeVar
+                    typeVar = freshTypeVar,
+                    typeArgs = instantiatedTypeArgs
                 )
             } else {
                 // Not quantified - create a TypeVar from the name for now
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeVar = TypeVar(constraint.typeParam)
+                    typeVar = TypeVar(constraint.typeParam),
+                    typeArgs = instantiatedTypeArgs
                 )
             }
         }
@@ -103,7 +108,8 @@ data class TypeScheme(
      */
     data class FreshAbilityConstraint(
         val abilityName: String,
-        val typeVar: TypeVar
+        val typeVar: TypeVar,
+        val typeArgs: List<MezzeType> = emptyList()  // Additional type arguments for multi-parameter abilities (e.g., Json in Encode Json 'a)
     )
 
     companion object {
@@ -230,7 +236,7 @@ private fun applySubstitutionToType(
         is MezzeType.IntType,
         is MezzeType.FloatType,
         is MezzeType.StringType,
-        is MezzeType.BooleanType,
+        is MezzeType.BoolType,
         is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.OrderingType,
@@ -295,7 +301,7 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.IntType,
         is MezzeType.FloatType,
         is MezzeType.StringType,
-        is MezzeType.BooleanType,
+        is MezzeType.BoolType,
         is MezzeType.NatType,
         is MezzeType.FracType,
         is MezzeType.OrderingType,

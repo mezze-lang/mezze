@@ -72,7 +72,7 @@ sealed interface MezzeType {
     object StringType : MezzeType
 
     @Serializable
-    object BooleanType : MezzeType
+    object BoolType : MezzeType
 
     // Enhanced numeric types
     @Serializable
@@ -414,7 +414,7 @@ data class TypeScheme(
             )
             // Concrete types remain unchanged
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
             is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
             is MezzeType.CharType -> type
             is MezzeType.EffectRow -> type // Effects don't contain type variables for now

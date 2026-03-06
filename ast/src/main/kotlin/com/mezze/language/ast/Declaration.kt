@@ -288,7 +288,8 @@ data class AbilityDeclaration(
 @Serializable
 data class AbilityConstraint(
     val abilityName: String,
-    val typeParam: String
+    val typeParam: String,
+    val typeArgs: List<MezzeType> = emptyList()  // Additional type arguments for multi-parameter abilities (e.g., Json in Encode Json 'a)
 )
 
 /**
