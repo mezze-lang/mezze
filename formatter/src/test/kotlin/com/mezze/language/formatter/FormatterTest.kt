@@ -308,8 +308,7 @@ class FormatterTest {
     fun `format lambda with typed parameters`() {
         val input = "let f = {x: Int, y: Int} -> x + y"
         val output = formatter.format(input)
-        // Typed parameters get spaces like record type annotations
-        assertEquals("let f = { x: Int, y: Int } -> x + y\n", output)
+        assertEquals("let f = {x: Int, y: Int} -> x + y\n", output)
     }
 
     @Test
@@ -465,14 +464,14 @@ class FormatterTest {
     fun `format simple type alias`() {
         val input = "type Point = {x: Int, y: Int}"
         val output = formatter.format(input)
-        assertEquals("type Point = { x: Int, y: Int }\n", output)
+        assertEquals("type Point = {x: Int, y: Int}\n", output)
     }
 
     @Test
     fun `format variant type`() {
         val input = "type Option 'a = | Some { value: 'a }, None |"
         val output = formatter.format(input)
-        assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
+        assertEquals("type Option 'a = Some {value: 'a} | None\n", output)
     }
 
     @Test
@@ -486,7 +485,7 @@ class FormatterTest {
     fun `format pub type`() {
         val input = "pub type Point = {x: Int, y: Int}"
         val output = formatter.format(input)
-        assertEquals("pub type Point = { x: Int, y: Int }\n", output)
+        assertEquals("pub type Point = {x: Int, y: Int}\n", output)
     }
 
     // =========================================================================
@@ -501,7 +500,7 @@ class FormatterTest {
             }
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("effect Log where {\n\tlog: { msg: String } -> {} <Log>\n}\n", output)
+        assertEquals("effect Log where {\n\tlog: {msg: String} -> {} <Log>\n}\n", output)
     }
 
     @Test
@@ -514,7 +513,7 @@ class FormatterTest {
         """.trimIndent()
         val output = formatter.format(input)
         // Each operation on its own line, comma after all but last
-        assertEquals("effect Console where {\n\tprint: { msg: String } -> {} <Console>,\n\tread: {} -> String <Console>\n}\n", output)
+        assertEquals("effect Console where {\n\tprint: {msg: String} -> {} <Console>,\n\tread: {} -> String <Console>\n}\n", output)
     }
 
     // =========================================================================

@@ -194,7 +194,7 @@ class PrettyPrinter {
 
         val singleLine = calculateRecordDefWidth(def) <= config.RECORD_SINGLE_LINE_THRESHOLD
         if (singleLine) {
-            append("{ ")
+            append("{")
             def.fields.forEachIndexed { index, field ->
                 append(field.name)
                 append(": ")
@@ -206,7 +206,7 @@ class PrettyPrinter {
             if (def.isOpen) {
                 append(", ...")
             }
-            append(" }")
+            append("}")
         } else {
             append("{")
             newLine()
@@ -274,7 +274,7 @@ class PrettyPrinter {
 
         if (decl.associatedTypes.isNotEmpty()) {
             append(" having ")
-            append(decl.associatedTypes.joinToString(", ") { "'$it" })
+            append(decl.associatedTypes.joinToString(", "))
         }
 
         append(" where {")
@@ -308,15 +308,15 @@ class PrettyPrinter {
         append("ability ")
         append(decl.name)
         append(" ")
-        append(decl.typeParams.joinToString(" ") { "'$it" })
+        append(decl.typeParams.joinToString(" "))
 
         if (decl.associatedTypes.isNotEmpty()) {
             append(" having ")
-            append(decl.associatedTypes.joinToString(", ") { "'$it" })
+            append(decl.associatedTypes.joinToString(", "))
         }
 
         if (decl.dependencies.isNotEmpty()) {
-            append(" for ")
+            append(" with ")
             decl.dependencies.forEachIndexed { index, dep ->
                 if (index > 0) append(", ")
                 append(dep.abilityName)
@@ -373,41 +373,51 @@ class PrettyPrinter {
             append(" having ")
             decl.associatedTypeBindings.entries.forEachIndexed { index, (name, type) ->
                 if (index > 0) append(", ")
-                append("'$name = ")
+                // name already includes the ' prefix from the parser
+                append("$name = ")
                 printTypeAnnotation(type)
             }
         }
 
-        append(" where {")
-        newLine()
-        indent {
+        // Treat impl body like a record - single line if short enough
+        val singleLine = calculateImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
+
+        if (singleLine && decl.operations.isNotEmpty()) {
+            append(" where {")
             decl.operations.forEachIndexed { index, op ->
-                printIndent()
+                if (index > 0) append(", ")
                 append(op.name)
-                op.paramType?.let {
-                    append(": ")
-                    printTypeAnnotation(it)
-                }
-                op.returnType?.let {
-                    append(" -> ")
-                    printTypeAnnotation(it)
-                }
-                op.effects?.let {
-                    append(" ")
-                    printEffectRow(it)
-                }
                 append(" = ")
                 printExpression(op.implementation)
-                // Add comma after each operation except the last
-                if (index < decl.operations.size - 1) {
-                    append(",")
-                }
-                newLine()
             }
+            append("}")
+        } else {
+            append(" where {")
+            newLine()
+            indent {
+                decl.operations.forEachIndexed { index, op ->
+                    printIndent()
+                    append(op.name)
+                    append(" = ")
+                    printExpression(op.implementation)
+                    // Trailing comma in multi-line (like records)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                        append(",")
+                    }
+                    newLine()
+                }
+            }
+            printIndent()
+            append("}")
         }
-        printIndent()
-        append("}")
         newLine()
+    }
+
+    private fun calculateImplOperationsWidth(operations: List<PerformerOperation>): Int {
+        // "where {" + operations + "}"
+        return 8 + operations.sumOf { op ->
+            op.name.length + 3 + estimateExprWidth(op.implementation) + 2  // "name = expr, "
+        }
     }
 
     private fun printImplAbilityDeclaration(decl: ImplAbilityDeclaration) {
@@ -434,37 +444,51 @@ class PrettyPrinter {
             append(" having ")
             decl.associatedTypeBindings.entries.forEachIndexed { index, (name, type) ->
                 if (index > 0) append(", ")
-                append("'$name = ")
+                // name already includes the ' prefix from the parser
+                append("$name = ")
                 printTypeAnnotation(type)
             }
         }
 
-        append(" where {")
-        newLine()
-        indent {
+        // Treat impl body like a record - single line if short enough
+        val singleLine = calculateAbilityImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
+
+        if (singleLine && decl.operations.isNotEmpty()) {
+            append(" where {")
             decl.operations.forEachIndexed { index, op ->
-                printIndent()
+                if (index > 0) append(", ")
                 append(op.name)
-                op.paramType?.let {
-                    append(": ")
-                    printTypeAnnotation(it)
-                }
-                op.returnType?.let {
-                    append(" -> ")
-                    printTypeAnnotation(it)
-                }
                 append(" = ")
                 printExpression(op.implementation)
-                // Add comma after each operation except the last
-                if (index < decl.operations.size - 1) {
-                    append(",")
-                }
-                newLine()
             }
+            append("}")
+        } else {
+            append(" where {")
+            newLine()
+            indent {
+                decl.operations.forEachIndexed { index, op ->
+                    printIndent()
+                    append(op.name)
+                    append(" = ")
+                    printExpression(op.implementation)
+                    // Trailing comma in multi-line (like records)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                        append(",")
+                    }
+                    newLine()
+                }
+            }
+            printIndent()
+            append("}")
         }
-        printIndent()
-        append("}")
         newLine()
+    }
+
+    private fun calculateAbilityImplOperationsWidth(operations: List<ImplAbilityOperation>): Int {
+        // "where {" + operations + "}"
+        return 8 + operations.sumOf { op ->
+            op.name.length + 3 + estimateExprWidth(op.implementation) + 2  // "name = expr, "
+        }
     }
 
     // =========================================================================
@@ -524,8 +548,8 @@ class PrettyPrinter {
             is BooleanLiteral -> append(if (expr.value) "True" else "False")
             is Identifier -> printIdentifier(expr)
             is RecordLiteral -> printRecordLiteral(expr)
-            is ArrayLiteral -> printArrayLiteral(expr)
-            is ArrayAccess -> printArrayAccess(expr)
+            is SeqLiteral -> printSeqLiteral(expr)
+            is SeqAccess -> printSeqAccess(expr)
             is MemberAccess -> printMemberAccess(expr)
             is RecordUpdate -> printRecordUpdate(expr)
             is RecordUpdateExpression -> printRecordUpdateExpression(expr)
@@ -640,18 +664,18 @@ class PrettyPrinter {
         }
     }
 
-    private fun printArrayLiteral(expr: ArrayLiteral) {
+    private fun printSeqLiteral(expr: SeqLiteral) {
         if (expr.elements.isEmpty()) {
             append("[]")
             return
         }
 
-        val singleLine = calculateArrayLiteralWidth(expr) <= config.ARRAY_SINGLE_LINE_THRESHOLD
+        val singleLine = calculateSeqLiteralWidth(expr) <= config.ARRAY_SINGLE_LINE_THRESHOLD
         if (singleLine) {
             append("[")
             expr.elements.forEachIndexed { index, element ->
                 if (index > 0) append(", ")
-                printArrayElement(element)
+                printSeqElement(element)
             }
             append("]")
         } else {
@@ -660,7 +684,7 @@ class PrettyPrinter {
             indent {
                 expr.elements.forEachIndexed { index, element ->
                     printIndent()
-                    printArrayElement(element)
+                    printSeqElement(element)
                     if (config.TRAILING_COMMA_IN_MULTILINE || index < expr.elements.size - 1) {
                         append(",")
                     }
@@ -672,18 +696,18 @@ class PrettyPrinter {
         }
     }
 
-    private fun printArrayElement(element: ArrayElement) {
+    private fun printSeqElement(element: SeqElement) {
         when (element) {
-            is ArrayRegularElement -> printExpression(element.expression)
-            is ArraySpreadElement -> {
+            is SeqRegularElement -> printExpression(element.expression)
+            is SeqSpreadElement -> {
                 append("...")
                 printExpression(element.expression)
             }
         }
     }
 
-    private fun printArrayAccess(expr: ArrayAccess) {
-        printExpression(expr.array)
+    private fun printSeqAccess(expr: SeqAccess) {
+        printExpression(expr.seq)
         append("[")
         printExpression(expr.index)
         append("]")
@@ -1018,7 +1042,7 @@ class PrettyPrinter {
             }
             is RecordPattern -> printRecordPattern(pattern)
             is LiteralPattern -> printLiteralValue(pattern.value)
-            is ArrayPattern -> printArrayPattern(pattern)
+            is SeqPattern -> printSeqPattern(pattern)
             is StringInterpolationPattern -> printStringInterpolationPattern(pattern)
         }
     }
@@ -1040,7 +1064,7 @@ class PrettyPrinter {
         append("}")
     }
 
-    private fun printArrayPattern(pattern: ArrayPattern) {
+    private fun printSeqPattern(pattern: SeqPattern) {
         append("[")
         pattern.elements.forEachIndexed { index, element ->
             if (index > 0) append(", ")
@@ -1123,7 +1147,7 @@ class PrettyPrinter {
             is RecordTypeAnnotation -> printRecordTypeAnnotation(type)
             is VariantTypeAnnotation -> printVariantTypeAnnotation(type)
             is FunctionTypeAnnotation -> printFunctionTypeAnnotation(type)
-            is ArrayTypeAnnotation -> {
+            is SeqTypeAnnotation -> {
                 append("[")
                 printTypeAnnotation(type.elementType)
                 append("]")
@@ -1142,7 +1166,7 @@ class PrettyPrinter {
         val singleLine = estimatedWidth <= config.RECORD_SINGLE_LINE_THRESHOLD
 
         if (singleLine) {
-            append("{ ")
+            append("{")
             type.entries.forEachIndexed { index, entry ->
                 if (index > 0) append(", ")
                 append(entry.name)
@@ -1154,7 +1178,7 @@ class PrettyPrinter {
                 append("...")
                 append(it)
             }
-            append(" }")
+            append("}")
         } else {
             append("{")
             newLine()
@@ -1215,7 +1239,8 @@ class PrettyPrinter {
                     append(" having ")
                     effectAnnotation.associatedTypes.entries.forEachIndexed { index, (name, typeAnn) ->
                         if (index > 0) append(", ")
-                        append("'$name = ")
+                        // name already includes the ' prefix from the parser
+                append("$name = ")
                         // Can't recursively call printTypeAnnotation here, so format inline
                         append(formatTypeAnnotationSimple(typeAnn))
                     }
@@ -1391,11 +1416,11 @@ class PrettyPrinter {
         }
     }
 
-    private fun calculateArrayLiteralWidth(expr: ArrayLiteral): Int {
+    private fun calculateSeqLiteralWidth(expr: SeqLiteral): Int {
         return 2 + expr.elements.sumOf { element ->
             when (element) {
-                is ArrayRegularElement -> estimateExprWidth(element.expression) + 2
-                is ArraySpreadElement -> 3 + estimateExprWidth(element.expression) + 2
+                is SeqRegularElement -> estimateExprWidth(element.expression) + 2
+                is SeqSpreadElement -> 3 + estimateExprWidth(element.expression) + 2
             }
         }
     }
@@ -1418,7 +1443,7 @@ class PrettyPrinter {
             is BooleanLiteral -> if (expr.value) 4 else 5
             is Identifier -> expr.name.length
             is RecordLiteral -> calculateRecordLiteralWidth(expr)
-            is ArrayLiteral -> calculateArrayLiteralWidth(expr)
+            is SeqLiteral -> calculateSeqLiteralWidth(expr)
             else -> 20
         }
     }
