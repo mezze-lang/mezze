@@ -25,7 +25,7 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
  *
  * Cache levels:
  * - Monomorphic: Single shape, direct indexed access
- * - Polymorphic: Up to 3 shapes, check shape then direct access
+ * - Polymorphic: Up to 6 shapes, check shape then direct access
  * - Megamorphic: Fall back to @TruffleBoundary lookup
  *
  * Primitive specializations:
@@ -59,7 +59,7 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
             "getRecordShape(recordObj) == cachedShape",
             "storageType == 0"
         },
-        limit = "3"
+        limit = "6"
     )
     protected long accessLongCached(
             Object recordObj,
@@ -81,7 +81,7 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
             "getRecordShape(recordObj) == cachedShape",
             "storageType == 1"
         },
-        limit = "3"
+        limit = "6"
     )
     protected double accessDoubleCached(
             Object recordObj,
@@ -103,7 +103,7 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
             "getRecordShape(recordObj) == cachedShape",
             "storageType == 2"
         },
-        limit = "3"
+        limit = "6"
     )
     protected Object accessObjectCached(
             Object recordObj,

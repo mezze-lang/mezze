@@ -4,9 +4,11 @@ import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeVariant;
+import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -105,6 +107,19 @@ public final class MatchNode extends MezzeNode {
     // Uses HashMap for O(1) lookup instead of O(N) linear scan
     @CompilationFinal
     private final Map<Object, Integer> literalToBranchIndex;
+
+    // ===== MONOMORPHIC VARIANT ASSUMPTION =====
+    // If a match site always sees the same tag, we can eliminate all dispatch
+    @CompilationFinal
+    private Assumption monomorphicTagAssumption;
+
+    // The single tag seen at this match site (if monomorphic)
+    @CompilationFinal
+    private int monomorphicTag = -1;
+
+    // The branch index for the monomorphic tag (if monomorphic)
+    @CompilationFinal
+    private int monomorphicBranchIndex = -1;
 
     public MatchNode(MezzeNode valueNode, MatchBranchNode[] branches, int wildcardBranchIndex) {
         this.valueNode = valueNode;
@@ -207,10 +222,13 @@ public final class MatchNode extends MezzeNode {
             tagToIndex[i] = defaultValue;
         }
 
-        // Fill in branch indices
+        // Fill in branch indices - store FIRST branch for each tag (branches are evaluated in order)
+        // If multiple branches have the same tag with guards, the first one is tried first,
+        // and if its guard fails, we fall through to linear search to try remaining branches.
         for (int i = 0; i < branches.length; i++) {
             int tag = branches[i].getTag();
-            if (tag >= 0) {
+            if (tag >= 0 && tagToIndex[tag] == defaultValue) {
+                // Only store the first branch for each tag
                 tagToIndex[tag] = i;
             }
         }
@@ -237,6 +255,35 @@ public final class MatchNode extends MezzeNode {
         Object value = valueNode.execute(frame);
 
         if (value instanceof MezzeVariant variant) {
+            // MONOMORPHIC FAST PATH: If we've only ever seen one tag, skip all dispatch
+            if (monomorphicTagAssumption != null && monomorphicTagAssumption.isValid()) {
+                int tag = variant.getTag();
+                if (tag == monomorphicTag) {
+                    // Direct branch execution - no dispatch at all!
+                    MatchBranchNode branch = branches[monomorphicBranchIndex];
+                    branch.bindPayload(frame, variant);
+                    Object result = branch.execute(frame);
+                    if (result != null || !branch.hasGuardsOrIfLet()) {
+                        return result;
+                    }
+                    // Guard failed - fall through to normal dispatch
+                } else {
+                    // Different tag seen - invalidate monomorphic assumption
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    monomorphicTagAssumption.invalidate();
+                    monomorphicTagAssumption = null;
+                }
+            } else if (monomorphicTag == -1) {
+                // First variant seen - try to establish monomorphic state
+                int tag = variant.getTag();
+                int branchIdx = findBranchForTag(tag);
+                if (branchIdx >= 0) {
+                    monomorphicTag = tag;
+                    monomorphicBranchIndex = branchIdx;
+                    monomorphicTagAssumption = Truffle.getRuntime().createAssumption("monomorphic-tag");
+                }
+            }
+
             // Use jump table dispatch if available
             if (useJumpTable) {
                 return executeJumpTableMatch(frame, variant);
@@ -416,6 +463,25 @@ public final class MatchNode extends MezzeNode {
     }
 
     /**
+     * Find the first branch that matches a given tag.
+     * Used for establishing monomorphic state.
+     */
+    private int findBranchForTag(int tag) {
+        // Use jump table if available
+        if (useJumpTable && tag >= 0 && tag <= maxTag) {
+            int idx = tagToIndex[tag];
+            return idx >= 0 ? idx : wildcardBranchIndex;
+        }
+        // Linear search
+        for (int i = 0; i < branchCount; i++) {
+            if (branches[i].matches(tag)) {
+                return i;
+            }
+        }
+        return wildcardBranchIndex;
+    }
+
+    /**
      * Execute array pattern matching for Object[] - V2 OPTIMIZED.
      * Uses @ExplodeLoop for JIT unrolling.
      */
@@ -527,6 +593,7 @@ public final class MatchNode extends MezzeNode {
 
     /**
      * Execute record pattern matching - OPTIMIZED.
+     * Supports guards and if-let bindings on record patterns.
      */
     @ExplodeLoop
     private Object executeRecordMatch(VirtualFrame frame, MezzeRecord record) {
@@ -536,8 +603,14 @@ public final class MatchNode extends MezzeNode {
 
             if (branch.isRecordPattern()) {
                 if (branchProfiles[i].profile(branch.matchesRecord(record))) {
+                    // Bind fields BEFORE checking guards/if-let
                     branch.bindRecordFields(frame, record);
-                    return branch.execute(frame);
+                    Object result = branch.execute(frame);
+                    // If guard/if-let failed (returned null), continue to next branch
+                    if (result != null || !branch.hasGuardsOrIfLet()) {
+                        return result;
+                    }
+                    // Guard/if-let failed - continue to try next branch
                 }
             }
         }
@@ -546,7 +619,10 @@ public final class MatchNode extends MezzeNode {
         if (wildcardBranchIndex >= 0) {
             MatchBranchNode wildcard = branches[wildcardBranchIndex];
             wildcard.bindValue(frame, record);
-            return wildcard.execute(frame);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
         }
 
         noMatchProfile.enter();

@@ -180,7 +180,10 @@ class ConstraintGenerator(
                     // CRITICAL: Include ability constraints so they get validated with the proper substitution!
                     // Without this, ability constraints like NumAdd 'a are only validated in global solving,
                     // but by then the type variable chain has changed and 'a doesn't resolve to the concrete type.
-                    val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints
+                    // CRITICAL FIX: Also include patternResult.constraints to solve HasField constraints
+                    // from destructuring patterns! Without these, bindings from {x = y} patterns stay as
+                    // unconstrained type variables instead of being unified with actual field types.
+                    val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints + patternResult.constraints
                     val solveResult = solver.solve(allBindingConstraints)
                     when (solveResult) {
                         is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {

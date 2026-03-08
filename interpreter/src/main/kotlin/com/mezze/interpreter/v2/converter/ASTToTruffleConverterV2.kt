@@ -786,13 +786,27 @@ class ASTToTruffleConverterV2(
                         // Create body with nested pattern extraction
                         var bodyNode = convertExpression(case.expression)
 
+                        // When there are nested patterns AND a guard, we need to extract nested
+                        // fields BEFORE the guard runs. We wrap the guard with extractions.
+                        var actualGuardNode = guardNode
+                        if (nestedPatterns.isNotEmpty() && guardNode != null) {
+                            // Create extraction statements
+                            val extractionStatements = mutableListOf<MezzeNode>()
+                            for ((tempSlot, nestedPattern) in nestedPatterns) {
+                                collectNestedExtractionStatements(tempSlot, nestedPattern, extractionStatements)
+                            }
+                            // Wrap the guard: do extractions, then evaluate guard and return result
+                            extractionStatements.add(guardNode)
+                            actualGuardNode = BlockNode(extractionStatements.toTypedArray())
+                        }
+
                         // Wrap body with nested record field extractions (in reverse order)
                         for ((tempSlot, nestedPattern) in nestedPatterns.reversed()) {
                             bodyNode = wrapBodyWithNestedRecordExtraction(tempSlot, nestedPattern, bodyNode)
                         }
 
                         if (hasGuardsOrIfLet) {
-                            branches.add(MatchBranchNode.variantPatternWithGuard(tag, fieldNames, fieldSlots, bodyNode, guardNode, ifLetNodes))
+                            branches.add(MatchBranchNode.variantPatternWithGuard(tag, fieldNames, fieldSlots, bodyNode, actualGuardNode, ifLetNodes))
                         } else {
                             branches.add(MatchBranchNode.variantPatternWithFieldNames(tag, fieldNames, fieldSlots, bodyNode))
                         }
@@ -903,18 +917,38 @@ class ASTToTruffleConverterV2(
                 }
                 is RecordPattern -> {
                     // Record pattern: {x, y} or {name = n, age = a}
+                    // Also handle nested patterns like { config = { port = p } }
+                    val nestedPatterns = mutableListOf<Pair<Int, RecordPattern>>()
+
                     val fieldNames = pattern.entries.map { it.name }.toTypedArray()
                     val fieldSlots = pattern.entries.map { entry ->
                         when (val p = entry.pattern) {
                             is VariablePattern -> getOrCreateSlot(p.name)
                             null -> getOrCreateSlot(entry.name) // Shorthand {x} = {x = x}
+                            is RecordPattern -> {
+                                // Nested record pattern: allocate temp slot and track for later extraction
+                                val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                nestedPatterns.add(tempSlot to p)
+                                tempSlot
+                            }
                             else -> -1
                         }
                     }.toIntArray()
                     val isOpen = pattern.isOpen
 
-                    val bodyNode = convertExpression(case.expression)
-                    branches.add(MatchBranchNode.recordPattern(fieldNames, fieldSlots, isOpen, bodyNode))
+                    // Create body with nested pattern extraction
+                    var bodyNode = convertExpression(case.expression)
+
+                    // Wrap body with nested record field extractions (in reverse order)
+                    for ((tempSlot, nestedPattern) in nestedPatterns.reversed()) {
+                        bodyNode = wrapBodyWithNestedRecordExtraction(tempSlot, nestedPattern, bodyNode)
+                    }
+
+                    if (hasGuardsOrIfLet) {
+                        branches.add(MatchBranchNode.recordPatternWithGuard(fieldNames, fieldSlots, isOpen, bodyNode, guardNode, ifLetNodes))
+                    } else {
+                        branches.add(MatchBranchNode.recordPattern(fieldNames, fieldSlots, isOpen, bodyNode))
+                    }
                 }
                 is StringInterpolationPattern -> {
                     // String interpolation pattern: "hello $(name)" or "$(a)-$(b)"
@@ -2352,6 +2386,63 @@ class ASTToTruffleConverterV2(
         statements.add(wrappedBody)
 
         return BlockNode(statements.toTypedArray())
+    }
+
+    /**
+     * Collects nested record field extraction statements without wrapping.
+     * This is used when we need to extract fields BEFORE a guard runs.
+     *
+     * @param tempSlot The slot index holding the intermediate record
+     * @param nestedPattern The nested RecordPattern to extract fields from
+     * @param statements The list to add extraction statements to
+     */
+    private fun collectNestedExtractionStatements(
+        tempSlot: Int,
+        nestedPattern: RecordPattern,
+        statements: MutableList<MezzeNode>
+    ) {
+        val furtherNested = mutableListOf<Pair<Int, RecordPattern>>()
+
+        for (entry in nestedPattern.entries) {
+            val fieldName = entry.name
+
+            val bindName = when (val p = entry.pattern) {
+                is VariablePattern -> p.name
+                null -> entry.name // shorthand: { x } means x = x
+                is RecordPattern -> {
+                    // Doubly-nested patterns - allocate anonymous slot
+                    val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+
+                    // Read the field and write to nested temp slot
+                    val fieldAccessNode = RecordFieldAccessNode.createByName(
+                        ReadLocalNode.createObject(tempSlot),
+                        fieldName
+                    )
+                    statements.add(WriteLocalNode.createObject(fieldAccessNode, nestedTempSlot))
+
+                    // Track for recursive processing
+                    furtherNested.add(nestedTempSlot to p)
+                    continue
+                }
+                else -> continue // Skip unsupported nested patterns
+            }
+
+            val targetSlot = getOrCreateSlot(bindName)
+
+            // Create a field access node: temp.fieldName
+            val fieldAccessNode = RecordFieldAccessNode.createByName(
+                ReadLocalNode.createObject(tempSlot),
+                fieldName
+            )
+
+            // Write the extracted field to the target slot
+            statements.add(WriteLocalNode.createObject(fieldAccessNode, targetSlot))
+        }
+
+        // Recursively collect extraction statements for further nested patterns
+        for ((nestedSlot, nestedPat) in furtherNested) {
+            collectNestedExtractionStatements(nestedSlot, nestedPat, statements)
+        }
     }
 
     /**

@@ -1417,11 +1417,11 @@ private fun copyMezzeLanguageJars(tempDir: File) {
         cliJarOrClassDir.parentFile
     } else {
         // Running from classes directory (development) - need to find install/mezze/lib
-        var current = cliJarOrClassDir
+        var current: File? = cliJarOrClassDir
         while (current != null && !File(current, "lib").exists()) {
             current = current.parentFile
         }
-        File(current, "lib")
+        File(current ?: cliJarOrClassDir, "lib")
     }
 
     if (!cliLibDir.exists() || !cliLibDir.isDirectory) {
@@ -1528,11 +1528,11 @@ private fun buildJarWithJavac(tempDir: File, outputFile: File, programName: Stri
     val cliLibDir = if (cliJarOrClassDir.isFile) {
         cliJarOrClassDir.parentFile
     } else {
-        var current = cliJarOrClassDir
+        var current: File? = cliJarOrClassDir
         while (current != null && !File(current, "lib").exists()) {
             current = current.parentFile
         }
-        File(current, "lib")
+        File(current ?: cliJarOrClassDir, "lib")
     }
 
     // Build classpath from all JARs in CLI's lib directory

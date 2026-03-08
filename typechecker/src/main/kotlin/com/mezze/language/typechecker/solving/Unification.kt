@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.util.StringDistance
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -732,8 +733,13 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // Every constructor in the open variant must exist in the closed variant
         val missingInClosed = openCtors - closedCtors
         if (missingInClosed.isNotEmpty()) {
+            // Provide helpful suggestions for each missing constructor
+            val suggestions = missingInClosed.map { missing ->
+                val suggestion = StringDistance.suggestDidYouMean(missing, closedCtors.toList())
+                if (suggestion != null) "'$missing' ($suggestion)" else "'$missing'"
+            }
             return UnificationResult.Failure(
-                message = "Variant type does not have constructor(s): ${missingInClosed.joinToString()}. " +
+                message = "Variant type does not have constructor(s): ${suggestions.joinToString()}. " +
                     "Available: ${closedCtors.joinToString()}",
                 type1 = var1,
                 type2 = var2
@@ -1305,14 +1311,12 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         constructor.name to dataType
     }
 
-    // DEBUG
-    try {
-        val debugFile = java.io.File("/tmp/expand_debug.txt")
-        debugFile.appendText("[EXPAND] ${typeApp.constructor}\n")
-        debugFile.appendText("[EXPAND] VariantDef has ${variantDef.constructors.size} constructors: ${variantDef.constructors.map { it.name }}\n")
-        debugFile.appendText("[EXPAND] Built ${constructors.size} constructors: ${constructors.keys}\n\n")
-    } catch (e: Exception) {
-        // Ignore
+    DebugLogger.debugSection(Category.Unification, "expandTypeApplicationToVariant") {
+        listOf(
+            "Expanding ${typeApp.constructor}",
+            "VariantDef has ${variantDef.constructors.size} constructors: ${variantDef.constructors.map { it.name }}",
+            "Built ${constructors.size} constructors: ${constructors.keys}"
+        )
     }
 
     return MezzeType.VariantType(

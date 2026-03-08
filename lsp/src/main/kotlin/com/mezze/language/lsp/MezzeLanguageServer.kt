@@ -46,8 +46,10 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
      * Initialize the server with client capabilities.
      */
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> {
-        // Store workspace root
-        workspaceRoot = params.rootUri?.removePrefix("file://")
+        // Store workspace root (prefer workspaceFolders, fallback to deprecated rootUri/rootPath)
+        @Suppress("DEPRECATION")
+        workspaceRoot = params.workspaceFolders?.firstOrNull()?.uri?.removePrefix("file://")
+            ?: params.rootUri?.removePrefix("file://")
             ?: params.rootPath
 
         // Log initialization

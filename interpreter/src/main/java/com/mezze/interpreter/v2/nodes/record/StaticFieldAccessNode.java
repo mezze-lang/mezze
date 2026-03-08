@@ -6,6 +6,7 @@ import com.mezze.interpreter.v2.values.MezzeRecord.Shape;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.InvalidAssumptionException;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -30,7 +31,7 @@ public final class StaticFieldAccessNode {
 
     /**
      * Access a Long (Int) field - direct unboxed access.
-     * Includes optional shape guard for maximum JIT optimization.
+     * Uses Truffle Assumptions for shape stability - JIT can eliminate all guards.
      */
     @NodeInfo(shortName = "field-long")
     public static final class LongField extends MezzeNode {
@@ -40,11 +41,15 @@ public final class StaticFieldAccessNode {
         @CompilationFinal
         private final int locationIndex;
 
-        // Optional expected shape for identity check optimization
+        // Shape assumption - allows JIT to completely remove shape checks
+        @CompilationFinal
+        private Assumption shapeStableAssumption;
+
+        // Expected shape for fallback identity check
         @CompilationFinal
         private Shape expectedShape;
 
-        // Error profile for shape mismatch
+        // Error profile for shape mismatch (rarely used after warmup)
         private final InlinedBranchProfile shapeMismatchProfile = InlinedBranchProfile.getUncached();
 
         public LongField(MezzeNode recordNode, int locationIndex) {
@@ -56,46 +61,53 @@ public final class StaticFieldAccessNode {
             this.recordNode = recordNode;
             this.locationIndex = locationIndex;
             this.expectedShape = expectedShape;
+            // Create assumption for this shape - if shape never changes, JIT removes all checks
+            this.shapeStableAssumption = Truffle.getRuntime().createAssumption("shape-stable-long");
         }
 
         @Override
         public Object execute(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
-            // Shape guard - identity check is JIT-friendly
-            if (expectedShape != null && record.getShape() != expectedShape) {
-                shapeMismatchProfile.enter(this);
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-                expectedShape = null; // Deoptimize and disable shape check
-            }
+            checkShapeStability(record);
             return record.getLongField(locationIndex);
         }
 
         @Override
         public long executeLong(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
-            if (expectedShape != null && record.getShape() != expectedShape) {
-                shapeMismatchProfile.enter(this);
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-                expectedShape = null;
-            }
+            checkShapeStability(record);
             return record.getLongField(locationIndex);
         }
 
         @Override
         public double executeDouble(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
+            checkShapeStability(record);
+            return record.getLongField(locationIndex);
+        }
+
+        private void checkShapeStability(MezzeRecord record) {
+            // Fast path: assumption still valid means JIT can eliminate this entire check
+            if (shapeStableAssumption != null && shapeStableAssumption.isValid()) {
+                if (record.getShape() == expectedShape) {
+                    return; // Shape matches, all good
+                }
+                // Shape changed - invalidate assumption
+                shapeStableAssumption.invalidate();
+            }
+            // Slow path: shape guard with deoptimization
             if (expectedShape != null && record.getShape() != expectedShape) {
                 shapeMismatchProfile.enter(this);
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 expectedShape = null;
+                shapeStableAssumption = null;
             }
-            return record.getLongField(locationIndex);
         }
     }
 
     /**
      * Access a Double (Float) field - direct unboxed access.
-     * Includes optional shape guard for maximum JIT optimization.
+     * Uses Truffle Assumptions for shape stability - JIT can eliminate all guards.
      */
     @NodeInfo(shortName = "field-double")
     public static final class DoubleField extends MezzeNode {
@@ -104,6 +116,9 @@ public final class StaticFieldAccessNode {
 
         @CompilationFinal
         private final int locationIndex;
+
+        @CompilationFinal
+        private Assumption shapeStableAssumption;
 
         @CompilationFinal
         private Shape expectedShape;
@@ -119,34 +134,42 @@ public final class StaticFieldAccessNode {
             this.recordNode = recordNode;
             this.locationIndex = locationIndex;
             this.expectedShape = expectedShape;
+            this.shapeStableAssumption = Truffle.getRuntime().createAssumption("shape-stable-double");
         }
 
         @Override
         public Object execute(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
-            if (expectedShape != null && record.getShape() != expectedShape) {
-                shapeMismatchProfile.enter(this);
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-                expectedShape = null;
-            }
+            checkShapeStability(record);
             return record.getDoubleField(locationIndex);
         }
 
         @Override
         public double executeDouble(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
+            checkShapeStability(record);
+            return record.getDoubleField(locationIndex);
+        }
+
+        private void checkShapeStability(MezzeRecord record) {
+            if (shapeStableAssumption != null && shapeStableAssumption.isValid()) {
+                if (record.getShape() == expectedShape) {
+                    return;
+                }
+                shapeStableAssumption.invalidate();
+            }
             if (expectedShape != null && record.getShape() != expectedShape) {
                 shapeMismatchProfile.enter(this);
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 expectedShape = null;
+                shapeStableAssumption = null;
             }
-            return record.getDoubleField(locationIndex);
         }
     }
 
     /**
      * Access an Object field.
-     * Includes optional shape guard for maximum JIT optimization.
+     * Uses Truffle Assumptions for shape stability - JIT can eliminate all guards.
      */
     @NodeInfo(shortName = "field-object")
     public static final class ObjectField extends MezzeNode {
@@ -155,6 +178,9 @@ public final class StaticFieldAccessNode {
 
         @CompilationFinal
         private final int locationIndex;
+
+        @CompilationFinal
+        private Assumption shapeStableAssumption;
 
         @CompilationFinal
         private Shape expectedShape;
@@ -170,23 +196,35 @@ public final class StaticFieldAccessNode {
             this.recordNode = recordNode;
             this.locationIndex = locationIndex;
             this.expectedShape = expectedShape;
+            this.shapeStableAssumption = Truffle.getRuntime().createAssumption("shape-stable-object");
         }
 
         @Override
         public Object execute(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
+            checkShapeStability(record);
+            return record.getObjectField(locationIndex);
+        }
+
+        private void checkShapeStability(MezzeRecord record) {
+            if (shapeStableAssumption != null && shapeStableAssumption.isValid()) {
+                if (record.getShape() == expectedShape) {
+                    return;
+                }
+                shapeStableAssumption.invalidate();
+            }
             if (expectedShape != null && record.getShape() != expectedShape) {
                 shapeMismatchProfile.enter(this);
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 expectedShape = null;
+                shapeStableAssumption = null;
             }
-            return record.getObjectField(locationIndex);
         }
     }
 
     /**
      * Access a Boolean field (stored in Object array).
-     * Includes optional shape guard for maximum JIT optimization.
+     * Uses Truffle Assumptions for shape stability - JIT can eliminate all guards.
      */
     @NodeInfo(shortName = "field-boolean")
     public static final class BooleanField extends MezzeNode {
@@ -195,6 +233,9 @@ public final class StaticFieldAccessNode {
 
         @CompilationFinal
         private final int locationIndex;
+
+        @CompilationFinal
+        private Assumption shapeStableAssumption;
 
         @CompilationFinal
         private Shape expectedShape;
@@ -210,28 +251,36 @@ public final class StaticFieldAccessNode {
             this.recordNode = recordNode;
             this.locationIndex = locationIndex;
             this.expectedShape = expectedShape;
+            this.shapeStableAssumption = Truffle.getRuntime().createAssumption("shape-stable-boolean");
         }
 
         @Override
         public Object execute(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
-            if (expectedShape != null && record.getShape() != expectedShape) {
-                shapeMismatchProfile.enter(this);
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-                expectedShape = null;
-            }
+            checkShapeStability(record);
             return record.getObjectField(locationIndex);
         }
 
         @Override
         public boolean executeBoolean(VirtualFrame frame) {
             MezzeRecord record = (MezzeRecord) recordNode.execute(frame);
+            checkShapeStability(record);
+            return (Boolean) record.getObjectField(locationIndex);
+        }
+
+        private void checkShapeStability(MezzeRecord record) {
+            if (shapeStableAssumption != null && shapeStableAssumption.isValid()) {
+                if (record.getShape() == expectedShape) {
+                    return;
+                }
+                shapeStableAssumption.invalidate();
+            }
             if (expectedShape != null && record.getShape() != expectedShape) {
                 shapeMismatchProfile.enter(this);
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 expectedShape = null;
+                shapeStableAssumption = null;
             }
-            return (Boolean) record.getObjectField(locationIndex);
         }
     }
 

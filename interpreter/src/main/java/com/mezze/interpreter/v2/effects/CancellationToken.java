@@ -56,8 +56,7 @@ public final class CancellationToken {
                 try {
                     callback.run();
                 } catch (Exception e) {
-                    // Log but don't propagate callback errors
-                    System.err.println("Error in cancellation callback: " + e.getMessage());
+                    // Silently ignore callback errors - cancellation must not fail
                 }
             }
             cancellationCallbacks.clear();
@@ -116,7 +115,7 @@ public final class CancellationToken {
             try {
                 callback.run();
             } catch (Exception e) {
-                System.err.println("Error in cancellation callback: " + e.getMessage());
+                // Silently ignore callback errors
             }
         } else {
             cancellationCallbacks.put(id, callback);
@@ -127,7 +126,7 @@ public final class CancellationToken {
                     try {
                         removed.run();
                     } catch (Exception e) {
-                        System.err.println("Error in cancellation callback: " + e.getMessage());
+                        // Silently ignore callback errors
                     }
                 }
             }

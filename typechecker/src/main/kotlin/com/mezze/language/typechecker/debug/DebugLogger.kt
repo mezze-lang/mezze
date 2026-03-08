@@ -22,6 +22,7 @@ object DebugLogger {
         ConstraintGenerator,
         ConstraintSolver,
         ExpressionConstraints,
+        Effects,
         ModuleResolver,
         TypeValidator,
         Unification,

@@ -39,6 +39,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  */
 @NodeChild("functionNode")
 @NodeInfo(shortName = "invoke")
+@SuppressWarnings("truffle-splitting")
 public abstract class InvokeNode extends MezzeNode {
 
     @Children
@@ -115,7 +116,7 @@ public abstract class InvokeNode extends MezzeNode {
      */
     @Specialization(
         guards = {"function.getCallTarget() == cachedTarget", "!function.hasClosure()", "hasZeroArgs()"},
-        limit = "3"
+        limit = "6"
     )
     protected Object callDirectNoClosureNoArgs(
             VirtualFrame frame,
@@ -134,7 +135,7 @@ public abstract class InvokeNode extends MezzeNode {
     @Specialization(
         guards = {"function.getCallTarget() == cachedTarget", "!function.hasClosure()", "hasOneArg()",
                   "function.getParameterNames().length == 0"},  // No partial app if no param names
-        limit = "3"
+        limit = "6"
     )
     protected Object callDirectNoClosureOneArg(
             VirtualFrame frame,
@@ -209,7 +210,7 @@ public abstract class InvokeNode extends MezzeNode {
      */
     @Specialization(
         guards = {"function.getCallTarget() == cachedTarget", "!function.hasClosure()"},
-        limit = "3"
+        limit = "6"
     )
     @ExplodeLoop
     protected Object callDirectNoClosure(
@@ -231,7 +232,7 @@ public abstract class InvokeNode extends MezzeNode {
      */
     @Specialization(
         guards = {"function.getCallTarget() == cachedTarget", "function.getClosureValues().length == cachedClosureLength"},
-        limit = "3"
+        limit = "6"
     )
     @ExplodeLoop
     protected Object callDirectCached(
@@ -264,7 +265,7 @@ public abstract class InvokeNode extends MezzeNode {
     @Specialization(
         guards = "function.getCallTarget() == cachedTarget",
         replaces = "callDirectCached",
-        limit = "3"
+        limit = "6"
     )
     @ExplodeLoop
     protected Object callDirect(
@@ -319,7 +320,7 @@ public abstract class InvokeNode extends MezzeNode {
      */
     @Specialization(
         guards = {"record == cachedRecord"},
-        limit = "3"
+        limit = "6"
     )
     @ExplodeLoop
     protected Object callRecordCached(

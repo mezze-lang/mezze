@@ -2714,12 +2714,43 @@ class ExpressionConstraintGenerator {
             constraints.addAll(patternResult.constraints)
             patternWarnings.addAll(patternResult.warnings)
 
-            // For additional patterns in or-pattern, just add constraints (don't use bindings)
-            // Note: In a complete implementation, we should verify that or-patterns bind the same variables
+            // For additional patterns in or-pattern, verify they bind the same variables
+            // and add constraints (bindings must match first pattern's)
+            val firstPatternBindings = patternResult.bindings.keys
             for (pattern in matchCase.patterns.drop(1)) {
                 val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.sourceLocation)
                 constraints.addAll(orPatternResult.constraints)
                 patternWarnings.addAll(orPatternResult.warnings)
+
+                // Verify that or-pattern binds exactly the same variables
+                val orPatternBindings = orPatternResult.bindings.keys
+                if (orPatternBindings != firstPatternBindings) {
+                    val missingInOr = firstPatternBindings - orPatternBindings
+                    val extraInOr = orPatternBindings - firstPatternBindings
+                    val errorParts = mutableListOf<String>()
+                    if (missingInOr.isNotEmpty()) {
+                        errorParts.add("missing bindings: ${missingInOr.joinToString()}")
+                    }
+                    if (extraInOr.isNotEmpty()) {
+                        errorParts.add("extra bindings: ${extraInOr.joinToString()}")
+                    }
+                    throw TypeCheckError(
+                        "Or-pattern alternatives must bind the same variables. ${errorParts.joinToString("; ")}",
+                        expr.sourceLocation
+                    )
+                }
+
+                // Also unify the binding types between patterns to ensure consistency
+                for ((varName, varType) in orPatternResult.bindings) {
+                    val firstType = patternResult.bindings[varName]!!
+                    constraints.add(
+                        Constraint.Equality(
+                            left = varType,
+                            right = firstType,
+                            context = "Or-pattern binding '$varName' must have same type in all alternatives"
+                        )
+                    )
+                }
             }
 
             // Extend context with pattern bindings for the case body
@@ -2731,6 +2762,7 @@ class ExpressionConstraintGenerator {
             // If there's a guard, check it (must be Bool)
             // TCO: Guard is NOT in tail position
             val guard = matchCase.guard
+            var guardUsedVariables: Set<String> = emptySet()  // Track for unused variable checking
             if (guard != null) {
                 val guardResult = generate(guard, caseContext.notInTailPosition())
                 constraints.addAll(guardResult.constraints)
@@ -2742,6 +2774,7 @@ class ExpressionConstraintGenerator {
                 performed = performed || guardResult.performed  // Propagate performed
                 duplicateBindings.addAll(guardResult.duplicateBindings)
                 referencedBindings.addAll(guardResult.referencedBindings)
+                guardUsedVariables = guardResult.usedVariables  // Save for later use
 
                 // Guard must be Bool (variant type | True, False |)
                 constraints.add(
@@ -2767,8 +2800,10 @@ class ExpressionConstraintGenerator {
                 abilityConstraints.addAll(bindingExprResult.abilityConstraints)
                 associatedTypeConstraints.addAll(bindingExprResult.associatedTypeConstraints)
                 effects.addAll(bindingExprResult.effects)
+                effectInstances.addAll(bindingExprResult.effectInstances)  // Bug fix: was missing
                 performed = performed || bindingExprResult.performed
                 duplicateBindings.addAll(bindingExprResult.duplicateBindings)
+                referencedBindings.addAll(bindingExprResult.referencedBindings)  // Bug fix: was missing
 
                 // Generate pattern constraints for the if-let pattern against the expression type
                 val ifLetPatternResult = patternGenerator.generate(
@@ -2802,8 +2837,8 @@ class ExpressionConstraintGenerator {
 
             // Check for unused pattern bindings
             // Variables starting with _ are intentionally unused (convention)
-            val usedVarsInBody = caseBodyResult.usedVariables +
-                (guard?.let { generate(it, caseContext).usedVariables } ?: emptySet())
+            // Bug fix: Reuse guardUsedVariables instead of re-generating the guard
+            val usedVarsInBody = caseBodyResult.usedVariables + guardUsedVariables
             for ((varName, _) in patternResult.bindings) {
                 if (!varName.startsWith("_") && varName !in usedVarsInBody) {
                     // Use the binding's source location from the pattern
@@ -3676,14 +3711,14 @@ class ExpressionConstraintGenerator {
         // Handle associated type substitution if we're in a perform context
         var instantiatedOperationType = operationType
         val performContext = context.performContext
-        println("DEBUG generateEffectCall: effectName=$effectName, operationName=$operationName, performContext=${performContext != null}, isFunctionType=${instantiatedOperationType is MezzeType.FunctionType}")
+        DebugLogger.debug(Category.Effects) { "generateEffectCall: effectName=$effectName, operationName=$operationName, performContext=${performContext != null}, isFunctionType=${instantiatedOperationType is MezzeType.FunctionType}" }
         if (performContext != null && instantiatedOperationType is MezzeType.FunctionType) {
-            println("DEBUG generateEffectCall: handlers=${performContext.handlers.map { it.name }}, performerToEffect=${context.performerToEffect}")
+            DebugLogger.debug(Category.Effects) { "generateEffectCall: handlers=${performContext.handlers.map { it.name }}, performerToEffect=${context.performerToEffect}" }
             // Find which performer is handling this effect
             var performerName: String? = null
             for (handler in performContext.handlers) {
                 val handlerEffectName = context.performerToEffect[handler.name]
-                println("DEBUG generateEffectCall: handler=${handler.name}, handlerEffectName=$handlerEffectName")
+                DebugLogger.debug(Category.Effects) { "generateEffectCall: handler=${handler.name}, handlerEffectName=$handlerEffectName" }
                 if (handlerEffectName == effectName) {
                     performerName = handler.name
                     break
@@ -3693,18 +3728,18 @@ class ExpressionConstraintGenerator {
             if (performerName != null) {
                 // Get the performer's associated type bindings using dedicated map
                 val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
-                println("DEBUG generateEffectCall: performerName=$performerName, performerInfos.size=${performerInfos.size}, effectName=$effectName")
+                DebugLogger.debug(Category.Effects) { "generateEffectCall: performerName=$performerName, performerInfos.size=${performerInfos.size}, effectName=$effectName" }
                 if (performerInfos.isNotEmpty()) {
                     val performerInfo = performerInfos.first()
                     val performerType = performerInfo.associatedTypes
-                    println("DEBUG generateEffectCall: performerType=$performerType")
+                    DebugLogger.debug(Category.Effects) { "generateEffectCall: performerType=$performerType" }
                     if (performerType is MezzeType.RecordType) {
-                        println("DEBUG generateEffectCall: fields=${performerType.fields}")
+                        DebugLogger.debug(Category.Effects) { "generateEffectCall: fields=${performerType.fields}" }
                         instantiatedOperationType = substituteAssociatedTypesInType(
                             instantiatedOperationType,
                             performerType.fields
                         )
-                        println("DEBUG generateEffectCall: after substitution=$instantiatedOperationType")
+                        DebugLogger.debug(Category.Effects) { "generateEffectCall: after substitution=$instantiatedOperationType" }
 
                         // CRITICAL: After substituting associated types, we need to instantiate
                         // with fresh vars BUT preserve the TypeVars that came from the performer's

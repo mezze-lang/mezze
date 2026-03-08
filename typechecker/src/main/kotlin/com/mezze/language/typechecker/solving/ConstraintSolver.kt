@@ -377,7 +377,15 @@ class ConstraintSolver(
 
                 if (invalidConstructors.isNotEmpty()) {
                     // Found invalid constructors for this closed variant - ERROR!
-                    val errorMsg = "Constructor(s) ${invalidConstructors.joinToString()} not found in closed variant '$typeName'. " +
+                    // Provide helpful suggestions for each invalid constructor
+                    val suggestions = invalidConstructors.map { invalid ->
+                        val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestDidYouMean(
+                            invalid,
+                            declaredConstructors.toList()
+                        )
+                        if (suggestion != null) "'$invalid' ($suggestion)" else "'$invalid'"
+                    }
+                    val errorMsg = "Constructor(s) ${suggestions.joinToString()} not found in closed variant '$typeName'. " +
                                   "Available constructors: ${declaredConstructors.joinToString()}"
                     return VariantInferenceResult.Failure(errorMsg)
                 }
@@ -419,14 +427,19 @@ class ConstraintSolver(
         val (inferredEqualities, inferenceErrors) = inferVariantTypes(constraints)
 
         // If variant inference found invalid constructors in closed variants, fail immediately
-        for (errorMsg in inferenceErrors) {
-            errors.add(
-                ConstraintError(
-                    message = errorMsg,
-                    constraint = constraints.first(),  // Use first constraint as context
-                    context = "Variant type inference"
+        // Note: inferenceErrors can only be non-empty if there were HasConstructor constraints,
+        // which means constraints must also be non-empty
+        if (inferenceErrors.isNotEmpty() && constraints.isNotEmpty()) {
+            val contextConstraint = constraints.first()  // Safe: we checked non-empty
+            for (errorMsg in inferenceErrors) {
+                errors.add(
+                    ConstraintError(
+                        message = errorMsg,
+                        constraint = contextConstraint,
+                        context = "Variant type inference"
+                    )
                 )
-            )
+            }
         }
 
         val allConstraints = constraints + inferredEqualities
@@ -2631,9 +2644,15 @@ class ConstraintSolver(
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
                     // Record is closed, OR this is a strict field check (record literal context)
-                    // Field must exist
+                    // Field must exist - provide helpful error with suggestions
+                    val availableFields = recordType.fields.keys.toList()
+                    val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestOrList(
+                        fieldName,
+                        availableFields,
+                        "fields"
+                    )
                     return ConstraintResult.Failure(
-                        "Record type does not have field '$fieldName'. Available fields: ${recordType.fields.keys.joinToString()}"
+                        "Record type does not have field '$fieldName'. $suggestion"
                     )
                 }
             }
@@ -3162,8 +3181,14 @@ class ConstraintSolver(
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
                     // Variant is closed - constructor must exist
+                    val availableConstructors = variantType.constructors.keys.toList()
+                    val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestOrList(
+                        constructorName,
+                        availableConstructors,
+                        "constructors"
+                    )
                     return ConstraintResult.Failure(
-                        "Variant type does not have constructor '$constructorName'. Available constructors: ${variantType.constructors.keys.joinToString()}"
+                        "Variant type does not have constructor '$constructorName'. $suggestion"
                     )
                 }
             }

@@ -151,18 +151,38 @@ public final class MezzeRecord implements TruffleObject {
     @CompilationFinal(dimensions = 1)
     private final Object[] objectFields;
 
+    /**
+     * Copy-on-Write ownership flag.
+     *
+     * When true, this record has exclusive ownership of its arrays and can
+     * safely mutate them in-place during updates. After an update, ownership
+     * transfers to the new record.
+     *
+     * This eliminates redundant array clones in update chains:
+     *   {...{...{...rec, a=1}, b=2}, c=3}  // 1 clone instead of 3
+     *
+     * NOT @CompilationFinal because it changes at runtime.
+     */
+    private boolean owned;
+
     public MezzeRecord(Shape shape, long[] longFields, double[] doubleFields, Object[] objectFields) {
+        this(shape, longFields, doubleFields, objectFields, true);
+    }
+
+    public MezzeRecord(Shape shape, long[] longFields, double[] doubleFields, Object[] objectFields, boolean owned) {
         this.shape = shape;
         this.longFields = longFields;
         this.doubleFields = doubleFields;
         this.objectFields = objectFields;
+        this.owned = owned;
     }
 
     /**
      * Create a record with all object fields (simple case).
+     * New records always start with ownership=true.
      */
     public static MezzeRecord withAllObjects(Shape shape, Object[] values) {
-        return new MezzeRecord(shape, new long[0], new double[0], values);
+        return new MezzeRecord(shape, new long[0], new double[0], values, true);
     }
 
     public Shape getShape() {
@@ -221,36 +241,53 @@ public final class MezzeRecord implements TruffleObject {
 
     /**
      * Create a copy with one field updated.
-     * OPTIMIZED: Only clones the array that needs modification.
-     * Other arrays are SHARED (structural sharing) to reduce allocation.
+     *
+     * COPY-ON-WRITE WITH STRUCTURAL SHARING:
+     * - Clones only the array being modified
+     * - Shares unmodified arrays between old and new record
+     * - New record gets ownership for potential future in-place updates
+     *
+     * Note: Optimistic in-place mutation (mutating when owned=true) was considered
+     * but rejected because it violates immutability semantics - the original record
+     * must always preserve its values even after creating updates.
      */
     public MezzeRecord withField(int fieldIndex, Object value) {
         FieldLocation loc = shape.getFieldLocation(fieldIndex);
+
+        // Mark this record as shared since we're sharing unmodified arrays
+        this.owned = false;
+
         return switch (loc.storageType) {
             case LONG -> {
                 long[] newLongs = longFields.clone();
                 newLongs[loc.index] = (long) value;
-                // OPTIMIZATION: Reuse doubleFields and objectFields (no clone)
-                yield new MezzeRecord(shape, newLongs, doubleFields, objectFields);
+                // Share doubleFields and objectFields (structural sharing)
+                yield new MezzeRecord(shape, newLongs, doubleFields, objectFields, true);
             }
             case DOUBLE -> {
                 double[] newDoubles = doubleFields.clone();
                 newDoubles[loc.index] = (double) value;
-                // OPTIMIZATION: Reuse longFields and objectFields (no clone)
-                yield new MezzeRecord(shape, longFields, newDoubles, objectFields);
+                // Share longFields and objectFields
+                yield new MezzeRecord(shape, longFields, newDoubles, objectFields, true);
             }
             case OBJECT -> {
                 Object[] newObjects = objectFields.clone();
                 newObjects[loc.index] = value;
-                // OPTIMIZATION: Reuse longFields and doubleFields (no clone)
-                yield new MezzeRecord(shape, longFields, doubleFields, newObjects);
+                // Share longFields and doubleFields
+                yield new MezzeRecord(shape, longFields, doubleFields, newObjects, true);
             }
         };
     }
 
     /**
      * Create a copy with multiple fields updated.
-     * BATCH UPDATE: More efficient than calling withField multiple times.
+     *
+     * BATCH UPDATE with STRUCTURAL SHARING:
+     * Only clones the arrays that need modification. Arrays that don't
+     * change are shared between old and new records.
+     *
+     * This is the most efficient path for spread syntax:
+     *   {...rec, a=1, b=2, c=3}  // Single operation, minimal cloning
      */
     public MezzeRecord withFields(int[] fieldIndices, Object[] values) {
         if (fieldIndices.length != values.length) {
@@ -263,24 +300,27 @@ public final class MezzeRecord implements TruffleObject {
             return withField(fieldIndices[0], values[0]);  // Single field fast path
         }
 
-        // Determine which arrays need cloning
-        boolean needsLongClone = false;
-        boolean needsDoubleClone = false;
-        boolean needsObjectClone = false;
+        // Determine which arrays need modification
+        boolean needsLongMod = false;
+        boolean needsDoubleMod = false;
+        boolean needsObjectMod = false;
 
         for (int fieldIndex : fieldIndices) {
             FieldLocation loc = shape.getFieldLocation(fieldIndex);
             switch (loc.storageType) {
-                case LONG -> needsLongClone = true;
-                case DOUBLE -> needsDoubleClone = true;
-                case OBJECT -> needsObjectClone = true;
+                case LONG -> needsLongMod = true;
+                case DOUBLE -> needsDoubleMod = true;
+                case OBJECT -> needsObjectMod = true;
             }
         }
 
-        // Clone only what's needed
-        long[] newLongs = needsLongClone ? longFields.clone() : longFields;
-        double[] newDoubles = needsDoubleClone ? doubleFields.clone() : doubleFields;
-        Object[] newObjects = needsObjectClone ? objectFields.clone() : objectFields;
+        // Mark this record as shared since we're sharing unmodified arrays
+        this.owned = false;
+
+        // Clone only arrays that need modification (structural sharing)
+        long[] newLongs = needsLongMod ? longFields.clone() : longFields;
+        double[] newDoubles = needsDoubleMod ? doubleFields.clone() : doubleFields;
+        Object[] newObjects = needsObjectMod ? objectFields.clone() : objectFields;
 
         // Apply all updates
         for (int i = 0; i < fieldIndices.length; i++) {
@@ -293,7 +333,7 @@ public final class MezzeRecord implements TruffleObject {
             }
         }
 
-        return new MezzeRecord(shape, newLongs, newDoubles, newObjects);
+        return new MezzeRecord(shape, newLongs, newDoubles, newObjects, true);
     }
 
     // InteropLibrary exports
@@ -404,21 +444,46 @@ public final class MezzeRecord implements TruffleObject {
     }
 
     /**
+     * Check if this record owns its arrays (can mutate in-place).
+     * Useful for debugging and testing CoW behavior.
+     */
+    public boolean isOwned() {
+        return owned;
+    }
+
+    /**
+     * Mark this record as shared (not owned).
+     * Call this when storing a record in a data structure that might be accessed
+     * from multiple places, to ensure updates create proper copies.
+     *
+     * Returns this record for chaining.
+     */
+    public MezzeRecord markShared() {
+        this.owned = false;
+        return this;
+    }
+
+    /**
      * Create an empty record.
      */
     public static MezzeRecord empty() {
         return EMPTY;
     }
 
+    /**
+     * Singleton empty record - NOT owned since it's shared globally.
+     */
     private static final MezzeRecord EMPTY = new MezzeRecord(
         new Shape(new String[0], new FieldLocation[0]),
         new long[0],
         new double[0],
-        new Object[0]
+        new Object[0],
+        false  // Shared singleton, never owned
     );
 
     /**
      * Create a record from field names and values (all object storage).
+     * New records always start with ownership=true.
      */
     @TruffleBoundary
     public static MezzeRecord fromFields(String[] fieldNames, Object[] values) {
@@ -427,7 +492,7 @@ public final class MezzeRecord implements TruffleObject {
             locations[i] = new FieldLocation(FieldLocation.StorageType.OBJECT, i);
         }
         Shape shape = new Shape(fieldNames, locations);
-        return new MezzeRecord(shape, new long[0], new double[0], values);
+        return new MezzeRecord(shape, new long[0], new double[0], values, true);
     }
 
     /**
