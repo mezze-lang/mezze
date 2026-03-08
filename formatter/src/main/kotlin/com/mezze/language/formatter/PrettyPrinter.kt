@@ -1,6 +1,7 @@
 package com.mezze.language.formatter
 
 import com.mezze.language.ast.*
+import com.mezze.language.parser.OperatorMapping
 
 /**
  * Pretty printer for Mezze AST.
@@ -15,6 +16,20 @@ class PrettyPrinter {
     private var currentLine = 1
     private var comments: List<Comment> = emptyList()
     private var nextCommentIndex = 0
+
+    // Reverse mapping: ability.method -> operator symbol
+    private val abilityMethodToOperator: Map<String, String> = buildMap {
+        for ((op, binaryOp) in OperatorMapping.BINARY_OPERATORS) {
+            put("${binaryOp.ability}.${binaryOp.method}", op)
+        }
+    }
+
+    // Reverse mapping for unary operators
+    private val abilityMethodToUnaryOperator: Map<String, String> = buildMap {
+        for ((op, unaryOp) in OperatorMapping.UNARY_OPERATORS) {
+            put("${unaryOp.ability}.${unaryOp.method}", op)
+        }
+    }
 
     /**
      * Print a complete program to formatted source code.
@@ -144,7 +159,8 @@ class PrettyPrinter {
     private fun printTypeParams(typeParams: List<String>) {
         if (typeParams.isNotEmpty()) {
             append(" ")
-            append(typeParams.joinToString(" ") { "'$it" })
+            // Type params already include the ' prefix from the parser
+            append(typeParams.joinToString(" "))
         }
     }
 
@@ -449,21 +465,16 @@ class PrettyPrinter {
 
     private fun printUsePath(path: UsePath) {
         when (path) {
-            is UseModule -> append(path.path.joinToString("::"))
-            is UseSelective -> {
-                append(path.modulePath.joinToString("::"))
+            is ModulePath -> append(path.segments.joinToString("::"))
+            is SelectivePath -> {
+                append(path.module.joinToString("::"))
                 append("::{")
                 path.items.forEachIndexed { index, item ->
                     if (index > 0) append(", ")
-                    when (item) {
-                        is UseItem.Named -> {
-                            append(item.name)
-                            item.alias?.let {
-                                append(" as ")
-                                append(it)
-                            }
-                        }
-                        is UseItem.Wildcard -> append("*")
+                    append(item.name)
+                    item.alias?.let {
+                        append(" as ")
+                        append(it)
                     }
                 }
                 append("}")
@@ -736,32 +747,35 @@ class PrettyPrinter {
     }
 
     private fun printFunctionCall(expr: FunctionCall) {
-        // Handle operator calls specially
-        if (expr.function is Identifier && isOperator((expr.function as Identifier).localName)) {
-            val op = (expr.function as Identifier).localName
-            val args = expr.arguments
-            if (args is RecordLiteral && args.entries.size == 2) {
-                val fieldEntries = args.getFieldEntries()
-                if (fieldEntries.size == 2) {
-                    val a = fieldEntries.find { it.name == "a" }?.value
-                    val b = fieldEntries.find { it.name == "b" }?.value
-                    if (a != null && b != null) {
-                        val needsParensA = needsParens(a, op, true)
-                        val needsParensB = needsParens(b, op, false)
+        // Check if this is a desugared binary operator (e.g., NumAdd.add {l = x, r = y} -> x + y)
+        val binaryOp = tryExtractBinaryOperator(expr)
+        if (binaryOp != null) {
+            val (op, left, right) = binaryOp
+            val needsParensA = needsParens(left, op, true)
+            val needsParensB = needsParens(right, op, false)
 
-                        if (needsParensA) append("(")
-                        printExpression(a)
-                        if (needsParensA) append(")")
+            if (needsParensA) append("(")
+            printExpression(left)
+            if (needsParensA) append(")")
 
-                        append(" $op ")
+            append(" $op ")
 
-                        if (needsParensB) append("(")
-                        printExpression(b)
-                        if (needsParensB) append(")")
-                        return
-                    }
-                }
-            }
+            if (needsParensB) append("(")
+            printExpression(right)
+            if (needsParensB) append(")")
+            return
+        }
+
+        // Check if this is a desugared unary operator (e.g., NumSub.neg {n = x} -> -x)
+        val unaryOp = tryExtractUnaryOperator(expr)
+        if (unaryOp != null) {
+            val (op, operand) = unaryOp
+            append(op)
+            val needsParens = operand is FunctionCall || operand is IfExpression
+            if (needsParens) append("(")
+            printExpression(operand)
+            if (needsParens) append(")")
+            return
         }
 
         // Regular function call
@@ -771,6 +785,64 @@ class PrettyPrinter {
         if (needsParens) append(")")
         append(" ")
         printExpression(expr.arguments)
+    }
+
+    /**
+     * Try to extract a binary operator from a desugared function call.
+     * Returns (operator, left, right) if this is a desugared binary op, null otherwise.
+     *
+     * Pattern: MemberAccess(Identifier("NumAdd"), "add") with args {l = x, r = y}
+     */
+    private fun tryExtractBinaryOperator(expr: FunctionCall): Triple<String, Expression, Expression>? {
+        val func = expr.function
+        val args = expr.arguments
+
+        // Check for MemberAccess pattern: Ability.method
+        if (func !is MemberAccess) return null
+        val receiver = func.receiver
+        if (receiver !is Identifier) return null
+
+        val key = "${receiver.localName}.${func.member}"
+        val op = abilityMethodToOperator[key] ?: return null
+
+        // Check for record args with l and r fields
+        if (args !is RecordLiteral) return null
+        val fieldEntries = args.getFieldEntries()
+        if (fieldEntries.size != 2) return null
+
+        val left = fieldEntries.find { it.name == "l" }?.value ?: return null
+        val right = fieldEntries.find { it.name == "r" }?.value ?: return null
+
+        return Triple(op, left, right)
+    }
+
+    /**
+     * Try to extract a unary operator from a desugared function call.
+     * Returns (operator, operand) if this is a desugared unary op, null otherwise.
+     *
+     * Pattern: MemberAccess(Identifier("NumSub"), "neg") with args {n = x}
+     */
+    private fun tryExtractUnaryOperator(expr: FunctionCall): Pair<String, Expression>? {
+        val func = expr.function
+        val args = expr.arguments
+
+        // Check for MemberAccess pattern: Ability.method
+        if (func !is MemberAccess) return null
+        val receiver = func.receiver
+        if (receiver !is Identifier) return null
+
+        val key = "${receiver.localName}.${func.member}"
+        val op = abilityMethodToUnaryOperator[key] ?: return null
+
+        // Check for record args with appropriate field
+        if (args !is RecordLiteral) return null
+        val fieldEntries = args.getFieldEntries()
+        if (fieldEntries.size != 1) return null
+
+        val unaryOpDef = OperatorMapping.getUnaryOp(op) ?: return null
+        val operand = fieldEntries.find { it.name == unaryOpDef.fieldName }?.value ?: return null
+
+        return Pair(op, operand)
     }
 
     private fun printIfExpression(expr: IfExpression) {
@@ -1004,7 +1076,7 @@ class PrettyPrinter {
             return
         }
 
-        append("{")
+        append("{ ")
         type.entries.forEachIndexed { index, entry ->
             if (index > 0) append(", ")
             append(entry.name)
@@ -1016,7 +1088,7 @@ class PrettyPrinter {
             append("...")
             append(it)
         }
-        append("}")
+        append(" }")
     }
 
     private fun printVariantTypeAnnotation(type: VariantTypeAnnotation) {
@@ -1161,14 +1233,11 @@ class PrettyPrinter {
         }
     }
 
-    private fun isOperator(name: String): Boolean {
-        return name in setOf("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||")
-    }
-
     private fun needsParens(expr: Expression, op: String, isLeft: Boolean): Boolean {
         if (expr !is FunctionCall) return false
-        val innerOp = (expr.function as? Identifier)?.localName ?: return false
-        if (!isOperator(innerOp)) return false
+
+        // Check if inner expression is also a binary operator
+        val innerOp = tryExtractBinaryOperator(expr)?.first ?: return false
 
         val outerPrec = operatorPrecedence(op)
         val innerPrec = operatorPrecedence(innerOp)
@@ -1193,7 +1262,13 @@ class PrettyPrinter {
     }
 
     private fun isSimpleType(type: TypeAnnotation?): Boolean {
-        return type == null || type is IdentifierTypeAnnotation
+        return when (type) {
+            null -> true
+            is IdentifierTypeAnnotation -> true
+            is RecordTypeAnnotation -> type.entries.size <= 2 && type.entries.all { isSimpleType(it.type) }
+            is TypeApplicationAnnotation -> type.args.size <= 2 && type.args.all { isSimpleType(it) }
+            else -> false
+        }
     }
 
     private fun calculateRecordDefWidth(def: RecordDefinition): Int {
@@ -1203,7 +1278,10 @@ class PrettyPrinter {
     private fun calculateRecordLiteralWidth(expr: RecordLiteral): Int {
         return 2 + expr.entries.sumOf { entry ->
             when (entry) {
-                is RecordFieldEntry -> entry.name.length + (if (entry.value != null) 3 + estimateExprWidth(entry.value) else 0) + 2
+                is RecordFieldEntry -> {
+                    val valueExpr = entry.value
+                    entry.name.length + (if (valueExpr != null) 3 + estimateExprWidth(valueExpr) else 0) + 2
+                }
                 is RecordSpreadEntry -> 3 + estimateExprWidth(entry.expression) + 2
             }
         }

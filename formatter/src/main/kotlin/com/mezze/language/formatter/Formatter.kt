@@ -27,8 +27,17 @@ class Formatter {
      * @return The formatted source code
      * @throws FormatException if the source code cannot be parsed
      */
+    /**
+     * Format Mezze source code.
+     *
+     * @param source The source code to format
+     * @param file Optional file path for error messages
+     * @return The formatted source code
+     * @throws FormatException if the source code cannot be parsed
+     */
     fun format(source: String, file: String? = null): String {
         val program = try {
+            // Use desugar = false to preserve original syntax
             parser.parse(source, desugar = false, file = file)
         } catch (e: Exception) {
             throw FormatException("Failed to parse source: ${e.message}", e)
