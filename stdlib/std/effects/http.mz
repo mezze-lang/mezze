@@ -146,7 +146,7 @@ effect Http where {
 # Uses scoped effects: client created once per perform block, closed on exit
 # Best for multiple requests - reuses connection pool
 # Uses default_http_config for all requests
-pub impl Http for HttpClient where {
+impl Http for HttpClient where {
     initialize_scope = {} -> do
         let client = __native_http_client_create {}
         {client = client},
@@ -163,7 +163,7 @@ pub impl Http for HttpClient where {
 # Example:
 #   perform HttpClientWith { config = config_with_timeout { timeout_ms = 5000 } } in do
 #       get { url = "https://api.example.com/fast" }
-pub impl Http for HttpClientWith { config: HttpConfig } where {
+impl Http for HttpClientWith { config: HttpConfig } where {
     initialize_scope = {} -> do
         let client = __native_http_client_create {}
         {client = client},
@@ -179,7 +179,7 @@ pub impl Http for HttpClientWith { config: HttpConfig } where {
 # Simple HTTP client that creates and closes connection per request
 # No scope management needed - good for one-off requests
 # Less efficient for multiple requests (no connection reuse)
-pub impl Http for SimpleHttpClient where {
+impl Http for SimpleHttpClient where {
     request = { req, config } -> do
         let client = __native_http_client_create {}
         let result = __native_http_request { req = req, config = config, client = client }
@@ -188,7 +188,7 @@ pub impl Http for SimpleHttpClient where {
 }
 
 # Simple HTTP client with custom config
-pub impl Http for SimpleHttpClientWith { config: HttpConfig } where {
+impl Http for SimpleHttpClientWith { config: HttpConfig } where {
     request = { req, config: default_config } -> do
         let client = __native_http_client_create {}
         let result = __native_http_request { req = req, config = config, client = client }
@@ -204,7 +204,7 @@ pub impl Http for SimpleHttpClientWith { config: HttpConfig } where {
 #       { methods = [Post], url = Glob { pattern = "/users" }, response = Ok { val = created_resp } },
 #       { methods = [], url = Glob { pattern = "**" }, response = Err { error = ConnectionFailed { url = "", reason = "No mock" } } }
 #   ] } in do ...
-pub impl Http for MockHttpClient { rules: [MockRule] } where {
+impl Http for MockHttpClient { rules: [MockRule] } where {
     # Access rules directly from impl params (captured as closure)
     request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }

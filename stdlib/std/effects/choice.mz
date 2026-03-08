@@ -16,7 +16,7 @@ effect Choice where {
 
 # AllPaths performer - explores all possible paths through choices
 # Uses scoped effects to manage continuation lifecycle internally
-pub impl Choice for AllPaths where {
+impl Choice for AllPaths where {
     initialize_scope = {} -> { cont = continuation::new {} },
 
     finalize_scope = {} -> scope.cont.reset {},

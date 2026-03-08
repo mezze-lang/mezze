@@ -14,6 +14,8 @@ import kotlin.test.assertTrue
  *
  * Tests that effects with associated types (like Exception having 'error)
  * propagate their concrete type bindings through function signatures and perform expressions.
+ *
+ * All handlers use scoped continuations internally - no need to pass continuations as parameters.
  */
 class EffectPolymorphicSignaturesTest {
 
@@ -34,22 +36,20 @@ class EffectPolymorphicSignaturesTest {
     }
 
     // ========================================================================
-    // DIRECT PERFORM - ToResult
+    // DIRECT PERFORM - ExceptionToResult
     // ========================================================================
 
     @Nested
-    @DisplayName("Direct Perform with ToResult")
-    inner class DirectPerformToResult {
+    @DisplayName("Direct Perform with ExceptionToResult")
+    inner class DirectPerformExceptionToResult {
 
         @Test
-        fun `direct ToResult with String error`() {
+        fun `direct ExceptionToResult with String error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let safe_div = {a, b} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         if b == 0 then
                             Exception.throw {error = "division by zero"}
                         else
@@ -58,14 +58,12 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `direct ToResult with Int error`() {
+        fun `direct ExceptionToResult with Int error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let safe_div = {a, b} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         if b == 0 then
                             Exception.throw {error = 42}
                         else
@@ -74,14 +72,12 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `direct ToResult with record error`() {
+        fun `direct ExceptionToResult with record error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let safe_div = {a, b} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         if b == 0 then
                             Exception.throw {error = {code = 500, msg = "error"}}
                         else
@@ -91,19 +87,17 @@ class EffectPolymorphicSignaturesTest {
     }
 
     // ========================================================================
-    // STEP-BY-STEP PERFORM - ToResult
+    // STEP-BY-STEP PERFORM - ExceptionToResult
     // ========================================================================
 
     @Nested
-    @DisplayName("Step-by-Step Perform with ToResult")
-    inner class StepByStepPerformToResult {
+    @DisplayName("Step-by-Step Perform with ExceptionToResult")
+    inner class StepByStepPerformExceptionToResult {
 
         @Test
-        fun `step-by-step ToResult with String error`() {
+        fun `step-by-step ExceptionToResult with String error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let thrower = {a, b} ->
                     if b == 0 then
@@ -114,17 +108,15 @@ class EffectPolymorphicSignaturesTest {
                 let calc = thrower {a = 10, b = 2}
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = calc }
             """.trimIndent())
         }
 
         @Test
-        fun `step-by-step ToResult with Int error`() {
+        fun `step-by-step ExceptionToResult with Int error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let thrower = {a, b} ->
                     if b == 0 then
@@ -135,17 +127,15 @@ class EffectPolymorphicSignaturesTest {
                 let calc = thrower {a = 10, b = 2}
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = calc }
             """.trimIndent())
         }
 
         @Test
-        fun `step-by-step ToResult with record error`() {
+        fun `step-by-step ExceptionToResult with record error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let thrower = {a, b} ->
                     if b == 0 then
@@ -156,29 +146,27 @@ class EffectPolymorphicSignaturesTest {
                 let calc = thrower {a = 10, b = 2}
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = calc }
             """.trimIndent())
         }
     }
 
     // ========================================================================
-    // DIRECT PERFORM - ToOption
+    // DIRECT PERFORM - ExceptionToOption
     // ========================================================================
 
     @Nested
-    @DisplayName("Direct Perform with ToOption")
-    inner class DirectPerformToOption {
+    @DisplayName("Direct Perform with ExceptionToOption")
+    inner class DirectPerformExceptionToOption {
 
         @Test
-        fun `direct ToOption with String error`() {
+        fun `direct ExceptionToOption with String error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToOption}
+                use std::effects::exception::{Exception, ExceptionToOption}
 
                 let safe_div = {a, b} ->
-                    perform ToOption {cont = continuation::new {}} in
+                    perform ExceptionToOption in
                         if b == 0 then
                             Exception.throw {error = "division by zero"}
                         else
@@ -187,14 +175,12 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `direct ToOption with record error`() {
+        fun `direct ExceptionToOption with record error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToOption}
+                use std::effects::exception::{Exception, ExceptionToOption}
 
                 let safe_div = {a, b} ->
-                    perform ToOption {cont = continuation::new {}} in
+                    perform ExceptionToOption in
                         if b == 0 then
                             Exception.throw {error = {code = 500, msg = "error"}}
                         else
@@ -204,19 +190,17 @@ class EffectPolymorphicSignaturesTest {
     }
 
     // ========================================================================
-    // STEP-BY-STEP PERFORM - ToOption
+    // STEP-BY-STEP PERFORM - ExceptionToOption
     // ========================================================================
 
     @Nested
-    @DisplayName("Step-by-Step Perform with ToOption")
-    inner class StepByStepPerformToOption {
+    @DisplayName("Step-by-Step Perform with ExceptionToOption")
+    inner class StepByStepPerformExceptionToOption {
 
         @Test
-        fun `step-by-step ToOption with String error`() {
+        fun `step-by-step ExceptionToOption with String error`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToOption}
+                use std::effects::exception::{Exception, ExceptionToOption}
 
                 let thrower = {a, b} ->
                     if b == 0 then
@@ -227,7 +211,7 @@ class EffectPolymorphicSignaturesTest {
                 let calc = thrower {a = 10, b = 2}
 
                 let result = {} ->
-                    perform ToOption {cont = continuation::new {}} in
+                    perform ExceptionToOption in
                         Some { val = calc }
             """.trimIndent())
         }
@@ -242,12 +226,10 @@ class EffectPolymorphicSignaturesTest {
     inner class TypeErrorsMissingWrapper {
 
         @Test
-        fun `ToResult without Ok wrapper produces type error`() {
+        fun `ExceptionToResult without Ok wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {
                 typeCheck("""
-                    use std::control::continuation
-                    use std::control::continuation::{Continuation}
-                    use std::effects::exception::{Exception, ToResult}
+                    use std::effects::exception::{Exception, ExceptionToResult}
 
                     let thrower = {a, b} ->
                         if b == 0 then
@@ -258,7 +240,7 @@ class EffectPolymorphicSignaturesTest {
                     let calc = thrower {a = 10, b = 2}
 
                     let result = {} ->
-                        perform ToResult {cont = continuation::new {}} in
+                        perform ExceptionToResult in
                             calc
                 """.trimIndent())
             }
@@ -266,12 +248,10 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `ToOption without Some wrapper produces type error`() {
+        fun `ExceptionToOption without Some wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {
                 typeCheck("""
-                    use std::control::continuation
-                    use std::control::continuation::{Continuation}
-                    use std::effects::exception::{Exception, ToOption}
+                    use std::effects::exception::{Exception, ExceptionToOption}
 
                     let thrower = {a, b} ->
                         if b == 0 then
@@ -282,7 +262,7 @@ class EffectPolymorphicSignaturesTest {
                     let calc = thrower {a = 10, b = 2}
 
                     let result = {} ->
-                        perform ToOption {cont = continuation::new {}} in
+                        perform ExceptionToOption in
                             calc
                 """.trimIndent())
             }
@@ -290,15 +270,13 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `direct ToResult without Ok wrapper produces type error`() {
+        fun `direct ExceptionToResult without Ok wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {
                 typeCheck("""
-                    use std::control::continuation
-                    use std::control::continuation::{Continuation}
-                    use std::effects::exception::{Exception, ToResult}
+                    use std::effects::exception::{Exception, ExceptionToResult}
 
                     let safe_div = {a, b} ->
-                        perform ToResult {cont = continuation::new {}} in
+                        perform ExceptionToResult in
                             if b == 0 then
                                 Exception.throw {error = "division by zero"}
                             else
@@ -320,9 +298,7 @@ class EffectPolymorphicSignaturesTest {
         @Test
         fun `multiple throws with same String error type`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let validate = {x} ->
                     if x < 0 then
@@ -333,7 +309,7 @@ class EffectPolymorphicSignaturesTest {
                         x
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = validate {x = 50} }
             """.trimIndent())
         }
@@ -341,9 +317,7 @@ class EffectPolymorphicSignaturesTest {
         @Test
         fun `multiple throws with same Int error type`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let validate = {x} ->
                     if x < 0 then
@@ -354,7 +328,7 @@ class EffectPolymorphicSignaturesTest {
                         x
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = validate {x = 50} }
             """.trimIndent())
         }
@@ -371,9 +345,7 @@ class EffectPolymorphicSignaturesTest {
         @Test
         fun `chained calls propagate error type`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let may_fail = {x} ->
                     if x == 0 then
@@ -388,7 +360,7 @@ class EffectPolymorphicSignaturesTest {
                     double_it {x = x} * 3
 
                 let result = {} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         Ok { val = triple_it {x = 5} }
             """.trimIndent())
         }
@@ -403,14 +375,12 @@ class EffectPolymorphicSignaturesTest {
     inner class DifferentReturnTypes {
 
         @Test
-        fun `ToResult with String value`() {
+        fun `ExceptionToResult with String value`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let get_name = {id} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         if id == 0 then
                             Exception.throw {error = "not found"}
                         else
@@ -419,14 +389,12 @@ class EffectPolymorphicSignaturesTest {
         }
 
         @Test
-        fun `ToResult with record value`() {
+        fun `ExceptionToResult with record value`() {
             typeCheck("""
-                use std::control::continuation
-                use std::control::continuation::{Continuation}
-                use std::effects::exception::{Exception, ToResult}
+                use std::effects::exception::{Exception, ExceptionToResult}
 
                 let get_user = {id} ->
-                    perform ToResult {cont = continuation::new {}} in
+                    perform ExceptionToResult in
                         if id == 0 then
                             Exception.throw {error = "not found"}
                         else

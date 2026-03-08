@@ -30,7 +30,7 @@ effect Time where {
 }
 
 # System time implementation using system clock
-pub impl Time for SystemTime where {
+impl Time for SystemTime where {
     now = { } -> __native_time_now { },
     now_nanos = { } -> __native_time_now_nanos { },
     sleep = { millis } -> __native_time_sleep { millis = millis },
@@ -46,7 +46,7 @@ pub impl Time for SystemTime where {
 }
 
 # Mock time implementation for testing (controllable time)
-pub impl Time for MockTime { fixed_time: Int } where {
+impl Time for MockTime { fixed_time: Int } where {
     now = { } -> fixed_time,
     now_nanos = { } -> fixed_time * 1000000,
     sleep = { millis } -> {},

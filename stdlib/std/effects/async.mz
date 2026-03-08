@@ -134,7 +134,7 @@ effect Async where {
 
 # Default handler - unbounded virtual threads
 # Uses scoped effects to track all spawned promises and ensure cleanup
-pub impl Async for LoomAsync where {
+impl Async for LoomAsync where {
     # Create a tracker for all spawned promises in this handler scope
     initialize_scope = {} -> __native_loom_init_scope {},
     # Await any unawaited promises (structured concurrency at handler level)
@@ -167,7 +167,7 @@ pub impl Async for LoomAsync where {
 # Example:
 #   perform LoomAsyncWith {max_concurrent = 100} in do
 #       Async.spawn {f = ...}
-pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
+impl Async for LoomAsyncWith { max_concurrent: Int } where {
     initialize_scope = {} -> __native_loom_init_scope {},
     finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
 
@@ -208,7 +208,7 @@ pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
 
 # Default handler - unbounded OS threads
 # Uses scoped effects for thread tracking and cleanup
-pub impl Async for OSThreadAsync where {
+impl Async for OSThreadAsync where {
     # Create thread tracker for cleanup
     initialize_scope = {} -> __native_os_init_scope {},
     # Join all spawned threads, cleanup resources
@@ -241,7 +241,7 @@ pub impl Async for OSThreadAsync where {
 # Example:
 #   perform OSThreadAsyncWith {pool_size = 4} in do
 #       Async.spawn {f = ...}
-pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
+impl Async for OSThreadAsyncWith { pool_size: Int } where {
     initialize_scope = {} -> __native_os_init_scope {},
     finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
 
@@ -283,7 +283,7 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
 #       let p = Async.spawn {f = {} -> 42}
 #       Async.await {p = p}
 
-pub impl Async for CoopAsync where {
+impl Async for CoopAsync where {
     # Continuation is created internally via scoped effects
     initialize_scope = {} -> { cont = continuation::new {} },
     finalize_scope = {} -> scope.cont.reset {},

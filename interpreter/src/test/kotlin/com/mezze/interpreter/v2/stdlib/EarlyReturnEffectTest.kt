@@ -7,7 +7,11 @@ import org.junit.jupiter.api.BeforeEach
 
 /**
  * Tests for std/effects/early_return module.
- * Tests early return effect with WithReturn, WithSome, and DiscardReturn handlers.
+ * Tests early return effect with EarlyReturn handler.
+ *
+ * All handlers use scoped continuations internally - no need to pass
+ * continuations as parameters.
+ *
  * Migrated from V1 to V2 with unboxed values.
  */
 class EarlyReturnEffectTest {
@@ -20,16 +24,15 @@ class EarlyReturnEffectTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // === WithReturn Handler Tests ===
+    // === EarlyReturn Handler Tests ===
 
     @Test
-    fun `test WithReturn early return`() {
+    fun `test EarlyReturn early return`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let check_number = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
                     else {}
@@ -41,13 +44,12 @@ class EarlyReturnEffectTest {
     }
 
     @Test
-    fun `test WithReturn normal path`() {
+    fun `test EarlyReturn normal path`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let check_number = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
                     else {}
@@ -63,11 +65,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test multiple guard clauses`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let classify = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
                     else {}
@@ -92,11 +93,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return helper function`() {
         val result = eval("""
-            use std::effects::early_return::{return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{return, EarlyReturn}
 
             let check = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         return {val = "negative"}
                     else {}
@@ -112,11 +112,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return_if helper function`() {
         val result = eval("""
-            use std::effects::early_return::{return_if, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{return_if, EarlyReturn}
 
             let validate = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     return_if {condition = x < 0, val = "negative"}
                     return_if {condition = x == 0, val = "zero"}
                     return_if {condition = x > 100, val = "too large"}
@@ -130,11 +129,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return_if with false condition continues`() {
         val result = eval("""
-            use std::effects::early_return::{return_if, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{return_if, EarlyReturn}
 
             let validate = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     return_if {condition = x < 0, val = "negative"}
                     "ok"
 
@@ -148,11 +146,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return_some with Some value`() {
         val result = eval("""
-            use std::effects::early_return::{return_some, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{return_some, EarlyReturn}
 
             let process = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     return_some {option = Some {val = x}}
                     "fallback"
 
@@ -164,11 +161,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return_some with None continues`() {
         val result = eval("""
-            use std::effects::early_return::{return_some, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{return_some, EarlyReturn}
 
             let process = {} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     return_some {option = None}
                     "fallback"
 
@@ -182,11 +178,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return with integer values`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let get_value = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x == 0 then
                         Return.return {val = 100}
                     else if x == 1 then
@@ -202,11 +197,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test return with boolean values`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let is_valid = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = False}
                     else {}
@@ -222,11 +216,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test first return wins`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let test = {} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     Return.return {val = "first"}
                     Return.return {val = "second"}
                     "third"
@@ -241,11 +234,10 @@ class EarlyReturnEffectTest {
     @Test
     fun `test normal path returns computed value`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let test = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = 0}
                     else {}

@@ -85,7 +85,7 @@ effect Parallel where {
 #   perform VirtualParallel in do
 #       Parallel.map {xs = numbers, f = {x} -> fibonacci {n = x}}
 
-pub impl Parallel for VirtualParallel where {
+impl Parallel for VirtualParallel where {
     map = {xs, f} -> __native_parallel_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_parallel_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_parallel_filter {xs = xs, f = f},
@@ -114,7 +114,7 @@ pub impl Parallel for VirtualParallel where {
 #   perform VirtualParallelWith {parallelism = 8, chunk_size = 100} in do
 #       Parallel.map {xs = huge_list, f = {x} -> process {x = x}}
 
-pub impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } where {
+impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } where {
     map = {xs, f} -> __native_parallel_map_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
     for_each = {xs, f} -> __native_parallel_for_each_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
     filter = {xs, f} -> __native_parallel_filter_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
@@ -150,7 +150,7 @@ pub impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } 
 #   perform ForkJoinParallel in do
 #       Parallel.map {xs = huge_list, f = {x} -> cpu_intensive {x = x}}
 
-pub impl Parallel for ForkJoinParallel where {
+impl Parallel for ForkJoinParallel where {
     map = {xs, f} -> __native_forkjoin_map {xs = xs, f = f, threshold = 64, parallelism = 0},
     for_each = {xs, f} -> __native_forkjoin_for_each {xs = xs, f = f, threshold = 64, parallelism = 0},
     filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = 64, parallelism = 0},
@@ -179,7 +179,7 @@ pub impl Parallel for ForkJoinParallel where {
 #   perform ForkJoinParallelWith {threshold = 100, parallelism = 8} in do
 #       Parallel.map {xs = data, f = {x} -> process {x = x}}
 
-pub impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } where {
+impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } where {
     map = {xs, f} -> __native_forkjoin_map {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
     for_each = {xs, f} -> __native_forkjoin_for_each {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
     filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
@@ -207,7 +207,7 @@ pub impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } 
 #   perform Sequential in do
 #       Parallel.map {xs = small_list, f = {x} -> x * 2}
 
-pub impl Parallel for Sequential where {
+impl Parallel for Sequential where {
     map = {xs, f} -> __native_sequential_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_sequential_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_sequential_filter {xs = xs, f = f},

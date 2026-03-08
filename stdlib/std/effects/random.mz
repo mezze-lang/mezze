@@ -14,7 +14,7 @@ effect Random where {
 # Seeded random implementation with deterministic behavior
 # Uses scoped effects to reset the random state at the start of each perform block,
 # ensuring that the same seed always produces the same sequence.
-pub impl Random for SeededRandom { seed: Int } where {
+impl Random for SeededRandom { seed: Int } where {
     initialize_scope = {} -> do
         # Reset the seeded random to ensure deterministic behavior
         # Each perform block with the same seed will produce identical sequences

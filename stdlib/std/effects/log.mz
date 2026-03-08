@@ -54,17 +54,17 @@ pub let color_formatter: {level: LogLevel, msg: String} -> String =
 # =============================================================================
 
 # Console - default implementation using default_formatter
-pub impl Log for Console where {
+impl Log for Console where {
     log = {level, msg} -> __native_console_print {msg = default_formatter {level = level, msg = msg}}
 }
 
 # ConsoleWith - customizable formatter
-pub impl Log for ConsoleWith {formatter: {level: LogLevel, msg: String} -> String} where {
+impl Log for ConsoleWith {formatter: {level: LogLevel, msg: String} -> String} where {
     log = {level, msg} -> __native_console_print {msg = formatter {level = level, msg = msg}}
 }
 
 # QuietConsole - for testing, suppresses all output
-pub impl Log for QuietConsole where {
+impl Log for QuietConsole where {
     log = {level, msg} -> {}
 }
 

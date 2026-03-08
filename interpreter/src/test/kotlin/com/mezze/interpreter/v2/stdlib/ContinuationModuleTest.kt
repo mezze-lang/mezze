@@ -79,11 +79,10 @@ class ContinuationModuleTest {
     @Test
     fun `test continuation used by early_return effect`() {
         val result = eval("""
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let check = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
                     else {}
@@ -98,8 +97,7 @@ class ContinuationModuleTest {
     fun `test continuation used by exception effect`() {
         // Wrap in a function to avoid top-level perform restriction
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -108,7 +106,7 @@ class ContinuationModuleTest {
                     Ok { val = a / b }
 
             let test = {} -> do
-                let r = perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 0}
+                let r = perform ExceptionToResult in divide {a = 10, b = 0}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> "err"

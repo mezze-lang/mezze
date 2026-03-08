@@ -74,7 +74,7 @@ pub let chan_bounded: { cap: Int } -> Chan 'a = { cap } ->
 #       Channel.send { ch = ch, value = 42 }
 #       Channel.recv { ch = ch }
 
-pub impl Channel for BlockingChannel where {
+impl Channel for BlockingChannel where {
     send = { ch, value } ->
         __native_channel_send { ch = ch, value = value },
 
@@ -115,7 +115,7 @@ pub impl Channel for BlockingChannel where {
 #       let v = Channel.recv { ch = ch }
 #       # v == 42
 
-pub impl Channel for MockChannel where {
+impl Channel for MockChannel where {
     send = { ch, value } ->
         __native_mock_channel_send { ch = ch, value = value },
 

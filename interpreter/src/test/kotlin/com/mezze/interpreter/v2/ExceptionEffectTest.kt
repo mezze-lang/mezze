@@ -10,10 +10,13 @@ import com.mezze.interpreter.v2.values.MezzeRecord
  * Integration tests for the Exception effect from stdlib
  *
  * Tests that the exception handling system works end-to-end with:
- * - ToResult handler (converts exceptions to Result type)
- * - ToOption handler (converts exceptions to Option type)
- * - Ignore handler (ignores all errors)
+ * - ExceptionToResult handler (converts exceptions to Result type)
+ * - ExceptionToOption handler (converts exceptions to Option type)
+ * - IgnoreException handler (ignores all errors)
  * - Custom handlers with specific error types
+ *
+ * All handlers use scoped continuations internally - no need to pass
+ * continuations as parameters.
  *
  * Migrated from V1 to V2 with unboxed values.
  */
@@ -27,14 +30,13 @@ class ExceptionEffectTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================================================
-    // Test 1: Basic Exception with ToResult Handler
+    // Test 1: Basic Exception with ExceptionToResult Handler
     // ========================================================================
 
     @Test
-    fun `test basic exception with ToResult handler`() {
+    fun `test basic exception with ExceptionToResult handler`() {
         val source = """
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -42,7 +44,7 @@ class ExceptionEffectTest {
                 else
                     Ok {val = a / b}
 
-            perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 2}
+            perform ExceptionToResult in divide {a = 10, b = 2}
         """.trimIndent()
 
         val result = eval(source)
@@ -57,8 +59,7 @@ class ExceptionEffectTest {
     @Test
     fun `test exception thrown returns Err`() {
         val source = """
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -66,7 +67,7 @@ class ExceptionEffectTest {
                 else
                     Ok {val = a / b}
 
-            perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 0}
+            perform ExceptionToResult in divide {a = 10, b = 0}
         """.trimIndent()
 
         val result = eval(source)
@@ -78,14 +79,13 @@ class ExceptionEffectTest {
     }
 
     // ========================================================================
-    // Test 3: ToOption Handler Returns None on Exception
+    // Test 3: ExceptionToOption Handler Returns None on Exception
     // ========================================================================
 
     @Test
-    fun `test ToOption handler returns None on exception`() {
+    fun `test ExceptionToOption handler returns None on exception`() {
         val source = """
-            use std::effects::exception::{Exception, ToOption}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToOption}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -93,7 +93,7 @@ class ExceptionEffectTest {
                 else
                     Some {val = a / b}
 
-            perform ToOption {cont = continuation::new {}} in divide {a = 10, b = 0}
+            perform ExceptionToOption in divide {a = 10, b = 0}
         """.trimIndent()
 
         val result = eval(source)
@@ -102,14 +102,13 @@ class ExceptionEffectTest {
     }
 
     // ========================================================================
-    // Test 4: Ignore Handler Returns Unit on Exception
+    // Test 4: IgnoreException Handler Returns Unit on Exception
     // ========================================================================
 
     @Test
-    fun `test Ignore handler returns unit on exception`() {
+    fun `test IgnoreException handler returns unit on exception`() {
         val source = """
-            use std::effects::exception::{Exception, Ignore}
-            use std::control::continuation
+            use std::effects::exception::{Exception, IgnoreException}
 
             let may_fail = {x} ->
                 if x == 0 then
@@ -117,7 +116,7 @@ class ExceptionEffectTest {
                 else
                     {}
 
-            perform Ignore {cont = continuation::new {}} in may_fail {x = 0}
+            perform IgnoreException in may_fail {x = 0}
         """.trimIndent()
 
         val result = eval(source)
@@ -131,8 +130,7 @@ class ExceptionEffectTest {
     @Test
     fun `test throw helper function`() {
         val source = """
-            use std::effects::exception::{throw, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{throw, ExceptionToResult}
 
             let check = {x} ->
                 if x < 0 then
@@ -140,7 +138,7 @@ class ExceptionEffectTest {
                 else
                     Ok {val = x}
 
-            perform ToResult {cont = continuation::new {}} in check {x = -5}
+            perform ExceptionToResult in check {x = -5}
         """.trimIndent()
 
         val result = eval(source)
@@ -158,8 +156,7 @@ class ExceptionEffectTest {
     @Test
     fun `test exception in if branch`() {
         val source = """
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let check_value = {x} ->
                 if x > 10 then
@@ -167,7 +164,7 @@ class ExceptionEffectTest {
                 else
                     Ok {val = x}
 
-            perform ToResult {cont = continuation::new {}} in check_value {x = 15}
+            perform ExceptionToResult in check_value {x = 15}
         """.trimIndent()
 
         val result = eval(source)
@@ -182,15 +179,14 @@ class ExceptionEffectTest {
     @Test
     fun `test multiple exceptions in sequence - first one wins`() {
         val source = """
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let multi_throw = {} -> do
                 Exception.throw {error = "First error"}
                 Exception.throw {error = "Second error"}
                 Ok {val = "unreachable"}
 
-            perform ToResult {cont = continuation::new {}} in multi_throw {}
+            perform ExceptionToResult in multi_throw {}
         """.trimIndent()
 
         val result = eval(source)
@@ -207,11 +203,10 @@ class ExceptionEffectTest {
     @Test
     fun `test unwrap helper function`() {
         val source = """
-            use std::effects::exception::{unwrap, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{unwrap, ExceptionToResult}
 
             let good_result = Ok {val = 42}
-            perform ToResult {cont = continuation::new {}} in Ok {val = unwrap {result = good_result}}
+            perform ExceptionToResult in Ok {val = unwrap {result = good_result}}
         """.trimIndent()
 
         val result = eval(source)
@@ -225,16 +220,12 @@ class ExceptionEffectTest {
 
     @Test
     fun `test unwrap with Err throws exception`() {
-        // Test that unwrap throws when given Err, and ToResult catches it
-        // Note: We use a let binding because unwrap can throw, and we need the throw
-        // to happen at the top-level of the perform body, not nested in a variant constructor
         val source = """
-            use std::effects::exception::{unwrap, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{unwrap, ExceptionToResult}
 
             let bad_result = Err {error = "Something failed"}
             let try_unwrap = {} ->
-                perform ToResult {cont = continuation::new {}} in do
+                perform ExceptionToResult in do
                     let val = unwrap {result = bad_result}
                     Ok {val = val}
             try_unwrap {}

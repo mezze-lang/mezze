@@ -7,7 +7,12 @@ import org.junit.jupiter.api.BeforeEach
 
 /**
  * Tests for std/effects/exception module.
- * Tests exception handling with ToResult, ToOption, Ignore, Abort, and Crash handlers.
+ * Tests exception handling with ExceptionToResult, ExceptionToOption, IgnoreException,
+ * AbortException, and CrashException handlers.
+ *
+ * All handlers use scoped continuations internally - no need to pass
+ * continuations as parameters.
+ *
  * Migrated from V1 to V2 with unboxed values.
  */
 class ExceptionEffectTest {
@@ -20,13 +25,12 @@ class ExceptionEffectTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // === ToResult Handler Tests ===
+    // === ExceptionToResult Handler Tests ===
 
     @Test
-    fun `test ToResult returns Ok on success`() {
+    fun `test ExceptionToResult returns Ok on success`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -35,7 +39,7 @@ class ExceptionEffectTest {
                     Ok {val = a / b}
 
             let test_divide = {a, b} -> do
-                let r = perform ToResult {cont = continuation::new {}} in divide {a = a, b = b}
+                let r = perform ExceptionToResult in divide {a = a, b = b}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> "err"
@@ -46,10 +50,9 @@ class ExceptionEffectTest {
     }
 
     @Test
-    fun `test ToResult returns Err on exception`() {
+    fun `test ExceptionToResult returns Err on exception`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -58,7 +61,7 @@ class ExceptionEffectTest {
                     Ok {val = a / b}
 
             let test_divide = {a, b} -> do
-                let r = perform ToResult {cont = continuation::new {}} in divide {a = a, b = b}
+                let r = perform ExceptionToResult in divide {a = a, b = b}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> error
@@ -68,13 +71,12 @@ class ExceptionEffectTest {
         assertEquals("Division by zero", result)
     }
 
-    // === ToOption Handler Tests ===
+    // === ExceptionToOption Handler Tests ===
 
     @Test
-    fun `test ToOption returns None on exception`() {
+    fun `test ExceptionToOption returns None on exception`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToOption}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToOption}
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -83,7 +85,7 @@ class ExceptionEffectTest {
                     Some {val = a / b}
 
             let test_divide = {a, b} -> do
-                let r = perform ToOption {cont = continuation::new {}} in divide {a = a, b = b}
+                let r = perform ExceptionToOption in divide {a = a, b = b}
                 match r is
                     Some {val} -> "some"
                     None -> "none"
@@ -93,13 +95,12 @@ class ExceptionEffectTest {
         assertEquals("none", result)
     }
 
-    // === Ignore Handler Tests ===
+    // === IgnoreException Handler Tests ===
 
     @Test
-    fun `test Ignore returns unit on exception`() {
+    fun `test IgnoreException returns unit on exception`() {
         val result = eval("""
-            use std::effects::exception::{Exception, Ignore}
-            use std::control::continuation
+            use std::effects::exception::{Exception, IgnoreException}
 
             let may_fail = {x} ->
                 if x == 0 then
@@ -108,7 +109,7 @@ class ExceptionEffectTest {
                     {}
 
             let test_ignore = {x} -> do
-                let result = perform Ignore {cont = continuation::new {}} in may_fail {x = x}
+                let result = perform IgnoreException in may_fail {x = x}
                 42
 
             test_ignore {x = 0}
@@ -121,8 +122,7 @@ class ExceptionEffectTest {
     @Test
     fun `test throw helper function`() {
         val result = eval("""
-            use std::effects::exception::{throw, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{throw, ExceptionToResult}
 
             let check = {x} ->
                 if x < 0 then
@@ -131,7 +131,7 @@ class ExceptionEffectTest {
                     Ok {val = x}
 
             let test_check = {x} -> do
-                let r = perform ToResult {cont = continuation::new {}} in check {x = x}
+                let r = perform ExceptionToResult in check {x = x}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> error
@@ -146,12 +146,11 @@ class ExceptionEffectTest {
     @Test
     fun `test unwrap with Ok value`() {
         val result = eval("""
-            use std::effects::exception::{unwrap, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{unwrap, ExceptionToResult}
 
             let test_unwrap = {} -> do
                 let good_result = Ok {val = 42}
-                let r = perform ToResult {cont = continuation::new {}} in Ok {val = unwrap {result = good_result}}
+                let r = perform ExceptionToResult in Ok {val = unwrap {result = good_result}}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> "err"
@@ -164,12 +163,11 @@ class ExceptionEffectTest {
     @Test
     fun `test unwrap with Err throws exception`() {
         val result = eval("""
-            use std::effects::exception::{unwrap, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{unwrap, ExceptionToResult}
 
             let try_unwrap = {} -> do
                 let bad_result = Err {error = "Something failed"}
-                let r = perform ToResult {cont = continuation::new {}} in do
+                let r = perform ExceptionToResult in do
                     let val = unwrap {result = bad_result}
                     Ok {val = val}
                 match r is
@@ -186,8 +184,7 @@ class ExceptionEffectTest {
     @Test
     fun `test first exception wins`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let multi_throw = {} -> do
                 Exception.throw {error = "First error"}
@@ -195,7 +192,7 @@ class ExceptionEffectTest {
                 Ok {val = "unreachable"}
 
             let test_multi = {} -> do
-                let r = perform ToResult {cont = continuation::new {}} in multi_throw {}
+                let r = perform ExceptionToResult in multi_throw {}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> error
@@ -210,8 +207,7 @@ class ExceptionEffectTest {
     @Test
     fun `test exception in if branch`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let check_value = {x} ->
                 if x > 10 then
@@ -220,7 +216,7 @@ class ExceptionEffectTest {
                     Ok {val = x}
 
             let test_check = {x} -> do
-                let r = perform ToResult {cont = continuation::new {}} in check_value {x = x}
+                let r = perform ExceptionToResult in check_value {x = x}
                 match r is
                     Ok {val} -> "ok"
                     Err {error} -> "err"
@@ -235,8 +231,7 @@ class ExceptionEffectTest {
     @Test
     fun `test exception with integer error`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let check = {x} ->
                 if x < 0 then
@@ -245,7 +240,7 @@ class ExceptionEffectTest {
                     Ok {val = x}
 
             let test_check = {x} -> do
-                let r = perform ToResult {cont = continuation::new {}} in check {x = x}
+                let r = perform ExceptionToResult in check {x = x}
                 match r is
                     Ok {val} -> 0
                     Err {error} -> error
@@ -258,8 +253,7 @@ class ExceptionEffectTest {
     @Test
     fun `test exception with record error`() {
         val result = eval("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let check = {x} ->
                 if x < 0 then
@@ -268,7 +262,7 @@ class ExceptionEffectTest {
                     Ok {val = x}
 
             let test_check = {x} -> do
-                let r = perform ToResult {cont = continuation::new {}} in check {x = x}
+                let r = perform ExceptionToResult in check {x = x}
                 match r is
                     Ok {val} -> 0
                     Err {error} -> error.code

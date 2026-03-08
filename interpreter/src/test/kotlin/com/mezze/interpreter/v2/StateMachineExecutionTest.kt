@@ -230,11 +230,10 @@ class StateMachineExecutionTest {
     fun `test return effect for early termination`() {
         // Test early return effect
         val code = """
-            use std::effects::early_return::{Return, WithReturn}
-            use std::control::continuation
+            use std::effects::early_return::{Return, EarlyReturn}
 
             let f = {x} ->
-                perform WithReturn { cont = continuation::new {} } in do
+                perform EarlyReturn in do
                     if x < 0 then
                         Return.return {val = 42}
                     else {}

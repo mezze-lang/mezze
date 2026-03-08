@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests continuation-based effects (Exception, Choice) as well as
  * scoped effects (SeededRandom, Log, Time).
  *
+ * All handlers use scoped continuations internally - no need to pass
+ * continuations as parameters.
+ *
  * Run with: ./gradlew :interpreter:test --tests "*EffectsIntegrationTest*"
  */
 public class EffectsIntegrationTest {
@@ -22,8 +25,7 @@ public class EffectsIntegrationTest {
     @Test
     void testExceptionThrowAndCatch() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::exception::{Exception, ToResult, throw}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult, throw}
 
             let computation = {} -> do
                 let x = 10
@@ -31,7 +33,7 @@ public class EffectsIntegrationTest {
                     True -> Exception.throw {error = "too big"}
                     False -> Ok {val = x}
 
-            perform ToResult {cont = continuation::new {}} in
+            perform ExceptionToResult in
                 computation {}
             """);
 
@@ -44,8 +46,7 @@ public class EffectsIntegrationTest {
     @Test
     void testExceptionToResultSuccess() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::exception::{Exception, ToResult}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let computation = {} -> do
                 let x = 3
@@ -53,7 +54,7 @@ public class EffectsIntegrationTest {
                     True -> Exception.throw {error = "too big"}
                     False -> Ok {val = x}
 
-            perform ToResult {cont = continuation::new {}} in
+            perform ExceptionToResult in
                 computation {}
             """);
 
@@ -66,12 +67,11 @@ public class EffectsIntegrationTest {
     @Test
     void testExceptionUnwrapSuccess() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::exception::{Exception, ToResult, unwrap}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult, unwrap}
 
             let good_result = Ok {val = 42}
 
-            perform ToResult {cont = continuation::new {}} in
+            perform ExceptionToResult in
                 Ok {val = unwrap {result = good_result}}
             """);
 
@@ -83,12 +83,11 @@ public class EffectsIntegrationTest {
     @Test
     void testExceptionUnwrapFailure() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::exception::{Exception, ToResult, unwrap}
-            use std::control::continuation
+            use std::effects::exception::{Exception, ExceptionToResult, unwrap}
 
             let bad_result = Err {error = "something went wrong"}
 
-            perform ToResult {cont = continuation::new {}} in do
+            perform ExceptionToResult in do
                 let val = unwrap {result = bad_result}
                 Ok {val = val}
             """);

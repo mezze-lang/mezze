@@ -15,7 +15,7 @@ effect Concurrency where {
 
 # Loom implementation - uses Project Loom virtual threads (Java 21+)
 # This is the primary implementation for concurrency in Mezze
-pub impl Concurrency for Loom where {
+impl Concurrency for Loom where {
   # spawn - creates new virtual thread, returns Promise
   spawn = {computation} ->
     __native_loom_spawn_cfg {f = computation, max_concurrent = 0},

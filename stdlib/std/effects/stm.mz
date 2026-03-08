@@ -143,7 +143,7 @@ effect STM where {
 #       let balance = STM.read {var = account}
 #       STM.write {var = account, val = balance + deposit}
 
-pub impl STM for OptimisticSTM where {
+impl STM for OptimisticSTM where {
     # Scoped effect: automatically begin transaction at start and commit at end
     initialize_scope = {} -> __native_stm_begin_transaction {},
     finalize_scope = {} -> __native_stm_commit_transaction {},
@@ -173,7 +173,7 @@ pub impl STM for OptimisticSTM where {
 #   perform OptimisticSTMWith {max_retries = 100, spin_count = 10} in do
 #       STM.read {var = account}
 
-pub impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
+impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
     # Scoped effect: automatically begin transaction at start and commit at end
     # Pass max_retries to commit so it can signal to the scoped handler
     initialize_scope = {} -> __native_stm_begin_transaction {},
@@ -201,7 +201,7 @@ pub impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
 #   perform SequentialSTM in do
 #       STM.read {var = account}
 
-pub impl STM for SequentialSTM where {
+impl STM for SequentialSTM where {
     # Scoped effect: SequentialSTM writes directly, so initialize/finalize are no-ops
     initialize_scope = {} -> {},
     finalize_scope = {} -> {},

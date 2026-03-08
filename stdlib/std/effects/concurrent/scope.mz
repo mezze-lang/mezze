@@ -28,7 +28,7 @@ effect Scope where {
 
 # AutoScope impl - automatically awaits all forked tasks on scope exit
 # Uses Concurrency effect internally for spawning
-pub impl Scope for AutoScope where {
+impl Scope for AutoScope where {
     fork = { task } -> do
         # Spawn the task using Concurrency effect
         let _ = Concurrency.spawn { computation = task }

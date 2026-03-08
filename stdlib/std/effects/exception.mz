@@ -1,4 +1,22 @@
 # std/effects/exception.mezze - Type-safe exception handling
+#
+# Provides exception handling via algebraic effects. All handlers use scoped
+# continuations internally - you don't need to pass continuations manually.
+#
+# Available handlers:
+# - ExceptionToResult: Converts exceptions to Result values (RECOMMENDED)
+# - ExceptionToOption: Converts to Option, discarding error details
+# - AbortException: Aborts current computation (catchable by outer handlers)
+# - IgnoreException: Silently ignores all errors
+# - CrashException: Terminates entire program (fatal errors only)
+#
+# Usage:
+#   use std::effects::exception::{Exception, ExceptionToResult, throw, unwrap}
+#
+#   perform ExceptionToResult in do
+#       let result = may_fail {}
+#       unwrap {result = result}  # throws if Err
+#       do_more_work {}
 
 use std::control::continuation
 use std::control::continuation::{Continuation}
@@ -8,33 +26,71 @@ effect Exception having 'error where {
 }
 
 # =============================================================================
-# Built-in Handlers
+# Built-in Handlers (all use scoped continuations)
 # =============================================================================
 
 # Converts exceptions to Result values (RECOMMENDED for most cases)
-# Uses suspend_with to package the Err value, signaling early return
-pub impl Exception for ToResult { cont: Continuation 'a 'b 'c } having 'error = 'e where {
-    throw = {error} -> cont.suspend_with {value = Err {error}}
+# On throw, returns Err {error}. Normal completion returns Ok {val}.
+#
+# Example:
+#   let result = perform ExceptionToResult in do
+#       let x = risky_operation {}
+#       x + 1
+#   # result is Result Int Error
+impl Exception for ExceptionToResult having 'error = 'e where {
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> scope.cont.reset {},
+    throw = {error} -> scope.cont.suspend_with {value = Err {error}}
+}
+
+# Converts exceptions to Option, discarding error details
+# On throw, returns None. Normal completion returns Some {val}.
+#
+# Example:
+#   let maybe = perform ExceptionToOption in do
+#       let x = parse_int {s = "abc"}
+#       x
+#   # maybe is Option Int (will be None)
+impl Exception for ExceptionToOption having 'error = 'e where {
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> scope.cont.reset {},
+    throw = {error} -> scope.cont.suspend_with {value = None}
 }
 
 # Aborts current computation (testable, catchable by outer handlers)
-pub impl Exception for Abort { cont: Continuation 'a 'b 'c } having 'error = 'e where {
-    throw = {error} -> cont.abort {}
+# On throw, aborts the continuation. Use for "stop processing" semantics.
+#
+# Example:
+#   perform AbortException in do
+#       if invalid then Exception.throw {error = "invalid"}
+#       continue_processing {}
+impl Exception for AbortException having 'error = 'e where {
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> scope.cont.reset {},
+    throw = {error} -> scope.cont.abort {}
+}
+
+# Silently ignores all errors, returning unit
+# On throw, returns {}. Use sparingly - errors are silently swallowed.
+#
+# Example:
+#   perform IgnoreException in do
+#       log_to_remote_server {}  # We don't care if this fails
+impl Exception for IgnoreException having 'error = 'e where {
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> scope.cont.reset {},
+    throw = {error} -> scope.cont.suspend_with {value = {}}
 }
 
 # Terminates entire program immediately (fatal errors only)
-pub impl Exception for Crash having 'error = 'e where {
+# Does NOT use continuation - immediately crashes the program.
+# Use only for unrecoverable errors.
+#
+# Example:
+#   perform CrashException in do
+#       if config_missing then Exception.throw {error = "No config file"}
+impl Exception for CrashException having 'error = 'e where {
     throw = {error} -> crash {msg = "Unhandled exception"}
-}
-
-# Converts to Option, discarding error details
-pub impl Exception for ToOption { cont: Continuation 'a 'b 'c } having 'error = 'e where {
-    throw = {error} -> cont.suspend_with {value = None}
-}
-
-# Silently ignores all errors
-pub impl Exception for Ignore { cont: Continuation 'a 'b 'c } having 'error = 'e where {
-    throw = {error} -> cont.suspend_with {value = {}}
 }
 
 # =============================================================================
@@ -44,8 +100,8 @@ pub impl Exception for Ignore { cont: Continuation 'a 'b 'c } having 'error = 'e
 # Shorthand for Exception.throw
 pub let throw = {error} -> Exception.throw {error}
 
-# Convert Result to exception (opposite of ToResult handler)
+# Convert Result to exception (opposite of ExceptionToResult handler)
 pub let unwrap = {result} ->
     match result is
         Ok {val} -> val
-        Err {error} -> Exception.throw {error }
+        Err {error} -> Exception.throw {error}
