@@ -186,7 +186,7 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
 
     // ===== EFFECT DECLARATION =====
 
-internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
         // Parse: effect Name [having 'state] where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
@@ -329,10 +329,9 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream, visibility:
                                             is ParseResult.Success -> {
                                                 ParseResult.Success(
                                                     EffectDeclaration(
-                                                        name.value.text,
-                                                        visibility,
-                                                        operations,
-                                                        associatedTypes,  // Pass the list of associated types
+                                                        name = name.value.text,
+                                                        operations = operations,
+                                                        associatedTypes = associatedTypes,
                                                         inferredType = null,
                                                         sourceLocation = effectToken.value.toSourceLocation()
                                                     ),
@@ -982,7 +981,7 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
 
     // ===== ABILITY DECLARATION =====
 
-internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
         // Parse: ability Encoder 'a where { operations }
         val abilityToken = tok(TokenType.ABILITY)(stream)
         return when (abilityToken) {
@@ -1197,13 +1196,12 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream, visibility
                                         when (rbrace) {
                                             is ParseResult.Success -> ParseResult.Success(
                                                 AbilityDeclaration(
-                                                    name.value.text,
-                                                    visibility,
-                                                    typeParams,
-                                                    associatedTypes,  // list of associated types from 'having' clause
-                                                    emptyList(),  // constraints (for function ability constraints)
-                                                    dependencies,  // dependencies from 'with' clause
-                                                    operations,
+                                                    name = name.value.text,
+                                                    typeParams = typeParams,
+                                                    associatedTypes = associatedTypes,  // list of associated types from 'having' clause
+                                                    constraints = emptyList(),  // constraints (for function ability constraints)
+                                                    dependencies = dependencies,  // dependencies from 'with' clause
+                                                    operations = operations,
                                                     inferredType = null,
                                                     sourceLocation = abilityToken.value.toSourceLocation()
                                                 ),

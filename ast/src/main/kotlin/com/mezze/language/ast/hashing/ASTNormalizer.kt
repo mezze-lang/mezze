@@ -326,7 +326,6 @@ object ASTNormalizer {
      */
     fun normalizeEffectDeclaration(decl: EffectDeclaration): EffectDeclaration = EffectDeclaration(
         name = decl.name,
-        visibility = decl.visibility,
         operations = decl.operations,  // Operation signatures are structural
         associatedTypes = decl.associatedTypes,
         inferredType = null,
@@ -359,7 +358,6 @@ object ASTNormalizer {
      */
     fun normalizeAbilityDeclaration(decl: AbilityDeclaration): AbilityDeclaration = AbilityDeclaration(
         name = decl.name,
-        visibility = decl.visibility,
         typeParams = decl.typeParams,
         associatedTypes = decl.associatedTypes,
         constraints = decl.constraints,

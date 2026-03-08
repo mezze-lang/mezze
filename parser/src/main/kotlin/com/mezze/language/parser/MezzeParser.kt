@@ -278,10 +278,10 @@ class MezzeParser(
 
     init {
         // Initialize parsers after all properties are available
-        effectDeclaration = { stream -> parseEffectDeclaration(stream, Visibility.PRIVATE) }
+        effectDeclaration = { stream -> parseEffectDeclaration(stream) }
         implDeclaration = { stream -> parseImplDeclaration(stream) }
         implAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
-        abilityDeclaration = { stream -> parseAbilityDeclaration(stream, Visibility.PRIVATE) }
+        abilityDeclaration = { stream -> parseAbilityDeclaration(stream) }
         typeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
         newtypeDeclaration = { stream -> parseNewtypeDeclaration(stream, Visibility.PRIVATE) }
         useDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
@@ -289,21 +289,61 @@ class MezzeParser(
         topLevelExpression = { stream -> Parsers.map(expression) { TopLevelExpression(it) }(stream) }
 
         // Initialize topLevelItem AFTER all other parsers are initialized
-        topLevelItem = { stream ->
+        topLevelItem = topLevelItem@{ stream ->
             // Check for optional 'pub' modifier
             val pubToken = tok(TokenType.PUB)(stream)
-            val (visibility, streamAfterPub) = when (pubToken) {
-                is ParseResult.Success -> Pair(Visibility.PUBLIC, pubToken.remaining)
-                is ParseResult.Failure -> Pair(Visibility.PRIVATE, stream)
+            val (visibility, streamAfterPub, pubLocation) = when (pubToken) {
+                is ParseResult.Success -> Triple(Visibility.PUBLIC, pubToken.remaining, pubToken.value)
+                is ParseResult.Failure -> Triple(Visibility.PRIVATE, stream, null)
             }
 
             // Parse the actual declaration with visibility
             val streamAfterPubSkipNl = skipNewlines(streamAfterPub)
+
+            // Check for pub before declarations that don't support it
+            if (pubLocation != null) {
+                val nextToken = streamAfterPubSkipNl.current()
+                when (nextToken?.type) {
+                    TokenType.EFFECT -> {
+                        return@topLevelItem ParseResult.Failure(
+                            "'pub' is not allowed on effect declarations. " +
+                            "Effects are always public because they must be usable in type signatures across modules. " +
+                            "Remove 'pub' and just write: effect ${peekIdentifier(streamAfterPubSkipNl.advance())} where { ... }",
+                            pubLocation.position,
+                            pubLocation.line,
+                            pubLocation.column
+                        )
+                    }
+                    TokenType.ABILITY -> {
+                        return@topLevelItem ParseResult.Failure(
+                            "'pub' is not allowed on ability declarations. " +
+                            "Abilities are always public because they must be usable in type signatures across modules. " +
+                            "Remove 'pub' and just write: ability ${peekIdentifier(streamAfterPubSkipNl.advance())} where { ... }",
+                            pubLocation.position,
+                            pubLocation.line,
+                            pubLocation.column
+                        )
+                    }
+                    TokenType.IMPL -> {
+                        return@topLevelItem ParseResult.Failure(
+                            "'pub' is not allowed on impl declarations. " +
+                            "Effect impls are always exported so the performer name can be imported for 'perform'. " +
+                            "Ability impls are always exported so they can be discovered for constraint resolution. " +
+                            "Remove 'pub' and just write: impl ...",
+                            pubLocation.position,
+                            pubLocation.line,
+                            pubLocation.column
+                        )
+                    }
+                    else -> { /* continue with normal parsing */ }
+                }
+            }
+
             val declResult = Parsers.oneOf(
-                { s -> parseEffectDeclaration(s, visibility) },
+                { s -> parseEffectDeclaration(s) },
                 { s -> parseTypeDeclaration(s, visibility) },
                 { s -> parseNewtypeDeclaration(s, visibility) },
-                { s -> parseAbilityDeclaration(s, visibility) },
+                { s -> parseAbilityDeclaration(s) },
                 { s -> parseImplAbilityDeclaration(s) },  // Try ability impl first
                 { s -> parseImplDeclaration(s) },          // Then effect impl
                 { s -> parseUseDeclaration(s, visibility) },
@@ -314,6 +354,12 @@ class MezzeParser(
 
             declResult
         }
+    }
+
+    // Helper to peek at the identifier after a keyword for better error messages
+    private fun peekIdentifier(stream: TokenStream): String {
+        val s = skipNewlines(stream)
+        return s.current()?.text ?: "..."
     }
 
     // ===== HELPERS =====

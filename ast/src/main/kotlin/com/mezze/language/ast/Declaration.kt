@@ -214,13 +214,13 @@ data class VariantConstructorDef(
 @Serializable
 data class EffectDeclaration(
     val name: String,
-    val visibility: Visibility = Visibility.PRIVATE,
     val operations: List<EffectOperation>,
     val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'state, 'error'
     val inferredType: MezzeType? = null,           // From typechecker
     val sourceLocation: SourceLocation? = null,   // For error reporting
     val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
+    // Effects are always public - no visibility field needed
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
 }
@@ -271,7 +271,6 @@ data class PerformerOperation(
 @Serializable
 data class AbilityDeclaration(
     val name: String,
-    val visibility: Visibility = Visibility.PRIVATE,
     val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
     val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'item, 'iter'
     val constraints: List<AbilityConstraint> = emptyList(),
@@ -281,6 +280,7 @@ data class AbilityDeclaration(
     val sourceLocation: SourceLocation? = null,   // For error reporting
     val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
+    // Abilities are always public - no visibility field needed
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
 }

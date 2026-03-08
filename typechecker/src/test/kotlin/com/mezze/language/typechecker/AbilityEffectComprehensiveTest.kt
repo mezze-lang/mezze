@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parser.ParseException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
@@ -1372,16 +1373,14 @@ class AbilityEffectComprehensiveTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-
-            val error = assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(program)
+            // Parser now rejects 'pub' before ability
+            val error = assertThrows<ParseException> {
+                parser.parse(source)
             }
 
             assertTrue(
-                error.message?.contains("pub", ignoreCase = true) == true &&
-                error.message?.contains("not needed", ignoreCase = true) == true,
-                "Error should mention pub is not needed, but got: ${error.message}"
+                error.message?.contains("'pub' is not allowed on ability declarations") == true,
+                "Error should mention pub is not allowed, but got: ${error.message}"
             )
         }
 
@@ -1393,16 +1392,14 @@ class AbilityEffectComprehensiveTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-
-            val error = assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(program)
+            // Parser now rejects 'pub' before effect
+            val error = assertThrows<ParseException> {
+                parser.parse(source)
             }
 
             assertTrue(
-                error.message?.contains("pub", ignoreCase = true) == true &&
-                error.message?.contains("not needed", ignoreCase = true) == true,
-                "Error should mention pub is not needed, but got: ${error.message}"
+                error.message?.contains("'pub' is not allowed on effect declarations") == true,
+                "Error should mention pub is not allowed, but got: ${error.message}"
             )
         }
 

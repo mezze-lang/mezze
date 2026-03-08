@@ -173,8 +173,9 @@ class V1CompatibilityTest {
 
     @Test
     fun `complete stdlib effect and impl should parse`() {
+        // Effects are always public - no 'pub' keyword needed
         val source = """
-pub effect Log where {
+effect Log where {
     info: { msg: String } -> {},
     warn: { msg: String } -> {},
     error: { msg: String } -> {} }

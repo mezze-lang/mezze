@@ -11,8 +11,9 @@ class StdlibTest {
 
     @Test
     fun `test parse effect declaration from stdlib`() {
+        // Effects are always public - no 'pub' keyword needed
         val source = """
-pub effect Log where {
+effect Log where {
     info: { msg: String } -> {},
     warn: { msg: String } -> {},
     error: { msg: String } -> {}
@@ -26,7 +27,7 @@ pub effect Log where {
 
             val effect = program.items[0] as EffectDeclaration
             assertEquals("Log", effect.name)
-            assertEquals(Visibility.PUBLIC, effect.visibility)
+            // Effects are always public - no visibility field
             assertEquals(3, effect.operations.size)
 
             val info = effect.operations[0]
@@ -34,6 +35,21 @@ pub effect Log where {
 
             println("✅ Effect declaration from stdlib parsed successfully!")
         }
+    }
+
+    @Test
+    fun `test pub effect gives error`() {
+        val source = """
+pub effect Log where {
+    info: { msg: String } -> {}
+}
+""".trim()
+
+        val exception = assertThrows(ParseException::class.java) {
+            parser.parse(source)
+        }
+        assertTrue(exception.message?.contains("'pub' is not allowed on effect declarations") == true)
+        println("✅ pub effect correctly rejected with helpful error message")
     }
 
     @Test

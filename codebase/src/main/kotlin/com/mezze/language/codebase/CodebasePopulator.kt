@@ -168,20 +168,20 @@ object CodebasePopulator {
         val hashString = decl.contentHash ?: return
         val hash = MezzeHash.fromHex(hashString)
 
-        val visibility = convertVisibility(decl.visibility)
-
+        // Abilities are always public
         codebase.putDefinition(StoredDefinition(
             hash = hash,
             kind = DefinitionKind.ABILITY,
             name = decl.name,
             modulePath = modulePath,
-            visibility = visibility,
+            visibility = Visibility.PUBLIC,
             astBlob = CodebaseSerialization.serializeAbilityDeclaration(decl)
         ))
 
         codebase.putName(modulePath, decl.name, hash)
 
-        if (decl.visibility == com.mezze.language.ast.Visibility.PUBLIC && modulePath != null) {
+        // Abilities are always exported
+        if (modulePath != null) {
             codebase.putExport(modulePath, decl.name, hash, DefinitionKind.ABILITY)
         }
     }
@@ -194,20 +194,20 @@ object CodebasePopulator {
         val hashString = decl.contentHash ?: return
         val hash = MezzeHash.fromHex(hashString)
 
-        val visibility = convertVisibility(decl.visibility)
-
+        // Effects are always public
         codebase.putDefinition(StoredDefinition(
             hash = hash,
             kind = DefinitionKind.EFFECT,
             name = decl.name,
             modulePath = modulePath,
-            visibility = visibility,
+            visibility = Visibility.PUBLIC,
             astBlob = CodebaseSerialization.serializeEffectDeclaration(decl)
         ))
 
         codebase.putName(modulePath, decl.name, hash)
 
-        if (decl.visibility == com.mezze.language.ast.Visibility.PUBLIC && modulePath != null) {
+        // Effects are always exported
+        if (modulePath != null) {
             codebase.putExport(modulePath, decl.name, hash, DefinitionKind.EFFECT)
         }
     }

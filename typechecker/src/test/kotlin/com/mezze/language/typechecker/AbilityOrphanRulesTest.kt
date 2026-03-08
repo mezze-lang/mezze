@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parser.ParseException
 import com.mezze.language.ast.LetBinding
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -299,6 +300,7 @@ class AbilityOrphanRulesTest {
     @Test
     fun `duplicate impl across modules should fail`() {
         // Both modules try to define impl Show Int
+        // Note: impls are always exported (no 'pub' keyword needed)
 
         val mod1 = tempDir.resolve("mod1.mz")
         Files.writeString(mod1, """
@@ -306,7 +308,7 @@ class AbilityOrphanRulesTest {
                 show: { val: 'a } -> String
             }
 
-            pub impl Show Int where {
+            impl Show Int where {
                 show: { val: Int } -> String = { val } -> "from mod1"
             }
         """.trimIndent())
@@ -480,16 +482,14 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+        // Parser now rejects 'pub' before ability
+        val error = assertThrows<ParseException> {
+            parser.parse(source)
         }
 
         assertTrue(
-            error.message?.contains("pub") == true &&
-            error.message?.contains("not needed") == true,
-            "Error should mention pub is not needed, but got: ${error.message}"
+            error.message?.contains("'pub' is not allowed on ability declarations") == true,
+            "Error should mention pub is not allowed, but got: ${error.message}"
         )
     }
 
@@ -501,16 +501,14 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+        // Parser now rejects 'pub' before effect
+        val error = assertThrows<ParseException> {
+            parser.parse(source)
         }
 
         assertTrue(
-            error.message?.contains("pub") == true &&
-            error.message?.contains("not needed") == true,
-            "Error should mention pub is not needed, but got: ${error.message}"
+            error.message?.contains("'pub' is not allowed on effect declarations") == true,
+            "Error should mention pub is not allowed, but got: ${error.message}"
         )
     }
 
