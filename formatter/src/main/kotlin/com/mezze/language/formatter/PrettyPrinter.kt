@@ -278,7 +278,7 @@ class PrettyPrinter {
         append(" where {")
         newLine()
         indent {
-            for (op in decl.operations) {
+            decl.operations.forEachIndexed { index, op ->
                 printIndent()
                 append(op.name)
                 append(": ")
@@ -289,6 +289,10 @@ class PrettyPrinter {
                     append(" <")
                     append(op.effects.joinToString(", "))
                     append(">")
+                }
+                // Add comma after each operation except the last
+                if (index < decl.operations.size - 1) {
+                    append(",")
                 }
                 newLine()
             }
@@ -327,13 +331,17 @@ class PrettyPrinter {
         append(" where {")
         newLine()
         indent {
-            for (op in decl.operations) {
+            decl.operations.forEachIndexed { index, op ->
                 printIndent()
                 append(op.name)
                 append(": ")
                 printTypeAnnotation(op.paramType)
                 append(" -> ")
                 printTypeAnnotation(op.returnType)
+                // Add comma after each operation except the last
+                if (index < decl.operations.size - 1) {
+                    append(",")
+                }
                 newLine()
             }
         }
@@ -371,7 +379,7 @@ class PrettyPrinter {
         append(" where {")
         newLine()
         indent {
-            for (op in decl.operations) {
+            decl.operations.forEachIndexed { index, op ->
                 printIndent()
                 append(op.name)
                 op.paramType?.let {
@@ -388,6 +396,10 @@ class PrettyPrinter {
                 }
                 append(" = ")
                 printExpression(op.implementation)
+                // Add comma after each operation except the last
+                if (index < decl.operations.size - 1) {
+                    append(",")
+                }
                 newLine()
             }
         }
@@ -428,7 +440,7 @@ class PrettyPrinter {
         append(" where {")
         newLine()
         indent {
-            for (op in decl.operations) {
+            decl.operations.forEachIndexed { index, op ->
                 printIndent()
                 append(op.name)
                 op.paramType?.let {
@@ -441,6 +453,10 @@ class PrettyPrinter {
                 }
                 append(" = ")
                 printExpression(op.implementation)
+                // Add comma after each operation except the last
+                if (index < decl.operations.size - 1) {
+                    append(",")
+                }
                 newLine()
             }
         }
