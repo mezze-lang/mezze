@@ -58,6 +58,9 @@ class MezzeParser(
     // Collect warnings during parsing
     private val warnings = mutableListOf<ParseWarning>()
 
+    // Collect comments during parsing (for formatter)
+    private val comments = mutableListOf<Comment>()
+
     /**
      * Get all warnings collected during the last parse() call.
      */
@@ -99,8 +102,9 @@ class MezzeParser(
         currentSource = source
         currentFile = file
 
-        // Clear warnings from previous parse
+        // Clear warnings and comments from previous parse
         warnings.clear()
+        comments.clear()
 
         // Clear syntax metadata from previous parses
         SyntaxMetadata.clear()
@@ -111,7 +115,10 @@ class MezzeParser(
             val stream = TokenStream(tokens)
 
             return when (val result = programParser(stream)) {
-                is ParseResult.Success -> if (desugar) desugarProgram(result.value) else result.value
+                is ParseResult.Success -> {
+                    val programWithComments = result.value.copy(comments = comments.toList())
+                    if (desugar) desugarProgram(programWithComments) else programWithComments
+                }
                 is ParseResult.Failure -> throw ParseException(
                     result.message,
                     result.position,
@@ -137,6 +144,7 @@ class MezzeParser(
         currentSource = source
         currentFile = file
         warnings.clear()
+        comments.clear()
         SyntaxMetadata.clear()
 
         val errors = mutableListOf<ParseException>()
@@ -174,7 +182,7 @@ class MezzeParser(
                 }
             }
 
-            val program = Program(items)
+            val program = Program(items, comments.toList())
             val finalProgram = if (desugar && errors.isEmpty()) desugarProgram(program) else program
 
             return ParseResultWithRecovery(finalProgram, errors, warnings.toList())
@@ -366,10 +374,46 @@ class MezzeParser(
 
     internal fun skipNewlines(stream: TokenStream): TokenStream {
         var current = stream
-        while (current.current()?.type == TokenType.NEWLINE) {
-            current = current.advance()
+        while (true) {
+            val token = current.current() ?: break
+            when (token.type) {
+                TokenType.NEWLINE -> current = current.advance()
+                TokenType.COMMENT -> {
+                    // Collect comment for formatter
+                    // Determine if trailing: check if previous non-comment token was on same line
+                    val isTrailing = isTrailingComment(current)
+                    comments.add(Comment(
+                        text = token.text,
+                        line = token.line,
+                        column = token.column,
+                        isTrailing = isTrailing
+                    ))
+                    current = current.advance()
+                }
+                else -> break
+            }
         }
         return current
+    }
+
+    /**
+     * Determine if a comment at the current position is a trailing comment
+     * (on the same line as code) or a leading comment (on its own line).
+     */
+    private fun isTrailingComment(stream: TokenStream): Boolean {
+        // Look back at previous tokens to see if there's code on the same line
+        val commentToken = stream.current() ?: return false
+        val commentLine = commentToken.line
+
+        // Check previous position in token stream
+        if (stream.position > 0) {
+            val prevToken = stream.tokens.getOrNull(stream.position - 1)
+            if (prevToken != null && prevToken.type != TokenType.NEWLINE && prevToken.type != TokenType.COMMENT) {
+                // Previous token is code - check if on same line
+                return prevToken.line == commentLine
+            }
+        }
+        return false
     }
 
     // Note: newlineParser was removed - it was unused. Use skipNewlines() instead.
@@ -951,6 +995,7 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.NEWLINE -> "newline"
     TokenType.EOF -> "end of file"
     TokenType.ERROR -> "error"
+    TokenType.COMMENT -> "comment"
 }
 
 /**

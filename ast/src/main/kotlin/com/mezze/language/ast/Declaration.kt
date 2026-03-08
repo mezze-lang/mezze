@@ -27,9 +27,27 @@ import kotlinx.serialization.json.JsonClassDiscriminator
 // PROGRAM STRUCTURE
 // ============================================================================
 
+/**
+ * A comment in the source code, preserved for the formatter.
+ *
+ * @param text The full comment text including the '#' character
+ * @param line The line number where the comment appears (1-indexed)
+ * @param column The column number where the comment starts (1-indexed)
+ * @param isTrailing True if the comment is on the same line as code (trailing comment),
+ *                   false if it's on its own line (leading comment)
+ */
+@Serializable
+data class Comment(
+    val text: String,
+    val line: Int,
+    val column: Int,
+    val isTrailing: Boolean = false
+)
+
 @Serializable
 data class Program(
-    val items: List<ProgramItem>
+    val items: List<ProgramItem>,
+    val comments: List<Comment> = emptyList()
 )
 
 /**

@@ -47,7 +47,10 @@ enum class TokenType {
     AT,  // @ for pipe operator placeholder
 
     // Special
-    NEWLINE, EOF, ERROR
+    NEWLINE, EOF, ERROR,
+
+    // Comments (for formatter)
+    COMMENT
 }
 
 /**
@@ -166,7 +169,7 @@ class Lexer(private val source: String) {
         val tokens = ArrayList<Token>(estimatedTokens)
 
         while (!isAtEnd()) {
-            skipWhitespaceAndComments()
+            skipWhitespace()
             if (isAtEnd()) break
 
             val token = nextToken()
@@ -264,6 +267,11 @@ class Lexer(private val source: String) {
         if (char == '.' && peek() == '.' && peek(2) == '.') {
             advance(3)
             return Token(TokenType.ELLIPSIS, InternedTokens.ELLIPSIS, start, startLine, startColumn)
+        }
+
+        // Comments - emit as COMMENT tokens for formatter
+        if (char == '#') {
+            return lexComment(start, startLine, startColumn)
         }
 
         // Single character tokens (use interned strings)
@@ -510,21 +518,24 @@ class Lexer(private val source: String) {
         return Token(TokenType.IDENTIFIER, internedText, start, startLine, startColumn)
     }
 
-    private fun skipWhitespaceAndComments() {
+    private fun lexComment(start: Int, startLine: Int, startColumn: Int): Token {
+        // Comments start with # and continue until end of line
+        // We include the # in the comment text
+        while (!isAtEnd() && current() != '\n') {
+            advance()
+        }
+        val text = source.substring(start, position)
+        return Token(TokenType.COMMENT, text, start, startLine, startColumn)
+    }
+
+    private fun skipWhitespace() {
         while (!isAtEnd()) {
             val char = current()
 
             // Skip spaces and tabs (but not newlines - we want to track them)
+            // Don't skip comments - they are now emitted as COMMENT tokens
             if (char == ' ' || char == '\t' || char == '\r') {
                 advance()
-                continue
-            }
-
-            // Skip comments
-            if (char == '#') {
-                while (!isAtEnd() && current() != '\n') {
-                    advance()
-                }
                 continue
             }
 

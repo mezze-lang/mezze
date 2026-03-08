@@ -163,7 +163,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         List<ProgramItem> items = new ArrayList<>();
         items.addAll(instances.values());
         items.addAll(program.getItems());
-        return new Program(items);
+        return new Program(items, java.util.Collections.emptyList());
     }
 
     /**

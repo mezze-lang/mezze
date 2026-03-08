@@ -237,9 +237,13 @@ internal fun desugarUnaryOperator(
 
 /**
  * Desugar an entire program by desugaring all program items.
+ * Preserves comments from the original program.
  */
 internal fun desugarProgram(program: Program): Program {
-    return Program(program.items.map { desugarProgramItem(it) })
+    return Program(
+        items = program.items.map { desugarProgramItem(it) },
+        comments = program.comments
+    )
 }
 
 /**
