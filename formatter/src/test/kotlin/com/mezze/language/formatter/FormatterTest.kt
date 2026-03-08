@@ -190,4 +190,241 @@ class FormatterTest {
         val output = formatter.format(input)
         assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
     }
+
+    // =========================================================================
+    // USE STATEMENTS
+    // =========================================================================
+
+    @Test
+    fun `format use statements grouped without blank lines`() {
+        val input = """
+            use std::int::Int
+            use std::string::String
+            let x = 42
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals("use std::int::Int\nuse std::string::String\n\nlet x = 42\n", output)
+    }
+
+    @Test
+    fun `format use statements with blank line before code`() {
+        val input = """
+            use std::int::Int
+            let x = 42
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals("use std::int::Int\n\nlet x = 42\n", output)
+    }
+
+    // =========================================================================
+    // MATCH EXPRESSIONS
+    // =========================================================================
+
+    @Test
+    fun `format simple match expression`() {
+        val input = """
+            let x = match y is
+                Some {val} -> val
+                None -> 0
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals("let x = match y is\n\tSome {val} -> val\n\tNone -> 0\n", output)
+    }
+
+    // =========================================================================
+    // DO BLOCKS
+    // =========================================================================
+
+    @Test
+    fun `format do block`() {
+        val input = """
+            let x = do
+                let a = 1
+                let b = 2
+                a + b
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals("let x = do\n\tlet a = 1\n\tlet b = 2\n\ta + b\n", output)
+    }
+
+    // =========================================================================
+    // FUNCTION CALLS
+    // =========================================================================
+
+    @Test
+    fun `format function call with record argument`() {
+        val input = "let x = foo {a = 1, b = 2}"
+        val output = formatter.format(input)
+        assertEquals("let x = foo {a = 1, b = 2}\n", output)
+    }
+
+    // Note: Pipe operator |> is desugared at parse time, so we can't test it directly
+    // The desugared form replaces @ placeholders with the piped value
+
+    // =========================================================================
+    // MEMBER ACCESS
+    // =========================================================================
+
+    @Test
+    fun `format member access`() {
+        val input = "let x = record.field"
+        val output = formatter.format(input)
+        assertEquals("let x = record.field\n", output)
+    }
+
+    @Test
+    fun `format chained member access`() {
+        val input = "let x = a.b.c"
+        val output = formatter.format(input)
+        assertEquals("let x = a.b.c\n", output)
+    }
+
+    // =========================================================================
+    // UNARY OPERATORS
+    // =========================================================================
+
+    @Test
+    fun `format negation`() {
+        val input = "let x = -5"
+        val output = formatter.format(input)
+        assertEquals("let x = -5\n", output)
+    }
+
+    @Test
+    fun `format not operator`() {
+        val input = "let x = !True"
+        val output = formatter.format(input)
+        assertEquals("let x = !True\n", output)
+    }
+
+    // =========================================================================
+    // STRING LITERALS
+    // =========================================================================
+
+    @Test
+    fun `format string literal`() {
+        val input = """let x = "hello""""
+        val output = formatter.format(input)
+        assertEquals("let x = \"hello\"\n", output)
+    }
+
+    // =========================================================================
+    // COMPARISON OPERATORS
+    // =========================================================================
+
+    @Test
+    fun `format equality`() {
+        val input = "let x = a==b"
+        val output = formatter.format(input)
+        assertEquals("let x = a == b\n", output)
+    }
+
+    @Test
+    fun `format less than`() {
+        val input = "let x = a<b"
+        val output = formatter.format(input)
+        assertEquals("let x = a < b\n", output)
+    }
+
+    @Test
+    fun `format greater than or equal`() {
+        val input = "let x = a>=b"
+        val output = formatter.format(input)
+        assertEquals("let x = a >= b\n", output)
+    }
+
+    // =========================================================================
+    // LOGICAL OPERATORS
+    // =========================================================================
+
+    @Test
+    fun `format logical and`() {
+        val input = "let x = a&&b"
+        val output = formatter.format(input)
+        assertEquals("let x = a && b\n", output)
+    }
+
+    @Test
+    fun `format logical or`() {
+        val input = "let x = a||b"
+        val output = formatter.format(input)
+        assertEquals("let x = a || b\n", output)
+    }
+
+    // =========================================================================
+    // EFFECT DECLARATIONS
+    // =========================================================================
+
+    @Test
+    fun `format effect declaration`() {
+        val input = """
+            effect Log where {
+                log: {msg: String} -> {} <Log>
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertEquals("effect Log where {\n\tlog: { msg: String } -> {} <Log>\n}\n", output)
+    }
+
+    // =========================================================================
+    // PERFORM EXPRESSIONS
+    // =========================================================================
+
+    @Test
+    fun `format perform expression`() {
+        val input = "let x = perform Handler in body"
+        val output = formatter.format(input)
+        assertEquals("let x = perform Handler in body\n", output)
+    }
+
+    // =========================================================================
+    // SELECTIVE USE
+    // =========================================================================
+
+    @Test
+    fun `format selective use`() {
+        val input = "use std::option::{Some, None}"
+        val output = formatter.format(input)
+        assertEquals("use std::option::{Some, None}\n", output)
+    }
+
+    // =========================================================================
+    // COMPLEX IDEMPOTENCY
+    // =========================================================================
+
+    @Test
+    fun `formatter is idempotent for match expression`() {
+        val input = """
+            let x = match y is
+                Some {val} -> val
+                None -> 0
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `formatter is idempotent for do block`() {
+        val input = """
+            let x = do
+                let a = 1
+                a + 1
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `formatter is idempotent for effect declaration`() {
+        val input = """
+            effect Log where {
+                log: {msg: String} -> {} <Log>
+            }
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
 }

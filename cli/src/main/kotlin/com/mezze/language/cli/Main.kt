@@ -2,6 +2,7 @@ package com.mezze.language.cli
 
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
+import com.mezze.language.formatter.Formatter
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.*
@@ -99,17 +100,6 @@ fun main(args: Array<String>) {
         }
     }
 
-    // Handle global flags first
-    if (args.contains("--help") || args.contains("-h")) {
-        showHelp()
-        return
-    }
-
-    if (args.contains("--version") || args.contains("-v")) {
-        showVersion()
-        return
-    }
-
     if (args.isEmpty()) {
         showUsage()
         kotlin.system.exitProcess(1)
@@ -117,6 +107,17 @@ fun main(args: Array<String>) {
 
     val command = args[0]
     val remainingArgs = args.drop(1)
+
+    // Handle global flags - only when they are the first argument (no command)
+    if (command == "--help" || command == "-h") {
+        showHelp()
+        return
+    }
+
+    if (command == "--version" || command == "-v") {
+        showVersion()
+        return
+    }
 
     // Handle command-specific help
     if (remainingArgs.contains("--help") || remainingArgs.contains("-h")) {
@@ -139,6 +140,7 @@ fun main(args: Array<String>) {
             "sync" -> handleSyncCommand(remainingArgs)
             // Developer tools
             "lsp" -> handleLspCommand(remainingArgs)
+            "fmt" -> handleFmtCommand(remainingArgs)
             else -> {
                 println("❌ Unknown command: $command")
                 println()
@@ -182,6 +184,7 @@ private fun showHelp() {
     println()
     println("DEVELOPER TOOLS:")
     println("  lsp       Start Language Server Protocol server")
+    println("  fmt       Format Mezze source code")
     println()
     println("GLOBAL OPTIONS:")
     println("  -h, --help     Show this help message")
@@ -223,7 +226,7 @@ private fun showUsage() {
     println("  File-based:    parse, check, exec, compile")
     println("  Package-based: dev, build")
     println("  Packages:      init, add, remove, sync")
-    println("  Tools:         lsp")
+    println("  Tools:         lsp, fmt")
     println()
     println("For command-specific help: mezze <command> --help")
 }
@@ -451,6 +454,35 @@ private fun showCommandHelp(command: String) {
             println("EDITOR INTEGRATION:")
             println("  VS Code:  Install the Mezze extension")
             println("  Neovim:   Configure LSP client to run 'mezze lsp'")
+            println()
+        }
+
+        "fmt" -> {
+            println("USAGE: mezze fmt [options] [files...]")
+            println()
+            println("Format Mezze source code")
+            println()
+            println("Formats .mz files in a consistent style. Without arguments, formats")
+            println("all .mz files in the current directory recursively.")
+            println()
+            println("OPTIONS:")
+            println("  --check            Check formatting without modifying files")
+            println("                     Exits with code 1 if files need formatting")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  mezze fmt                        # Format all .mz files in current dir")
+            println("  mezze fmt src/                   # Format all .mz files in src/")
+            println("  mezze fmt app.mz lib.mz          # Format specific files")
+            println("  mezze fmt --check                # Check if files are formatted")
+            println("  mezze fmt --check src/app.mz     # Check specific file")
+            println()
+            println("STYLE:")
+            println("  - Tabs for indentation (2-space width for line calculation)")
+            println("  - 100 character max line length")
+            println("  - Spaces around binary operators (x + y)")
+            println("  - No spaces in empty records/arrays ({}, [])")
+            println("  - Trailing newline at end of file")
             println()
         }
 
@@ -1728,6 +1760,108 @@ private fun handleLspCommand(args: List<String>) {
 
     // Start the LSP server (communicates via stdin/stdout)
     com.mezze.language.lsp.startServer(System.`in`, System.out)
+}
+
+/**
+ * Format Mezze source code
+ */
+private fun handleFmtCommand(args: List<String>) {
+    val checkOnly = args.contains("--check")
+    val fileArgs = args.filter { !it.startsWith("-") }
+
+    // Collect files to format
+    val filesToFormat = mutableListOf<File>()
+
+    if (fileArgs.isEmpty()) {
+        // Format all .mz files in current directory recursively
+        val currentDir = File(System.getProperty("user.dir"))
+        collectMezzeFiles(currentDir, filesToFormat)
+    } else {
+        // Format specified files/directories
+        for (arg in fileArgs) {
+            val file = File(arg)
+            if (!file.exists()) {
+                println("Error: File not found: $arg")
+                kotlin.system.exitProcess(1)
+            }
+            if (file.isDirectory) {
+                collectMezzeFiles(file, filesToFormat)
+            } else if (file.extension == "mz") {
+                filesToFormat.add(file)
+            } else {
+                println("Warning: Skipping non-.mz file: $arg")
+            }
+        }
+    }
+
+    if (filesToFormat.isEmpty()) {
+        println("No .mz files found")
+        return
+    }
+
+    val formatter = Formatter()
+    var unformattedCount = 0
+    var formattedCount = 0
+    var errorCount = 0
+
+    for (file in filesToFormat) {
+        try {
+            val source = file.readText()
+            val formatted = formatter.format(source)
+
+            if (source != formatted) {
+                unformattedCount++
+                if (checkOnly) {
+                    println("Would format: ${file.path}")
+                } else {
+                    file.writeText(formatted)
+                    println("Formatted: ${file.path}")
+                    formattedCount++
+                }
+            }
+        } catch (e: Exception) {
+            errorCount++
+            println("Error formatting ${file.path}: ${e.message}")
+        }
+    }
+
+    // Print summary
+    println()
+    if (checkOnly) {
+        if (unformattedCount > 0) {
+            println("$unformattedCount file(s) need formatting")
+            kotlin.system.exitProcess(1)
+        } else {
+            println("All ${filesToFormat.size} file(s) are formatted correctly")
+        }
+    } else {
+        if (formattedCount > 0) {
+            println("Formatted $formattedCount file(s)")
+        } else {
+            println("All ${filesToFormat.size} file(s) are already formatted")
+        }
+    }
+
+    if (errorCount > 0) {
+        println("$errorCount file(s) had errors")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+/**
+ * Recursively collect all .mz files in a directory
+ */
+private fun collectMezzeFiles(dir: File, files: MutableList<File>) {
+    dir.listFiles()?.forEach { file ->
+        if (file.isDirectory) {
+            // Skip hidden directories and common non-source directories
+            if (!file.name.startsWith(".") && file.name != "node_modules" && file.name != "build") {
+                collectMezzeFiles(file, files)
+            }
+        } else if (file.extension == "mz") {
+            files.add(file)
+        }
+    }
 }
 
 /**

@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
     implementation(project(":lsp"))
+    implementation(project(":formatter"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")

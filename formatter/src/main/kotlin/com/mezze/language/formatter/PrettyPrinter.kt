@@ -54,22 +54,32 @@ class PrettyPrinter {
     // =========================================================================
 
     private fun printProgram(program: Program) {
-        var lastItemLine = 0
         var isFirst = true
+        var lastWasUse = false
 
         for (item in program.items) {
             // Print leading comments for this item
             printLeadingComments(getItemLine(item))
 
+            val isUse = item is UseDeclaration || item is PubUseDeclaration
+
             // Add blank line between top-level items (but not before first)
             if (!isFirst) {
-                // Preserve single blank lines between items
-                newLine()
+                // Use statements are grouped together without blank lines
+                // But add a blank line after the last use statement before other code
+                if (lastWasUse && !isUse) {
+                    // Transition from use block to user code - add blank line
+                    newLine()
+                } else if (!lastWasUse) {
+                    // Between non-use items, add blank line
+                    newLine()
+                }
+                // Between consecutive use statements - no blank line (just the newline from printing)
             }
             isFirst = false
+            lastWasUse = isUse
 
             printProgramItem(item)
-            lastItemLine = currentLine
         }
     }
 
@@ -857,11 +867,11 @@ class PrettyPrinter {
     private fun printMatchExpression(expr: MatchExpression) {
         append("match ")
         printExpression(expr.expression)
+        append(" is")
         newLine()
         indent {
             for (case in expr.cases) {
                 printIndent()
-                append("is ")
                 case.patterns.forEachIndexed { index, pattern ->
                     if (index > 0) append(" | ")
                     printPattern(pattern)
@@ -917,9 +927,8 @@ class PrettyPrinter {
 
     private fun printPerformExpression(expr: PerformExpression) {
         append("perform ")
-        printExpression(expr.expression)
+        // Syntax: perform Handler in expression
         if (expr.handlers.isNotEmpty()) {
-            append(" with ")
             expr.handlers.forEachIndexed { index, handler ->
                 if (index > 0) append(", ")
                 append(handler.name)
@@ -928,7 +937,9 @@ class PrettyPrinter {
                     printRecordLiteral(it)
                 }
             }
+            append(" in ")
         }
+        printExpression(expr.expression)
     }
 
     private fun printEffectCallExpression(expr: EffectCallExpression) {
