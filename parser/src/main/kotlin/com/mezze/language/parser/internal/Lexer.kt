@@ -41,7 +41,7 @@ enum class TokenType {
     LPAREN, RPAREN,
     LBRACE, RBRACE,
     LBRACKET, RBRACKET,
-    COMMA, DOT, COLON, SEMICOLON,
+    COMMA, DOT, COLON,
     ARROW, ASSIGN, ELLIPSIS,
     PLACEHOLDER,  // _ as expression placeholder
     AT,  // @ for pipe operator placeholder
@@ -75,7 +75,6 @@ private object InternedTokens {
     const val COMMA = ","
     const val DOT = "."
     const val COLON = ":"
-    const val SEMICOLON = ";"
     const val ASSIGN = "="
     const val NEWLINE = "\n"
     const val PLACEHOLDER = "_"
@@ -288,7 +287,6 @@ class Lexer(private val source: String) {
             ',' -> TokenType.COMMA to InternedTokens.COMMA
             '.' -> TokenType.DOT to InternedTokens.DOT
             ':' -> TokenType.COLON to InternedTokens.COLON
-            ';' -> TokenType.SEMICOLON to InternedTokens.SEMICOLON
             '=' -> TokenType.ASSIGN to InternedTokens.ASSIGN
             else -> TokenType.ERROR to char.toString()
         }

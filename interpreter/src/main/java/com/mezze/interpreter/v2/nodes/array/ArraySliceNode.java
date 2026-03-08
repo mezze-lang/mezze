@@ -3,6 +3,7 @@ package com.mezze.interpreter.v2.nodes.array;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -32,7 +33,7 @@ public abstract class ArraySliceNode extends MezzeNode {
 
     @Specialization
     protected Object sliceObjectArray(Object[] array, long start,
-            @Cached InlinedBranchProfile emptyProfile) {
+            @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
         int startIdx = (int) start;
         if (startIdx >= array.length) {
             emptyProfile.enter(this);
@@ -43,7 +44,7 @@ public abstract class ArraySliceNode extends MezzeNode {
 
     @Specialization
     protected Object sliceMezzeList(MezzeList list, long start,
-            @Cached InlinedBranchProfile emptyProfile) {
+            @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
         int startIdx = (int) start;
         if (startIdx >= list.size()) {
             emptyProfile.enter(this);
@@ -54,7 +55,7 @@ public abstract class ArraySliceNode extends MezzeNode {
 
     @Specialization(guards = "isIntArray(array)")
     protected long[] sliceIntArray(Object array, long start,
-            @Cached InlinedBranchProfile emptyProfile) {
+            @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
         long[] arr = (long[]) array;
         int startIdx = (int) start;
         if (startIdx >= arr.length) {
@@ -66,7 +67,7 @@ public abstract class ArraySliceNode extends MezzeNode {
 
     @Specialization(guards = "isDoubleArray(array)")
     protected double[] sliceDoubleArray(Object array, long start,
-            @Cached InlinedBranchProfile emptyProfile) {
+            @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
         double[] arr = (double[]) array;
         int startIdx = (int) start;
         if (startIdx >= arr.length) {

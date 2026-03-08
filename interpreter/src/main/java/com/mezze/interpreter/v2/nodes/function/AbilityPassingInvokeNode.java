@@ -50,6 +50,10 @@ public final class AbilityPassingInvokeNode extends MezzeNode {
     @CompilationFinal
     private MezzeFunction cachedFunction;
 
+    // Cached operation field indices for faster repeated access
+    @CompilationFinal(dimensions = 1)
+    private int[] cachedOperationIndices;
+
     public AbilityPassingInvokeNode(
             MezzeNode functionNode,
             MezzeNode[] argumentNodes,
@@ -132,6 +136,14 @@ public final class AbilityPassingInvokeNode extends MezzeNode {
         MezzeContext context = MezzeContext.get(this);
         Object[] ops = new Object[abilityContentHashes.length];
 
+        // Initialize cached indices array if needed
+        if (cachedOperationIndices == null) {
+            cachedOperationIndices = new int[abilityContentHashes.length];
+            for (int i = 0; i < cachedOperationIndices.length; i++) {
+                cachedOperationIndices[i] = -1;
+            }
+        }
+
         for (int i = 0; i < abilityContentHashes.length; i++) {
             String contentHash = abilityContentHashes[i];
             String operationName = operationNames[i];
@@ -143,10 +155,19 @@ public final class AbilityPassingInvokeNode extends MezzeNode {
                     "Could not find ability implementation for hash: " + contentHash);
             }
 
+            // Use cached index if available
+            int opIndex = cachedOperationIndices[i];
+            if (opIndex < 0) {
+                opIndex = impl.getFieldIndex(operationName);
+                if (opIndex >= 0) {
+                    cachedOperationIndices[i] = opIndex;
+                }
+            }
+
             // Extract the operation function
             Object opValue;
             try {
-                opValue = impl.getFieldByName(operationName);
+                opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
             } catch (Exception e) {
                 throw new RuntimeException(
                     "Ability implementation does not have operation: " + operationName);

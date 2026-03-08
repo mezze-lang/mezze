@@ -54,6 +54,10 @@ public final class HashBasedAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private boolean initialized = false;
 
+    // Cached operation field index for faster repeated access
+    @CompilationFinal
+    private int cachedOperationIndex = -1;
+
     public HashBasedAbilityCallNode(
             String implementationHash,
             String abilityName,
@@ -108,10 +112,18 @@ public final class HashBasedAbilityCallNode extends MezzeNode {
             );
         }
 
-        // Extract operation function
+        // Extract operation function using cached index if available
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = impl.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+
         Object opValue;
         try {
-            opValue = impl.getFieldByName(operationName);
+            opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
         } catch (Exception e) {
             throw new RuntimeException(
                 "Ability " + abilityName + " implementation does not have operation: " + operationName

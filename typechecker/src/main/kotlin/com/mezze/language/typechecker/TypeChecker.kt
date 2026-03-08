@@ -602,8 +602,15 @@ class TypeChecker(
                                     warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
                                 }
 
+                                // Populate content hashes in UseDeclaration items
+                                // so the interpreter can use hash-based lookups
+                                val programWithImportHashes = populateImportContentHashes(
+                                    monomorphizationResult.program,
+                                    importContext
+                                )
+
                                 return TypeCheckResult.Success(
-                                    program = monomorphizationResult.program,
+                                    program = programWithImportHashes,
                                     substitution = substitution,
                                     monomorphicInstances = monomorphizationResult.monomorphicInstances,
                                     importContext = importContext,
@@ -667,6 +674,7 @@ class TypeChecker(
                     importResult.errors.forEach { moduleError ->
                         // Convert ModuleError to TypeCheckError
                         // Extract source location if available
+                        @Suppress("USELESS_IS_CHECK")
                         val sourceLocation = when (moduleError) {
                             is ModuleError.ExportNotFound -> moduleError.sourceLocation
                             is ModuleError.InternalModuleAccess -> moduleError.sourceLocation
@@ -1347,6 +1355,52 @@ class TypeChecker(
                 }
                 // Items without content hash
                 is TopLevelExpression, is UseDeclaration, is PubUseDeclaration -> item
+            }
+        }
+        return Program(items = updatedItems)
+    }
+
+    /**
+     * Populate content hashes in UseDeclaration items from import resolution.
+     * This enables the interpreter to use content-hash based lookups for imports.
+     */
+    private fun populateImportContentHashes(
+        program: Program,
+        importContext: ModuleImportContext?
+    ): Program {
+        if (importContext == null) return program
+
+        val importedBindings = importContext.importedBindings
+        val importedTypes = importContext.importedTypes
+        val importedAbilities = importContext.importedAbilities
+        val importedEffects = importContext.importedEffects
+        val importedImpls = importContext.importedImpls
+
+        val updatedItems = program.items.map { item ->
+            when (item) {
+                is UseDeclaration -> {
+                    when (val path = item.path) {
+                        is SelectivePath -> {
+                            val updatedItems = path.items.map { importItem ->
+                                val localName = importItem.alias ?: importItem.name
+                                // Try to find content hash from imported bindings
+                                val contentHash = importedBindings[localName]?.contentHash
+                                    ?: importedTypes[localName]?.contentHash
+                                    ?: importedAbilities[localName]?.contentHash
+                                    ?: importedEffects[localName]?.contentHash
+                                    ?: importedImpls[localName]?.contentHash
+                                if (contentHash != null) {
+                                    importItem.copy(contentHash = contentHash)
+                                } else {
+                                    importItem
+                                }
+                            }
+                            item.copy(path = path.copy(items = updatedItems))
+                        }
+                        is ModulePath -> item  // Module path imports don't have per-item hashes
+                    }
+                }
+                else -> item
             }
         }
         return Program(items = updatedItems)

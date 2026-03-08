@@ -31,6 +31,10 @@ public final class RuntimeAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private final String operationName;
 
+    // Content hash for O(1) lookup when available
+    @CompilationFinal
+    private final String contentHash;
+
     @Child
     private MezzeNode argumentsNode;
 
@@ -43,14 +47,27 @@ public final class RuntimeAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private boolean initialized = false;
 
+    // Cached operation field index for faster repeated access
+    @CompilationFinal
+    private int cachedOperationIndex = -1;
+
     public RuntimeAbilityCallNode(String abilityName, String operationName, MezzeNode argumentsNode) {
+        this(abilityName, operationName, argumentsNode, null);
+    }
+
+    public RuntimeAbilityCallNode(String abilityName, String operationName, MezzeNode argumentsNode, String contentHash) {
         this.abilityName = abilityName;
         this.operationName = operationName;
         this.argumentsNode = argumentsNode;
+        this.contentHash = contentHash;
     }
 
     public static RuntimeAbilityCallNode create(String abilityName, String operationName, MezzeNode argumentsNode) {
-        return new RuntimeAbilityCallNode(abilityName, operationName, argumentsNode);
+        return new RuntimeAbilityCallNode(abilityName, operationName, argumentsNode, null);
+    }
+
+    public static RuntimeAbilityCallNode create(String abilityName, String operationName, MezzeNode argumentsNode, String contentHash) {
+        return new RuntimeAbilityCallNode(abilityName, operationName, argumentsNode, contentHash);
     }
 
     @Override
@@ -97,17 +114,34 @@ public final class RuntimeAbilityCallNode extends MezzeNode {
     private MezzeFunction lookupOperation() {
         MezzeContext context = MezzeContext.get(this);
 
-        // Look up the ability impl by ability name
-        // For codec abilities, there should be exactly one impl in scope
-        Object implValue = context.lookupAbilityImpl(abilityName);
+        // Prefer content hash lookup (O(1), collision-free)
+        Object implValue = null;
+        if (contentHash != null) {
+            implValue = context.lookupGlobal(contentHash);
+        }
+
+        // Fall back to ability name lookup if content hash didn't work
+        if (implValue == null) {
+            implValue = context.lookupAbilityImpl(abilityName);
+        }
 
         if (!(implValue instanceof MezzeRecord impl)) {
             return null;
         }
 
-        // Get the operation function by name
+        // Use cached operation index if available, otherwise compute and cache it
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = impl.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+
+        // Get the operation function (using index when available)
+        Object opValue;
         try {
-            Object opValue = impl.getFieldByName(operationName);
+            opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
             if (opValue instanceof MezzeFunction func) {
                 return func;
             }

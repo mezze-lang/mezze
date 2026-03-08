@@ -356,8 +356,11 @@ class ContinuationTransformer {
      * The binding state receives the value as input and binds it to the pattern.
      *
      * For simple variable patterns like `result`, this creates:
-     * `do { let result = __input; {} }`
-     *
+     * ```
+     * do
+     *     let result = __input
+     *     {}
+     * ```
      * Where __input is a special identifier that the runtime will replace with the actual input value.
      */
     private fun createBindExpression(pattern: Pattern, valueType: MezzeType?): Expression {
@@ -400,7 +403,10 @@ class ContinuationTransformer {
                 // Wrap the let statement in a DoExpression to preserve the binding
                 // This ensures that when the state executes, the variable gets bound to the frame
                 //
-                // Example: `let x = foo()` becomes `do { let x = foo(); {} }`
+                // Example: `let x = foo()` becomes:
+                //   do
+                //       let x = foo()
+                //       {}
                 // This way, x is properly bound when the state executes
                 val unitExpr = RecordLiteral(
                     entries = emptyList(),

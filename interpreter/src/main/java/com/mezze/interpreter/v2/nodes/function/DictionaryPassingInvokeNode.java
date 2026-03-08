@@ -81,6 +81,10 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private MezzeRecord[] cachedImplementations;
 
+    // Cached operation field indices for faster field access
+    @CompilationFinal(dimensions = 1)
+    private int[] cachedOperationIndices;
+
     public DictionaryPassingInvokeNode(
             MezzeNode functionNode,
             MezzeNode argumentsNode,
@@ -208,6 +212,14 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
         // Extract operation functions in the order the callee needs them
         cachedOperations = new MezzeFunction[requirements.length];
 
+        // Initialize cached indices
+        if (cachedOperationIndices == null || cachedOperationIndices.length != requirements.length) {
+            cachedOperationIndices = new int[requirements.length];
+            for (int i = 0; i < cachedOperationIndices.length; i++) {
+                cachedOperationIndices[i] = -1;
+            }
+        }
+
         for (int i = 0; i < requirements.length; i++) {
             MezzeFunction.AbilitySlotRequirement req = requirements[i];
             String hash = abilityToHash.get(req.abilityName);
@@ -225,10 +237,19 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
                     " with hash: " + hash);
             }
 
+            // Use cached field index if available
+            int opIndex = cachedOperationIndices[i];
+            if (opIndex < 0) {
+                opIndex = impl.getFieldIndex(req.operationName);
+                if (opIndex >= 0) {
+                    cachedOperationIndices[i] = opIndex;
+                }
+            }
+
             // Extract the operation function
             Object opValue;
             try {
-                opValue = impl.getFieldByName(req.operationName);
+                opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(req.operationName);
             } catch (Exception e) {
                 throw new RuntimeException(
                     "Ability implementation " + req.abilityName +

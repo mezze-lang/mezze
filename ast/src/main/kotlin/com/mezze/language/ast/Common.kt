@@ -277,9 +277,12 @@ data class SelectivePath(
 
 /**
  * Individual item in a selective import.
+ * The contentHash is populated by the typechecker during import resolution,
+ * enabling O(1) content-addressed lookups instead of name-based lookups.
  */
 @Serializable
 data class ImportItem(
     val name: String,
-    val alias: String? = null
+    val alias: String? = null,
+    val contentHash: String? = null
 )

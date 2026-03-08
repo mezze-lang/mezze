@@ -92,13 +92,17 @@ class HashStabilityTest {
 
     @Test
     fun `internal let bindings with different names produce same hash`() {
-        // do { let x = 1; x }
+        // do
+        //     let x = 1
+        //     x
         val do1 = DoExpression(
             statements = listOf(LetStatement.simple("x", IntLiteral(1))),
             result = Identifier("x")
         )
 
-        // do { let y = 1; y }
+        // do
+        //     let y = 1
+        //     y
         val do2 = DoExpression(
             statements = listOf(LetStatement.simple("y", IntLiteral(1))),
             result = Identifier("y")
@@ -112,7 +116,10 @@ class HashStabilityTest {
 
     @Test
     fun `nested internal bindings with different names produce same hash`() {
-        // do { let x = 1; let y = x + 1; y }
+        // do
+        //     let x = 1
+        //     let y = x + 1
+        //     y
         val do1 = DoExpression(
             statements = listOf(
                 LetStatement.simple("x", IntLiteral(1)),
@@ -127,7 +134,10 @@ class HashStabilityTest {
             result = Identifier("y")
         )
 
-        // do { let a = 1; let b = a + 1; b }
+        // do
+        //     let a = 1
+        //     let b = a + 1
+        //     b
         val do2 = DoExpression(
             statements = listOf(
                 LetStatement.simple("a", IntLiteral(1)),

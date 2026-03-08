@@ -54,13 +54,11 @@ data class TypeScheme(
         // This handles both "'a" and "a" formats
         val nameToFreshVar = mutableMapOf<String, TypeVar>()
         for ((oldVar, newType) in substitution) {
-            if (newType is MezzeType.VarType) {
-                // Map both with and without the ' prefix
-                val baseName = oldVar.name.removePrefix("'")
-                nameToFreshVar[baseName] = newType.variable
-                nameToFreshVar["'$baseName"] = newType.variable
-                nameToFreshVar[oldVar.name] = newType.variable
-            }
+            // Map both with and without the ' prefix
+            val baseName = oldVar.name.removePrefix("'")
+            nameToFreshVar[baseName] = newType.variable
+            nameToFreshVar["'$baseName"] = newType.variable
+            nameToFreshVar[oldVar.name] = newType.variable
         }
 
         // Instantiate constraints with fresh variables

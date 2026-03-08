@@ -57,6 +57,10 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @CompilationFinal
     private boolean cacheValid = false;
 
+    // Cached operation field index for faster repeated access
+    @CompilationFinal
+    private int cachedOperationIndex = -1;
+
     public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode) {
         this.effectName = effectName;
         this.operationName = operationName;
@@ -106,8 +110,17 @@ public final class DynamicEffectCallNode extends MezzeNode {
                 ". For parameterized impls, use 'perform Handler {params} in ...'");
         }
 
-        // Get the operation function from the handler record
-        Object operation = handlerRecord.getField(operationName);
+        // Get the operation function from the handler record using cached index
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = handlerRecord.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                cachedOperationIndex = opIndex;
+            }
+        }
+
+        Object operation = opIndex >= 0 ? handlerRecord.getField(opIndex) : handlerRecord.getField(operationName);
 
         if (!(operation instanceof MezzeFunction opFunc)) {
             throw new RuntimeException("Operation '" + operationName + "' not found or not a function in handler " + effectName +

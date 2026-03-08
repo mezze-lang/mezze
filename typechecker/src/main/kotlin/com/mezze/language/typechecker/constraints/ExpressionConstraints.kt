@@ -2897,7 +2897,10 @@ class ExpressionConstraintGenerator {
     // ========================================================================
 
     private fun generateDo(expr: DoExpression, context: ConstraintContext): ConstraintResult {
-        // do { stmt1; stmt2; result }
+        // do
+        //     stmt1
+        //     stmt2
+        //     result
 
         // IMPORTANT: Clear expected type for intermediate statements in do block
         // The expected type should only apply to the final result expression, not

@@ -702,9 +702,7 @@ class TypeValidator(
                     for (constructor in annotation.constructors) {
                         val concretePayload = concreteType.constructors[constructor.name] ?: continue
                         val annPayload = constructor.dataType ?: continue
-                        if (concretePayload != null) {
-                            extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
-                        }
+                        extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
                     }
                 }
             }
@@ -1489,7 +1487,11 @@ class TypeValidator(
     private fun variantTypesCompatible(annotated: MezzeType.VariantType, inferred: MezzeType.VariantType): Boolean {
         // Check that all annotated constructors exist in inferred type
         for ((constructorName, annotatedPayload) in annotated.constructors) {
-            val inferredPayload = inferred.constructors[constructorName] ?: return false
+            // Key must exist in inferred type
+            if (!inferred.constructors.containsKey(constructorName)) {
+                return false
+            }
+            val inferredPayload = inferred.constructors[constructorName]
 
             // Both have payload - check compatibility
             if (annotatedPayload != null && inferredPayload != null) {

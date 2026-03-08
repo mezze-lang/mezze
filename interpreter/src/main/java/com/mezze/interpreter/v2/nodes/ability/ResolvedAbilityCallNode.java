@@ -49,6 +49,10 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private int cachedClosureLength = -1;
 
+    // Cached operation field index - avoids string lookup after first resolution
+    @CompilationFinal
+    private int cachedOperationIndex = -1;
+
     protected ResolvedAbilityCallNode(int localSlot, String implHash, String operationName) {
         this.localSlot = localSlot;
         this.implHash = implHash;
@@ -70,7 +74,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callDirectNoClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTarget(frame)", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTarget(frame)", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLength(frame)") int closureLength,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
     ) {
@@ -86,7 +90,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callDirectOneClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTarget(frame)", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTarget(frame)", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLength(frame)") int closureLength,
             @Cached(value = "resolveClosureValues(frame)", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -102,7 +106,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callDirectTwoClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTarget(frame)", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTarget(frame)", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLength(frame)") int closureLength,
             @Cached(value = "resolveClosureValues(frame)", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -120,7 +124,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callDirectSmallClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTarget(frame)", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTarget(frame)", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLength(frame)") int closureLength,
             @Cached(value = "resolveClosureValues(frame)", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -141,7 +145,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callDirectLargeClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTarget(frame)", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTarget(frame)", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLength(frame)") int closureLength,
             @Cached(value = "resolveClosureValues(frame)", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -162,7 +166,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callContextNoClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLengthFromContext()") int closureLength,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
     ) {
@@ -177,7 +181,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callContextOneClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLengthFromContext()") int closureLength,
             @Cached(value = "resolveClosureValuesFromContext()", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -193,7 +197,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callContextTwoClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLengthFromContext()") int closureLength,
             @Cached(value = "resolveClosureValuesFromContext()", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -210,7 +214,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callContextSmallClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLengthFromContext()") int closureLength,
             @Cached(value = "resolveClosureValuesFromContext()", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -231,7 +235,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     protected Object callContextLargeClosure(
             VirtualFrame frame,
             Object args,
-            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true, neverDefault = true) CallTarget cachedTarget,
+            @Cached(value = "resolveCallTargetFromContext()", allowUncached = true) CallTarget cachedTarget,
             @Cached(value = "resolveClosureLengthFromContext()") int closureLength,
             @Cached(value = "resolveClosureValuesFromContext()", allowUncached = true, dimensions = 1) Object[] closureValues,
             @Cached("create(cachedTarget)") @Exclusive DirectCallNode callNode
@@ -329,7 +333,16 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
         if (!(impl instanceof MezzeRecord record)) {
             return null;
         }
-        Object operationFunc = record.getField(operationName);
+        // Use cached index if available, otherwise compute and cache it
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = record.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+        // Use index-based access when available (faster than string lookup)
+        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
         if (!(operationFunc instanceof MezzeFunction func)) {
             return null;
         }
@@ -341,7 +354,15 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
         if (!(impl instanceof MezzeRecord record)) {
             return EMPTY_CLOSURE;
         }
-        Object operationFunc = record.getField(operationName);
+        // Use cached index if available
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = record.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
         if (!(operationFunc instanceof MezzeFunction func)) {
             return EMPTY_CLOSURE;
         }
@@ -353,7 +374,15 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
         if (!(impl instanceof MezzeRecord record)) {
             return 0;
         }
-        Object operationFunc = record.getField(operationName);
+        // Use cached index if available
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = record.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
         if (!(operationFunc instanceof MezzeFunction func)) {
             return 0;
         }

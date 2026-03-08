@@ -101,7 +101,7 @@ object Parsers {
         token.type in listOf(
             TokenType.LPAREN, TokenType.RPAREN, TokenType.LBRACE, TokenType.RBRACE,
             TokenType.LBRACKET, TokenType.RBRACKET, TokenType.COMMA, TokenType.DOT,
-            TokenType.COLON, TokenType.SEMICOLON, TokenType.ARROW, TokenType.ASSIGN,
+            TokenType.COLON, TokenType.ARROW, TokenType.ASSIGN,
             TokenType.ELLIPSIS, TokenType.DOUBLE_COLON, TokenType.AT, TokenType.PIPE,
             TokenType.PIPE_OP, TokenType.PLUS, TokenType.MINUS, TokenType.STAR,
             TokenType.SLASH, TokenType.PERCENT, TokenType.EQ, TokenType.NEQ,

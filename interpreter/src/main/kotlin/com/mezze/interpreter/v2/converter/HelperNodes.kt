@@ -24,15 +24,29 @@ import com.mezze.interpreter.v2.values.MezzeFunction
 
 /**
  * Node that binds an imported value from a use declaration.
+ * Uses content hash for O(1) lookup when available, falls back to qualified name.
  */
 @NodeInfo(shortName = "use-binding")
 class UseBindingNode(
     private val slot: Int,
     private val qualifiedName: String,
-    private val localName: String
+    private val localName: String,
+    private val contentHash: String? = null
 ) : MezzeNode() {
 
+    @CompilationFinal
+    private var cachedValue: Any? = null
+
+    @CompilationFinal
+    private var initialized: Boolean = false
+
     override fun execute(frame: VirtualFrame): Any {
+        // Fast path: use cached value after first lookup
+        if (initialized && cachedValue != null) {
+            frame.setObject(slot, cachedValue)
+            return cachedValue!!
+        }
+
         val value = lookupImport()
         frame.setObject(slot, value)
         return value
@@ -41,7 +55,23 @@ class UseBindingNode(
     @TruffleBoundary
     private fun lookupImport(): Any {
         val context = MezzeContext.get(this)
-        return context.lookupGlobal(qualifiedName) ?: MezzeUnit.INSTANCE
+
+        // Prefer content hash lookup (O(1), collision-free)
+        if (contentHash != null) {
+            val value = context.lookupGlobal(contentHash)
+            if (value != null) {
+                // Cache the value for subsequent calls
+                cachedValue = value
+                initialized = true
+                return value
+            }
+        }
+
+        // Fall back to qualified name lookup
+        val value = context.lookupGlobal(qualifiedName) ?: MezzeUnit.INSTANCE
+        cachedValue = value
+        initialized = true
+        return value
     }
 }
 

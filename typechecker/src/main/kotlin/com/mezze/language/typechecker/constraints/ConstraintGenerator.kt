@@ -196,9 +196,11 @@ class ConstraintGenerator(
                             results[getBindingName(item)] = resultWithDuplicates
 
                             // Add binding to context with unsolved type
+                            // Pass contentHash for simple bindings (single variable pattern)
+                            val bindingHash = if (item.isSimpleBinding) item.contentHash else null
                             currentContext = currentContext.extendAll(
                                 patternResult.bindings.mapValues { (_, type) ->
-                                    TypingContext.Binding.Monomorphic(type)
+                                    TypingContext.Binding.Monomorphic(type, contentHash = bindingHash)
                                 }
                             )
                             continue
@@ -488,10 +490,14 @@ class ConstraintGenerator(
                                         constraints = abilityConstraints,
                                         type = solvedType
                                     )
-                                    TypingContext.Binding.Polymorphic(scheme)
+                                    // Pass contentHash for simple bindings (single variable pattern)
+                                    val bindingHash = if (item.isSimpleBinding) item.contentHash else null
+                                    TypingContext.Binding.Polymorphic(scheme, contentHash = bindingHash)
                                 } else {
                                     // Monomorphic binding - either no free variables or has unsatisfied ability constraints
-                                    TypingContext.Binding.Monomorphic(solvedType)
+                                    // Pass contentHash for simple bindings (single variable pattern)
+                                    val bindingHash = if (item.isSimpleBinding) item.contentHash else null
+                                    TypingContext.Binding.Monomorphic(solvedType, contentHash = bindingHash)
                                 }
                             }
 

@@ -94,9 +94,6 @@ class CodecGenerator {
 
             // Type variables - assume serializable (constraint will be added during resolution)
             is MezzeType.VarType -> true
-
-            // Unknown types - not serializable by default
-            else -> false
         }
     }
 

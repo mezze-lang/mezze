@@ -170,7 +170,6 @@ class ASTToTruffleConverterV2(
             is ImplAbilityDeclaration -> convertImplAbilityDeclaration(item)
             is UseDeclaration -> convertUseDeclaration(item)
             is PubUseDeclaration -> convertPubUseDeclaration(item)
-            else -> throw RuntimeException("Unsupported program item: ${item::class.simpleName}")
         }
     }
 
@@ -183,7 +182,7 @@ class ASTToTruffleConverterV2(
                     val localName = importItem.alias ?: importedName
                     val slot = getOrCreateSlot(localName)
                     val qualifiedImportName = "$modulePath::$importedName"
-                    UseBindingNode(slot, qualifiedImportName, localName)
+                    UseBindingNode(slot, qualifiedImportName, localName, importItem.contentHash)
                 }
                 if (bindingNodes.isEmpty()) {
                     UnitLiteralNode()
@@ -626,7 +625,6 @@ class ASTToTruffleConverterV2(
                 when (part) {
                     is StringPart -> StringLiteralNode(part.value)
                     is ExpressionPart -> convertExpression(part.expression)
-                    else -> throw RuntimeException("Unknown string part: ${part::class.simpleName}")
                 }
             }.toTypedArray()
             return InterpolatedStringNode(partNodes)
@@ -645,23 +643,25 @@ class ASTToTruffleConverterV2(
 
         val info = variableInfo[identifier.name]
         if (info != null) {
-            // Cross-module references have content hash - use strict content hash lookup
-            if (contentHash != null) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
-            }
-
             // Closure variables need fallback lookup for recursive function support.
             // When a function captures itself, the closure value may be null at capture time,
             // but the function will be in the global context (written by WriteLocalWithContextNode).
+            // Pass contentHash when available for efficient lookup.
             if (info.isClosure) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name)
+                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
             }
 
             // Top-level (module-level) variables need fallback lookup because they may be
             // referenced from nested scopes (like inside function bodies or state machines)
             // where the frame slot would be null.
+            // Pass contentHash when available for efficient lookup.
             if (info.isTopLevel) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name)
+                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+            }
+
+            // Cross-module references have content hash - use strict content hash lookup
+            if (contentHash != null) {
+                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
             }
 
             // Variables that need fallback (created from outer scope reference)
@@ -980,7 +980,6 @@ class ASTToTruffleConverterV2(
                         branches.add(MatchBranchNode.stringPattern(partTypes, literals, captureSlots, bodyNode))
                     }
                 }
-                else -> throw RuntimeException("Unsupported pattern: ${pattern::class.simpleName}")
             }
             } // end of inner for loop over case.patterns
         }

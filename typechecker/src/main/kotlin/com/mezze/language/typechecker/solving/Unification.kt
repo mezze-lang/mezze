@@ -1384,7 +1384,6 @@ internal fun getTypeDefinitionKind(
         is RecordDefinition -> TypeDefinitionKind.RECORD
         is VariantDefinition -> TypeDefinitionKind.VARIANT
         is NewtypeDefinition -> TypeDefinitionKind.NEWTYPE
-        else -> TypeDefinitionKind.UNKNOWN
     }
 }
 
@@ -1431,6 +1430,5 @@ internal fun expandTypeApplication(
                 TypeExpansionResult.NotFound
             }
         }
-        else -> TypeExpansionResult.NotFound
     }
 }

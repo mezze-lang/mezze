@@ -1766,9 +1766,7 @@ class ConstraintSolver(
                     for (constructor in annotation.constructors) {
                         val concretePayload = concreteType.constructors[constructor.name] ?: continue
                         val annPayload = constructor.dataType ?: continue
-                        if (concretePayload != null) {
-                            extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
-                        }
+                        extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
                     }
                 }
             }
@@ -3021,7 +3019,7 @@ class ConstraintSolver(
                                 else -> null
                             }
 
-                            if (resultVariant != null && resultVariant is MezzeType.VariantType) {
+                            if (resultVariant != null) {
                                 var resultSubst = Substitution.single(variantType.variable, resultVariant)
 
                                 // Validate payload presence/absence and unify types

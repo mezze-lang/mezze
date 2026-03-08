@@ -890,7 +890,6 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.COMMA -> "','"
     TokenType.DOT -> "'.'"
     TokenType.COLON -> "':'"
-    TokenType.SEMICOLON -> "';'"
     TokenType.ARROW -> "'->'"
     TokenType.ASSIGN -> "'='"
     TokenType.ELLIPSIS -> "'...'"

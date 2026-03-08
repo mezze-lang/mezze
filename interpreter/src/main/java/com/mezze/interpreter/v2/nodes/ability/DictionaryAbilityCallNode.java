@@ -52,6 +52,10 @@ public final class DictionaryAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private boolean initialized = false;
 
+    // Cached operation field index for faster repeated access
+    @CompilationFinal
+    private int cachedOperationIndex = -1;
+
     public DictionaryAbilityCallNode(int dictionarySlot, String abilityName, String operationName, MezzeNode argumentsNode) {
         this.dictionarySlot = dictionarySlot;
         this.abilityName = abilityName;
@@ -76,10 +80,19 @@ public final class DictionaryAbilityCallNode extends MezzeNode {
             );
         }
 
-        // Get the operation function from the impl record
+        // Get the operation function from the impl record using cached index
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = impl.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                cachedOperationIndex = opIndex;
+            }
+        }
+
         Object opValue;
         try {
-            opValue = impl.getFieldByName(operationName);
+            opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
         } catch (Exception e) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new RuntimeException(

@@ -677,9 +677,7 @@ class AbilityResolver(
                     for (constructor in annotation.constructors) {
                         val concretePayload = concreteType.constructors[constructor.name] ?: continue
                         val annPayload = constructor.dataType ?: continue
-                        if (concretePayload != null) {
-                            extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
-                        }
+                        extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
                     }
                 }
             }
