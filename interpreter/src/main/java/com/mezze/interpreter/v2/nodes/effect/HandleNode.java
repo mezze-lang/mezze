@@ -91,6 +91,10 @@ public final class HandleNode extends MezzeNode {
     @CompilationFinal
     private final String handlerName;
 
+    // Content hash for handler lookup (preferred over string name)
+    @CompilationFinal
+    private final String handlerContentHash;
+
     @Child
     private MezzeNode handlerNode;
 
@@ -149,17 +153,18 @@ public final class HandleNode extends MezzeNode {
             MezzeNode handlerNode,
             MezzeNode bodyNode
     ) {
-        this(handlerSlot, effectNames, handlerName, handlerNode, bodyNode,
+        this(handlerSlot, effectNames, handlerName, null, handlerNode, bodyNode,
              -1, null, null, false, false);
     }
 
     /**
-     * Full constructor with scoped effect support.
+     * Full constructor with scoped effect support and content hash.
      */
     public HandleNode(
             int handlerSlot,
             String[] effectNames,
             String handlerName,
+            String handlerContentHash,
             MezzeNode handlerNode,
             MezzeNode bodyNode,
             int scopeSlot,
@@ -171,6 +176,7 @@ public final class HandleNode extends MezzeNode {
         this.handlerSlot = handlerSlot;
         this.effectNames = effectNames != null ? effectNames : new String[0];
         this.handlerName = handlerName;
+        this.handlerContentHash = handlerContentHash;
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
         this.scopeSlot = scopeSlot;
@@ -188,7 +194,9 @@ public final class HandleNode extends MezzeNode {
         // Create a handler lookup node
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
-        return new HandleNode(handlerSlot, null, null, handlerNode, bodyChild);
+        // Store contentHash for processSuspended fallback lookup
+        return new HandleNode(handlerSlot, null, null, contentHash, handlerNode, bodyChild,
+                -1, null, null, false, false);
     }
 
     /**
@@ -197,7 +205,9 @@ public final class HandleNode extends MezzeNode {
     public static HandleNode create(int handlerSlot, String contentHash, String[] effectNames, String handlerName, MezzeNode bodyChild) {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
-        return new HandleNode(handlerSlot, effectNames, handlerName, handlerNode, bodyChild);
+        // Store contentHash for processSuspended fallback lookup
+        return new HandleNode(handlerSlot, effectNames, handlerName, contentHash, handlerNode, bodyChild,
+                -1, null, null, false, false);
     }
 
     /**
@@ -227,6 +237,7 @@ public final class HandleNode extends MezzeNode {
                 handlerSlot,
                 effectNames,
                 handlerName,
+                contentHash,  // Pass content hash for fallback lookup
                 handlerNode,
                 bodyChild,
                 scopeSlot,
@@ -419,17 +430,30 @@ public final class HandleNode extends MezzeNode {
 
         // Build handler map from our effect names
         Map<String, Object> handlers = new HashMap<>();
-        if (handlerName != null) {
-            Object handler = context.lookupLocal(handlerName);
+        Object handler = null;
+
+        // Prefer content hash lookup (O(1), collision-free)
+        if (handlerContentHash != null) {
+            handler = context.lookupGlobal(handlerContentHash);
+        }
+
+        // Fall back to name-based lookup if content hash not available or didn't find handler
+        if (handler == null && handlerName != null) {
+            handler = context.lookupLocal(handlerName);
             if (handler == null) {
                 handler = context.lookupGlobal(handlerName);
             }
-            if (handler != null) {
-                handlers.put(handlerName, handler);
-                // Also map effect names to this handler
-                for (String effectName : effectNames) {
-                    handlers.put(effectName, handler);
-                }
+        }
+
+        if (handler != null) {
+            // Use content hash as key if available, otherwise use name
+            String handlerKey = handlerContentHash != null ? handlerContentHash : handlerName;
+            if (handlerKey != null) {
+                handlers.put(handlerKey, handler);
+            }
+            // Also map effect names to this handler
+            for (String effectName : effectNames) {
+                handlers.put(effectName, handler);
             }
         }
 
