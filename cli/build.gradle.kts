@@ -28,7 +28,6 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
-    implementation(project(":interpreterv2"))
     implementation(project(":lsp"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
@@ -182,12 +181,8 @@ graalvmNative {
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",
 
-                // Initialize our language classes at build time
-                "--initialize-at-build-time=com.mezze.language.interpreter.MezzeLanguageProvider",
-                "--initialize-at-build-time=com.mezze.language.interpreter.MezzeValueGen\$InteropLibraryExports",
-
-                // Initialize all our interpreter classes at build time (safer approach)
-                "--initialize-at-build-time=com.mezze.language.interpreter",
+                // Initialize V2 interpreter classes at build time
+                "--initialize-at-build-time=com.mezze.interpreter.v2",
 
                 // Initialize kotlin and kotlinx classes at build time
                 // Required for AST serialization and related static initializers

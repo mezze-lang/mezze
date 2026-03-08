@@ -40,7 +40,19 @@ object BuiltinAbilities {
     // Inspect ability
     const val INSPECT = "Inspect"
 
-    // All built-in abilities
+    // Serialization abilities (used by codec system)
+    const val ENCODE = "Encode"
+    const val DECODE = "Decode"
+    const val STREAM_ENCODE = "StreamEncode"
+    const val STREAM_DECODE = "StreamDecode"
+    const val ENCODE_FORMAT = "EncodeFormat"
+    const val DECODE_FORMAT = "DecodeFormat"
+
+    // Other stdlib abilities
+    const val SHOW = "Show"
+    const val CONVERT = "Convert"
+
+    // All core built-in abilities (operators and basic operations)
     val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT, INSPECT)
 
     /**
@@ -153,22 +165,48 @@ object BuiltinAbilities {
  */
 object BuiltinTypes {
 
+    // ========================================================================
+    // TYPE NAME CONSTANTS
+    // ========================================================================
+
+    const val OPTION = "Option"
+    const val RESULT = "Result"
+    const val LIST = "List"
+    const val MAP = "Map"
+    const val SET = "Set"
+
     /**
      * Built-in type constructor names
      */
-    val coreTypeNames = setOf("Option", "Result", "List", "Map", "Set")
+    val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET)
     val primitiveTypeNames = setOf("Int", "Float", "String", "Boolean", "Nat", "Frac", "Ordering")
     val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
+
+    // ========================================================================
+    // CONSTRUCTOR NAME CONSTANTS
+    // ========================================================================
+
+    // Option constructors
+    const val SOME = "Some"
+    const val NONE = "None"
+
+    // Result constructors
+    const val OK = "Ok"
+    const val ERR = "Err"
+
+    // Standard record field names for built-in types
+    const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
+    const val ERROR_FIELD = "error"  // Used in Result.Err
 
     /**
      * Built-in constructor names for Option
      */
-    val optionConstructors = setOf("Some", "None")
+    val optionConstructors = setOf(SOME, NONE)
 
     /**
      * Built-in constructor names for Result
      */
-    val resultConstructors = setOf("Ok", "Err")
+    val resultConstructors = setOf(OK, ERR)
 
     /**
      * Built-in constructor names for List
@@ -234,5 +272,109 @@ object BuiltinTypes {
 
     fun createSetType(elementType: MezzeType): MezzeType.SetType {
         return MezzeType.SetType(elementType)
+    }
+
+    /**
+     * Check if a variant type is the Bool variant: | True, False |
+     *
+     * Bool is represented as a closed variant with exactly two constructors (True and False),
+     * both with no payloads.
+     */
+    fun isBoolVariant(type: MezzeType): Boolean {
+        return type is MezzeType.VariantType &&
+               type.constructors.size == 2 &&
+               type.constructors.containsKey("True") &&
+               type.constructors.containsKey("False") &&
+               type.constructors["True"] == null &&
+               type.constructors["False"] == null
+    }
+
+    /**
+     * Get the canonical Bool type.
+     */
+    fun getBoolType(): MezzeType.VariantType {
+        return MezzeType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+    }
+
+    /**
+     * Check if a variant type represents the Option type: | Some { val }, None |
+     *
+     * Option is a closed variant with exactly two constructors:
+     * - Some: with a payload (typically { val: T })
+     * - None: with no payload
+     */
+    fun isOptionVariant(type: MezzeType): Boolean {
+        return type is MezzeType.VariantType &&
+               type.constructors.size == 2 &&
+               type.constructors.containsKey("Some") &&
+               type.constructors.containsKey("None") &&
+               type.constructors["None"] == null &&
+               !type.isOpen
+    }
+
+    /**
+     * Extract the value type from an Option's Some constructor.
+     *
+     * For Option 'a, returns 'a (the type parameter).
+     * Returns null if the type is not a valid Option variant.
+     */
+    fun getOptionValueType(type: MezzeType.VariantType): MezzeType? {
+        if (!isOptionVariant(type)) return null
+        val someType = type.constructors["Some"] ?: return null
+        return when (someType) {
+            is MezzeType.RecordType -> someType.fields["val"]
+            else -> someType
+        }
+    }
+
+    /**
+     * Check if a variant type represents the Result type: | Ok { val }, Err { error } |
+     *
+     * Result is a closed variant with exactly two constructors:
+     * - Ok: with a payload { val: T }
+     * - Err: with a payload { error: E }
+     */
+    fun isResultVariant(type: MezzeType): Boolean {
+        if (type !is MezzeType.VariantType) return false
+        if (type.constructors.size != 2 || type.isOpen) return false
+
+        val okType = type.constructors["Ok"] ?: return false
+        val errType = type.constructors["Err"] ?: return false
+
+        // Both Ok and Err must have record payloads with specific fields
+        val okRecord = okType as? MezzeType.RecordType ?: return false
+        val errRecord = errType as? MezzeType.RecordType ?: return false
+
+        return okRecord.fields.containsKey("val") && errRecord.fields.containsKey("error")
+    }
+
+    /**
+     * Extract the value and error types from a Result variant.
+     *
+     * For Result 'a 'e, returns Pair('a, 'e).
+     * Returns null if the type is not a valid Result variant.
+     */
+    fun getResultTypes(type: MezzeType.VariantType): Pair<MezzeType, MezzeType>? {
+        if (type.constructors.size != 2 || type.isOpen) return null
+
+        val okType = type.constructors["Ok"] ?: return null
+        val errType = type.constructors["Err"] ?: return null
+
+        // Extract value type from Ok { val: T }
+        val valueType = when (okType) {
+            is MezzeType.RecordType -> okType.fields["val"]
+            else -> null
+        } ?: return null
+
+        // Extract error type from Err { error: E }
+        val errorType = when (errType) {
+            is MezzeType.RecordType -> errType.fields["error"]
+            else -> null
+        } ?: return null
+
+        return Pair(valueType, errorType)
     }
 }

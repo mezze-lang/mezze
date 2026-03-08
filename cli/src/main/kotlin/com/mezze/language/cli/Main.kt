@@ -5,8 +5,8 @@ import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.*
-import com.mezze.language.interpreter.MezzeException
-import com.mezze.language.interpreter.MezzeLanguage
+import com.mezze.language.typechecker.printing.ErrorFormatter
+import org.graalvm.polyglot.PolyglotException
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.SQLiteCodebase
 import kotlinx.serialization.json.Json
@@ -619,7 +619,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
             println("Parse: ${String.format("%.2f", parseTime)}ms$cacheInfo  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
-        println(ErrorPrettyPrinter.prettyPrint(e, source, file.name))
+        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -824,7 +824,7 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
     } catch (e: TypeCheckError) {
         val appFile = File(currentDir, mezzeToml.readText().substringAfter("path = \"").substringBefore("\""))
         val source = if (appFile.exists()) appFile.readText() else ""
-        println(ErrorPrettyPrinter.prettyPrint(e, source, appFile.name))
+        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -1106,18 +1106,8 @@ private fun handleExecCommand(args: List<String>) {
             java.nio.file.Paths.get(".").toAbsolutePath()
         }
 
-        // Use V2 interpreter (optimized Truffle implementation)
-        // Default to V1 until V2 supports all features (effects, MezzeUnit, etc.)
-        val useV2 = System.getProperty("mezze.interpreter.v2", "false").toBoolean()
-
-        if (useV2) {
-            // Execute using V2 interpreter (optimized)
-            executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
-        } else {
-            // Execute using V1 interpreter (fallback)
-            val interpreter = com.mezze.language.interpreter.MezzeInterpreter(skipParserSetup = false)
-            interpreter.execute(programToExecute, projectRootPath, successResult.monomorphicInstances)
-        }
+        // Execute using V2 interpreter (optimized Truffle implementation)
+        executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
 
         // Program should return {}, so we don't print the result
         // Execution completed silently
@@ -1125,14 +1115,14 @@ private fun handleExecCommand(args: List<String>) {
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
         val fileName = filePath?.fileName?.toString()
-        println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
+        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
         println("━".repeat(50))
         println(e.message)
         kotlin.system.exitProcess(1)
-    } catch (e: MezzeException) {
+    } catch (e: PolyglotException) {
         println("❌ Runtime Error:")
         println(e.message ?: "Unknown runtime error")
         kotlin.system.exitProcess(1)
@@ -1155,6 +1145,7 @@ private fun executeWithV2Interpreter(
     // Set up V2 context
     val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
         .allowAllAccess(true)
+        .allowCreateThread(true)
         .build()
 
     try {
@@ -1178,7 +1169,11 @@ private fun executeWithV2Interpreter(
 
         // Result is stored in MezzeLanguage.getLastExecutionResult() if needed
     } finally {
-        context.close()
+        // Use cancelIfExecuting=true for Go/Rust-style semantics:
+        // When main exits, any fire-and-forget tasks (unawaited spawns) are cancelled.
+        // This matches Go (goroutines die when main exits) and Rust (tokio tasks cancelled).
+        // See: https://www.graalvm.org/truffle/javadoc/org/graalvm/polyglot/Context.html
+        context.close(true)
     }
 }
 
@@ -1282,7 +1277,7 @@ private fun handleCompileCommand(args: List<String>) {
 
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
-        println(ErrorPrettyPrinter.prettyPrint(e, source, inputFile.name))
+        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         println("❌ Compilation Error:")
@@ -1815,7 +1810,7 @@ private fun printGeneralError(error: Exception) {
     println()
     
     // Show stack trace for debugging if it's not a known user error
-    if (error !is TypeCheckError && error !is MezzeException) {
+    if (error !is TypeCheckError && error !is PolyglotException) {
         println("🐛 Debug Information:")
         error.printStackTrace()
     }
@@ -1976,46 +1971,6 @@ private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
             } ?: "unknown"
         }
         println("${binding.variableName} : $typeStr")
-    }
-}
-
-/**
- * Pretty print a MezzeValue result for user-friendly output
- */
-private fun prettyPrintResult(result: com.mezze.language.interpreter.MezzeValue): String {
-    return when (result) {
-        is com.mezze.language.interpreter.MezzeInt -> result.value.toString()
-        is com.mezze.language.interpreter.MezzeFloat -> result.value.toString()
-        is com.mezze.language.interpreter.MezzeString -> "\"${result.value}\""
-        is com.mezze.language.interpreter.MezzeBool -> result.value.toString()
-        is com.mezze.language.interpreter.MezzeNull -> "null"
-        is com.mezze.language.interpreter.MezzeVariant -> {
-            val value = result.value
-            if (value != null) {
-                if (value is com.mezze.language.interpreter.MezzeRecord) {
-                    "${result.constructor} ${prettyPrintResult(value)}"
-                } else {
-                    "${result.constructor}(${prettyPrintResult(value)})"
-                }
-            } else {
-                result.constructor
-            }
-        }
-        is com.mezze.language.interpreter.MezzeRecord -> {
-            val fields = result.fields.map { (key, value) -> 
-                "$key = ${prettyPrintResult(value)}" 
-            }
-            "{ ${fields.joinToString(", ")} }"
-        }
-        is com.mezze.language.interpreter.NativeMezzeFunction -> "<native-function:${result.name}>"
-        else -> {
-            // Check if it's MezzeTruffleFunction (from either package) using class name
-            if (result::class.simpleName == "MezzeTruffleFunction") {
-                "<function>"
-            } else {
-                result.getDisplayString()
-            }
-        }
     }
 }
 

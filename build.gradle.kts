@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.2.0" apply false
     kotlin("plugin.serialization") version "2.2.0" apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.7" apply false
     java // Needed for java { toolchain { ... } } in root project
 }
 
@@ -17,6 +18,7 @@ allprojects {
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "java") // required for java { toolchain { ... } }
+    apply(plugin = "io.gitlab.arturbosch.detekt")
 
     // Kotlin toolchain (Kotlin 2.2.0 fully supports JDK 24 - verified bytecode major version 68)
     configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
@@ -64,4 +66,19 @@ subprojects {
 tasks.register("generateGrammarSource") {
     dependsOn(":parser:generateGrammarSource")
     description = "Generate ANTLR grammar sources for all modules"
+}
+
+// Configure Detekt for all subprojects
+subprojects {
+    afterEvaluate {
+        extensions.findByType<io.gitlab.arturbosch.detekt.extensions.DetektExtension>()?.apply {
+            config.setFrom(rootProject.files("detekt.yml"))
+            buildUponDefaultConfig = true
+            parallel = true
+        }
+        // Detekt doesn't support JDK 24 yet, use 22 for analysis
+        tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+            jvmTarget = "22"
+        }
+    }
 }

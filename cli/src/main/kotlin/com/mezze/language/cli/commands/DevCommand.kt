@@ -6,7 +6,7 @@ import com.mezze.language.cli.CodebaseHelper
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.ErrorPrettyPrinter
+import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.*
 import java.io.File
 
@@ -115,7 +115,7 @@ class DevCommand {
         val typeCheckResult = try {
             typeChecker.typeCheck(ast, currentDir.toPath())
         } catch (e: TypeCheckError) {
-            println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
+            println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
             kotlin.system.exitProcess(1)
         }
 
@@ -203,16 +203,45 @@ class DevCommand {
             items = typeCheckResult.program.items + listOf(TopLevelExpression(mainCall))
         )
 
-        // Execute
+        // Execute using V2 interpreter
         try {
             System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
             System.setProperty("polyglot.log.level", "OFF")
 
-            val interpreter = com.mezze.language.interpreter.MezzeInterpreter(skipParserSetup = false)
-            interpreter.execute(programToExecute, currentDir.toPath(), typeCheckResult.monomorphicInstances)
+            // Set up V2 context
+            val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+                .allowAllAccess(true)
+                .allowCreateThread(true)
+                .build()
+
+            try {
+                // Store the program for direct execution (bypasses parsing)
+                com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(programToExecute, currentDir.toPath())
+
+                // Store monomorphic instances (compiler-generated specializations)
+                if (typeCheckResult.monomorphicInstances.isNotEmpty()) {
+                    com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(typeCheckResult.monomorphicInstances)
+                }
+
+                // Create a dummy source to trigger MezzeLanguage.parse()
+                val source = org.graalvm.polyglot.Source.newBuilder(
+                    com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
+                    "# Direct AST execution",
+                    "__direct_execution__.mz"
+                ).buildLiteral()
+
+                // Execute via polyglot API
+                context.eval(source)
+            } finally {
+                // Use cancelIfExecuting=true for Go/Rust-style semantics:
+                // When main exits, any fire-and-forget tasks (unawaited spawns) are cancelled.
+                // This matches Go (goroutines die when main exits) and Rust (tokio tasks cancelled).
+                // See: https://www.graalvm.org/truffle/javadoc/org/graalvm/polyglot/Context.html
+                context.close(true)
+            }
 
             // Execution completed silently
-        } catch (e: com.mezze.language.interpreter.MezzeException) {
+        } catch (e: org.graalvm.polyglot.PolyglotException) {
             println("❌ Runtime Error:")
             println(e.message ?: "Unknown runtime error")
             kotlin.system.exitProcess(1)

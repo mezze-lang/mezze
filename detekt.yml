@@ -1,0 +1,51 @@
+# Detekt Configuration for Mezze Language
+# https://detekt.dev/docs/rules/
+
+build:
+  maxIssues: -1  # Report all issues without failing
+  excludeCorrectable: false
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+processors:
+  active: true
+
+console-reports:
+  active: true
+
+output-reports:
+  active: true
+
+# Focus on unused code detection
+style:
+  active: true
+  UnusedPrivateMember:
+    active: true
+    allowedNames: "(_|ignored|expected|serialVersionUID)"
+  UnusedPrivateProperty:
+    active: true
+    allowedNames: "_"
+
+# Disable other rule sets for now - focus on unused code
+complexity:
+  active: false
+
+coroutines:
+  active: false
+
+empty-blocks:
+  active: false
+
+exceptions:
+  active: false
+
+naming:
+  active: false
+
+performance:
+  active: false
+
+potential-bugs:
+  active: false

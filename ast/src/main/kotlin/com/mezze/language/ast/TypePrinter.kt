@@ -1,66 +1,5 @@
 package com.mezze.language.ast
 
-// ============================================================================
-// VARIANT TYPE HELPERS
-// ============================================================================
-
-/**
- * Check if a variant type represents the built-in Bool type.
- */
-private fun isBoolVariant(type: MezzeType.VariantType): Boolean =
-    type.constructors.size == 2 &&
-    type.constructors.containsKey("True") &&
-    type.constructors.containsKey("False") &&
-    type.constructors["True"] == null &&
-    type.constructors["False"] == null &&
-    !type.isOpen
-
-/**
- * Check if a variant type represents the Option type.
- */
-private fun isOptionVariant(type: MezzeType.VariantType): Boolean =
-    type.constructors.size == 2 &&
-    type.constructors.containsKey("Some") &&
-    type.constructors.containsKey("None") &&
-    type.constructors["None"] == null &&
-    !type.isOpen
-
-/**
- * Check if a variant type represents the Result type.
- * Returns the value type and error type if it's a proper Result, null otherwise.
- */
-private fun getResultTypes(type: MezzeType.VariantType): Pair<MezzeType, MezzeType>? {
-    if (type.constructors.size != 2 || type.isOpen) return null
-
-    val okType = type.constructors["Ok"] ?: return null
-    val errType = type.constructors["Err"] ?: return null
-
-    // Extract value type from Ok { val: T }
-    val valueType = when (okType) {
-        is MezzeType.RecordType -> okType.fields["val"]
-        else -> null
-    } ?: return null
-
-    // Extract error type from Err { error: E }
-    val errorType = when (errType) {
-        is MezzeType.RecordType -> errType.fields["error"]
-        else -> null
-    } ?: return null
-
-    return Pair(valueType, errorType)
-}
-
-/**
- * Extract the value type from an Option's Some constructor.
- */
-private fun getOptionValueType(type: MezzeType.VariantType): MezzeType? {
-    val someType = type.constructors["Some"] ?: return null
-    return when (someType) {
-        is MezzeType.RecordType -> someType.fields["val"]
-        else -> someType
-    }
-}
-
 /**
  * Print a variant type, handling special cases (Bool, Option, Result) and named type declarations.
  */
@@ -72,13 +11,13 @@ private fun printVariantType(
     typeDeclarations: List<TypeDeclaration>
 ): String {
     // Special case: Bool variant
-    if (isBoolVariant(type)) {
+    if (BuiltinTypes.isBoolVariant(type)) {
         return "Bool"
     }
 
     // Special case: Option variant
-    if (isOptionVariant(type)) {
-        val valueType = getOptionValueType(type)
+    if (BuiltinTypes.isOptionVariant(type)) {
+        val valueType = BuiltinTypes.getOptionValueType(type)
         val valueTypeStr = if (valueType != null) {
             prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
         } else {
@@ -101,7 +40,7 @@ private fun printVariantType(
     }
 
     // Special case: Result variant
-    val resultTypes = getResultTypes(type)
+    val resultTypes = BuiltinTypes.getResultTypes(type)
     if (resultTypes != null) {
         val (valueType, errorType) = resultTypes
         val valueTypeStr = prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
@@ -253,7 +192,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     }
     is MezzeType.VariantType -> {
         // Special case: Bool variant prints as "Bool" instead of "| True, False |"
-        if (isBoolVariant(type)) {
+        if (BuiltinTypes.isBoolVariant(type)) {
             "Bool"
         } else {
             // Print as regular variant type (inline variant syntax)
@@ -892,207 +831,9 @@ fun printTypeScheme(scheme: TypeScheme): String {
     }
 }
 
-/**
- * Check if a type is a built-in type (as opposed to a user-defined or stdlib type)
- */
-fun isBuiltinType(type: MezzeType): Boolean {
-    return when (type) {
-        // Primitive built-in types
-        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-        is MezzeType.CharType -> true
-
-        // Core built-in types
-        is MezzeType.ListType, is MezzeType.MapType, is MezzeType.SetType,
-        is MezzeType.SortedMapType, is MezzeType.SortedSetType -> true
-
-        // Function types are built-in constructs
-        is MezzeType.FunctionType -> true
-
-        // Suspended types are built-in constructs (values with unhandled effects)
-        is MezzeType.SuspendedType -> true
-
-        // Effect rows are built-in constructs
-        is MezzeType.EffectRow -> true
-
-        // Type variables and other constructs are not built-in types per se
-        is MezzeType.VarType -> false
-
-        // Record and variant types are user-defined (unless they're built-in constructors)
-        is MezzeType.RecordType, is MezzeType.VariantType -> false
-
-        // Array types
-        is MezzeType.ArrayType -> false
-
-        // TypeApplication (e.g., Option Int) - check if constructor is built-in
-        is MezzeType.TypeApplication -> type.constructor in setOf("Option", "Result")
-    }
-}
-
-/**
- * Get the name of a built-in type for display purposes
- */
-fun getBuiltinTypeName(type: MezzeType): String? {
-    return when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "String"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.ListType -> "List"
-        is MezzeType.MapType -> "Map"
-        is MezzeType.SetType -> "Set"
-        is MezzeType.TypeApplication -> if (type.constructor in setOf("Option", "Result")) type.constructor else null
-        else -> null
-    }
-}
-
-/**
- * Pretty print a type with built-in type highlighting
- * Returns a pair of (printed type, is built-in)
- */
-fun prettyPrintTypeWithBuiltinInfo(type: MezzeType): Pair<String, Boolean> {
-    val typeStr = prettyPrintType(type)
-    val isBuiltin = isBuiltinType(type)
-    return Pair(typeStr, isBuiltin)
-}
-
-/**
- * Check if two types are alpha-equivalent (structurally equal modulo variable renaming)
- * Also handles record field ordering - fields can be in any order as long as they match
- */
-fun areTypesAlphaEquivalent(type1: MezzeType, type2: MezzeType): Boolean {
-    return alphaEquivHelper(type1, type2, mutableMapOf(), mutableMapOf())
-}
-
-private fun alphaEquivHelper(
-    type1: MezzeType,
-    type2: MezzeType,
-    mapping1to2: MutableMap<TypeVar, TypeVar>,
-    mapping2to1: MutableMap<TypeVar, TypeVar>
-): Boolean {
-    return when {
-        // Base types - exact match
-        type1 is MezzeType.IntType && type2 is MezzeType.IntType -> true
-        type1 is MezzeType.FloatType && type2 is MezzeType.FloatType -> true
-        type1 is MezzeType.StringType && type2 is MezzeType.StringType -> true
-        type1 is MezzeType.BoolType && type2 is MezzeType.BoolType -> true
-        type1 is MezzeType.NatType && type2 is MezzeType.NatType -> true
-        type1 is MezzeType.FracType && type2 is MezzeType.FracType -> true
-        type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> true
-
-        // Type variables - check consistent renaming
-        type1 is MezzeType.VarType && type2 is MezzeType.VarType -> {
-            val existingMapping = mapping1to2[type1.variable]
-            val existingReverseMapping = mapping2to1[type2.variable]
-
-            when {
-                existingMapping != null && existingReverseMapping != null -> {
-                    // Both variables already mapped - check consistency
-                    existingMapping == type2.variable && existingReverseMapping == type1.variable
-                }
-                existingMapping == null && existingReverseMapping == null -> {
-                    // Neither mapped yet - create new mapping
-                    mapping1to2[type1.variable] = type2.variable
-                    mapping2to1[type2.variable] = type1.variable
-                    true
-                }
-                else -> false // Inconsistent mapping
-            }
-        }
-
-        // Function types
-        type1 is MezzeType.FunctionType && type2 is MezzeType.FunctionType -> {
-            // Check parameter and return types
-            alphaEquivHelper(type1.paramType, type2.paramType, mapping1to2, mapping2to1) &&
-            alphaEquivHelper(type1.returnType, type2.returnType, mapping1to2, mapping2to1) &&
-            // Check ability constraints (must match in count and structure)
-            type1.abilityConstraints.size == type2.abilityConstraints.size &&
-            type1.abilityConstraints.zip(type2.abilityConstraints).all { (c1, c2) ->
-                c1.abilityName == c2.abilityName &&
-                c1.typeArgs.size == c2.typeArgs.size &&
-                c1.typeArgs.zip(c2.typeArgs).all { (a1, a2) ->
-                    alphaEquivHelper(a1, a2, mapping1to2, mapping2to1)
-                }
-            } &&
-            // Check effect rows (both nullable)
-            when {
-                type1.effects == null && type2.effects == null -> true
-                type1.effects != null && type2.effects != null ->
-                    alphaEquivHelper(type1.effects, type2.effects, mapping1to2, mapping2to1)
-                else -> false
-            }
-        }
-
-        // Record types - fields can be in any order!
-        type1 is MezzeType.RecordType && type2 is MezzeType.RecordType -> {
-            type1.isOpen == type2.isOpen &&
-            type1.fields.size == type2.fields.size &&
-            type1.fields.all { (name, fieldType1) ->
-                val fieldType2 = type2.fields[name]
-                fieldType2 != null && alphaEquivHelper(fieldType1, fieldType2, mapping1to2, mapping2to1)
-            }
-        }
-
-        // Variant types
-        type1 is MezzeType.VariantType && type2 is MezzeType.VariantType -> {
-            type1.isOpen == type2.isOpen &&
-            type1.constructors.size == type2.constructors.size &&
-            type1.constructors.all { (name, dataType1) ->
-                val dataType2 = type2.constructors[name]
-                when {
-                    dataType1 == null && dataType2 == null -> true
-                    dataType1 != null && dataType2 != null ->
-                        alphaEquivHelper(dataType1, dataType2, mapping1to2, mapping2to1)
-                    else -> false
-                }
-            }
-        }
-
-        // List types
-        type1 is MezzeType.ListType && type2 is MezzeType.ListType -> {
-            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
-        }
-
-        // Array types
-        type1 is MezzeType.ArrayType && type2 is MezzeType.ArrayType -> {
-            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
-        }
-
-        // Map types
-        type1 is MezzeType.MapType && type2 is MezzeType.MapType -> {
-            alphaEquivHelper(type1.keyType, type2.keyType, mapping1to2, mapping2to1) &&
-            alphaEquivHelper(type1.valueType, type2.valueType, mapping1to2, mapping2to1)
-        }
-
-        // Set types
-        type1 is MezzeType.SetType && type2 is MezzeType.SetType -> {
-            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
-        }
-
-        // Suspended types
-        type1 is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType -> {
-            alphaEquivHelper(type1.valueType, type2.valueType, mapping1to2, mapping2to1)
-        }
-
-        // Type applications (e.g., Option Int, Result String Int)
-        type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication -> {
-            type1.constructor == type2.constructor &&
-            type1.args.size == type2.args.size &&
-            type1.args.zip(type2.args).all { (a1, a2) ->
-                alphaEquivHelper(a1, a2, mapping1to2, mapping2to1)
-            }
-        }
-
-        // Effect rows
-        type1 is MezzeType.EffectRow && type2 is MezzeType.EffectRow -> {
-            type1.isOpen == type2.isOpen &&
-            type1.effects == type2.effects
-        }
-
-        else -> false
-    }
-}
+// Note: The following unused functions were removed:
+// - isBuiltinType
+// - getBuiltinTypeName
+// - prettyPrintTypeWithBuiltinInfo
+// - areTypesAlphaEquivalent (with alphaEquivHelper)
+// Use BuiltinTypes.isBuiltinTypeName() for type name checks instead.

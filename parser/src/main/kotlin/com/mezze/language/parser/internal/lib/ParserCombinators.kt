@@ -280,11 +280,5 @@ object Parsers {
     }
 }
 
-// Extension functions for more readable combinator style
-infix fun <A, B> Parser<A>.then(other: Parser<B>): Parser<Pair<A, B>> = Parsers.seq(this, other)
-infix fun <T> Parser<T>.or(other: Parser<T>): Parser<T> = Parsers.choice(this, other)
-fun <A, B> Parser<A>.map(transform: (A) -> B): Parser<B> = Parsers.map(this, transform)
-fun <A, B> Parser<A>.flatMap(f: (A) -> Parser<B>): Parser<B> = Parsers.flatMap(this, f)
-fun <T> Parser<T>.optional(): Parser<T?> = Parsers.optional(this)
-fun <T> Parser<T>.many(): Parser<List<T>> = Parsers.many(this)
-fun <T> Parser<T>.many1(): Parser<List<T>> = Parsers.many1(this)
+// Note: Extension functions (.then, .or, .map, .flatMap, .optional, .many, .many1)
+// were removed as they were never used - the codebase uses Parsers.* methods directly.

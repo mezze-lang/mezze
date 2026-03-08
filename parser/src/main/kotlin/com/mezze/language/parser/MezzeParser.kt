@@ -326,9 +326,7 @@ class MezzeParser(
         return current
     }
 
-    private val newlineParser: Parser<Unit> = Parsers.map(
-        Parsers.many1(Parsers.token({ it.type == TokenType.NEWLINE }, "newline"))
-    ) { Unit }
+    // Note: newlineParser was removed - it was unused. Use skipNewlines() instead.
 
     internal fun tok(type: TokenType): Parser<Token> =
         Parsers.token({ it.type == type }, tokenDescription(type))
@@ -671,7 +669,6 @@ class MezzeParser(
 
                 // Find the matching closing paren
                 i += 2  // Skip "$("
-                val varStart = i
 
                 // Skip whitespace before variable name
                 while (i < content.length && content[i].isWhitespace()) {
@@ -767,7 +764,7 @@ class ParseException(
     companion object {
         private fun formatParseError(
             message: String,
-            position: Int,
+            @Suppress("UNUSED_PARAMETER") position: Int,  // Kept for API consistency
             line: Int,
             column: Int,
             sourceCode: String?,

@@ -538,7 +538,7 @@ class Lexer(private val source: String) {
     private fun peek(offset: Int = 1): Char = if (position + offset < source.length) source[position + offset] else '\u0000'
 
     private fun advance(count: Int = 1) {
-        for (i in 0 until count) {
+        repeat(count) {
             if (position < source.length) {
                 if (source[position] == '\n') {
                     line++

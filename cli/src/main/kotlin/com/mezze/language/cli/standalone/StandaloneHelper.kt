@@ -3,13 +3,14 @@ package com.mezze.language.cli.standalone
 import com.mezze.language.ast.*
 import com.mezze.language.codebase.CodebaseLoader
 import com.mezze.language.codebase.SQLiteCodebase
-import com.mezze.language.interpreter.MezzeInterpreter
+import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.language.typechecker.TypeChecker
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Engine
+import org.graalvm.polyglot.Source
 
 /**
  * Helper class for standalone JAR execution.
@@ -93,20 +94,38 @@ object StandaloneHelper {
             .allowExperimentalOptions(true)
             .build()
 
-        val context = Context.newBuilder("mezze")
+        val context = Context.newBuilder(MezzeLanguage.ID)
             .engine(engine)
             .allowAllAccess(true)
             .allowExperimentalOptions(true)
+            .allowCreateThread(true)
             .build()
 
         return try {
-            val interpreter = MezzeInterpreter(skipParserSetup = false)
             val projectRoot = java.nio.file.Paths.get(".")
-            val monomorphicInstances = emptyMap<String, LetBinding>()
-            interpreter.execute(program, projectRoot, monomorphicInstances)
+
+            // Store the program for direct execution (bypasses parsing)
+            MezzeLanguage.setProgramForDirectExecution(program, projectRoot)
+
+            // Create a dummy source to trigger MezzeLanguage.parse()
+            val source = Source.newBuilder(
+                MezzeLanguage.ID,
+                "# Direct AST execution",
+                "__direct_execution__.mz"
+            ).buildLiteral()
+
+            // Execute via polyglot API
+            context.eval(source)
+
+            // V2 returns unboxed values (Long, String, Boolean, Double) instead of MezzeInt, MezzeString, etc.
+            // For standalone JARs, we just return null since main returns {}
             null
         } finally {
-            context.close()
+            // Use cancelIfExecuting=true for Go/Rust-style semantics:
+            // When main exits, any fire-and-forget tasks (unawaited spawns) are cancelled.
+            // This matches Go (goroutines die when main exits) and Rust (tokio tasks cancelled).
+            // See: https://www.graalvm.org/truffle/javadoc/org/graalvm/polyglot/Context.html
+            context.close(true)
             engine.close()
         }
     }

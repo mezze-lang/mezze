@@ -316,5 +316,37 @@ object LoomTypes {
             )),
             MezzeType.BoolType
         )
+
+        // === Effect Scope Lifecycle (for scoped effects) ===
+        // These natives support initialize_scope/finalize_scope in effect handlers
+        // The tracker type is polymorphic - it can be any type returned by initialize_scope
+
+        // __native_loom_init_scope: {} -> 't (polymorphic - returns opaque tracker)
+        // Creates a new promise tracker for structured concurrency
+        val scopeTrackerVar = MezzeType.VarType(com.mezze.language.ast.TypeVar("tracker"))
+        context["__native_loom_init_scope"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            scopeTrackerVar
+        )
+
+        // __native_loom_finalize_scope: {tracker: 't} -> {}
+        // Awaits all unawaited promises registered with the tracker
+        context["__native_loom_finalize_scope"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "tracker" to MezzeType.VarType(com.mezze.language.ast.TypeVar("tracker"))
+            )),
+            MezzeType.RecordType(emptyMap())
+        )
+
+        // __native_loom_spawn_tracked: {f: {} -> 'a <...>, max_concurrent: Int, tracker: 't} -> Promise 'a
+        // Spawns a computation and registers the promise with the tracker
+        context["__native_loom_spawn_tracked"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "max_concurrent" to MezzeType.IntType,
+                "tracker" to MezzeType.VarType(com.mezze.language.ast.TypeVar("tracker"))
+            )),
+            promiseType
+        )
     }
 }

@@ -6,7 +6,7 @@ import com.mezze.language.cli.CodebaseHelper
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.ErrorPrettyPrinter
+import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.*
 import java.io.File
 
@@ -196,7 +196,7 @@ class BuildCommand {
             println("💡 Alternative (with warnings): java -jar ${outputFile.name}")
 
         } catch (e: TypeCheckError) {
-            println(ErrorPrettyPrinter.prettyPrint(e, source, appFile.name))
+            println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
             kotlin.system.exitProcess(1)
         } catch (e: Exception) {
             println("❌ Build Error:")

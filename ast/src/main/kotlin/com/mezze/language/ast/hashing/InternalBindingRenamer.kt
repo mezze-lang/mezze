@@ -217,7 +217,6 @@ class InternalBindingRenamer {
         val newCases = match.cases.map { case ->
             // Save environment for each case
             val savedEnv = env.toMap()
-            val savedCounter = counter
 
             // Add pattern bindings
             for (pattern in case.patterns) {
