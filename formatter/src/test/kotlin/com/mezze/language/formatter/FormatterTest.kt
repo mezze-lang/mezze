@@ -696,4 +696,89 @@ class FormatterTest {
         val second = formatter.format(first)
         assertEquals(first, second)
     }
+
+    // =========================================================================
+    // COMMENTS
+    // =========================================================================
+
+    @Test
+    fun `format preserves leading comment`() {
+        val input = """
+            # This is a comment
+            let x = 42
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("# This is a comment"))
+        assertTrue(output.contains("let x = 42"))
+    }
+
+    @Test
+    fun `format preserves trailing comment`() {
+        val input = "let x = 42  # trailing"
+        val output = formatter.format(input)
+        assertTrue(output.contains("# trailing"))
+    }
+
+    @Test
+    fun `format preserves multiple comments`() {
+        val input = """
+            # First comment
+            let x = 42
+            # Second comment
+            let y = 10
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("# First comment"))
+        assertTrue(output.contains("# Second comment"))
+    }
+
+    @Test
+    fun `formatter is idempotent for comments`() {
+        val input = """
+            # Header comment
+            let x = 42  # trailing
+            # Another comment
+            let y = 10
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
+
+    // =========================================================================
+    // LINE BREAKING
+    // =========================================================================
+
+    @Test
+    fun `format long record on multiple lines`() {
+        val input = "let x = {very_long_field_name_one = 1, very_long_field_name_two = 2, very_long_field_name_three = 3}"
+        val output = formatter.format(input)
+        // Should break to multiple lines
+        assertTrue(output.contains("\n\t"))
+        assertTrue(output.contains("very_long_field_name_one = 1"))
+    }
+
+    @Test
+    fun `format long array on multiple lines`() {
+        val input = "let x = [very_long_element_name_one, very_long_element_name_two, very_long_element_name_three]"
+        val output = formatter.format(input)
+        // Should break to multiple lines
+        assertTrue(output.contains("\n\t"))
+    }
+
+    @Test
+    fun `format short record on single line`() {
+        val input = "let x = {a = 1, b = 2}"
+        val output = formatter.format(input)
+        // Should stay on single line
+        assertEquals("let x = {a = 1, b = 2}\n", output)
+    }
+
+    @Test
+    fun `formatter is idempotent for long record`() {
+        val input = "let x = {very_long_field_name_one = 1, very_long_field_name_two = 2, very_long_field_name_three = 3}"
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
 }

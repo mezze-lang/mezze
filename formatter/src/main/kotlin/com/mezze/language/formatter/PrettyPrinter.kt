@@ -1103,19 +1103,51 @@ class PrettyPrinter {
             return
         }
 
-        append("{ ")
-        type.entries.forEachIndexed { index, entry ->
-            if (index > 0) append(", ")
-            append(entry.name)
-            append(": ")
-            printTypeAnnotation(entry.type)
+        val estimatedWidth = calculateRecordTypeWidth(type)
+        val singleLine = estimatedWidth <= config.RECORD_SINGLE_LINE_THRESHOLD
+
+        if (singleLine) {
+            append("{ ")
+            type.entries.forEachIndexed { index, entry ->
+                if (index > 0) append(", ")
+                append(entry.name)
+                append(": ")
+                printTypeAnnotation(entry.type)
+            }
+            type.restField?.let {
+                if (type.entries.isNotEmpty()) append(", ")
+                append("...")
+                append(it)
+            }
+            append(" }")
+        } else {
+            append("{")
+            newLine()
+            indent {
+                type.entries.forEachIndexed { index, entry ->
+                    printIndent()
+                    append(entry.name)
+                    append(": ")
+                    printTypeAnnotation(entry.type)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || index < type.entries.size - 1 || type.restField != null) {
+                        append(",")
+                    }
+                    newLine()
+                }
+                type.restField?.let {
+                    printIndent()
+                    append("...")
+                    append(it)
+                    newLine()
+                }
+            }
+            printIndent()
+            append("}")
         }
-        type.restField?.let {
-            if (type.entries.isNotEmpty()) append(", ")
-            append("...")
-            append(it)
-        }
-        append(" }")
+    }
+
+    private fun calculateRecordTypeWidth(type: RecordTypeAnnotation): Int {
+        return 4 + type.entries.sumOf { it.name.length + 2 + estimateTypeWidth(it.type) + 2 }
     }
 
     private fun printVariantTypeAnnotation(type: VariantTypeAnnotation) {
