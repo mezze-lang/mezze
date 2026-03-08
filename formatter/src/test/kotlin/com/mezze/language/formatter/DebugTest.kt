@@ -19,4 +19,5 @@ class DebugTest {
         val output = formatter.format(input)
         assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
     }
+
 }

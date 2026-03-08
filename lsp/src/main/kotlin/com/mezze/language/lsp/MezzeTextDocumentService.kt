@@ -5,6 +5,7 @@ import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.Codebase
+import com.mezze.language.formatter.Formatter
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
 import com.mezze.language.typechecker.TypeChecker
@@ -1788,6 +1789,44 @@ class MezzeTextDocumentService(
 
     override fun signatureHelp(params: SignatureHelpParams): CompletableFuture<SignatureHelp?> {
         return CompletableFuture.completedFuture(null)
+    }
+
+    // ========== Document Formatting ==========
+
+    override fun formatting(params: DocumentFormattingParams): CompletableFuture<List<TextEdit>> {
+        val uri = params.textDocument.uri
+        val state = documents[uri]
+            ?: return CompletableFuture.completedFuture(emptyList())
+
+        return CompletableFuture.supplyAsync {
+            try {
+                val formatter = Formatter()
+                val formatted = formatter.format(state.content)
+
+                // If content unchanged, return empty list
+                if (formatted == state.content) {
+                    return@supplyAsync emptyList()
+                }
+
+                // Return a single edit that replaces the entire document
+                val lines = state.content.lines()
+                val lastLine = lines.size - 1
+                val lastChar = lines.lastOrNull()?.length ?: 0
+
+                listOf(
+                    TextEdit(
+                        Range(
+                            Position(0, 0),
+                            Position(lastLine, lastChar)
+                        ),
+                        formatted
+                    )
+                )
+            } catch (e: Exception) {
+                server.logError("Formatting failed: ${e.message}")
+                emptyList()
+            }
+        }
     }
 
     // ========== Utilities ==========

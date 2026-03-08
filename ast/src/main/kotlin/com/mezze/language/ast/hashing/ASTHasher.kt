@@ -186,6 +186,11 @@ object ASTHasher {
                 builder.append(byteArrayOf(0xFF.toByte()))
             }
 
+            is ParenthesizedExpression -> {
+                builder.append("paren:".toByteArray())
+                hashExpressionInto(expr.expression, builder)
+            }
+
             is RecordLiteral -> {
                 builder.append(byteArrayOf(HashTags.RECORD))
                 // Sort entries by name for deterministic hashing

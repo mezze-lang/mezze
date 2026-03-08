@@ -10,6 +10,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":codebase"))
+    implementation(project(":formatter"))
 
     // LSP4J - Language Server Protocol implementation for Java/Kotlin
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:0.21.1")

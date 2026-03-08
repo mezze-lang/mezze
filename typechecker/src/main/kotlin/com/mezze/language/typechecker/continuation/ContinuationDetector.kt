@@ -120,6 +120,9 @@ class ContinuationDetector {
             // Literals and identifiers don't use continuations
             is IntLiteral, is NatLiteral, is FloatLiteral, is BooleanLiteral,
             is FractionLiteral, is Identifier, is PlaceholderExpression -> false
+
+            // Parenthesized - check inner expression
+            is ParenthesizedExpression -> usesContinuations(expr.expression)
         }
     }
 

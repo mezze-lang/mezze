@@ -614,6 +614,7 @@ class ASTToTruffleConverterV2(
             is DoExpression -> convertDoExpression(expr)
             is PerformExpression -> convertPerformExpression(expr)
             is StateMachineExpression -> convertStateMachineExpression(expr)
+            is ParenthesizedExpression -> convertExpression(expr.expression)
             else -> throw RuntimeException("Unsupported expression: ${expr::class.simpleName}")
         }
     }
@@ -1807,6 +1808,7 @@ class ASTToTruffleConverterV2(
                     // free variables computed during continuation transformation
                     variables.addAll(e.capturedVariables)
                 }
+                is ParenthesizedExpression -> visit(e.expression)
                 else -> Unit
             }
         }

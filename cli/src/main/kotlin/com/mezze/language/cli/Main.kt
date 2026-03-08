@@ -1854,8 +1854,8 @@ private fun handleFmtCommand(args: List<String>) {
 private fun collectMezzeFiles(dir: File, files: MutableList<File>) {
     dir.listFiles()?.forEach { file ->
         if (file.isDirectory) {
-            // Skip hidden directories and common non-source directories
-            if (!file.name.startsWith(".") && file.name != "node_modules" && file.name != "build") {
+            // Skip hidden directories (like .deps, .mez) and build output
+            if (!file.name.startsWith(".") && file.name != "build") {
                 collectMezzeFiles(file, files)
             }
         } else if (file.extension == "mz") {

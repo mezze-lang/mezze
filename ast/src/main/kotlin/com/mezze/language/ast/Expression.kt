@@ -279,6 +279,17 @@ data class PlaceholderExpression(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
+/**
+ * Parenthesized expression - preserves user's explicit grouping.
+ * The formatter outputs these with parentheses to maintain the original style.
+ */
+@Serializable
+data class ParenthesizedExpression(
+    val expression: Expression,
+    override val inferredType: MezzeType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
 // ============================================================================
 // RECORDS
 // ============================================================================

@@ -2161,6 +2161,11 @@ class TypeValidator(
             is StateMachineExpression -> {
                 // No patterns to validate in these
             }
+
+            // Parenthesized - recurse into inner
+            is ParenthesizedExpression -> {
+                errors.addAll(validatePatternsInExpression(expr.expression, substitution))
+            }
         }
 
         return errors
@@ -2452,6 +2457,11 @@ class TypeValidator(
             is StateMachineExpression -> {
                 // No sub-expressions to validate
             }
+
+            // Parenthesized - recurse into inner
+            is ParenthesizedExpression -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.expression, implDeclarations, effectDeclarations, functionDefinitions))
+            }
         }
 
         return errors
@@ -2680,6 +2690,9 @@ class TypeValidator(
                 is RecordUpdateExpression,
                 is EffectCallExpression,
                 is StateMachineExpression -> { }
+
+                // Parenthesized - recurse into inner
+                is ParenthesizedExpression -> traverse(e.expression)
             }
         }
 

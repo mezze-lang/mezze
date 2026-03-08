@@ -91,7 +91,7 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
             }
 
             // Document formatting
-            documentFormattingProvider = Either.forLeft(false) // TODO: implement
+            documentFormattingProvider = Either.forLeft(true)
 
             // Folding ranges
             foldingRangeProvider = Either.forLeft(true)

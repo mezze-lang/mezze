@@ -40,6 +40,10 @@ class TypeSubstitutor(
             // Variables
             is Identifier -> expr.copy(inferredType = substitutedType)
             is PlaceholderExpression -> expr.copy(inferredType = substitutedType)
+            is ParenthesizedExpression -> expr.copy(
+                expression = apply(expr.expression),
+                inferredType = substitutedType
+            )
 
             // Arrays
             is ArrayAccess -> expr.copy(

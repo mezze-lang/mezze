@@ -93,6 +93,12 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
+        is ParenthesizedExpression -> expr.copy(
+            expression = normalizeExpression(expr.expression),
+            inferredType = null,
+            sourceLocation = null
+        )
+
         is RecordLiteral -> expr.copy(
             entries = expr.entries.map { normalizeRecordEntry(it) },
             inferredType = null,

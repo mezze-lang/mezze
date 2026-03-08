@@ -2193,11 +2193,29 @@ internal val MezzeParser.parenExpression: Parser<Expression>
                 )
             }
         } else {
-            Parsers.between(
-                tok(TokenType.LPAREN),
-                expression,
-                tok(TokenType.RPAREN)
-            )(stream)
+            when (val lparen = tok(TokenType.LPAREN)(stream)) {
+                is ParseResult.Failure -> lparen
+                is ParseResult.Success -> {
+                    when (val innerResult = expression(lparen.remaining)) {
+                        is ParseResult.Failure -> innerResult
+                        is ParseResult.Success -> {
+                            when (val rparen = tok(TokenType.RPAREN)(innerResult.remaining)) {
+                                is ParseResult.Failure -> rparen
+                                is ParseResult.Success -> {
+                                    // Wrap in ParenthesizedExpression to preserve the grouping
+                                    ParseResult.Success(
+                                        ParenthesizedExpression(
+                                            expression = innerResult.value,
+                                            sourceLocation = SourceLocation(lparen.value.line, lparen.value.column, null)
+                                        ),
+                                        rparen.remaining
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

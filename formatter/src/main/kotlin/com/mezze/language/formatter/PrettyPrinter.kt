@@ -14,6 +14,7 @@ class PrettyPrinter {
     private val output = StringBuilder()
     private var indentLevel = 0
     private var currentLine = 1
+    private var currentColumn = 0
     private var comments: List<Comment> = emptyList()
     private var nextCommentIndex = 0
 
@@ -38,6 +39,7 @@ class PrettyPrinter {
         output.clear()
         indentLevel = 0
         currentLine = 1
+        currentColumn = 0
         comments = program.comments.sortedBy { it.line * 10000 + it.column }
         nextCommentIndex = 0
 
@@ -536,6 +538,11 @@ class PrettyPrinter {
             is PerformExpression -> printPerformExpression(expr)
             is EffectCallExpression -> printEffectCallExpression(expr)
             is PlaceholderExpression -> append("_")
+            is ParenthesizedExpression -> {
+                append("(")
+                printExpression(expr.expression)
+                append(")")
+            }
             is StateMachineExpression -> {
                 // State machines are compiler-generated, should not appear in user code
                 append("<state-machine>")
@@ -729,6 +736,7 @@ class PrettyPrinter {
     }
 
     private fun printLambdaExpression(expr: LambdaExpression) {
+        val startColumn = currentColumn
         printLambdaParameters(expr.parameters)
 
         if (expr.abilityConstraints.isNotEmpty()) {
@@ -751,8 +759,35 @@ class PrettyPrinter {
             printTypeAnnotation(it)
         }
 
-        append(" -> ")
-        printExpression(expr.body)
+        // Estimate if the body would fit on this line
+        val estimatedBodyWidth = estimateExprWidth(expr.body)
+        val wouldExceedLine = currentColumn + 4 + estimatedBodyWidth > config.MAX_LINE_LENGTH
+
+        if (wouldExceedLine && !isSimpleExpression(expr.body)) {
+            // Break after -> and indent body
+            append(" ->")
+            newLine()
+            indent {
+                printIndent()
+                printExpression(expr.body)
+            }
+        } else {
+            append(" -> ")
+            printExpression(expr.body)
+        }
+    }
+
+    private fun isSimpleExpression(expr: Expression): Boolean {
+        return when (expr) {
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral,
+            is NatLiteral, is FractionLiteral, is Identifier, is PlaceholderExpression -> true
+            is VariantConstruction -> {
+                val value = expr.value
+                value == null || isSimpleExpression(value)
+            }
+            is MemberAccess -> isSimpleExpression(expr.receiver)
+            else -> false
+        }
     }
 
     private fun printLambdaParameters(params: LambdaParameters) {
@@ -1243,18 +1278,28 @@ class PrettyPrinter {
 
     private fun append(s: String) {
         output.append(s)
+        // Track column - count from last newline or add to current
+        val lastNewline = s.lastIndexOf('\n')
+        if (lastNewline >= 0) {
+            currentColumn = s.length - lastNewline - 1
+        } else {
+            currentColumn += s.length
+        }
     }
 
     private fun newLine() {
         printTrailingComment()
         output.append("\n")
         currentLine++
+        currentColumn = 0
     }
 
     private fun printIndent() {
         repeat(indentLevel) {
             output.append(config.INDENT_CHAR)
         }
+        // Each tab counts as TAB_WIDTH for column tracking
+        currentColumn = indentLevel * config.TAB_WIDTH
     }
 
     private inline fun indent(block: () -> Unit) {

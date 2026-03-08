@@ -781,4 +781,84 @@ class FormatterTest {
         val second = formatter.format(first)
         assertEquals(first, second)
     }
+
+    @Test
+    fun `format long lambda breaks body to new line`() {
+        val input = "let very_long_function_name_that_is_way_too_long = {some_parameter_with_a_long_name, another_very_long_parameter_name, yet_another_parameter} -> some_parameter_with_a_long_name + another_very_long_parameter_name"
+        val output = formatter.format(input)
+        // Should break the body to a new line due to length
+        assertTrue(output.contains("->\n"), "Should break after -> for long lambda")
+    }
+
+    @Test
+    fun `format short lambda stays on single line`() {
+        val input = "let add = {x, y} -> x + y"
+        val output = formatter.format(input)
+        assertEquals("let add = {x, y} -> x + y\n", output)
+    }
+
+    @Test
+    fun `formatter is idempotent for long lambda`() {
+        val input = "let very_long_function_name_that_is_way_too_long = {some_parameter_with_a_long_name, another_very_long_parameter_name, yet_another_parameter} -> some_parameter_with_a_long_name + another_very_long_parameter_name"
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `format long binary expression`() {
+        // Long chain of binary operations - these are currently formatted on one line
+        // since breaking them mid-expression can be tricky
+        val input = "let result = a + b + c + d + e + f + g"
+        val output = formatter.format(input)
+        assertEquals("let result = a + b + c + d + e + f + g\n", output)
+    }
+
+    @Test
+    fun `format very long binary expression preserves correctness`() {
+        val input = "let result = very_long_variable_name_one + very_long_variable_name_two + very_long_variable_name_three"
+        val output = formatter.format(input)
+        // Should contain the expression even if long
+        assertTrue(output.contains("very_long_variable_name_one + very_long_variable_name_two"))
+    }
+
+    // =========================================================================
+    // PARENTHESES - ALWAYS PRESERVED
+    // =========================================================================
+
+    @Test
+    fun `format preserves parentheses for precedence`() {
+        val input = "let x = (a + b) * c"
+        val output = formatter.format(input)
+        assertEquals("let x = (a + b) * c\n", output)
+    }
+
+    @Test
+    fun `format preserves parentheses on right side`() {
+        val input = "let x = a * (b + c)"
+        val output = formatter.format(input)
+        assertEquals("let x = a * (b + c)\n", output)
+    }
+
+    @Test
+    fun `format preserves all parentheses even when not strictly needed`() {
+        // We preserve what user wrote - don't try to be clever
+        val input = "let x = (a * b) + c"
+        val output = formatter.format(input)
+        assertEquals("let x = (a * b) + c\n", output)
+    }
+
+    @Test
+    fun `format preserves redundant parentheses`() {
+        val input = "let x = (a + b) + c"
+        val output = formatter.format(input)
+        assertEquals("let x = (a + b) + c\n", output)
+    }
+
+    @Test
+    fun `format preserves nested parentheses`() {
+        val input = "let x = ((a + b))"
+        val output = formatter.format(input)
+        assertEquals("let x = ((a + b))\n", output)
+    }
 }

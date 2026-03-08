@@ -79,6 +79,9 @@ class ExpressionConstraintGenerator {
             is Identifier -> generateIdentifier(expr, context)
             is PlaceholderExpression -> generatePlaceholder(expr, context)
 
+            // Parenthesized expression - just delegate to inner
+            is ParenthesizedExpression -> generate(expr.expression, context)
+
             // Arrays
             is ArrayAccess -> generateArrayAccess(expr, context)
 

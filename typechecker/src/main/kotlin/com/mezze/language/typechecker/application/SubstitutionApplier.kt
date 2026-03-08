@@ -582,6 +582,12 @@ class SubstitutionApplier(
             is Identifier -> applyToIdentifier(expr)
             is PlaceholderExpression -> applyToPlaceholder(expr)
 
+            // Parenthesized
+            is ParenthesizedExpression -> expr.copy(
+                expression = applyToExpression(expr.expression),
+                inferredType = expr.inferredType?.let { substitution.apply(it) }
+            )
+
             // Arrays
             is ArrayAccess -> applyToArrayAccess(expr)
 

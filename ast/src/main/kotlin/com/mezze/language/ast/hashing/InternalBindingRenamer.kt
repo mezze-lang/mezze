@@ -96,6 +96,10 @@ class InternalBindingRenamer {
 
         is PlaceholderExpression -> expr
 
+        is ParenthesizedExpression -> expr.copy(
+            expression = renameExpr(expr.expression)
+        )
+
         // Arrays
         is ArrayLiteral -> expr.copy(
             elements = expr.elements.map { renameArrayElement(it) }

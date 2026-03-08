@@ -372,6 +372,10 @@ internal fun desugarExpression(expr: Expression): Expression {
                 expr
             }
         }
+        // Parenthesized - recurse into inner
+        is ParenthesizedExpression -> expr.copy(
+            expression = desugarExpression(expr.expression)
+        )
         // Literals and simple expressions (no desugaring needed)
         is IntLiteral -> expr
         is NatLiteral -> expr
