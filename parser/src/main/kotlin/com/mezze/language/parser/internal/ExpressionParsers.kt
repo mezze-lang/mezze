@@ -520,24 +520,24 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<RecordLiteralEntry>
         }
     }
 
-// ===== ARRAY LITERAL =====
+// ===== SEQ LITERAL =====
 
 internal val MezzeParser.arrayLiteral: Parser<Expression>
     get() = { stream ->
         // Parse: [element1, element2, ...]
         // Supports spread only at the start: [...xs, a, b, c]
         // NOT allowed: [a, ...xs] or [a, ...xs, b]
-        val arrayLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture [ token location
+        val seqLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture [ token location
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbracket.remaining)
 
-                // Check for empty array []
+                // Check for empty seq []
                 val rbracket = tok(TokenType.RBRACKET)(stream1)
                 if (rbracket is ParseResult.Success) {
                     ParseResult.Success(
-                        SeqLiteral(emptyList<SeqElement>(), sourceLocation = arrayLocation),
+                        SeqLiteral(emptyList<SeqElement>(), sourceLocation = seqLocation),
                         rbracket.remaining
                     )
                 } else {
@@ -550,19 +550,19 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
                     when (elements) {
                         is ParseResult.Success -> {
                             // Validate spread position: spreads must come before regular elements
-                            validateArraySpreadPosition(elements.value, arrayLocation)
+                            validateSeqSpreadPosition(elements.value, seqLocation)
 
                             val stream2 = skipNewlines(elements.remaining)
                             val rbracket2 = tok(TokenType.RBRACKET)(stream2)
 
                             when (rbracket2) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    SeqLiteral(elements.value, sourceLocation = arrayLocation),
+                                    SeqLiteral(elements.value, sourceLocation = seqLocation),
                                     rbracket2.remaining
                                 )
                                 is ParseResult.Failure -> {
                                     val token = stream2.current()
-                                    stream2.failure("Expected ',' between array elements or ']' to close array, but got ${tokenGotDescription(token)}")
+                                    stream2.failure("Expected ',' between seq elements or ']' to close seq, but got ${tokenGotDescription(token)}")
                                 }
                             }
                         }
@@ -575,11 +575,11 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
     }
 
 /**
- * Validate that array spread elements only appear at the beginning.
+ * Validate that seq spread elements only appear at the beginning.
  * Valid: [...xs, a, b, c] or [...xs]
  * Invalid: [a, ...xs] or [a, ...xs, b]
  */
-private fun validateArraySpreadPosition(elements: List<SeqElement>, location: SourceLocation?) {
+private fun validateSeqSpreadPosition(elements: List<SeqElement>, location: SourceLocation?) {
     var seenRegular = false
     for (element in elements) {
         when (element) {
@@ -587,7 +587,7 @@ private fun validateArraySpreadPosition(elements: List<SeqElement>, location: So
             is SeqSpreadElement -> {
                 if (seenRegular) {
                     throw ParseException(
-                        "Array spread must come before regular elements. Use [...arr, elem1, elem2] syntax.",
+                        "Seq spread must come before regular elements. Use [...seq, elem1, elem2] syntax.",
                         position = 0,
                         line = location?.line ?: 0,
                         column = location?.column ?: 0

@@ -36,7 +36,7 @@ class CodecGenerator {
      * - Primitives (Int, Float, String, Bool, Nat, Frac, Char)
      * - Records with all serializable fields
      * - Variants with all serializable payloads
-     * - Collections (List, Array, Set, Map) with serializable elements
+     * - Collections (List, Seq, Set, Map) with serializable elements
      * - Option with serializable inner type
      *
      * Returns false for:
@@ -123,7 +123,7 @@ class CodecGenerator {
                 "|$sortedCtors|"
             }
             is MezzeType.ListType -> "List[${normalizeType(type.elementType)}]"
-            is MezzeType.SeqType -> "Array[${normalizeType(type.elementType)}]"
+            is MezzeType.SeqType -> "Seq[${normalizeType(type.elementType)}]"
             is MezzeType.SetType -> "Set[${normalizeType(type.elementType)}]"
             is MezzeType.SortedSetType -> "SortedSet[${normalizeType(type.elementType)}]"
             is MezzeType.MapType -> "Map[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
@@ -347,7 +347,7 @@ class CodecGenerator {
         )
     }
 
-    /** Create an array literal from expressions */
+    /** Create a seq literal from expressions */
     private fun array(elements: List<Expression>): SeqLiteral {
         return SeqLiteral(elements = elements.map { SeqRegularElement(it) })
     }
@@ -444,9 +444,9 @@ class CodecGenerator {
         return id("StreamDecodeFormat")
     }
 
-    /** Call append_path using native array operations directly */
+    /** Call append_path using native seq operations directly */
     private fun appendPath(pathExpr: Expression, fieldName: String): Expression {
-        // Use native arraylist functions since paths are now Array String
+        // Use native seq functions since paths are now Seq String
         // Inline: __native_seq_add {xs = path, x = field}
         return call(
             id("__native_seq_add"),
@@ -473,9 +473,9 @@ class CodecGenerator {
         )
     }
 
-    /** Call append_index using native array operations directly */
+    /** Call append_index using native seq operations directly */
     private fun appendIndex(pathExpr: Expression, indexExpr: Expression): Expression {
-        // Use native arraylist functions since paths are now Array String
+        // Use native seq functions since paths are now Seq String
         // Inline: __native_seq_add {xs = path, x = __native_int_to_string {n = index}}
         return call(
             id("__native_seq_add"),
@@ -561,7 +561,7 @@ class CodecGenerator {
         // Final expression: encode_record call
         // Field names are transformed via EncodeFormat.transform_field (e.g., camelCase -> snake_case)
         // NOTE: Entry type uses "key" and "value" fields (not "val")
-        // NOTE: JObject.fields is now Array, so we use array literals directly
+        // NOTE: JObject.fields is now Seq, so we use seq literals directly
         var resultExpr: Expression = call(
             member(encodeFormatImpl(formatType), "encode_record"),
             record(
@@ -962,19 +962,19 @@ class CodecGenerator {
     }
 
     /**
-     * Generate encode for Array - convert to List first using native function.
+     * Generate encode for Seq - convert to List first using native function.
      */
-    private fun generateArrayEncode(formatType: MezzeType, arrayType: MezzeType.SeqType): ImplAbilityDeclaration {
+    private fun generateArrayEncode(formatType: MezzeType, seqType: MezzeType.SeqType): ImplAbilityDeclaration {
         // Use __native_seq_to_list to convert seq to list
         val toListCall = call(id("__native_seq_to_list"), record("xs" to id("val")))
 
         // Create list type for encoding
-        val listType = MezzeType.ListType(arrayType.elementType)
+        val listType = MezzeType.ListType(seqType.elementType)
 
         // Generate direct encode call for the list
-        val body = generateDirectEncodeCall(formatType, listType, toListCall, "__array_as_list")
+        val body = generateDirectEncodeCall(formatType, listType, toListCall, "__seq_as_list")
 
-        return createEncodeImpl(formatType, arrayType, body)
+        return createEncodeImpl(formatType, seqType, body)
     }
 
     /**
@@ -1720,22 +1720,22 @@ class CodecGenerator {
     }
 
     /**
-     * Generate decode for Array - decode as List then convert.
+     * Generate decode for Seq - decode as List then convert.
      */
-    private fun generateArrayDecode(formatType: MezzeType, arrayType: MezzeType.SeqType): ImplAbilityDeclaration {
-        // Decode as List[ElementType] first, then convert to Array
-        val listType = MezzeType.ListType(arrayType.elementType)
+    private fun generateArrayDecode(formatType: MezzeType, seqType: MezzeType.SeqType): ImplAbilityDeclaration {
+        // Decode as List[ElementType] first, then convert to Seq
+        val listType = MezzeType.ListType(seqType.elementType)
 
         val body = match(
             // Use typed ability call for list decoding
             typedDecodeCall(listType, id("val")),
             matchCase(
                 okPat("decoded_list"),
-                ok(call(member(id("array"), "from_list"), record("list" to id("decoded_list"))))
+                ok(call(member(id("seq"), "from_list"), record("list" to id("decoded_list"))))
             ),
             matchCase(errPat("e"), err(id("e")))
         )
-        return createDecodeImpl(formatType, arrayType, body)
+        return createDecodeImpl(formatType, seqType, body)
     }
 
     /**
@@ -2056,7 +2056,7 @@ class CodecGenerator {
      * Generates single `encode` method that takes config parameter.
      */
     private fun createEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
-        // Wrap body in a do block that creates an empty path (Array String)
+        // Wrap body in a do block that creates an empty path (Seq String)
         // config is a parameter from the caller
         val encodeBody = doWithLet("path", array(emptyList()), body)
 
@@ -2079,7 +2079,7 @@ class CodecGenerator {
      * Generates single `decode` method that takes config parameter.
      */
     private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
-        // Wrap body in a do block that creates an empty path (Array String)
+        // Wrap body in a do block that creates an empty path (Seq String)
         // config is a parameter from the caller
         val decodeBody = doWithLet("path", array(emptyList()), body)
 
