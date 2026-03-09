@@ -55,7 +55,8 @@ data class RecordTypeAnnotation(
 
 @Serializable
 data class VariantTypeAnnotation(
-    val constructors: List<VariantTypeConstructor>
+    val constructors: List<VariantTypeConstructor>,
+    val isOpen: Boolean = false  // true for | A, B, ... | syntax
 ) : TypeAnnotation
 
 @Serializable
@@ -229,7 +230,9 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
             val constructorTypes = annotation.constructors.associate { constructor ->
                 constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
             }
-            MezzeType.VariantType(constructorTypes)
+            // If isOpen is true (| A, B, ... | syntax), create open variant with fresh row variable
+            val rowVar = if (annotation.isOpen) RowVar.fresh() else null
+            MezzeType.VariantType(constructorTypes, rowVar)
         }
         is TypeApplicationAnnotation -> {
             // For parameterized types like Option, Result, List, and user-defined generic types

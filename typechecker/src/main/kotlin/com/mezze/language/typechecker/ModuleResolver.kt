@@ -336,6 +336,56 @@ class ModuleResolver(
         }
 
         /**
+         * Look up a type declaration by name from all cached modules.
+         *
+         * This is used during unification when we need to expand a TypeApplication
+         * (like `LogLevel`) that references a type from an imported module, even if
+         * the type itself wasn't explicitly imported.
+         *
+         * @param typeName The simple name of the type to look up (e.g., "LogLevel")
+         * @return The TypeDeclaration if found in any cached module, null otherwise
+         */
+        @JvmStatic
+        fun lookupTypeDeclaration(typeName: String): TypeDeclaration? {
+            synchronized(cacheLock) {
+                for ((_, module) in moduleCache) {
+                    val typeDecl = module.index.typeDeclarations[typeName]
+                    if (typeDecl != null) {
+                        return typeDecl
+                    }
+                }
+                return null
+            }
+        }
+
+        /**
+         * Look up a type declaration that contains the given constructor from all cached modules.
+         *
+         * This is used during constraint solving when we encounter a constructor (like `Success`)
+         * and need to find its declaring type (like `MyResult`) to get the full variant type.
+         *
+         * @param constructorName The constructor name to look up (e.g., "Success", "Info")
+         * @return The TypeDeclaration containing that constructor, or null if not found
+         */
+        @JvmStatic
+        fun lookupTypeDeclarationForConstructor(constructorName: String): TypeDeclaration? {
+            synchronized(cacheLock) {
+                for ((_, module) in moduleCache) {
+                    for ((_, typeDecl) in module.index.typeDeclarations) {
+                        val definition = typeDecl.definition
+                        if (definition is VariantDefinition) {
+                            val hasConstructor = definition.constructors.any { it.name == constructorName }
+                            if (hasConstructor) {
+                                return typeDecl
+                            }
+                        }
+                    }
+                }
+                return null
+            }
+        }
+
+        /**
          * Factory method to create a new ModuleResolver instance.
          */
         @JvmStatic

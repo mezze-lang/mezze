@@ -17,7 +17,14 @@ class DebugTest {
     fun `format variant type`() {
         val input = "type Option 'a = | Some { value: 'a }, None |"
         val output = formatter.format(input)
-        assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
+        assertEquals("type Option 'a = | Some { value: 'a }, None |\n", output)
+    }
+
+    @Test
+    fun `format extensible variant type`() {
+        val input = "type LogLevel = | Error, Warn, Info, ... |"
+        val output = formatter.format(input)
+        assertEquals("type LogLevel = | Error, Warn, Info, ... |\n", output)
     }
 
     @Test
@@ -82,7 +89,7 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         // Multi-line with trailing comma (like records)
-        val expected = """impl Log ConsoleLogger where {
+        val expected = """impl Log for ConsoleLogger where {
 	info = { msg } -> {},
 	warn = { msg } -> {},
 }
@@ -98,7 +105,7 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         // Multi-line with trailing comma (like records)
-        val expected = """impl State Counter having 'state = Int where {
+        val expected = """impl State for Counter having 'state = Int where {
 	get = {} -> 0,
 	put = { value } -> {},
 }
@@ -113,7 +120,7 @@ class DebugTest {
     random = {} -> 42
 }"""
         val output = formatter.format(input)
-        val expected = """impl Random SeededRandom { seed: Int } where { random = {} -> 42 }
+        val expected = """impl Random for SeededRandom { seed: Int } where { random = {} -> 42 }
 """
         assertEquals(expected, output)
     }

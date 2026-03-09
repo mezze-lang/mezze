@@ -233,21 +233,29 @@ class PrettyPrinter {
     }
 
     private fun printVariantDefinition(def: VariantDefinition) {
+        // Mezze variant syntax: | Constructor1, Constructor2 { data: Type }, ... |
         // For variant definitions, we print each constructor on its own line
         // unless it's very simple
         val simple = def.constructors.size <= config.VARIANT_SINGLE_LINE_MAX_CONSTRUCTORS &&
                 def.constructors.all { it.dataType == null || isSimpleType(it.dataType) }
 
         if (simple && def.constructors.isNotEmpty()) {
+            // Single line: | Constructor1, Constructor2 |
+            append("| ")
             def.constructors.forEachIndexed { index, constructor ->
-                if (index > 0) append(" | ")
+                if (index > 0) append(", ")
                 append(constructor.name)
                 constructor.dataType?.let {
                     append(" ")
                     printTypeAnnotation(it)
                 }
             }
+            if (def.isOpen) {
+                append(", ...")
+            }
+            append(" |")
         } else {
+            // Multi-line format
             newLine()
             indent {
                 def.constructors.forEachIndexed { index, constructor ->
@@ -258,6 +266,11 @@ class PrettyPrinter {
                         append(" ")
                         printTypeAnnotation(it)
                     }
+                    newLine()
+                }
+                if (def.isOpen) {
+                    printIndent()
+                    append("| ...")
                     newLine()
                 }
             }
@@ -355,7 +368,7 @@ class PrettyPrinter {
     private fun printImplDeclaration(decl: ImplDeclaration) {
         append("impl ")
         append(decl.effectName)
-        append(" ")
+        append(" for ")
         append(decl.performerName)
 
         if (decl.performerParams.isNotEmpty()) {
@@ -1218,14 +1231,20 @@ class PrettyPrinter {
     }
 
     private fun printVariantTypeAnnotation(type: VariantTypeAnnotation) {
+        // Mezze variant syntax: | Constructor1, Constructor2 { data: Type } |
+        append("| ")
         type.constructors.forEachIndexed { index, constructor ->
-            if (index > 0) append(" | ")
+            if (index > 0) append(", ")
             append(constructor.name)
             constructor.dataType?.let {
                 append(" ")
                 printTypeAnnotation(it)
             }
         }
+        if (type.isOpen) {
+            append(", ...")
+        }
+        append(" |")
     }
 
     private fun printFunctionTypeAnnotation(type: FunctionTypeAnnotation) {

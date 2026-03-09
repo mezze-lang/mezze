@@ -75,8 +75,10 @@ class UndefinedIdentifierTest {
 
     @Test
     fun `test variant constructor does not throw error`() {
+        // Using MyVariant instead of Some because Some is a built-in Option constructor
+        // that expects a payload
         val source = """
-            let value = Some
+            let value = MyVariant
 
             value
         """.trimIndent()

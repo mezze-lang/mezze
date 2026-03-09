@@ -680,11 +680,19 @@ internal val MezzeParser.variantTypeAnnotationParser: Parser<TypeAnnotation>
                 if (error != null) {
                     error
                 } else {
+                    // Check for ellipsis (...) to indicate open variant
+                    val isOpen = if (currentStream.current()?.type == TokenType.ELLIPSIS) {
+                        currentStream = skipNewlines(currentStream.advance())
+                        true
+                    } else {
+                        false
+                    }
+
                     // Expect closing pipe
                     val pipe2 = tok(TokenType.PIPE)(currentStream)
                     when (pipe2) {
                         is ParseResult.Success -> ParseResult.Success(
-                            VariantTypeAnnotation(constructors),
+                            VariantTypeAnnotation(constructors, isOpen),
                             pipe2.remaining
                         )
                         is ParseResult.Failure -> pipe2

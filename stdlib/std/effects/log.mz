@@ -15,7 +15,7 @@
 # Log Level - Open variant type for extensibility
 # =============================================================================
 
-pub type LogLevel = | Error, Warn, Info, Debug, Trace, ... |
+pub type LogLevel = | Error, Warn, Info, Debug, Trace, Print, ... |
 
 # =============================================================================
 # Log Effect - Single operation with open variant levels

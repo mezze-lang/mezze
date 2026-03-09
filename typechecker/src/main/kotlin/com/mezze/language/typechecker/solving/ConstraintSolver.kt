@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.constraints.ErrorContext
 import com.mezze.language.typechecker.printing.TypeDiffPrinter
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
+import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 
 /**
@@ -540,10 +541,11 @@ class ConstraintSolver(
                     is ConstraintResult.Failure -> {
                         // Check if constraint might succeed later
                         val constraintType = appliedConstraint.variantType
-                        if (constraintType is MezzeType.VarType) {
+                        // Terminal errors (e.g., built-in constructors with wrong payload) should not be deferred
+                        if (constraintType is MezzeType.VarType && !result.terminal) {
                             // Still a type variable - might be resolved later
                         } else {
-                            // Concrete type - this is a real error
+                            // Concrete type OR terminal error - this is a real error
                             errors.add(
                                 ConstraintError(
                                     message = result.message,
@@ -869,7 +871,11 @@ class ConstraintSolver(
             val warnings: List<String> = emptyList()
         ) : ConstraintResult()
 
-        data class Failure(val message: String) : ConstraintResult()
+        data class Failure(
+            val message: String,
+            /** If true, this error should not be deferred even for VarType constraints */
+            val terminal: Boolean = false
+        ) : ConstraintResult()
 
         /** Constraint couldn't be solved yet - put back on worklist */
         data class Deferred(val reason: String) : ConstraintResult()
@@ -2947,116 +2953,109 @@ class ConstraintSolver(
             //
             // IMPORTANT: Only use built-in type resolution when:
             // 1. The constructor has a payload that matches the expected pattern
-            // 2. There is NO user-defined type that contains this constructor
-            //    (i.e., the constructor belongs to the truly built-in Result/Option)
+            // EXPRESSION CONTEXT: Check if constructor belongs to a declared type
+            // If so, validate payload requirements and use the declared type
             if (!isPatternContext) {
-                // First check if there's a user-defined type with this constructor
-                // If so, use the normal open variant logic
+                // Look up any type declaration that contains this constructor
                 val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
 
-                // A type is "user-defined" if it exists AND is not one of the built-in types
-                // (Result, Option). Built-in types are registered in typeDeclarations but
-                // should still use the built-in resolution logic.
-                val builtInTypeNames = setOf("Result", "Option")
-                val isUserDefinedConstructor = typeForConstructor != null &&
-                    typeForConstructor.name !in builtInTypeNames
+                if (typeForConstructor != null) {
+                    val variantDef = typeForConstructor.definition as VariantDefinition
+                    val constructorDef = variantDef.constructors.find { it.name == constructorName }
 
-                // Only apply built-in resolution if there's no user-defined type
-                if (!isUserDefinedConstructor) {
-                    // Check if this is a built-in constructor with the expected payload structure.
-                    // Ok requires {val}, Err requires {error}, Some requires {val}, None has no payload.
-                    // hasFieldNamed returns true for VarType (assumed, verified during unification).
-                    val shouldUseBuiltInType = when (constructorName) {
-                        "Ok" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "val")
-                        "Err" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "error")
-                        "Some" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "val")
-                        "None" -> true  // None never has a payload
-                        else -> false
-                    }
+                    if (constructorDef != null) {
+                        val declaredPayload = constructorDef.dataType
 
-                    if (shouldUseBuiltInType) {
-                        // Use the built-in Result/Option type
-                        // These are registered in ContextBuilder as implicit type declarations
-                        val builtInTypeName = when (constructorName) {
-                            "Ok", "Err" -> "Result"
-                            "Some", "None" -> "Option"
-                            else -> null
+                        // GENERALIZED PAYLOAD VALIDATION:
+                        // If the declared constructor has a payload, usage must have a payload
+                        // If the declared constructor has no payload, usage must not have a payload
+                        if (declaredPayload != null && expectedPayloadType == null) {
+                            // Constructor requires payload but none provided
+                            // Extract field names from the declared payload for a helpful error message
+                            val fieldNames = when (declaredPayload) {
+                                is RecordTypeAnnotation -> declaredPayload.entries.map { it.name }
+                                else -> listOf("...")
+                            }
+                            val fieldList = fieldNames.joinToString(", ")
+                            return ConstraintResult.Failure(
+                                "Constructor '$constructorName' from type '${typeForConstructor.name}' requires a payload. " +
+                                "Use '$constructorName { $fieldList }' instead of bare '$constructorName'.",
+                                terminal = true
+                            )
                         }
 
-                        if (builtInTypeName != null) {
-                            // Create the built-in variant type with fresh type parameters
-                            val resultVariant = when (builtInTypeName) {
-                                "Result" -> {
-                                    val valTypeVar = MezzeType.VarType(TypeVar.fresh())
-                                    val errTypeVar = MezzeType.VarType(TypeVar.fresh())
-                                    MezzeType.VariantType(
-                                        constructors = mapOf(
-                                            "Ok" to MezzeType.RecordType(mapOf("val" to valTypeVar)),
-                                            "Err" to MezzeType.RecordType(mapOf("error" to errTypeVar))
-                                        ),
-                                        rowVar = null,  // Closed
-                                        typeName = "Result"
-                                    )
-                                }
-                                "Option" -> {
-                                    // For built-in Option, we need to return a TypeApplication
-                                    // to match the type annotation form (Option Int)
-                                    val valTypeVar = MezzeType.VarType(TypeVar.fresh())
+                        if (declaredPayload == null && expectedPayloadType != null) {
+                            // Constructor has no payload but one was provided
+                            return ConstraintResult.Failure(
+                                "Constructor '$constructorName' from type '${typeForConstructor.name}' does not take a payload. " +
+                                "Use '$constructorName' without '{ ... }'.",
+                                terminal = true
+                            )
+                        }
 
-                                    // If there's an expected payload, extract the val type from it
-                                    val innerType = if (expectedPayloadType != null && expectedPayloadType is MezzeType.RecordType) {
-                                        expectedPayloadType.fields["val"] ?: valTypeVar
-                                    } else {
-                                        valTypeVar
-                                    }
-
-                                    // Return TypeApplication to match Option Int form
-                                    val optionType = MezzeType.TypeApplication("Option", listOf(innerType))
-                                    return ConstraintResult.Success(
-                                        Substitution.single(variantType.variable, optionType)
-                                    )
-                                }
-                                else -> null
+                        // Payload presence matches - now check if payload structure matches (if applicable)
+                        // For constructors with payload, verify the fields match
+                        if (declaredPayload != null && expectedPayloadType != null) {
+                            // Convert declared payload to MezzeType for field comparison
+                            val typeParamMapping = typeForConstructor.typeParams.associate { param ->
+                                param to MezzeType.VarType(TypeVar.fresh())
                             }
+                            val declaredPayloadType = convertTypeAnnotation(declaredPayload, typeParamMapping)
 
-                            if (resultVariant != null) {
-                                var resultSubst = Substitution.single(variantType.variable, resultVariant)
-
-                                // Validate payload presence/absence and unify types
-                                val declaredPayload = resultVariant.constructors[constructorName]
-
-                                if (expectedPayloadType != null && declaredPayload != null) {
-                                    // Both pattern and constructor have payload - unify them
-                                    val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
-                                    when (unifyResult) {
-                                        is UnificationResult.Success -> {
-                                            resultSubst = resultSubst.compose(unifyResult.substitution)
-                                        }
-                                        is UnificationResult.Failure -> {
-                                            return ConstraintResult.Failure(
-                                                "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
-                                            )
-                                        }
-                                    }
-                                } else if (expectedPayloadType == null && declaredPayload != null) {
-                                    // Pattern has no destructuring but constructor has payload - ERROR!
+                            // Check if expected payload has the required fields
+                            if (declaredPayloadType is MezzeType.RecordType && expectedPayloadType is MezzeType.RecordType) {
+                                val missingFields = declaredPayloadType.fields.keys - expectedPayloadType.fields.keys
+                                if (missingFields.isNotEmpty()) {
                                     return ConstraintResult.Failure(
-                                        "Constructor '$constructorName' has a payload that must be destructured. " +
-                                        "Use '$constructorName { ... }' to match the payload."
-                                    )
-                                } else if (expectedPayloadType != null && declaredPayload == null) {
-                                    // Pattern tries to destructure but constructor has no payload - ERROR!
-                                    return ConstraintResult.Failure(
-                                        "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
-                                        "Use '$constructorName' without '{ ... }'."
+                                        "Constructor '$constructorName' payload is missing required fields: ${missingFields.joinToString(", ")}",
+                                        terminal = true
                                     )
                                 }
-
-                                return ConstraintResult.Success(resultSubst)
                             }
                         }
+
+                        // Create the full declared variant type with all constructors
+                        val typeParamMapping = typeForConstructor.typeParams.associate { param ->
+                            param to MezzeType.VarType(TypeVar.fresh())
+                        }
+
+                        val constructors = variantDef.constructors.associate { ctor ->
+                            val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
+                                convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
+                            }
+                            ctor.name to payloadType
+                        }
+
+                        val declaredVariant = MezzeType.VariantType(
+                            constructors = constructors,
+                            rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+                            typeName = typeForConstructor.name
+                        )
+
+                        var resultSubst = Substitution.single(variantType.variable, declaredVariant)
+
+                        // Unify payload types if present
+                        val declaredCtorPayload = constructors[constructorName]
+                        if (expectedPayloadType != null && declaredCtorPayload != null) {
+                            val unifyResult = unify(expectedPayloadType, declaredCtorPayload, typeDeclarations)
+                            when (unifyResult) {
+                                is UnificationResult.Success -> {
+                                    resultSubst = resultSubst.compose(unifyResult.substitution)
+                                }
+                                is UnificationResult.Failure -> {
+                                    return ConstraintResult.Failure(
+                                        "Constructor '$constructorName' payload type mismatch: ${unifyResult.message}"
+                                    )
+                                }
+                            }
+                        }
+
+                        return ConstraintResult.Success(resultSubst)
                     }
                 }
+
+                // No type declaration found for this constructor - fall through to create open variant
+                // This handles truly anonymous constructors that don't belong to any declared type
             }
 
             // PATTERN CONTEXT: For pattern matching, we still want to allow row polymorphism
@@ -3072,13 +3071,21 @@ class ConstraintSolver(
             // Here, the scrutinee is still a type variable, so we create an open variant.
             // This enables row polymorphism where the variant type is inferred from patterns.
 
-            // BOTH PATTERN AND EXPRESSION CONTEXT: Create an open variant during constraint solving
-            // This is only for constructors that don't belong to any known type declaration
-            // The variant will be closed later based on usage
+            // Create variant with appropriate openness based on context:
+            // - EXPRESSION CONTEXT: Create CLOSED variant (e.g., `Info` -> `| Info |`)
+            //   A bare constructor in an expression is a specific value, not a row-polymorphic type
+            // - PATTERN CONTEXT: Create open variant for row polymorphism
+            //   Patterns may need to unify with other patterns via row variables
+
+            // BOTH PATTERN AND EXPRESSION CONTEXT: Create an open variant
+            // This allows:
+            // 1. Row polymorphism in patterns
+            // 2. Merging of variants from if-then-else branches (Success | Failure -> MyResult)
+            // 3. The global type lookup in Unification handles expanding type aliases (LogLevel)
             val newRowVar = RowVar.fresh()
             val newVariant = MezzeType.VariantType(
                 constructors = mapOf(constructorName to expectedPayloadType),
-                rowVar = newRowVar  // Open so additional constructors can be added
+                rowVar = newRowVar  // Open for row polymorphism and merging
             )
 
             // PATTERN CONTEXT: Track the row var so it can be closed later

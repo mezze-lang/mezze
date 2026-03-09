@@ -451,9 +451,7 @@ pub let get_content_type: { resp: Response } -> Option String = { resp } ->
 # Get Content-Length header as Int
 pub let get_content_length: { resp: Response } -> Option Int = { resp } ->
     match get_header { resp = resp, name = "content-length" } is
-        Some { val } -> match int::from_string { s = val } is
-            Ok { val = n } -> Some { val = n }
-            Err { error } -> None
+        Some { val } -> int::from_string { s = val }
         None -> None
 
 # =============================================================================

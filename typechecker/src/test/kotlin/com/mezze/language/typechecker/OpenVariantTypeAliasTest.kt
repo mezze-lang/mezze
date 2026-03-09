@@ -116,6 +116,7 @@ class OpenVariantTypeAliasTest {
 
     @Test
     fun `test closed variant rejects undefined constructor`() {
+        // Yellow is not in Color = | Red, Blue, Green |, so this should fail
         assertTypeCheckFails(
             """
             type Color = |Red, Blue, Green |
@@ -127,6 +128,7 @@ class OpenVariantTypeAliasTest {
 
     @Test
     fun `test closed variant rejects constructor from different variant`() {
+        // Yellow is in Animal but not in Color, so this should fail
         assertTypeCheckFails(
             """
             type Color = |Red, Blue, Green |
@@ -179,6 +181,7 @@ class OpenVariantTypeAliasTest {
 
     @Test
     fun `test closed variant with payload rejects wrong constructor`() {
+        // Dog from Animal cannot be assigned to Shape (different closed variant types)
         assertTypeCheckFails(
             """
             type Shape = |Circle { radius: Int }, Square { side: Int } |
@@ -219,6 +222,7 @@ class OpenVariantTypeAliasTest {
 
     @Test
     fun `test closed variant with nested records rejects wrong constructor`() {
+        // Red from Color cannot be assigned to Shape (different closed variant types)
         assertTypeCheckFails(
             """
             type Shape = |Circle { center: { x: Int, y: Int }, radius: Int } |

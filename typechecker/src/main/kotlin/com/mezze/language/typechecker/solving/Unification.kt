@@ -723,35 +723,46 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     }
 
     // Case 2: One is closed, one is open
-    // The closed variant's constructors must be a SUPERSET of the open variant's
-    // (or equivalently, all of open's constructors must be in closed)
+    // Open variants (with `...`) accept ANY constructor, so a closed variant like `| CustomStatus |`
+    // can always unify with an open variant like `| Active, Inactive, ... |`.
+    //
+    // The key insight: open variants are extensible - they represent "these constructors AND possibly more".
+    // So `| Info |` (closed) is compatible with `| Error, Warn, Info, ... |` (open) because Info is
+    // implicitly included in the "..." part even if not explicitly listed.
+    //
+    // HOWEVER: If the closed variant has a typeName (is a declared type like `Color`), then
+    // ALL constructors in the open variant MUST be in the closed variant. Otherwise we'd be
+    // allowing invalid constructors like `Yellow` when the type is `Color = | Red, Green, Blue |`.
     if (var1.rowVar != null || var2.rowVar != null) {
         val (openVar, closedVar) = if (var1.rowVar != null) Pair(var1, var2) else Pair(var2, var1)
-        val openCtors = openVar.constructors.keys
         val closedCtors = closedVar.constructors.keys
+        val openCtors = openVar.constructors.keys
 
-        // Every constructor in the open variant must exist in the closed variant
-        val missingInClosed = openCtors - closedCtors
-        if (missingInClosed.isNotEmpty()) {
-            // Provide helpful suggestions for each missing constructor
-            val suggestions = missingInClosed.map { missing ->
-                val suggestion = StringDistance.suggestDidYouMean(missing, closedCtors.toList())
-                if (suggestion != null) "'$missing' ($suggestion)" else "'$missing'"
+        // CRITICAL: If closed variant has a typeName (is a declared type), check that ALL
+        // constructors in the open variant exist in the closed variant.
+        // This prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`.
+        if (closedVar.typeName != null) {
+            val invalidConstructors = openCtors - closedCtors
+            if (invalidConstructors.isNotEmpty()) {
+                val available = closedCtors.sorted().joinToString(", ")
+                val invalid = invalidConstructors.sorted().joinToString(", ")
+                return UnificationResult.Failure(
+                    message = "Constructor(s) '$invalid' not found in type '${closedVar.typeName}'. " +
+                              "Available constructors: $available",
+                    type1 = var1,
+                    type2 = var2
+                )
             }
-            return UnificationResult.Failure(
-                message = "Variant type does not have constructor(s): ${suggestions.joinToString()}. " +
-                    "Available: ${closedCtors.joinToString()}",
-                type1 = var1,
-                type2 = var2
-            )
         }
 
-        // Unify payload types for shared constructors
+        // Unify payload types for constructors that exist in BOTH variants
+        // (constructors only in the closed variant are implicitly accepted by the open variant)
         var substitution = Substitution.empty
-        for (constructorName in openCtors) {
+        for (constructorName in closedCtors) {
             val dataType1 = var1.constructors[constructorName]
             val dataType2 = var2.constructors[constructorName]
 
+            // Only unify if constructor exists in both (has declared payload type in open variant)
             if (dataType1 != null && dataType2 != null) {
                 val appliedType1 = substitution.apply(dataType1)
                 val appliedType2 = substitution.apply(dataType2)
@@ -772,6 +783,8 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
             // This allows constructor references like `Some` (without payload) to unify
             // with the full type `Some { val: 'a }`. The constraint solver handles
             // the payload checking at the use site.
+            //
+            // Also: constructors only in the closed variant are accepted by the open variant's `...`
         }
 
         return UnificationResult.Success(substitution)
@@ -781,8 +794,37 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // This allows match expressions to return different constructors that get unified into
     // a combined variant type: `match x is Red -> Blue | Green -> Yellow` produces `| Blue, Yellow |`
     //
-    // NOTE: This is used during inference. For explicit type annotations with closed variants,
-    // the constraint solver should prevent invalid assignments.
+    // HOWEVER: If BOTH variants have a typeName (are declared types), they must be the SAME type.
+    // This prevents `Animal` from unifying with `Color` even if they happen to share a constructor.
+    if (var1.typeName != null && var2.typeName != null && var1.typeName != var2.typeName) {
+        return UnificationResult.Failure(
+            message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
+            type1 = var1,
+            type2 = var2
+        )
+    }
+
+    // If only one has a typeName (is a declared type), check that ALL constructors from the
+    // anonymous variant exist in the declared type
+    val (declaredVar, anonymousVar) = when {
+        var1.typeName != null && var2.typeName == null -> Pair(var1, var2)
+        var2.typeName != null && var1.typeName == null -> Pair(var2, var1)
+        else -> Pair(null, null)  // Both named (already checked above) or both anonymous
+    }
+
+    if (declaredVar != null && anonymousVar != null) {
+        val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
+        if (invalidConstructors.isNotEmpty()) {
+            val available = declaredVar.constructors.keys.sorted().joinToString(", ")
+            val invalid = invalidConstructors.sorted().joinToString(", ")
+            return UnificationResult.Failure(
+                message = "Constructor(s) '$invalid' not found in type '${declaredVar.typeName}'. " +
+                          "Available constructors: $available",
+                type1 = var1,
+                type2 = var2
+            )
+        }
+    }
 
     val allConstructors = (constructors1 + constructors2).toSet()
 
@@ -1173,8 +1215,10 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
  * @return The expanded variant type, or null if expansion failed
  */
 internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration>): MezzeType.VariantType? {
-    // Look up the type declaration
-    val typeDecl = typeDeclarations[typeApp.constructor] ?: return null
+    // Look up the type declaration - first in local declarations, then in all cached modules
+    val typeDecl = typeDeclarations[typeApp.constructor]
+        ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
+        ?: return null
 
     // Handle both variant definitions and newtype definitions
     // Newtypes are essentially single-constructor variants
@@ -1321,7 +1365,8 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
 
     return MezzeType.VariantType(
         constructors = constructors,
-        rowVar = if (variantDef.isOpen) RowVar.fresh() else null
+        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+        typeName = typeDecl.name  // Preserve the type name for validation
     )
 }
 

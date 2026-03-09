@@ -471,7 +471,7 @@ class FormatterTest {
     fun `format variant type`() {
         val input = "type Option 'a = | Some { value: 'a }, None |"
         val output = formatter.format(input)
-        assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
+        assertEquals("type Option 'a = | Some { value: 'a }, None |\n", output)
     }
 
     @Test
