@@ -65,6 +65,41 @@ object ErrorFormatter {
     }
 
     /**
+     * Format a standalone TypeCheckError exception with full context.
+     *
+     * This overload handles the TypeCheckError exception class (as opposed to
+     * the TypeChecker.TypeCheckError data class).
+     */
+    fun format(
+        error: TypeCheckError,
+        sourceCode: String? = null,
+        colorize: Boolean = false
+    ): String {
+        return buildString {
+            // Header - use errorType for phase info
+            val phase = error.errorType.name.lowercase().replace("_", " ").replaceFirstChar { it.uppercase() }
+            appendLine("❌ Type Error [$phase]")
+            appendLine("━".repeat(50))
+
+            // Location - try sourceLocation first, then expression.sourceLocation
+            val location = error.sourceLocation ?: error.expression?.sourceLocation
+            if (location != null) {
+                val fileInfo = location.file ?: "<input>"
+                appendLine("   --> $fileInfo:${location.line}:${location.column}")
+            }
+
+            // Source code context
+            if (sourceCode != null && location != null) {
+                append(SourceContext.formatCodeSnippet(sourceCode, location))
+            }
+
+            // Error message
+            appendLine()
+            appendLine("Error: ${error.message}")
+        }.trim()
+    }
+
+    /**
      * Format validation error.
      *
      * ValidationErrors already have good messages, but we enhance them with:

@@ -196,7 +196,7 @@ class BuildCommand {
             println("💡 Alternative (with warnings): java -jar ${outputFile.name}")
 
         } catch (e: TypeCheckError) {
-            println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+            println(ErrorFormatter.format(e, source))
             kotlin.system.exitProcess(1)
         } catch (e: Exception) {
             println("❌ Build Error:")

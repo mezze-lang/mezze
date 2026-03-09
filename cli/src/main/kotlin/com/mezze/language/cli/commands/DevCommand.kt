@@ -115,7 +115,7 @@ class DevCommand {
         val typeCheckResult = try {
             typeChecker.typeCheck(ast, currentDir.toPath())
         } catch (e: TypeCheckError) {
-            println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+            println(ErrorFormatter.format(e, source))
             kotlin.system.exitProcess(1)
         }
 

@@ -651,7 +651,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
             println("Parse: ${String.format("%.2f", parseTime)}ms$cacheInfo  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
-        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+        println(ErrorFormatter.format(e, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -856,7 +856,7 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
     } catch (e: TypeCheckError) {
         val appFile = File(currentDir, mezzeToml.readText().substringAfter("path = \"").substringBefore("\""))
         val source = if (appFile.exists()) appFile.readText() else ""
-        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+        println(ErrorFormatter.format(e, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -1146,8 +1146,7 @@ private fun handleExecCommand(args: List<String>) {
 
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
-        val fileName = filePath?.fileName?.toString()
-        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+        println(ErrorFormatter.format(e, source))
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -1309,7 +1308,7 @@ private fun handleCompileCommand(args: List<String>) {
 
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
-        println(ErrorFormatter.format(e as TypeChecker.TypeCheckError, source))
+        println(ErrorFormatter.format(e, source))
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         println("❌ Compilation Error:")
