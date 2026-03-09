@@ -32,10 +32,6 @@ dependencies {
     implementation("io.vertx:vertx-core:4.5.1")
     implementation("io.vertx:vertx-web-client:4.5.1")
 
-    // Vavr - persistent immutable collections for functional programming
-    // Used for Array (Vector), Map (HashMap), Set (HashSet), SortedMap (TreeMap), SortedSet (TreeSet)
-    implementation("io.vavr:vavr:0.10.4")
-
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":typechecker"))

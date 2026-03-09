@@ -6,19 +6,19 @@ import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
-import io.vavr.collection.HashSet;
 
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Mezze Set backed by Vavr HashSet (HAMT) for O(1) amortized persistent operations.
+ * Mezze Set backed by custom datastructures module for O(1) amortized persistent operations.
  *
- * Vavr HashSet provides:
- * - O(1) amortized add, remove, contains (Hash Array Mapped Trie)
+ * The datastructures MezzeSet provides:
+ * - O(1) amortized add, remove, contains (tiered storage)
  * - Structural sharing for memory efficiency
  * - Immutable semantics with persistent updates
+ * - Specialized storage for primitives (long)
  *
  * All "mutating" operations return new MezzeSet instances with shared structure.
  */
@@ -26,13 +26,13 @@ import java.util.Set;
 public final class MezzeSet implements TruffleObject, Iterable<Object> {
 
     // Singleton empty set
-    private static final MezzeSet EMPTY = new MezzeSet(HashSet.empty());
+    private static final MezzeSet EMPTY = new MezzeSet(com.mezze.datastructures.set.MezzeSet.empty());
 
-    // Vavr HashSet backing store
-    private final HashSet<Object> elements;
+    // Datastructures MezzeSet backing store
+    private final com.mezze.datastructures.set.MezzeSet<Object> delegate;
 
-    private MezzeSet(HashSet<Object> elements) {
-        this.elements = elements;
+    private MezzeSet(com.mezze.datastructures.set.MezzeSet<Object> delegate) {
+        this.delegate = delegate;
     }
 
     // ===== FACTORY METHODS =====
@@ -42,97 +42,112 @@ public final class MezzeSet implements TruffleObject, Iterable<Object> {
     }
 
     public static MezzeSet of(Object element) {
-        return new MezzeSet(HashSet.of(element));
+        return new MezzeSet(com.mezze.datastructures.set.MezzeSet.of(element));
     }
 
     public static MezzeSet of(Object e1, Object e2) {
-        return new MezzeSet(HashSet.of(e1, e2));
+        return new MezzeSet(com.mezze.datastructures.set.MezzeSet.of(e1, e2));
     }
 
     public static MezzeSet of(Object e1, Object e2, Object e3) {
-        return new MezzeSet(HashSet.of(e1, e2, e3));
+        return new MezzeSet(com.mezze.datastructures.set.MezzeSet.of(e1, e2, e3));
     }
 
     @TruffleBoundary
     public static MezzeSet of(Object... elements) {
         if (elements.length == 0) return EMPTY;
-        return new MezzeSet(HashSet.of(elements));
+        return new MezzeSet(com.mezze.datastructures.set.MezzeSet.of(elements));
     }
 
     @TruffleBoundary
     public static MezzeSet fromIterable(Iterable<?> elements) {
-        return new MezzeSet(HashSet.ofAll(elements));
+        com.mezze.datastructures.set.MezzeSet<Object> result = com.mezze.datastructures.set.MezzeSet.empty();
+        for (Object elem : elements) {
+            result = result.add(elem);
+        }
+        return new MezzeSet(result);
     }
 
     @TruffleBoundary
     public static MezzeSet fromJavaSet(Set<?> set) {
-        return new MezzeSet(HashSet.ofAll(set));
+        com.mezze.datastructures.set.MezzeSet<Object> result = com.mezze.datastructures.set.MezzeSet.empty();
+        for (Object elem : set) {
+            result = result.add(elem);
+        }
+        return new MezzeSet(result);
     }
 
     // ===== BASIC OPERATIONS =====
 
     public int size() {
-        return elements.size();
+        return delegate.size();
     }
 
     public boolean isEmpty() {
-        return elements.isEmpty();
+        return delegate.isEmpty();
     }
 
     @TruffleBoundary
     public boolean contains(Object element) {
-        return elements.contains(element);
+        return delegate.contains(element);
     }
 
-    public HashSet<Object> getElements() {
-        return elements;
+    /**
+     * Get the underlying datastructures set for internal use.
+     */
+    public com.mezze.datastructures.set.MezzeSet<Object> getDelegate() {
+        return delegate;
     }
 
     // ===== PERSISTENT UPDATE OPERATIONS =====
 
     @TruffleBoundary
     public MezzeSet add(Object element) {
-        return new MezzeSet(elements.add(element));
+        return new MezzeSet(delegate.add(element));
     }
 
     @TruffleBoundary
     public MezzeSet remove(Object element) {
-        return new MezzeSet(elements.remove(element));
+        return new MezzeSet(delegate.remove(element));
     }
 
     // ===== SET OPERATIONS =====
 
     @TruffleBoundary
     public MezzeSet union(MezzeSet other) {
-        return new MezzeSet(elements.union(other.elements));
+        return new MezzeSet(delegate.union(other.delegate));
     }
 
     @TruffleBoundary
     public MezzeSet intersect(MezzeSet other) {
-        return new MezzeSet(elements.intersect(other.elements));
+        return new MezzeSet(delegate.intersect(other.delegate));
     }
 
     @TruffleBoundary
     public MezzeSet diff(MezzeSet other) {
-        return new MezzeSet(elements.diff(other.elements));
+        return new MezzeSet(delegate.difference(other.delegate));
     }
 
     @TruffleBoundary
     public boolean isSubsetOf(MezzeSet other) {
-        return other.elements.containsAll(elements);
+        return delegate.isSubsetOf(other.delegate);
     }
 
     // ===== CONVERSION =====
 
     @TruffleBoundary
     public Set<Object> toJavaSet() {
-        return elements.toJavaSet();
+        java.util.HashSet<Object> result = new java.util.HashSet<>(delegate.size());
+        for (Object elem : delegate) {
+            result.add(elem);
+        }
+        return result;
     }
 
     @Override
     @TruffleBoundary
     public Iterator<Object> iterator() {
-        return elements.iterator();
+        return delegate.iterator();
     }
 
     // ===== INTEROP LIBRARY =====
@@ -145,7 +160,7 @@ public final class MezzeSet implements TruffleObject, Iterable<Object> {
     @ExportMessage
     @TruffleBoundary
     Object getIterator() {
-        return new SetIterator(elements.iterator());
+        return new SetIterator(delegate.iterator());
     }
 
     // ===== OBJECT METHODS =====
@@ -155,13 +170,13 @@ public final class MezzeSet implements TruffleObject, Iterable<Object> {
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeSet other)) return false;
-        return Objects.equals(elements, other.elements);
+        return Objects.equals(delegate, other.delegate);
     }
 
     @Override
     @TruffleBoundary
     public int hashCode() {
-        return elements.hashCode();
+        return delegate.hashCode();
     }
 
     @Override
@@ -169,7 +184,7 @@ public final class MezzeSet implements TruffleObject, Iterable<Object> {
     public String toString() {
         StringBuilder sb = new StringBuilder("#{");
         boolean first = true;
-        for (Object elem : elements) {
+        for (Object elem : delegate) {
             if (!first) sb.append(", ");
             first = false;
             sb.append(elem);

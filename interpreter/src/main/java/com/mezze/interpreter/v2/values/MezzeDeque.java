@@ -6,24 +6,20 @@ import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
-import io.vavr.collection.Queue;
-import io.vavr.Tuple2;
 
 import java.util.Iterator;
 import java.util.Objects;
 
 /**
- * Mezze Deque backed by Vavr Queue for amortized O(1) operations on both ends.
+ * Mezze Deque backed by custom datastructures module for O(1) operations on both ends.
  *
- * Vavr Queue provides:
- * - Amortized O(1) enqueue (pushBack)
- * - Amortized O(1) dequeue (popFront)
- * - Amortized O(1) prepend (pushFront)
+ * The datastructures MezzeDeque provides:
+ * - O(1) pushFront, pushBack
+ * - O(1) peekFront, peekBack
+ * - O(1) popFront, popBack
+ * - Ring buffer with copy-on-write optimization
  * - Structural sharing for memory efficiency
  * - Immutable semantics with persistent updates
- *
- * Implemented as a functional queue (Banker's queue style) with two internal lists:
- * front for O(1) head access, back for O(1) tail insertion, with lazy rotation.
  *
  * All "mutating" operations return new MezzeDeque instances with shared structure.
  */
@@ -31,13 +27,13 @@ import java.util.Objects;
 public final class MezzeDeque implements TruffleObject, Iterable<Object> {
 
     // Singleton empty deque
-    private static final MezzeDeque EMPTY = new MezzeDeque(Queue.empty());
+    private static final MezzeDeque EMPTY = new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.empty());
 
-    // Vavr Queue backing store
-    private final Queue<Object> elements;
+    // Datastructures MezzeDeque backing store
+    private final com.mezze.datastructures.deque.MezzeDeque<Object> delegate;
 
-    private MezzeDeque(Queue<Object> elements) {
-        this.elements = elements;
+    private MezzeDeque(com.mezze.datastructures.deque.MezzeDeque<Object> delegate) {
+        this.delegate = delegate;
     }
 
     // ===== FACTORY METHODS =====
@@ -47,90 +43,97 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     }
 
     public static MezzeDeque of(Object element) {
-        return new MezzeDeque(Queue.of(element));
+        return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.of(element));
     }
 
     public static MezzeDeque of(Object e1, Object e2) {
-        return new MezzeDeque(Queue.of(e1, e2));
+        return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.of(e1, e2));
     }
 
     public static MezzeDeque of(Object e1, Object e2, Object e3) {
-        return new MezzeDeque(Queue.of(e1, e2, e3));
+        return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.of(e1, e2, e3));
     }
 
     @TruffleBoundary
     public static MezzeDeque of(Object... elements) {
         if (elements.length == 0) return EMPTY;
-        return new MezzeDeque(Queue.of(elements));
+        return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.of(elements));
     }
 
     @TruffleBoundary
     public static MezzeDeque fromIterable(Iterable<?> elements) {
-        return new MezzeDeque(Queue.ofAll(elements));
+        com.mezze.datastructures.deque.MezzeDeque<Object> result = com.mezze.datastructures.deque.MezzeDeque.empty();
+        for (Object elem : elements) {
+            result = result.pushBack(elem);
+        }
+        return new MezzeDeque(result);
     }
 
     // ===== BASIC OPERATIONS =====
 
     public int size() {
-        return elements.size();
+        return delegate.size();
     }
 
     public boolean isEmpty() {
-        return elements.isEmpty();
+        return delegate.isEmpty();
     }
 
-    public Queue<Object> getElements() {
-        return elements;
+    /**
+     * Get the underlying datastructures deque for internal use.
+     */
+    public com.mezze.datastructures.deque.MezzeDeque<Object> getDelegate() {
+        return delegate;
     }
 
     // ===== FRONT OPERATIONS =====
 
     /**
-     * Get the front element without removing it. Amortized O(1)
+     * Get the front element without removing it.
      * @throws java.util.NoSuchElementException if deque is empty
      */
     @TruffleBoundary
     public Object peekFront() {
-        return elements.head();
+        return delegate.peekFront();
     }
 
     /**
-     * Get the front element, or null if empty. Amortized O(1)
+     * Get the front element, or null if empty.
      */
     @TruffleBoundary
     public Object peekFrontOrNull() {
-        return elements.isEmpty() ? null : elements.head();
+        return delegate.isEmpty() ? null : delegate.peekFront();
     }
 
     /**
-     * Add element to front. Amortized O(1)
+     * Add element to front.
      */
     @TruffleBoundary
     public MezzeDeque pushFront(Object element) {
-        return new MezzeDeque(elements.prepend(element));
+        return new MezzeDeque(delegate.pushFront(element));
     }
 
     /**
-     * Remove and return front element. Amortized O(1)
+     * Remove and return front element.
      * Returns a tuple of (element, newDeque), or null if empty.
      */
     @TruffleBoundary
     public Object[] popFront() {
-        if (elements.isEmpty()) return null;
-        Tuple2<Object, Queue<Object>> result = elements.dequeue();
-        Queue<Object> newQueue = result._2;
-        return new Object[]{result._1, newQueue.isEmpty() ? EMPTY : new MezzeDeque(newQueue)};
+        if (delegate.isEmpty()) return null;
+        com.mezze.datastructures.deque.MezzeDeque.PopResult<Object> result = delegate.popFront();
+        MezzeDeque newDeque = result.rest().isEmpty() ? EMPTY : new MezzeDeque(result.rest());
+        return new Object[]{result.element(), newDeque};
     }
 
     // ===== BACK OPERATIONS =====
 
     /**
-     * Get the back element without removing it. O(n) - but usually fast in practice
+     * Get the back element without removing it.
      * @throws java.util.NoSuchElementException if deque is empty
      */
     @TruffleBoundary
     public Object peekBack() {
-        return elements.last();
+        return delegate.peekBack();
     }
 
     /**
@@ -138,82 +141,98 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
      */
     @TruffleBoundary
     public Object peekBackOrNull() {
-        return elements.isEmpty() ? null : elements.last();
+        return delegate.isEmpty() ? null : delegate.peekBack();
     }
 
     /**
-     * Add element to back. Amortized O(1)
+     * Add element to back.
      */
     @TruffleBoundary
     public MezzeDeque pushBack(Object element) {
-        return new MezzeDeque(elements.append(element));
+        return new MezzeDeque(delegate.pushBack(element));
     }
 
     /**
      * Remove and return back element.
      * Returns a tuple of (newDeque, element), or null if empty.
-     * Note: O(n) operation - use sparingly for true deque semantics.
      */
     @TruffleBoundary
     public Object[] popBack() {
-        if (elements.isEmpty()) return null;
-        Queue<Object> init = elements.init();
-        Object last = elements.last();
-        return new Object[]{init.isEmpty() ? EMPTY : new MezzeDeque(init), last};
+        if (delegate.isEmpty()) return null;
+        com.mezze.datastructures.deque.MezzeDeque.PopResult<Object> result = delegate.popBack();
+        MezzeDeque newDeque = result.rest().isEmpty() ? EMPTY : new MezzeDeque(result.rest());
+        return new Object[]{newDeque, result.element()};
     }
 
     // ===== BULK OPERATIONS =====
 
     /**
-     * Concatenate two deques. O(n)
+     * Concatenate two deques.
      */
     @TruffleBoundary
     public MezzeDeque concat(MezzeDeque other) {
-        return new MezzeDeque(elements.appendAll(other.elements));
+        return new MezzeDeque(delegate.concat(other.delegate));
     }
 
     /**
-     * Reverse the deque. O(n)
+     * Reverse the deque.
      */
     @TruffleBoundary
     public MezzeDeque reverse() {
-        return new MezzeDeque(elements.reverse());
+        return new MezzeDeque(delegate.reverse());
     }
 
     /**
-     * Take first n elements. O(n)
+     * Take first n elements.
      */
     @TruffleBoundary
     public MezzeDeque take(int n) {
-        Queue<Object> taken = elements.take(n);
-        return taken.isEmpty() ? EMPTY : new MezzeDeque(taken);
+        // Build a new deque with first n elements
+        if (n <= 0 || delegate.isEmpty()) return EMPTY;
+        com.mezze.datastructures.deque.MezzeDeque<Object> result = com.mezze.datastructures.deque.MezzeDeque.empty();
+        int count = 0;
+        for (Object elem : delegate) {
+            if (count >= n) break;
+            result = result.pushBack(elem);
+            count++;
+        }
+        return new MezzeDeque(result);
     }
 
     /**
-     * Drop first n elements. O(n)
+     * Drop first n elements.
      */
     @TruffleBoundary
     public MezzeDeque drop(int n) {
-        Queue<Object> dropped = elements.drop(n);
-        return dropped.isEmpty() ? EMPTY : new MezzeDeque(dropped);
+        if (n <= 0) return this;
+        if (n >= delegate.size()) return EMPTY;
+        com.mezze.datastructures.deque.MezzeDeque<Object> result = delegate;
+        for (int i = 0; i < n && !result.isEmpty(); i++) {
+            result = result.popFront().rest();
+        }
+        return result.isEmpty() ? EMPTY : new MezzeDeque(result);
     }
 
     // ===== CONVERSION =====
 
     @TruffleBoundary
     public java.util.List<Object> toJavaList() {
-        return elements.asJava();
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>(delegate.size());
+        for (Object elem : delegate) {
+            result.add(elem);
+        }
+        return result;
     }
 
     @TruffleBoundary
     public Object[] toJavaArray() {
-        return elements.toJavaArray(Object[]::new);
+        return delegate.toArray();
     }
 
     @Override
     @TruffleBoundary
     public Iterator<Object> iterator() {
-        return elements.iterator();
+        return delegate.iterator();
     }
 
     // ===== INTEROP LIBRARY =====
@@ -225,19 +244,19 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
 
     @ExportMessage
     long getArraySize() {
-        return elements.size();
+        return delegate.size();
     }
 
     @ExportMessage
     @TruffleBoundary
     boolean isArrayElementReadable(long index) {
-        return index >= 0 && index < elements.size();
+        return index >= 0 && index < delegate.size();
     }
 
     @ExportMessage
     @TruffleBoundary
     Object readArrayElement(long index) {
-        return elements.get((int) index);
+        return delegate.get((int) index);
     }
 
     @ExportMessage
@@ -263,7 +282,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     @ExportMessage
     @TruffleBoundary
     Object getIterator() {
-        return new DequeIterator(elements.iterator());
+        return new DequeIterator(delegate.iterator());
     }
 
     // ===== OBJECT METHODS =====
@@ -273,13 +292,13 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeDeque other)) return false;
-        return Objects.equals(elements, other.elements);
+        return Objects.equals(delegate, other.delegate);
     }
 
     @Override
     @TruffleBoundary
     public int hashCode() {
-        return elements.hashCode();
+        return delegate.hashCode();
     }
 
     @Override
@@ -287,7 +306,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     public String toString() {
         StringBuilder sb = new StringBuilder("Deque(");
         boolean first = true;
-        for (Object elem : elements) {
+        for (Object elem : delegate) {
             if (!first) sb.append(", ");
             first = false;
             sb.append(elem);

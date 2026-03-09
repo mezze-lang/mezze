@@ -6,34 +6,34 @@ import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
-import io.vavr.collection.List;
 
 import java.util.Iterator;
 import java.util.Objects;
 
 /**
- * Mezze List backed by Vavr List (functional linked list) for O(1) head/tail/prepend.
+ * Mezze List backed by custom datastructures module (functional linked list) for O(1) head/tail/prepend.
  *
- * Vavr List provides:
+ * The datastructures MezzeList provides:
  * - O(1) prepend (cons)
  * - O(1) head
  * - O(1) tail
  * - O(n) append, get by index
  * - Structural sharing for memory efficiency
  * - Immutable semantics with persistent updates
+ * - Specialized storage for primitives (long, double)
  *
  * This is the classic functional linked list, ideal for recursive algorithms
- * and pattern matching. For random access, use MezzeSeq (Vavr Vector) instead.
+ * and pattern matching. For random access, use MezzeSeq instead.
  */
 @ExportLibrary(InteropLibrary.class)
 public final class MezzeList implements TruffleObject, Iterable<Object> {
 
-    private static final MezzeList EMPTY = new MezzeList(List.empty());
+    private static final MezzeList EMPTY = new MezzeList(com.mezze.datastructures.list.MezzeList.empty());
 
-    private final List<Object> elements;
+    private final com.mezze.datastructures.list.MezzeList<Object> delegate;
 
-    private MezzeList(List<Object> elements) {
-        this.elements = elements;
+    private MezzeList(com.mezze.datastructures.list.MezzeList<Object> delegate) {
+        this.delegate = delegate;
     }
 
     // ===== FACTORY METHODS =====
@@ -43,142 +43,198 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
     }
 
     public static MezzeList of(Object element) {
-        return new MezzeList(List.of(element));
+        return new MezzeList(com.mezze.datastructures.list.MezzeList.of(element));
     }
 
     public static MezzeList of(Object e1, Object e2) {
-        return new MezzeList(List.of(e1, e2));
+        return new MezzeList(com.mezze.datastructures.list.MezzeList.of(e1, e2));
     }
 
     public static MezzeList of(Object e1, Object e2, Object e3) {
-        return new MezzeList(List.of(e1, e2, e3));
+        return new MezzeList(com.mezze.datastructures.list.MezzeList.of(e1, e2, e3));
     }
 
     @TruffleBoundary
     public static MezzeList of(Object... elements) {
         if (elements.length == 0) return EMPTY;
-        return new MezzeList(List.of(elements));
+        return new MezzeList(com.mezze.datastructures.list.MezzeList.of(elements));
     }
 
     @TruffleBoundary
     public static MezzeList fromIterable(Iterable<?> elements) {
-        return new MezzeList(List.ofAll(elements));
+        com.mezze.datastructures.list.MezzeList<Object> result = com.mezze.datastructures.list.MezzeList.empty();
+        // Build in reverse order then reverse
+        for (Object elem : elements) {
+            result = result.prepend(elem);
+        }
+        return new MezzeList(result.reverse());
     }
 
     @TruffleBoundary
     public static MezzeList fromArray(Object[] elements) {
         if (elements.length == 0) return EMPTY;
-        return new MezzeList(List.of(elements));
+        return new MezzeList(com.mezze.datastructures.list.MezzeList.of(elements));
     }
 
     // ===== BASIC OPERATIONS =====
 
     public int size() {
-        return elements.size();
+        return delegate.size();
     }
 
     public boolean isEmpty() {
-        return elements.isEmpty();
+        return delegate.isEmpty();
     }
 
-    public List<Object> getElements() {
-        return elements;
+    /**
+     * Get the underlying datastructures list for internal use.
+     */
+    public com.mezze.datastructures.list.MezzeList<Object> getDelegate() {
+        return delegate;
     }
 
     // ===== HEAD/TAIL OPERATIONS (O(1)) =====
 
     @TruffleBoundary
     public Object head() {
-        return elements.head();
+        return delegate.head();
     }
 
     @TruffleBoundary
     public Object headOrNull() {
-        return elements.isEmpty() ? null : elements.head();
+        return delegate.isEmpty() ? null : delegate.head();
     }
 
     @TruffleBoundary
     public MezzeList tail() {
-        List<Object> t = elements.tail();
+        com.mezze.datastructures.list.MezzeList<Object> t = delegate.tail();
         return t.isEmpty() ? EMPTY : new MezzeList(t);
     }
 
     @TruffleBoundary
     public MezzeList tailOrEmpty() {
-        if (elements.isEmpty()) return EMPTY;
-        List<Object> t = elements.tail();
+        if (delegate.isEmpty()) return EMPTY;
+        com.mezze.datastructures.list.MezzeList<Object> t = delegate.tail();
         return t.isEmpty() ? EMPTY : new MezzeList(t);
     }
 
     @TruffleBoundary
     public Object last() {
-        return elements.last();
+        // Walk to the last element
+        com.mezze.datastructures.list.MezzeList<Object> current = delegate;
+        Object last = null;
+        while (!current.isEmpty()) {
+            last = current.head();
+            current = current.tail();
+        }
+        return last;
     }
 
     @TruffleBoundary
     public MezzeList init() {
-        List<Object> i = elements.init();
-        return i.isEmpty() ? EMPTY : new MezzeList(i);
+        // Return all but the last element
+        if (delegate.isEmpty() || delegate.tail().isEmpty()) {
+            return EMPTY;
+        }
+        // Build new list without last element
+        com.mezze.datastructures.list.MezzeList<Object> result = com.mezze.datastructures.list.MezzeList.empty();
+        com.mezze.datastructures.list.MezzeList<Object> current = delegate;
+        while (!current.tail().isEmpty()) {
+            result = result.prepend(current.head());
+            current = current.tail();
+        }
+        return new MezzeList(result.reverse());
     }
 
     // ===== INDEX ACCESS (O(n)) =====
 
     @TruffleBoundary
     public Object get(int index) {
-        return elements.get(index);
+        return delegate.get(index);
     }
 
     public boolean isValidIndex(int index) {
-        return index >= 0 && index < elements.size();
+        return index >= 0 && index < delegate.size();
     }
 
     // ===== PERSISTENT UPDATE OPERATIONS =====
 
     @TruffleBoundary
     public MezzeList prepend(Object element) {
-        return new MezzeList(elements.prepend(element));
+        return new MezzeList(delegate.prepend(element));
     }
 
     @TruffleBoundary
     public MezzeList append(Object element) {
-        return new MezzeList(elements.append(element));
+        return new MezzeList(delegate.append(element));
     }
 
     @TruffleBoundary
     public MezzeList update(int index, Object element) {
-        return new MezzeList(elements.update(index, element));
+        // Build new list with element at index replaced
+        if (index < 0 || index >= delegate.size()) {
+            throw new IndexOutOfBoundsException("Index: " + index);
+        }
+        com.mezze.datastructures.list.MezzeList<Object> result = com.mezze.datastructures.list.MezzeList.empty();
+        com.mezze.datastructures.list.MezzeList<Object> current = delegate;
+        int i = 0;
+        while (!current.isEmpty()) {
+            if (i == index) {
+                result = result.prepend(element);
+            } else {
+                result = result.prepend(current.head());
+            }
+            current = current.tail();
+            i++;
+        }
+        return new MezzeList(result.reverse());
     }
 
     @TruffleBoundary
     public MezzeList removeAt(int index) {
-        return new MezzeList(elements.removeAt(index));
+        // Build new list without element at index
+        if (index < 0 || index >= delegate.size()) {
+            throw new IndexOutOfBoundsException("Index: " + index);
+        }
+        com.mezze.datastructures.list.MezzeList<Object> result = com.mezze.datastructures.list.MezzeList.empty();
+        com.mezze.datastructures.list.MezzeList<Object> current = delegate;
+        int i = 0;
+        while (!current.isEmpty()) {
+            if (i != index) {
+                result = result.prepend(current.head());
+            }
+            current = current.tail();
+            i++;
+        }
+        return new MezzeList(result.reverse());
     }
 
     @TruffleBoundary
     public MezzeList concat(MezzeList other) {
-        return new MezzeList(elements.appendAll(other.elements));
+        return new MezzeList(delegate.concat(other.delegate));
     }
 
     @TruffleBoundary
     public MezzeList reverse() {
-        return new MezzeList(elements.reverse());
+        return new MezzeList(delegate.reverse());
     }
 
     @TruffleBoundary
     public MezzeList take(int n) {
-        List<Object> taken = elements.take(n);
+        com.mezze.datastructures.list.MezzeList<Object> taken = delegate.take(n);
         return taken.isEmpty() ? EMPTY : new MezzeList(taken);
     }
 
     @TruffleBoundary
     public MezzeList drop(int n) {
-        List<Object> dropped = elements.drop(n);
+        com.mezze.datastructures.list.MezzeList<Object> dropped = delegate.drop(n);
         return dropped.isEmpty() ? EMPTY : new MezzeList(dropped);
     }
 
     @TruffleBoundary
     public MezzeList slice(int start, int end) {
-        List<Object> sliced = elements.slice(start, end);
+        // take(end).drop(start)
+        com.mezze.datastructures.list.MezzeList<Object> sliced = delegate.take(end).drop(start);
         return sliced.isEmpty() ? EMPTY : new MezzeList(sliced);
     }
 
@@ -186,30 +242,43 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
 
     @TruffleBoundary
     public boolean contains(Object element) {
-        return elements.contains(element);
+        return delegate.contains(element);
     }
 
     @TruffleBoundary
     public int indexOf(Object element) {
-        return elements.indexOf(element);
+        int i = 0;
+        com.mezze.datastructures.list.MezzeList<Object> current = delegate;
+        while (!current.isEmpty()) {
+            if (Objects.equals(current.head(), element)) {
+                return i;
+            }
+            current = current.tail();
+            i++;
+        }
+        return -1;
     }
 
     // ===== CONVERSION =====
 
     @TruffleBoundary
     public java.util.List<Object> toJavaList() {
-        return elements.asJava();
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>(delegate.size());
+        for (Object elem : delegate) {
+            result.add(elem);
+        }
+        return result;
     }
 
     @TruffleBoundary
     public Object[] toArray() {
-        return elements.toJavaArray(Object[]::new);
+        return delegate.toArray();
     }
 
     @Override
     @TruffleBoundary
     public Iterator<Object> iterator() {
-        return elements.iterator();
+        return delegate.iterator();
     }
 
     // ===== INTEROP LIBRARY =====
@@ -221,19 +290,19 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
 
     @ExportMessage
     long getArraySize() {
-        return elements.size();
+        return delegate.size();
     }
 
     @ExportMessage
     @TruffleBoundary
     boolean isArrayElementReadable(long index) {
-        return index >= 0 && index < elements.size();
+        return index >= 0 && index < delegate.size();
     }
 
     @ExportMessage
     @TruffleBoundary
     Object readArrayElement(long index) {
-        return elements.get((int) index);
+        return delegate.get((int) index);
     }
 
     @ExportMessage
@@ -259,7 +328,7 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
     @ExportMessage
     @TruffleBoundary
     Object getIterator() {
-        return new ListIterator(elements.iterator());
+        return new ListIterator(delegate.iterator());
     }
 
     // ===== OBJECT METHODS =====
@@ -269,13 +338,13 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeList other)) return false;
-        return Objects.equals(elements, other.elements);
+        return Objects.equals(delegate, other.delegate);
     }
 
     @Override
     @TruffleBoundary
     public int hashCode() {
-        return elements.hashCode();
+        return delegate.hashCode();
     }
 
     @Override
@@ -283,7 +352,7 @@ public final class MezzeList implements TruffleObject, Iterable<Object> {
     public String toString() {
         StringBuilder sb = new StringBuilder("List(");
         boolean first = true;
-        for (Object elem : elements) {
+        for (Object elem : delegate) {
             if (!first) sb.append(", ");
             first = false;
             sb.append(elem);

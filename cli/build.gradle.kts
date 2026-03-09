@@ -185,6 +185,9 @@ graalvmNative {
                 // Initialize V2 interpreter classes at build time
                 "--initialize-at-build-time=com.mezze.interpreter.v2",
 
+                // Initialize datastructures classes at build time (MezzeSeq, MezzeList, etc.)
+                "--initialize-at-build-time=com.mezze.datastructures",
+
                 // Initialize kotlin and kotlinx classes at build time
                 // Required for AST serialization and related static initializers
                 "--initialize-at-build-time=kotlin",

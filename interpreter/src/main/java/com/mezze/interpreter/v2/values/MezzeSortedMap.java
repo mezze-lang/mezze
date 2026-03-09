@@ -7,25 +7,25 @@ import com.oracle.truffle.api.interop.UnknownKeyException;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
-import io.vavr.collection.TreeMap;
-import io.vavr.control.Option;
 
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /**
- * Mezze SortedMap backed by Vavr TreeMap (Red-Black tree) for O(log n) operations.
+ * Mezze SortedMap backed by sorted arrays for O(log n) operations.
  *
- * Vavr TreeMap provides:
- * - O(log n) get, put, remove
- * - O(log n) min, max
+ * This implementation:
+ * - O(log n) get, containsKey (binary search)
+ * - O(n) put, remove (due to array copy)
+ * - O(1) min, max
  * - Keys maintained in sorted order
- * - Structural sharing for memory efficiency
  * - Immutable semantics with persistent updates
  *
- * All "mutating" operations return new MezzeSortedMap instances with shared structure.
+ * All "mutating" operations return new MezzeSortedMap instances.
  */
 @ExportLibrary(InteropLibrary.class)
 public final class MezzeSortedMap implements TruffleObject {
@@ -34,13 +34,15 @@ public final class MezzeSortedMap implements TruffleObject {
     private static final Comparator<Object> DEFAULT_COMPARATOR = MezzeSortedMap::compareValues;
 
     // Singleton empty sorted map
-    private static final MezzeSortedMap EMPTY = new MezzeSortedMap(TreeMap.empty(DEFAULT_COMPARATOR));
+    private static final MezzeSortedMap EMPTY = new MezzeSortedMap(new Object[0], new Object[0]);
 
-    // Vavr TreeMap backing store
-    private final TreeMap<Object, Object> entries;
+    // Sorted arrays for keys and values
+    private final Object[] keys;
+    private final Object[] values;
 
-    private MezzeSortedMap(TreeMap<Object, Object> entries) {
-        this.entries = entries;
+    private MezzeSortedMap(Object[] keys, Object[] values) {
+        this.keys = keys;
+        this.values = values;
     }
 
     // ===== VALUE COMPARISON =====
@@ -74,150 +76,248 @@ public final class MezzeSortedMap implements TruffleObject {
         return a.toString().compareTo(b.toString());
     }
 
+    /**
+     * Binary search for key.
+     * Returns index if found, or -(insertionPoint + 1) if not found.
+     */
+    @TruffleBoundary
+    private int binarySearch(Object key) {
+        int low = 0;
+        int high = keys.length - 1;
+
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            int cmp = compareValues(keys[mid], key);
+
+            if (cmp < 0) {
+                low = mid + 1;
+            } else if (cmp > 0) {
+                high = mid - 1;
+            } else {
+                return mid;
+            }
+        }
+
+        return -(low + 1);
+    }
+
     // ===== FACTORY METHODS =====
 
     public static MezzeSortedMap empty() {
         return EMPTY;
     }
 
+    @TruffleBoundary
     public static MezzeSortedMap of(Object key, Object value) {
-        return new MezzeSortedMap(TreeMap.of(DEFAULT_COMPARATOR, key, value));
+        return new MezzeSortedMap(new Object[]{key}, new Object[]{value});
     }
 
+    @TruffleBoundary
     public static MezzeSortedMap of(Object k1, Object v1, Object k2, Object v2) {
-        return new MezzeSortedMap(
-            TreeMap.of(DEFAULT_COMPARATOR, k1, v1).put(k2, v2)
-        );
+        return empty().put(k1, v1).put(k2, v2);
     }
 
     @TruffleBoundary
     public static MezzeSortedMap fromJavaMap(Map<?, ?> map) {
-        TreeMap<Object, Object> result = TreeMap.empty(DEFAULT_COMPARATOR);
+        MezzeSortedMap result = EMPTY;
         for (Map.Entry<?, ?> entry : map.entrySet()) {
             result = result.put(entry.getKey(), entry.getValue());
         }
-        return new MezzeSortedMap(result);
+        return result;
     }
 
     @TruffleBoundary
     public static MezzeSortedMap fromEntries(Iterable<? extends Map.Entry<?, ?>> entries) {
-        TreeMap<Object, Object> result = TreeMap.empty(DEFAULT_COMPARATOR);
+        MezzeSortedMap result = EMPTY;
         for (Map.Entry<?, ?> entry : entries) {
             result = result.put(entry.getKey(), entry.getValue());
         }
-        return new MezzeSortedMap(result);
+        return result;
     }
 
     // ===== BASIC OPERATIONS =====
 
     public int size() {
-        return entries.size();
+        return keys.length;
     }
 
     public boolean isEmpty() {
-        return entries.isEmpty();
+        return keys.length == 0;
     }
 
     @TruffleBoundary
     public Object get(Object key) {
-        return entries.get(key).getOrNull();
+        int idx = binarySearch(key);
+        return idx >= 0 ? values[idx] : null;
     }
 
     @TruffleBoundary
-    public Option<Object> getOption(Object key) {
-        return entries.get(key);
+    public Object getOrNull(Object key) {
+        return get(key);
     }
 
     @TruffleBoundary
     public boolean containsKey(Object key) {
-        return entries.containsKey(key);
-    }
-
-    public TreeMap<Object, Object> getEntries() {
-        return entries;
+        return binarySearch(key) >= 0;
     }
 
     // ===== PERSISTENT UPDATE OPERATIONS =====
 
     @TruffleBoundary
     public MezzeSortedMap put(Object key, Object value) {
-        return new MezzeSortedMap(entries.put(key, value));
+        int idx = binarySearch(key);
+
+        if (idx >= 0) {
+            // Update existing
+            Object[] newValues = values.clone();
+            newValues[idx] = value;
+            return new MezzeSortedMap(keys, newValues);
+        }
+
+        // Insert new
+        int insertPos = -(idx + 1);
+        Object[] newKeys = new Object[keys.length + 1];
+        Object[] newValues = new Object[values.length + 1];
+
+        System.arraycopy(keys, 0, newKeys, 0, insertPos);
+        newKeys[insertPos] = key;
+        System.arraycopy(keys, insertPos, newKeys, insertPos + 1, keys.length - insertPos);
+
+        System.arraycopy(values, 0, newValues, 0, insertPos);
+        newValues[insertPos] = value;
+        System.arraycopy(values, insertPos, newValues, insertPos + 1, values.length - insertPos);
+
+        return new MezzeSortedMap(newKeys, newValues);
     }
 
     @TruffleBoundary
     public MezzeSortedMap remove(Object key) {
-        return new MezzeSortedMap(entries.remove(key));
+        int idx = binarySearch(key);
+        if (idx < 0) return this;
+
+        if (keys.length == 1) return EMPTY;
+
+        Object[] newKeys = new Object[keys.length - 1];
+        Object[] newValues = new Object[values.length - 1];
+
+        System.arraycopy(keys, 0, newKeys, 0, idx);
+        System.arraycopy(keys, idx + 1, newKeys, idx, keys.length - idx - 1);
+
+        System.arraycopy(values, 0, newValues, 0, idx);
+        System.arraycopy(values, idx + 1, newValues, idx, values.length - idx - 1);
+
+        return new MezzeSortedMap(newKeys, newValues);
     }
 
     @TruffleBoundary
     public MezzeSortedMap merge(MezzeSortedMap other) {
-        return new MezzeSortedMap(entries.merge(other.entries));
+        MezzeSortedMap result = this;
+        for (int i = 0; i < other.keys.length; i++) {
+            result = result.put(other.keys[i], other.values[i]);
+        }
+        return result;
     }
 
     // ===== SORTED MAP SPECIFIC OPERATIONS =====
 
     /**
-     * Get the minimum key. O(log n)
+     * Get the minimum key. O(1)
      */
     @TruffleBoundary
     public Object minKey() {
-        return entries.isEmpty() ? null : entries.head()._1;
+        return isEmpty() ? null : keys[0];
     }
 
     /**
-     * Get the maximum key. O(log n)
+     * Get the maximum key. O(1)
      */
     @TruffleBoundary
     public Object maxKey() {
-        return entries.isEmpty() ? null : entries.last()._1;
+        return isEmpty() ? null : keys[keys.length - 1];
     }
 
     /**
-     * Get the entry with minimum key. O(log n)
+     * Get the entry with minimum key. O(1)
      */
     @TruffleBoundary
     public Object[] minEntry() {
-        if (entries.isEmpty()) return null;
-        var entry = entries.head();
-        return new Object[]{entry._1, entry._2};
+        if (isEmpty()) return null;
+        return new Object[]{keys[0], values[0]};
     }
 
     /**
-     * Get the entry with maximum key. O(log n)
+     * Get the entry with maximum key. O(1)
      */
     @TruffleBoundary
     public Object[] maxEntry() {
-        if (entries.isEmpty()) return null;
-        var entry = entries.last();
-        return new Object[]{entry._1, entry._2};
+        if (isEmpty()) return null;
+        return new Object[]{keys[keys.length - 1], values[values.length - 1]};
     }
 
     /**
-     * Get all entries with keys in the range [from, to). O(log n + m)
+     * Get all entries with keys in the range [from, to).
      */
     @TruffleBoundary
     public MezzeSortedMap range(Object fromKey, Object toKey) {
-        TreeMap<Object, Object> ranged = entries.filterKeys(k ->
-            compareValues(k, fromKey) >= 0 && compareValues(k, toKey) < 0
+        int fromIdx = binarySearch(fromKey);
+        if (fromIdx < 0) fromIdx = -(fromIdx + 1);
+
+        int toIdx = binarySearch(toKey);
+        if (toIdx < 0) toIdx = -(toIdx + 1);
+
+        if (fromIdx >= toIdx) return EMPTY;
+
+        return new MezzeSortedMap(
+            Arrays.copyOfRange(keys, fromIdx, toIdx),
+            Arrays.copyOfRange(values, fromIdx, toIdx)
         );
-        return ranged.isEmpty() ? EMPTY : new MezzeSortedMap(ranged);
     }
 
     // ===== ITERATION =====
 
     @TruffleBoundary
     public Iterable<Object> keys() {
-        return entries.keySet();
+        return () -> new Iterator<>() {
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index < keys.length;
+            }
+
+            @Override
+            public Object next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                return keys[index++];
+            }
+        };
     }
 
     @TruffleBoundary
     public Iterable<Object> values() {
-        return entries.values();
+        return () -> new Iterator<>() {
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index < values.length;
+            }
+
+            @Override
+            public Object next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                return values[index++];
+            }
+        };
     }
 
     @TruffleBoundary
     public java.util.Map<Object, Object> toJavaMap() {
-        return entries.toJavaMap();
+        java.util.LinkedHashMap<Object, Object> result = new java.util.LinkedHashMap<>(keys.length);
+        for (int i = 0; i < keys.length; i++) {
+            result.put(keys[i], values[i]);
+        }
+        return result;
     }
 
     // ===== INTEROP LIBRARY =====
@@ -229,21 +329,21 @@ public final class MezzeSortedMap implements TruffleObject {
 
     @ExportMessage
     long getHashSize() {
-        return entries.size();
+        return keys.length;
     }
 
     @ExportMessage
     @TruffleBoundary
     boolean isHashEntryReadable(Object key) {
-        return entries.containsKey(key);
+        return binarySearch(key) >= 0;
     }
 
     @ExportMessage
     @TruffleBoundary
     Object readHashValue(Object key) throws UnknownKeyException {
-        Option<Object> value = entries.get(key);
-        if (value.isDefined()) {
-            return value.get();
+        int idx = binarySearch(key);
+        if (idx >= 0) {
+            return values[idx];
         }
         throw UnknownKeyException.create(key);
     }
@@ -266,7 +366,7 @@ public final class MezzeSortedMap implements TruffleObject {
     @ExportMessage
     @TruffleBoundary
     Object getHashEntriesIterator() {
-        return new SortedMapEntryIterator(entries.iterator());
+        return new SortedMapEntryIterator(keys, values);
     }
 
     // ===== OBJECT METHODS =====
@@ -276,24 +376,22 @@ public final class MezzeSortedMap implements TruffleObject {
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeSortedMap other)) return false;
-        return Objects.equals(entries, other.entries);
+        return Arrays.equals(keys, other.keys) && Arrays.equals(values, other.values);
     }
 
     @Override
     @TruffleBoundary
     public int hashCode() {
-        return entries.hashCode();
+        return Arrays.hashCode(keys) ^ Arrays.hashCode(values);
     }
 
     @Override
     @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SortedMap{");
-        boolean first = true;
-        for (var entry : entries) {
-            if (!first) sb.append(", ");
-            first = false;
-            sb.append(entry._1).append(" = ").append(entry._2);
+        for (int i = 0; i < keys.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(keys[i]).append(" = ").append(values[i]);
         }
         sb.append("}");
         return sb.toString();
@@ -303,10 +401,13 @@ public final class MezzeSortedMap implements TruffleObject {
 
     @ExportLibrary(InteropLibrary.class)
     static final class SortedMapEntryIterator implements TruffleObject {
-        private final Iterator<io.vavr.Tuple2<Object, Object>> iterator;
+        private final Object[] keys;
+        private final Object[] values;
+        private int index = 0;
 
-        SortedMapEntryIterator(Iterator<io.vavr.Tuple2<Object, Object>> iterator) {
-            this.iterator = iterator;
+        SortedMapEntryIterator(Object[] keys, Object[] values) {
+            this.keys = keys;
+            this.values = values;
         }
 
         @ExportMessage
@@ -317,17 +418,18 @@ public final class MezzeSortedMap implements TruffleObject {
         @ExportMessage
         @TruffleBoundary
         boolean hasIteratorNextElement() {
-            return iterator.hasNext();
+            return index < keys.length;
         }
 
         @ExportMessage
         @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
-            if (!iterator.hasNext()) {
+            if (index >= keys.length) {
                 throw UnsupportedMessageException.create();
             }
-            io.vavr.Tuple2<Object, Object> entry = iterator.next();
-            return new Object[]{entry._1, entry._2};
+            Object[] entry = new Object[]{keys[index], values[index]};
+            index++;
+            return entry;
         }
     }
 }
