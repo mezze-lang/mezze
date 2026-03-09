@@ -1,6 +1,7 @@
 # std/stm.mezze - Software Transactional Memory
 #
 # STM provides composable, lock-free concurrent programming with transactions.
+use std::collections::list
 # All reads and writes to shared memory happen atomically within transactions.
 #
 # Key features:
@@ -463,7 +464,7 @@ let unwrap_tqueue: {q: TQueue 'a} -> TVar {read: List 'a, write: List 'a} =
 #   let queue = tqueue {}
 pub let tqueue: {} -> TQueue 'a =
     {} -> do
-        let empty_list = __native_list_empty {}
+        let empty_list = list::empty {}
         let inner = tvar {init = {read = empty_list, write = empty_list}}
         TQueue {val = inner}
 
@@ -473,7 +474,7 @@ pub let tqueue: {} -> TQueue 'a =
 #   let queue = tqueue_from_list {items = [1, 2, 3]}
 pub let tqueue_from_list: {items: List 'a} -> TQueue 'a =
     {items} -> do
-        let empty_list = __native_list_empty {}
+        let empty_list = list::empty {}
         let inner = tvar {init = {read = items, write = empty_list}}
         TQueue {val = inner}
 
@@ -485,7 +486,7 @@ pub let write_tqueue: {q: TQueue 'a, val: 'a} -> {} <STM> =
     {q, val} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        let new_write = __native_list_cons {head = val, tail = state.write}
+        let new_write = list::cons {head = val, tail = state.write}
         STM.write {var = inner, val = {read = state.read, write = new_write}}
 
 # Read and remove a value from the front of the queue
@@ -497,17 +498,17 @@ pub let read_tqueue: {q: TQueue 'a} -> 'a <STM> =
     {q} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> do
                 STM.write {var = inner, val = {read = pair.tail, write = state.write}}
                 pair.head
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> STM.retry {}
                 False -> do
                     # Reverse write list into read list
-                    let reversed = __native_list_reverse {xs = state.write}
-                    match __native_list_uncons {xs = reversed} is
+                    let reversed = list::reverse {xs = state.write}
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> do
                             STM.write {var = inner, val = {read = pair.tail, write = empty_list}}
                             pair.head
@@ -524,16 +525,16 @@ pub let try_read_tqueue: {q: TQueue 'a} -> Option 'a <STM> =
     {q} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> do
                 STM.write {var = inner, val = {read = pair.tail, write = state.write}}
                 Some {val = pair.head}
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> None
                 False -> do
-                    let reversed = __native_list_reverse {xs = state.write}
-                    match __native_list_uncons {xs = reversed} is
+                    let reversed = list::reverse {xs = state.write}
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> do
                             STM.write {var = inner, val = {read = pair.tail, write = empty_list}}
                             Some {val = pair.head}
@@ -548,16 +549,16 @@ pub let peek_tqueue: {q: TQueue 'a} -> 'a <STM> =
     {q} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> pair.head
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> STM.retry {}
                 False -> do
-                    let reversed = __native_list_reverse {xs = state.write}
+                    let reversed = list::reverse {xs = state.write}
                     # Write back the normalized form for future reads
                     STM.write {var = inner, val = {read = reversed, write = empty_list}}
-                    match __native_list_uncons {xs = reversed} is
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> pair.head
                         None -> STM.retry {}
 
@@ -569,8 +570,8 @@ pub let is_empty_tqueue: {q: TQueue 'a} -> Bool <STM> =
     {q} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        match __native_list_is_empty {xs = state.read} is
-            True -> __native_list_is_empty {xs = state.write}
+        match list::is_empty {xs = state.read} is
+            True -> list::is_empty {xs = state.write}
             False -> False
 
 # Get the current length of the queue
@@ -582,7 +583,7 @@ pub let length_tqueue: {q: TQueue 'a} -> Int <STM> =
     {q} -> do
         let inner = unwrap_tqueue {q = q}
         let state = STM.read {var = inner}
-        __native_list_length {xs = state.read} + __native_list_length {xs = state.write}
+        list::length {xs = state.read} + list::length {xs = state.write}
 
 # =============================================================================
 # TBQueue - Bounded STM Queue
@@ -619,7 +620,7 @@ let unwrap_tbqueue: {q: TBQueue 'a} -> TVar {read: List 'a, write: List 'a, size
 #   let queue = tbqueue {capacity = 100}
 pub let tbqueue: {capacity: Int} -> TBQueue 'a =
     {capacity} -> do
-        let empty_list = __native_list_empty {}
+        let empty_list = list::empty {}
         let inner = tvar {init = {read = empty_list, write = empty_list, size = 0, capacity = capacity}}
         TBQueue {val = inner}
 
@@ -635,7 +636,7 @@ pub let write_tbqueue: {q: TBQueue 'a, val: 'a} -> {} <STM> =
         match state.size >= state.capacity is
             True -> STM.retry {}  # Queue is full, wait
             False -> do
-                let new_write = __native_list_cons {head = val, tail = state.write}
+                let new_write = list::cons {head = val, tail = state.write}
                 STM.write {var = inner, val = {
                     read = state.read,
                     write = new_write,
@@ -652,8 +653,8 @@ pub let read_tbqueue: {q: TBQueue 'a} -> 'a <STM> =
     {q} -> do
         let inner = unwrap_tbqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> do
                 STM.write {var = inner, val = {
                     read = pair.tail,
@@ -662,11 +663,11 @@ pub let read_tbqueue: {q: TBQueue 'a} -> 'a <STM> =
                     capacity = state.capacity
                 }}
                 pair.head
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> STM.retry {}  # Queue is empty
                 False -> do
-                    let reversed = __native_list_reverse {xs = state.write}
-                    match __native_list_uncons {xs = reversed} is
+                    let reversed = list::reverse {xs = state.write}
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> do
                             STM.write {var = inner, val = {
                                 read = pair.tail,
@@ -687,8 +688,8 @@ pub let try_read_tbqueue: {q: TBQueue 'a} -> Option 'a <STM> =
     {q} -> do
         let inner = unwrap_tbqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> do
                 STM.write {var = inner, val = {
                     read = pair.tail,
@@ -697,11 +698,11 @@ pub let try_read_tbqueue: {q: TBQueue 'a} -> Option 'a <STM> =
                     capacity = state.capacity
                 }}
                 Some {val = pair.head}
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> None
                 False -> do
-                    let reversed = __native_list_reverse {xs = state.write}
-                    match __native_list_uncons {xs = reversed} is
+                    let reversed = list::reverse {xs = state.write}
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> do
                             STM.write {var = inner, val = {
                                 read = pair.tail,
@@ -724,7 +725,7 @@ pub let try_write_tbqueue: {q: TBQueue 'a, val: 'a} -> Bool <STM> =
         match state.size >= state.capacity is
             True -> False  # Queue is full
             False -> do
-                let new_write = __native_list_cons {head = val, tail = state.write}
+                let new_write = list::cons {head = val, tail = state.write}
                 STM.write {var = inner, val = {
                     read = state.read,
                     write = new_write,
@@ -742,20 +743,20 @@ pub let peek_tbqueue: {q: TBQueue 'a} -> 'a <STM> =
     {q} -> do
         let inner = unwrap_tbqueue {q = q}
         let state = STM.read {var = inner}
-        let empty_list = __native_list_empty {}
-        match __native_list_uncons {xs = state.read} is
+        let empty_list = list::empty {}
+        match list::uncons {xs = state.read} is
             Some {val = pair} -> pair.head
-            None -> match __native_list_is_empty {xs = state.write} is
+            None -> match list::is_empty {xs = state.write} is
                 True -> STM.retry {}
                 False -> do
-                    let reversed = __native_list_reverse {xs = state.write}
+                    let reversed = list::reverse {xs = state.write}
                     STM.write {var = inner, val = {
                         read = reversed,
                         write = empty_list,
                         size = state.size,
                         capacity = state.capacity
                     }}
-                    match __native_list_uncons {xs = reversed} is
+                    match list::uncons {xs = reversed} is
                         Some {val = pair} -> pair.head
                         None -> STM.retry {}
 

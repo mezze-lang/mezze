@@ -44,11 +44,11 @@ pub let repeat = { s: String, n: Int } ->
     else if n == 1 then s
     else concat { l = s, r = repeat { s = s, n = n - 1 } }
 
-# Split string by delimiter into an array of strings
+# Split string by delimiter into a seq of strings
 pub let split = { s: String, delimiter: String } ->
     __native_string_split { s = s, delimiter = delimiter }
 
-# Join array of strings with separator
+# Join seq of strings with separator
 pub let join = { strings: [String], separator: String } ->
     __native_string_join { strings = strings, separator = separator }
 
@@ -127,7 +127,7 @@ pub let lines = { s: String } ->
 pub let words = { s: String } ->
     __native_string_words { s = s }
 
-# Convert string to array of characters
+# Convert string to seq of characters
 # Example: chars {s = "abc"} -> ['a', 'b', 'c']
 pub let chars = { s: String } ->
     __native_string_chars { s = s }
@@ -171,3 +171,31 @@ pub let pad_right = { s: String, len: Int, c: Char } ->
 #
 pub let glob_match = { pattern: String, s: String } ->
     __native_string_glob_match { pattern = pattern, s = s }
+
+# =============================================================================
+# Case Conversion
+# =============================================================================
+
+# Convert string to snake_case
+# Example: to_snake_case {s = "HelloWorld"} -> "hello_world"
+# Example: to_snake_case {s = "myFieldName"} -> "my_field_name"
+pub let to_snake_case = { s: String } ->
+    __native_string_to_snake_case { s = s }
+
+# Convert string to camelCase
+# Example: to_camel_case {s = "hello_world"} -> "helloWorld"
+# Example: to_camel_case {s = "my_field_name"} -> "myFieldName"
+pub let to_camel_case = { s: String } ->
+    __native_string_to_camel_case { s = s }
+
+# Convert string to kebab-case
+# Example: to_kebab_case {s = "HelloWorld"} -> "hello-world"
+# Example: to_kebab_case {s = "myFieldName"} -> "my-field-name"
+pub let to_kebab_case = { s: String } ->
+    __native_string_to_kebab_case { s = s }
+
+# Convert string to SCREAMING_SNAKE_CASE
+# Example: to_screaming_snake_case {s = "HelloWorld"} -> "HELLO_WORLD"
+# Example: to_screaming_snake_case {s = "myFieldName"} -> "MY_FIELD_NAME"
+pub let to_screaming_snake_case = { s: String } ->
+    __native_string_to_screaming_snake_case { s = s }

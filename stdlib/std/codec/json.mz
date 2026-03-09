@@ -13,7 +13,7 @@
 #
 #   let bytes = json::serialize {json = data}
 
-use std::collections::array
+use std::collections::seq
 use std::collections::list
 use std::collections::set
 use std::collections::map
@@ -28,9 +28,9 @@ use std::codec::core::{EncodeFormat, DecodeFormat, EncodeError, DecodeError, Cod
 # ============================================================================
 
 # The Json type represents any JSON value
-# Note: JArray and JObject use Array for efficient construction with [...] literals
+# Note: JArray and JObject use Seq for efficient construction with [...] literals
 # Using anonymous record {key: String, value: Json} for structural compatibility with codec
-pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: Array Json }, JObject { fields: Array {key: String, value: Json}} |
+pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] }, JObject { fields: [{key: String, value: Json}]} |
 
 # ============================================================================
 # CONFIGURATION
@@ -103,10 +103,10 @@ let serialize_compact: {json: Json} -> String = {json} ->
         JFloat {val} -> float::to_string {n = val}
         JString {val} -> "\"$(escape_string {s = val})\""
         JArray {items} -> do
-            let inner = array::map {xs = items, f = {x} -> serialize_compact {json = x}}
+            let inner = seq::map {xs = items, f = {x} -> serialize_compact {json = x}}
             "[$(string::join {strings = inner, separator = ","})]"
         JObject {fields} -> do
-            let inner = array::map {
+            let inner = seq::map {
                 xs = fields,
                 f = {x} -> "\"$(escape_string {s = x.key})\":$(serialize_compact {json = x.value})"
             }
@@ -124,19 +124,19 @@ let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {j
         JFloat {val} -> float::to_string {n = val}
         JString {val} -> "\"$(escape_string {s = val})\""
         JArray {items} ->
-            if array::is_empty {xs = items} then
+            if seq::is_empty {xs = items} then
                 "[]"
             else do
-                let inner = array::map {
+                let inner = seq::map {
                     xs = items,
                     f = {x} -> "$(next_indent_str)$(serialize_pretty {json = x, indent = next_indent, indent_size = indent_size})"
                 }
                 "[\n$(string::join {strings = inner, separator = ",\n"})\n$(indent_str)]"
         JObject {fields} ->
-            if array::is_empty {xs = fields} then
+            if seq::is_empty {xs = fields} then
                 "{}"
             else do
-                let inner = array::map {
+                let inner = seq::map {
                     xs = fields,
                     f = {x} -> do
                         let val_str = serialize_pretty {json = x.value, indent = next_indent, indent_size = indent_size}
@@ -190,19 +190,19 @@ pub let parse_str = {s: String} ->
 pub let transform_field_name = {name: String, transform: FieldTransform} ->
     match transform is
         Identity -> name
-        SnakeCase -> __native_string_to_snake_case {s = name}
-        CamelCase -> __native_string_to_camel_case {s = name}
-        KebabCase -> __native_string_to_kebab_case {s = name}
-        ScreamingSnakeCase -> __native_string_to_screaming_snake_case {s = name}
+        SnakeCase -> string::to_snake_case {s = name}
+        CamelCase -> string::to_camel_case {s = name}
+        KebabCase -> string::to_kebab_case {s = name}
+        ScreamingSnakeCase -> string::to_screaming_snake_case {s = name}
 
 # Inverse transform (for decoding - e.g., snake_case JSON -> camelCase Mezze)
 pub let inverse_transform_field_name = {name: String, transform: FieldTransform} ->
     match transform is
         Identity -> name
-        SnakeCase -> __native_string_to_camel_case {s = name}  # snake_case -> camelCase
-        CamelCase -> __native_string_to_snake_case {s = name}  # camelCase -> snake_case
-        KebabCase -> __native_string_to_camel_case {s = name}  # kebab-case -> camelCase
-        ScreamingSnakeCase -> __native_string_to_camel_case {s = name}  # SCREAMING -> camelCase
+        SnakeCase -> string::to_camel_case {s = name}  # snake_case -> camelCase
+        CamelCase -> string::to_snake_case {s = name}  # camelCase -> snake_case
+        KebabCase -> string::to_camel_case {s = name}  # kebab-case -> camelCase
+        ScreamingSnakeCase -> string::to_camel_case {s = name}  # SCREAMING -> camelCase
 
 # ============================================================================
 # ENCODE/DECODE WITH CONFIG
@@ -239,8 +239,8 @@ let transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t} ->
         JInt {val} -> JInt {val = val}
         JFloat {val} -> JFloat {val = val}
         JString {val} -> JString {val = val}
-        JArray {items} -> JArray {items = array::map {xs = items, f = {x} -> transform_fields_impl {j = x, t = t}}}
-        JObject {fields} -> JObject {fields = array::map {xs = fields, f = {x} -> {
+        JArray {items} -> JArray {items = seq::map {xs = items, f = {x} -> transform_fields_impl {j = x, t = t}}}
+        JObject {fields} -> JObject {fields = seq::map {xs = fields, f = {x} -> {
             key = transform_field_name {name = x.key, transform = t},
             value = transform_fields_impl {j = x.value, t = t}
         }}}
@@ -259,8 +259,8 @@ let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t}
         JInt {val} -> JInt {val = val}
         JFloat {val} -> JFloat {val = val}
         JString {val} -> JString {val = val}
-        JArray {items} -> JArray {items = array::map {xs = items, f = {x} -> inverse_transform_fields_impl {j = x, t = t}}}
-        JObject {fields} -> JObject {fields = array::map {xs = fields, f = {x} -> {
+        JArray {items} -> JArray {items = seq::map {xs = items, f = {x} -> inverse_transform_fields_impl {j = x, t = t}}}
+        JObject {fields} -> JObject {fields = seq::map {xs = fields, f = {x} -> {
             key = inverse_transform_field_name {name = x.key, transform = t},
             value = inverse_transform_fields_impl {j = x.value, t = t}
         }}}
@@ -321,7 +321,7 @@ impl EncodeFormat Json where {
         Ok {val = JString {val = b64}},
 
     encode_record = {fields, path} ->
-        # fields is Array {key: String, value: Json}, matching JObject.fields
+        # fields is [{key: String, value: Json}], matching JObject.fields
         Ok {val = JObject {fields = fields}},
 
     encode_variant = {tag, payload, path} -> do
@@ -333,22 +333,22 @@ impl EncodeFormat Json where {
         Ok {val = JObject {fields = fields}},
 
     encode_list = {elems, path} ->
-        # Convert List to Array for JArray
-        Ok {val = JArray {items = list::to_array {xs = elems}}},
+        # Convert List to Seq for JArray
+        Ok {val = JArray {items = list::to_seq {xs = elems}}},
 
     encode_set = {elems, path} -> do
-        # Sets encoded as arrays in JSON
-        Ok {val = JArray {items = set::to_array {s = elems}}},
+        # Sets encoded as JSON arrays
+        Ok {val = JArray {items = set::to_seq {s = elems}}},
 
     encode_map = {entries, path} -> do
-        # Maps encoded as array of {key, value} objects
+        # Maps encoded as JSON array of {key, value} objects
         let items = list::map {xs = entries, f = {x} ->
             JObject {fields = [
                 {key = "key", value = x.key},
                 {key = "value", value = x.value}
             ]}
         }
-        Ok {val = JArray {items = list::to_array {xs = items}}},
+        Ok {val = JArray {items = list::to_seq {xs = items}}},
 
     encode_option = {val, path} ->
         match val is
@@ -481,31 +481,31 @@ impl DecodeFormat Json where {
 
     decode_list = {val, path} ->
         match val is
-            # JArray.items is now Array, convert to List for codec
-            JArray {items} -> Ok {val = __native_list_from_array {xs = items}}
+            # JArray.items is Seq, convert to List for codec
+            JArray {items} -> Ok {val = list::from_seq {xs = items}}
             _ -> Err {error = {
                 path = path,
                 message = "Expected array",
-                expected = "Array",
+                expected = "Seq",
                 found = Some {val = json_type_name {json = val}}
             }},
 
     decode_set = {val, path} ->
         match val is
-            # JArray.items is Array, use set::from_array
-            JArray {items} -> Ok {val = set::from_array {xs = items}}
+            # JArray.items is Seq, use set::from_seq
+            JArray {items} -> Ok {val = set::from_seq {xs = items}}
             _ -> Err {error = {
                 path = path,
                 message = "Expected array (for set)",
-                expected = "Array",
+                expected = "Seq",
                 found = Some {val = json_type_name {json = val}}
             }},
 
     decode_map = {val, path} ->
         match val is
             JObject {fields} -> do
-                # Convert object fields (Array {key: String, value: Json}) to List {key: Json, value: Json}
-                let as_list = __native_list_from_array {xs = fields}
+                # Convert object fields [{key: String, value: Json}] to List {key: Json, value: Json}
+                let as_list = list::from_seq {xs = fields}
                 let converted = list::map {xs = as_list, f = {x} ->
                     {key = JString {val = x.key}, value = x.value}
                 }
@@ -532,7 +532,7 @@ impl DecodeFormat Json where {
 # DECODE HELPER FUNCTIONS
 # ============================================================================
 
-# Find a field in an array of entries
+# Find a field in a seq of entries
 let find_field = {fields, key, path} -> do
     match find_field_value {fields = fields, key = key, idx = 0} is
         Some {val = v} -> Ok {val = v}
@@ -543,12 +543,12 @@ let find_field = {fields, key, path} -> do
             found = None
         }}
 
-# Find a field value without returning error (using array indexing)
+# Find a field value without returning error (using seq indexing)
 let find_field_value = {fields, key, idx} ->
-    if idx >= __native_arraylist_length {xs = fields} then
+    if idx >= seq::length {xs = fields} then
         None
     else
-        match __native_arraylist_get {xs = fields, i = idx} is
+        match seq::get {xs = fields, i = idx} is
             Some {val = entry} ->
                 if entry.key == key then
                     Some {val = entry.value}

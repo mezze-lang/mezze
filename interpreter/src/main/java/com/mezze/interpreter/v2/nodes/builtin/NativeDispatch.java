@@ -126,8 +126,13 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Handler Registration ====================
 
     private static void initHandlers() {
-        // ArrayList operations
-        registerArrayListHandlers();
+        // Core primitive operations (Int, Float, String, Bool, Console)
+        registerIntHandlers();
+        registerFloatBasicHandlers();
+        registerStringBasicHandlers();
+        registerBoolHandlers();
+        // Seq operations (new, MezzeSeq-backed)
+        registerSeqHandlers();
         // List operations
         registerListHandlers();
         // Set operations
@@ -189,69 +194,544 @@ public final class NativeDispatch extends MezzeNode {
         });
     }
 
-    // ==================== ArrayList ====================
+    // ==================== Int Operations ====================
 
-    private static void registerArrayListHandlers() {
-        HANDLERS.put("__native_arraylist_length", (r, c) ->
-            ArrayListNatives.length(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_is_empty", (r, c) ->
-            ArrayListNatives.isEmpty(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_get", (r, c) ->
-            ArrayListNatives.get(getArray(r, "xs"), getLong(r, "i")));
-        HANDLERS.put("__native_arraylist_set", (r, c) ->
-            ArrayListNatives.set(getArray(r, "xs"), getLong(r, "i"), getField(r, "x")));
-        HANDLERS.put("__native_arraylist_add", (r, c) ->
-            ArrayListNatives.add(getArray(r, "xs"), getField(r, "x")));
-        HANDLERS.put("__native_arraylist_remove", (r, c) ->
-            ArrayListNatives.remove(getArray(r, "xs"), getLong(r, "i")));
-        HANDLERS.put("__native_arraylist_concat", (r, c) ->
-            ArrayListNatives.concat(getArray(r, "xs"), getArray(r, "ys")));
-        HANDLERS.put("__native_arraylist_reverse", (r, c) ->
-            ArrayListNatives.reverse(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_slice", (r, c) ->
-            ArrayListNatives.slice(getArray(r, "xs"), getLong(r, "start"), getLong(r, "end")));
-        HANDLERS.put("__native_arraylist_contains", (r, c) ->
-            ArrayListNatives.contains(getArray(r, "xs"), getField(r, "x")));
-        HANDLERS.put("__native_arraylist_index_of", (r, c) ->
-            ArrayListNatives.indexOf(getArray(r, "xs"), getField(r, "x")));
-        HANDLERS.put("__native_arraylist_last", (r, c) ->
-            ArrayListNatives.last(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_init", (r, c) ->
-            ArrayListNatives.init(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_sort", (r, c) ->
-            ArrayListNatives.sort(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_unique", (r, c) ->
-            ArrayListNatives.unique(getArray(r, "xs")));
-        HANDLERS.put("__native_arraylist_flatten", (r, c) ->
-            ArrayListNatives.flatten(getArray(r, "xss")));
-        HANDLERS.put("__native_arraylist_equals", (r, c) ->
-            ArrayListNatives.equals(getArray(r, "l"), getArray(r, "r")));
+    private static void registerIntHandlers() {
+        HANDLERS.put("__native_int_add", (r, c) ->
+            Math.addExact(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_subtract", (r, c) ->
+            Math.subtractExact(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_multiply", (r, c) ->
+            Math.multiplyExact(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_divide", (r, c) -> {
+            long l = getLong(r, "l");
+            long rv = getLong(r, "r");
+            if (rv == 0) throw new RuntimeException("Division by zero");
+            return l / rv;
+        });
+        HANDLERS.put("__native_int_modulo", (r, c) -> {
+            long l = getLong(r, "l");
+            long rv = getLong(r, "r");
+            if (rv == 0) throw new RuntimeException("Modulo by zero");
+            return l % rv;
+        });
+        HANDLERS.put("__native_int_to_string", (r, c) ->
+            Long.toString(getLong(r, "n")));
+        HANDLERS.put("__native_int_abs", (r, c) ->
+            Math.abs(getLong(r, "n")));
+        HANDLERS.put("__native_int_min", (r, c) ->
+            Math.min(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_max", (r, c) ->
+            Math.max(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_clamp", (r, c) ->
+            Math.max(getLong(r, "min"), Math.min(getLong(r, "max"), getLong(r, "n"))));
+        HANDLERS.put("__native_int_sign", (r, c) ->
+            (long) Long.signum(getLong(r, "n")));
+        HANDLERS.put("__native_int_neg", (r, c) ->
+            Math.negateExact(getLong(r, "n")));
+        HANDLERS.put("__native_int_from_string", (r, c) ->
+            intFromString(getString(r, "s")));
+        HANDLERS.put("__native_int_from_nat", (r, c) ->
+            getLong(r, "n"));
+        HANDLERS.put("__native_int_to_float", (r, c) ->
+            (double) getLong(r, "n"));
+        HANDLERS.put("__native_int_to_nat", (r, c) -> {
+            long n = getLong(r, "n");
+            return n >= 0 ? MezzeVariant.some(n) : MezzeVariant.none();
+        });
+        HANDLERS.put("__native_int_pow", (r, c) ->
+            intPow(getLong(r, "base"), getLong(r, "exp")));
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant intFromString(String s) {
+        try {
+            long value = Long.parseLong(s.trim());
+            return MezzeVariant.some(value);
+        } catch (NumberFormatException e) {
+            return MezzeVariant.none();
+        }
+    }
+
+    private static long intPow(long base, long exp) {
+        if (exp < 0) return 0;
+        long result = 1;
+        while (exp > 0) {
+            if ((exp & 1) == 1) {
+                result = Math.multiplyExact(result, base);
+            }
+            base = Math.multiplyExact(base, base);
+            exp >>= 1;
+        }
+        return result;
+    }
+
+    // ==================== Float Basic Operations ====================
+
+    private static void registerFloatBasicHandlers() {
+        HANDLERS.put("__native_float_to_string", (r, c) ->
+            Double.toString(getDouble(r, "n")));
+        HANDLERS.put("__native_float_from_int", (r, c) ->
+            (double) getLong(r, "n"));
+        HANDLERS.put("__native_float_from_string", (r, c) ->
+            floatFromString(getString(r, "s")));
+        HANDLERS.put("__native_float_abs", (r, c) ->
+            Math.abs(getDouble(r, "n")));
+        HANDLERS.put("__native_float_min", (r, c) ->
+            Math.min(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_max", (r, c) ->
+            Math.max(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_clamp", (r, c) ->
+            Math.max(getDouble(r, "min"), Math.min(getDouble(r, "max"), getDouble(r, "n"))));
+        HANDLERS.put("__native_float_sign", (r, c) ->
+            Math.signum(getDouble(r, "n")));
+        HANDLERS.put("__native_float_to_int", (r, c) ->
+            (long) getDouble(r, "n"));
+        HANDLERS.put("__native_float_is_nan", (r, c) ->
+            Double.isNaN(getDouble(r, "n")));
+        HANDLERS.put("__native_float_is_infinite", (r, c) ->
+            Double.isInfinite(getDouble(r, "n")));
+        HANDLERS.put("__native_float_is_finite", (r, c) ->
+            Double.isFinite(getDouble(r, "n")));
+        HANDLERS.put("__native_float_floor", (r, c) ->
+            Math.floor(getDouble(r, "n")));
+        HANDLERS.put("__native_float_ceil", (r, c) ->
+            Math.ceil(getDouble(r, "n")));
+        HANDLERS.put("__native_float_round", (r, c) ->
+            (double) Math.round(getDouble(r, "n")));
+        HANDLERS.put("__native_float_sqrt", (r, c) ->
+            Math.sqrt(getDouble(r, "n")));
+        HANDLERS.put("__native_float_pow", (r, c) ->
+            Math.pow(getDouble(r, "base"), getDouble(r, "exp")));
+        HANDLERS.put("__native_float_ln", (r, c) ->
+            Math.log(getDouble(r, "n")));
+        HANDLERS.put("__native_float_log10", (r, c) ->
+            Math.log10(getDouble(r, "n")));
+        HANDLERS.put("__native_float_exp", (r, c) ->
+            Math.exp(getDouble(r, "n")));
+        // Trig operations
+        HANDLERS.put("__native_float_sin", (r, c) ->
+            Math.sin(getDouble(r, "n")));
+        HANDLERS.put("__native_float_cos", (r, c) ->
+            Math.cos(getDouble(r, "n")));
+        HANDLERS.put("__native_float_tan", (r, c) ->
+            Math.tan(getDouble(r, "n")));
+        HANDLERS.put("__native_float_asin", (r, c) ->
+            Math.asin(getDouble(r, "n")));
+        HANDLERS.put("__native_float_acos", (r, c) ->
+            Math.acos(getDouble(r, "n")));
+        HANDLERS.put("__native_float_atan", (r, c) ->
+            Math.atan(getDouble(r, "n")));
+        HANDLERS.put("__native_float_atan2", (r, c) ->
+            Math.atan2(getDouble(r, "y"), getDouble(r, "x")));
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant floatFromString(String s) {
+        try {
+            double value = Double.parseDouble(s.trim());
+            return MezzeVariant.some(value);
+        } catch (NumberFormatException e) {
+            return MezzeVariant.none();
+        }
+    }
+
+    // ==================== String Basic Operations ====================
+
+    private static void registerStringBasicHandlers() {
+        HANDLERS.put("__native_string_concat", (r, c) ->
+            getString(r, "l") + getString(r, "r"));
+        HANDLERS.put("__native_string_length", (r, c) ->
+            (long) getString(r, "s").length());
+        HANDLERS.put("__native_string_to_upper", (r, c) ->
+            getString(r, "s").toUpperCase());
+        HANDLERS.put("__native_string_to_lower", (r, c) ->
+            getString(r, "s").toLowerCase());
+        HANDLERS.put("__native_string_trim", (r, c) ->
+            getString(r, "s").trim());
+        HANDLERS.put("__native_string_substring", (r, c) ->
+            stringSubstring(getString(r, "s"), getLong(r, "start"), getLong(r, "end")));
+        HANDLERS.put("__native_string_char_at", (r, c) ->
+            stringCharAt(getString(r, "s"), getLong(r, "i")));
+        HANDLERS.put("__native_string_index_of", (r, c) ->
+            stringIndexOf(getString(r, "s"), getString(r, "sub")));
+        HANDLERS.put("__native_string_contains", (r, c) ->
+            getString(r, "s").contains(getString(r, "substring")));
+        HANDLERS.put("__native_string_starts_with", (r, c) ->
+            getString(r, "s").startsWith(getString(r, "prefix")));
+        HANDLERS.put("__native_string_ends_with", (r, c) ->
+            getString(r, "s").endsWith(getString(r, "suffix")));
+        HANDLERS.put("__native_string_replace", (r, c) ->
+            getString(r, "s").replaceFirst(java.util.regex.Pattern.quote(getString(r, "old")), getString(r, "new")));
+        HANDLERS.put("__native_string_replace_all", (r, c) ->
+            getString(r, "s").replace(getString(r, "old"), getString(r, "new")));
+        HANDLERS.put("__native_string_split", (r, c) ->
+            stringSplit(getString(r, "s"), getString(r, "delimiter")));
+        HANDLERS.put("__native_string_join", (r, c) ->
+            stringJoin(getSeq(r, "strings"), getString(r, "separator")));
+        HANDLERS.put("__native_string_reverse", (r, c) ->
+            new StringBuilder(getString(r, "s")).reverse().toString());
+        HANDLERS.put("__native_string_repeat", (r, c) ->
+            getString(r, "s").repeat((int) getLong(r, "n")));
+        HANDLERS.put("__native_string_trim_start", (r, c) ->
+            getString(r, "s").stripLeading());
+        HANDLERS.put("__native_string_trim_end", (r, c) ->
+            getString(r, "s").stripTrailing());
+    }
+
+    @TruffleBoundary
+    private static String stringSubstring(String s, long start, long end) {
+        int startIdx = (int) Math.max(0, Math.min(start, s.length()));
+        int endIdx = (int) Math.max(0, Math.min(end, s.length()));
+        if (startIdx >= endIdx) return "";
+        return s.substring(startIdx, endIdx);
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant stringCharAt(String s, long i) {
+        if (i < 0 || i >= s.length()) return MezzeVariant.none();
+        return MezzeVariant.some(String.valueOf(s.charAt((int) i)));
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant stringIndexOf(String s, String sub) {
+        int idx = s.indexOf(sub);
+        return idx >= 0 ? MezzeVariant.some((long) idx) : MezzeVariant.none();
+    }
+
+    @TruffleBoundary
+    private static MezzeSeq stringSplit(String s, String delimiter) {
+        String[] parts = s.split(java.util.regex.Pattern.quote(delimiter));
+        Object[] result = new Object[parts.length];
+        System.arraycopy(parts, 0, result, 0, parts.length);
+        return MezzeSeq.fromArray(result);
+    }
+
+    @TruffleBoundary
+    private static String stringJoin(MezzeSeq strings, String separator) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < strings.size(); i++) {
+            if (i > 0) sb.append(separator);
+            sb.append((String) strings.get(i));
+        }
+        return sb.toString();
+    }
+
+    // ==================== Bool Operations ====================
+
+    private static void registerBoolHandlers() {
+        HANDLERS.put("__native_bool_to_string", (r, c) ->
+            Boolean.toString(getBool(r, "b")));
+        HANDLERS.put("__native_bool_and", (r, c) ->
+            getBool(r, "l") && getBool(r, "r"));
+        HANDLERS.put("__native_bool_or", (r, c) ->
+            getBool(r, "l") || getBool(r, "r"));
+        HANDLERS.put("__native_bool_not", (r, c) ->
+            !getBool(r, "b"));
+        HANDLERS.put("__native_bool_xor", (r, c) ->
+            getBool(r, "l") ^ getBool(r, "r"));
+    }
+
+    // ==================== Seq (new, MezzeSeq-backed) ====================
+
+    private static void registerSeqHandlers() {
+        HANDLERS.put("__native_seq_empty", (r, c) -> SeqNatives.empty());
+        HANDLERS.put("__native_seq_length", (r, c) ->
+            SeqNatives.length(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_is_empty", (r, c) ->
+            SeqNatives.isEmpty(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_get", (r, c) ->
+            SeqNatives.get(getSeq(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_seq_set", (r, c) ->
+            SeqNatives.set(getSeq(r, "xs"), getLong(r, "i"), getField(r, "x")));
+        HANDLERS.put("__native_seq_add", (r, c) ->
+            SeqNatives.add(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_push", (r, c) ->
+            SeqNatives.push(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_push_front", (r, c) ->
+            SeqNatives.pushFront(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_remove", (r, c) ->
+            SeqNatives.remove(getSeq(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_seq_concat", (r, c) ->
+            SeqNatives.concat(getSeq(r, "xs"), getSeq(r, "ys")));
+        HANDLERS.put("__native_seq_reverse", (r, c) ->
+            SeqNatives.reverse(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_slice", (r, c) ->
+            SeqNatives.slice(getSeq(r, "xs"), getLong(r, "start"), getLong(r, "end")));
+        HANDLERS.put("__native_seq_take", (r, c) ->
+            SeqNatives.take(getSeq(r, "xs"), getLong(r, "n")));
+        HANDLERS.put("__native_seq_drop", (r, c) ->
+            SeqNatives.drop(getSeq(r, "xs"), getLong(r, "n")));
+        HANDLERS.put("__native_seq_head", (r, c) ->
+            SeqNatives.head(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_first", (r, c) ->
+            SeqNatives.first(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_last", (r, c) ->
+            SeqNatives.last(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_tail", (r, c) ->
+            SeqNatives.tail(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_init", (r, c) ->
+            SeqNatives.init(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_contains", (r, c) ->
+            SeqNatives.contains(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_index_of", (r, c) ->
+            SeqNatives.indexOf(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_sort", (r, c) ->
+            SeqNatives.sort(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_unique", (r, c) ->
+            SeqNatives.unique(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_distinct", (r, c) ->
+            SeqNatives.distinct(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_flatten", (r, c) ->
+            SeqNatives.flatten(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_equals", (r, c) ->
+            SeqNatives.equals(getSeq(r, "l"), getSeq(r, "r")));
+        HANDLERS.put("__native_seq_intersperse", (r, c) ->
+            SeqNatives.intersperse(getSeq(r, "xs"), getField(r, "sep")));
+        HANDLERS.put("__native_seq_chunk", (r, c) ->
+            SeqNatives.chunk(getSeq(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_seq_sliding", (r, c) ->
+            SeqNatives.sliding(getSeq(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_seq_range", (r, c) ->
+            SeqNatives.range(getLong(r, "start"), getLong(r, "end")));
+        HANDLERS.put("__native_seq_range_step", (r, c) ->
+            SeqNatives.rangeStep(getLong(r, "start"), getLong(r, "end"), getLong(r, "step")));
+        HANDLERS.put("__native_seq_zip_with_index", (r, c) ->
+            SeqNatives.zipWithIndex(getSeq(r, "xs")));
 
         // HOF operations
-        HANDLERS.put("__native_arraylist_map", (r, c) ->
-            ArrayListNatives.map(getArray(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_arraylist_filter", (r, c) ->
-            ArrayListNatives.filter(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_fold", (r, c) ->
-            ArrayListNatives.fold(getArray(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_arraylist_reduce", (r, c) ->
-            ArrayListNatives.reduce(getArray(r, "xs"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_arraylist_find", (r, c) ->
-            ArrayListNatives.find(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_find_index", (r, c) ->
-            ArrayListNatives.findIndex(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_any", (r, c) ->
-            ArrayListNatives.any(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_all", (r, c) ->
-            ArrayListNatives.all(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_partition", (r, c) ->
-            ArrayListNatives.partition(getArray(r, "xs"), getFunction(r, "p"), c));
-        HANDLERS.put("__native_arraylist_sort_by", (r, c) ->
-            ArrayListNatives.sortBy(getArray(r, "xs"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_arraylist_zip", (r, c) ->
-            ArrayListNatives.zip(getArray(r, "xs"), getArray(r, "ys")));
-        HANDLERS.put("__native_arraylist_unzip", (r, c) ->
-            ArrayListNatives.unzip(getArray(r, "xs")));
+        HANDLERS.put("__native_seq_map", (r, c) ->
+            SeqNatives.map(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_filter", (r, c) ->
+            SeqNatives.filter(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_flat_map", (r, c) ->
+            SeqNatives.flatMap(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_fold", (r, c) ->
+            SeqNatives.fold(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_reduce", (r, c) ->
+            SeqNatives.reduce(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_find", (r, c) ->
+            SeqNatives.find(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_find_index", (r, c) ->
+            SeqNatives.findIndex(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_any", (r, c) ->
+            SeqNatives.any(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_all", (r, c) ->
+            SeqNatives.all(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_none", (r, c) ->
+            SeqNatives.none(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_count", (r, c) ->
+            SeqNatives.count(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_partition", (r, c) ->
+            SeqNatives.partition(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_sort_by", (r, c) ->
+            SeqNatives.sortBy(getSeq(r, "xs"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_seq_take_while", (r, c) ->
+            SeqNatives.takeWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_drop_while", (r, c) ->
+            SeqNatives.dropWhile(getSeq(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_seq_zip", (r, c) ->
+            SeqNatives.zip(getSeq(r, "xs"), getSeq(r, "ys")));
+        HANDLERS.put("__native_seq_unzip", (r, c) ->
+            SeqNatives.unzip(getSeq(r, "xs")));
+
+        // Min/Max/Sum/Product
+        HANDLERS.put("__native_seq_min", (r, c) ->
+            SeqNatives.min(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_max", (r, c) ->
+            SeqNatives.max(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_min_by", (r, c) ->
+            SeqNatives.minBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_max_by", (r, c) ->
+            SeqNatives.maxBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_sum", (r, c) ->
+            SeqNatives.sum(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_sum_float", (r, c) ->
+            SeqNatives.sumFloat(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_product", (r, c) ->
+            SeqNatives.product(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_product_float", (r, c) ->
+            SeqNatives.productFloat(getSeq(r, "xs")));
+
+        // Group By
+        HANDLERS.put("__native_seq_group_by", (r, c) ->
+            SeqNatives.groupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+
+        // Enumerate/ForEach/Scan
+        HANDLERS.put("__native_seq_enumerate", (r, c) ->
+            SeqNatives.enumerate(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_for_each", (r, c) ->
+            SeqNatives.forEach(getSeq(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_seq_scan", (r, c) ->
+            SeqNatives.scan(getSeq(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
+
+        // Split Operations
+        HANDLERS.put("__native_seq_split_at", (r, c) ->
+            SeqNatives.splitAt(getSeq(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_seq_span", (r, c) ->
+            SeqNatives.span(getSeq(r, "xs"), getFunction(r, "p"), c));
+
+        // Dedup
+        HANDLERS.put("__native_seq_dedup", (r, c) ->
+            SeqNatives.dedup(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_dedup_by", (r, c) ->
+            SeqNatives.dedupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+
+        // Singleton/Nth/Fill
+        HANDLERS.put("__native_seq_singleton", (r, c) ->
+            SeqNatives.singleton(getField(r, "x")));
+        HANDLERS.put("__native_seq_nth", (r, c) ->
+            SeqNatives.nth(getSeq(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_seq_fill", (r, c) ->
+            SeqNatives.fill(getLong(r, "n"), getField(r, "x")));
+        HANDLERS.put("__native_seq_fill_with", (r, c) ->
+            SeqNatives.fillWith(getLong(r, "n"), getFunction(r, "f"), c));
+
+        // Group Consecutive
+        HANDLERS.put("__native_seq_group_consecutive", (r, c) ->
+            SeqNatives.groupConsecutive(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_group_consecutive_by", (r, c) ->
+            SeqNatives.groupConsecutiveBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+
+        // Windows/Chunks/Rotate
+        HANDLERS.put("__native_seq_windows", (r, c) ->
+            SeqNatives.windows(getSeq(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_seq_chunks_exact", (r, c) ->
+            SeqNatives.chunksExact(getSeq(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_seq_rotate_left", (r, c) ->
+            SeqNatives.rotateLeft(getSeq(r, "xs"), getLong(r, "n")));
+        HANDLERS.put("__native_seq_rotate_right", (r, c) ->
+            SeqNatives.rotateRight(getSeq(r, "xs"), getLong(r, "n")));
+
+        // Binary Search
+        HANDLERS.put("__native_seq_binary_search", (r, c) ->
+            SeqNatives.binarySearch(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_binary_search_by", (r, c) ->
+            SeqNatives.binarySearchBy(getSeq(r, "xs"), getField(r, "x"), getFunction(r, "cmp"), c));
+
+        // Sort By Key
+        HANDLERS.put("__native_seq_sort_by_key", (r, c) ->
+            SeqNatives.sortByKey(getSeq(r, "xs"), getFunction(r, "f"), c));
+
+        // Additional Search/Replace Operations
+        HANDLERS.put("__native_seq_last_index_of", (r, c) ->
+            SeqNatives.lastIndexOf(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_replace", (r, c) ->
+            SeqNatives.replace(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val")));
+        HANDLERS.put("__native_seq_replace_all", (r, c) ->
+            SeqNatives.replaceAll(getSeq(r, "xs"), getField(r, "old"), getField(r, "new_val")));
+        HANDLERS.put("__native_seq_insert_at", (r, c) ->
+            SeqNatives.insertAt(getSeq(r, "xs"), getLong(r, "i"), getField(r, "x")));
+        HANDLERS.put("__native_seq_swap", (r, c) ->
+            SeqNatives.swap(getSeq(r, "xs"), getLong(r, "i"), getLong(r, "j")));
+        HANDLERS.put("__native_seq_starts_with", (r, c) ->
+            SeqNatives.startsWith(getSeq(r, "xs"), getSeq(r, "prefix")));
+        HANDLERS.put("__native_seq_ends_with", (r, c) ->
+            SeqNatives.endsWith(getSeq(r, "xs"), getSeq(r, "suffix")));
+        HANDLERS.put("__native_seq_join", (r, c) ->
+            SeqNatives.join(getSeq(r, "xs"), getString(r, "sep")));
+
+        // Advanced Zip Operations
+        HANDLERS.put("__native_seq_zip_with", (r, c) ->
+            SeqNatives.zipWith(getSeq(r, "xs"), getSeq(r, "ys"), getFunction(r, "f")));
+        HANDLERS.put("__native_seq_zip3", (r, c) ->
+            SeqNatives.zip3(getSeq(r, "xs"), getSeq(r, "ys"), getSeq(r, "zs")));
+        HANDLERS.put("__native_seq_zip4", (r, c) ->
+            SeqNatives.zip4(getSeq(r, "xs"), getSeq(r, "ys"), getSeq(r, "zs"), getSeq(r, "ws")));
+        HANDLERS.put("__native_seq_cartesian_product", (r, c) ->
+            SeqNatives.cartesianProduct(getSeq(r, "xs"), getSeq(r, "ys")));
+
+        // Combinatorics
+        HANDLERS.put("__native_seq_permutations", (r, c) ->
+            SeqNatives.permutations(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_combinations", (r, c) ->
+            SeqNatives.combinations(getSeq(r, "xs"), getLong(r, "k")));
+        HANDLERS.put("__native_seq_subsequences", (r, c) ->
+            SeqNatives.subsequences(getSeq(r, "xs")));
+
+        // Statistical Operations
+        HANDLERS.put("__native_seq_average", (r, c) ->
+            SeqNatives.average(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_variance", (r, c) ->
+            SeqNatives.variance(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_stddev", (r, c) ->
+            SeqNatives.stddev(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_median", (r, c) ->
+            SeqNatives.median(getSeq(r, "xs")));
+
+        // Sorting Checks
+        HANDLERS.put("__native_seq_is_sorted", (r, c) ->
+            SeqNatives.isSorted(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_is_sorted_by", (r, c) ->
+            SeqNatives.isSortedBy(getSeq(r, "xs"), getFunction(r, "f")));
+        HANDLERS.put("__native_seq_is_sorted_descending", (r, c) ->
+            SeqNatives.isSortedDescending(getSeq(r, "xs")));
+
+        // Counting
+        HANDLERS.put("__native_seq_count_element", (r, c) ->
+            SeqNatives.countElement(getSeq(r, "xs"), getField(r, "x")));
+
+        // Update Operations
+        HANDLERS.put("__native_seq_update", (r, c) ->
+            SeqNatives.updateAt(getSeq(r, "xs"), getLong(r, "i"), getFunction(r, "f")));
+        HANDLERS.put("__native_seq_remove_at", (r, c) ->
+            SeqNatives.removeAt(getSeq(r, "xs"), getLong(r, "i")));
+
+        // Split Operations
+        HANDLERS.put("__native_seq_split", (r, c) ->
+            SeqNatives.split(getSeq(r, "xs"), getField(r, "sep")));
+
+        // Float-specific Operations
+        HANDLERS.put("__native_seq_min_float", (r, c) ->
+            SeqNatives.minFloat(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_max_float", (r, c) ->
+            SeqNatives.maxFloat(getSeq(r, "xs")));
+
+        // Cross-Collection Conversions
+        HANDLERS.put("__native_seq_to_list", (r, c) ->
+            SeqNatives.toList(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_to_set", (r, c) ->
+            SeqNatives.toSet(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_to_deque", (r, c) ->
+            SeqNatives.toDeque(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_to_sorted_set", (r, c) ->
+            SeqNatives.toSortedSet(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_to_map", (r, c) ->
+            SeqNatives.toMap(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_to_sorted_map", (r, c) ->
+            SeqNatives.toSortedMap(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_from_list", (r, c) ->
+            SeqNatives.fromList(getList(r, "xs")));
+        HANDLERS.put("__native_seq_from_set", (r, c) ->
+            SeqNatives.fromSet(getSet(r, "s")));
+        HANDLERS.put("__native_seq_from_deque", (r, c) ->
+            SeqNatives.fromDeque(getDeque(r, "d")));
+        HANDLERS.put("__native_seq_from_sorted_set", (r, c) ->
+            SeqNatives.fromSortedSet(getSortedSet(r, "s")));
+        HANDLERS.put("__native_seq_from_map", (r, c) ->
+            SeqNatives.fromMap(getMap(r, "m")));
+        HANDLERS.put("__native_seq_from_sorted_map", (r, c) ->
+            SeqNatives.fromSortedMap(getSortedMap(r, "m")));
+
+        // Binary search operations
+        HANDLERS.put("__native_seq_binary_search_insert_point", (r, c) ->
+            SeqNatives.binarySearchInsertPoint(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_lower_bound", (r, c) ->
+            SeqNatives.lowerBound(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_upper_bound", (r, c) ->
+            SeqNatives.upperBound(getSeq(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_seq_equal_range", (r, c) ->
+            SeqNatives.equalRange(getSeq(r, "xs"), getField(r, "x")));
+
+        // Lexicographic comparison (returns -1, 0, 1)
+        HANDLERS.put("__native_seq_compare", (r, c) ->
+            SeqNatives.compareSeqs(getSeq(r, "xs"), getSeq(r, "ys")));
+
+        // Additional combinatorics
+        HANDLERS.put("__native_seq_subsequences_non_empty", (r, c) ->
+            SeqNatives.subsequencesNonEmpty(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_contiguous_subsequences", (r, c) ->
+            SeqNatives.contiguousSubsequences(getSeq(r, "xs")));
     }
 
     // ==================== List ====================
@@ -271,15 +751,15 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_init", (r, c) ->
             ListNatives.init(getList(r, "xs")));
         HANDLERS.put("__native_list_cons", (r, c) ->
-            ListNatives.cons(getField(r, "x"), getList(r, "xs")));
+            ListNatives.cons(getField(r, "head"), getList(r, "tail")));
         HANDLERS.put("__native_list_append", (r, c) ->
-            ListNatives.append(getList(r, "xs"), getField(r, "x")));
+            ListNatives.concat2(getList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_list_uncons", (r, c) ->
             ListNatives.uncons(getList(r, "xs")));
         HANDLERS.put("__native_list_get", (r, c) ->
             ListNatives.get(getList(r, "xs"), getLong(r, "index")));
         HANDLERS.put("__native_list_concat", (r, c) ->
-            ListNatives.concat(getList(r, "xs"), getList(r, "ys")));
+            ListNatives.concat(getList(r, "xss")));
         HANDLERS.put("__native_list_take", (r, c) ->
             ListNatives.take(getList(r, "xs"), getLong(r, "n")));
         HANDLERS.put("__native_list_drop", (r, c) ->
@@ -296,10 +776,8 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.repeat(getField(r, "x"), getLong(r, "n")));
         HANDLERS.put("__native_list_intersperse", (r, c) ->
             ListNatives.intersperse(getList(r, "xs"), getField(r, "sep")));
-        HANDLERS.put("__native_list_to_array", (r, c) ->
-            ListNatives.toArray(getList(r, "xs")));
-        HANDLERS.put("__native_list_from_array", (r, c) ->
-            ListNatives.fromArray(getArray(r, "xs")));
+        HANDLERS.put("__native_list_to_seq", (r, c) ->
+            ListNatives.toSeq(getList(r, "xs")));
         HANDLERS.put("__native_list_zip", (r, c) ->
             ListNatives.zip(getList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_list_unzip", (r, c) ->
@@ -309,7 +787,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_map", (r, c) ->
             ListNatives.map(getList(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_list_filter", (r, c) ->
-            ListNatives.filter(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.filter(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_fold_left", (r, c) ->
             ListNatives.foldLeft(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_list_fold_right", (r, c) ->
@@ -317,17 +795,193 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_list_reduce", (r, c) ->
             ListNatives.reduce(getList(r, "xs"), getFunction(r, "f"), c));
         HANDLERS.put("__native_list_find", (r, c) ->
-            ListNatives.find(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.find(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_find_index", (r, c) ->
-            ListNatives.findIndex(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.findIndex(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_any", (r, c) ->
-            ListNatives.any(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.any(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_all", (r, c) ->
-            ListNatives.all(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.all(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_partition", (r, c) ->
-            ListNatives.partition(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.partition(getList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_list_sort_by", (r, c) ->
-            ListNatives.sortBy(getList(r, "xs"), getFunction(r, "f"), c));
+            ListNatives.sortBy(getList(r, "xs"), getFunction(r, "cmp"), c));
+
+        // Min/Max/Sum/Product
+        HANDLERS.put("__native_list_min", (r, c) ->
+            ListNatives.min(getList(r, "xs")));
+        HANDLERS.put("__native_list_max", (r, c) ->
+            ListNatives.max(getList(r, "xs")));
+        HANDLERS.put("__native_list_min_by", (r, c) ->
+            ListNatives.minBy(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_max_by", (r, c) ->
+            ListNatives.maxBy(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_sum", (r, c) ->
+            ListNatives.sum(getList(r, "xs")));
+        HANDLERS.put("__native_list_sum_float", (r, c) ->
+            ListNatives.sumFloat(getList(r, "xs")));
+        HANDLERS.put("__native_list_product", (r, c) ->
+            ListNatives.product(getList(r, "xs")));
+        HANDLERS.put("__native_list_product_float", (r, c) ->
+            ListNatives.productFloat(getList(r, "xs")));
+
+        // Group By
+        HANDLERS.put("__native_list_group_by", (r, c) ->
+            ListNatives.groupBy(getList(r, "xs"), getFunction(r, "f"), c));
+
+        // Enumerate/ForEach/Scan/ZipWithIndex
+        HANDLERS.put("__native_list_enumerate", (r, c) ->
+            ListNatives.enumerate(getList(r, "xs")));
+        HANDLERS.put("__native_list_zip_with_index", (r, c) ->
+            ListNatives.zipWithIndex(getList(r, "xs")));
+        HANDLERS.put("__native_list_for_each", (r, c) ->
+            ListNatives.forEach(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_scan", (r, c) ->
+            ListNatives.scan(getList(r, "xs"), getField(r, "init"), getFunction(r, "f"), c));
+
+        // Split Operations
+        HANDLERS.put("__native_list_split_at", (r, c) ->
+            ListNatives.splitAt(getList(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_list_span", (r, c) ->
+            ListNatives.span(getList(r, "xs"), getFunction(r, "p"), c));
+
+        // Dedup
+        HANDLERS.put("__native_list_dedup", (r, c) ->
+            ListNatives.dedup(getList(r, "xs")));
+        HANDLERS.put("__native_list_dedup_by", (r, c) ->
+            ListNatives.dedupBy(getList(r, "xs"), getFunction(r, "f"), c));
+
+        // Singleton/Nth/Fill
+        HANDLERS.put("__native_list_singleton", (r, c) ->
+            ListNatives.singleton(getField(r, "x")));
+        HANDLERS.put("__native_list_nth", (r, c) ->
+            ListNatives.nth(getList(r, "xs"), getLong(r, "i")));
+        HANDLERS.put("__native_list_fill", (r, c) ->
+            ListNatives.fill(getLong(r, "n"), getField(r, "x")));
+        HANDLERS.put("__native_list_fill_with", (r, c) ->
+            ListNatives.fillWith(getLong(r, "n"), getFunction(r, "f"), c));
+
+        // Group Consecutive
+        HANDLERS.put("__native_list_group_consecutive", (r, c) ->
+            ListNatives.groupConsecutive(getList(r, "xs")));
+        HANDLERS.put("__native_list_group_consecutive_by", (r, c) ->
+            ListNatives.groupConsecutiveBy(getList(r, "xs"), getFunction(r, "f"), c));
+
+        // FlatMap/TakeWhile/DropWhile
+        HANDLERS.put("__native_list_flat_map", (r, c) ->
+            ListNatives.flatMap(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_take_while", (r, c) ->
+            ListNatives.takeWhile(getList(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_list_drop_while", (r, c) ->
+            ListNatives.dropWhile(getList(r, "xs"), getFunction(r, "p"), c));
+
+        // None/Count
+        HANDLERS.put("__native_list_none", (r, c) ->
+            ListNatives.none(getList(r, "xs"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_list_count", (r, c) ->
+            ListNatives.count(getList(r, "xs"), getFunction(r, "p"), c));
+
+        // Unique/Distinct/Flatten
+        HANDLERS.put("__native_list_unique", (r, c) ->
+            ListNatives.unique(getList(r, "xs")));
+        HANDLERS.put("__native_list_distinct", (r, c) ->
+            ListNatives.distinct(getList(r, "xs")));
+        HANDLERS.put("__native_list_flatten", (r, c) ->
+            ListNatives.flatten(getList(r, "xss")));
+
+        // Task #17: Additional operations
+        HANDLERS.put("__native_list_equals", (r, c) ->
+            ListNatives.equals(getList(r, "xs"), getList(r, "ys")));
+        HANDLERS.put("__native_list_index_of", (r, c) ->
+            ListNatives.indexOf(getList(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_list_last_index_of", (r, c) ->
+            ListNatives.lastIndexOf(getList(r, "xs"), getField(r, "x")));
+        HANDLERS.put("__native_list_slice", (r, c) ->
+            ListNatives.slice(getList(r, "xs"), getLong(r, "start"), getLong(r, "end")));
+
+        // Task #18: Windowing operations
+        HANDLERS.put("__native_list_chunk", (r, c) ->
+            ListNatives.chunk(getList(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_list_windows", (r, c) ->
+            ListNatives.windows(getList(r, "xs"), getLong(r, "size")));
+        HANDLERS.put("__native_list_sliding", (r, c) ->
+            ListNatives.sliding(getList(r, "xs"), getLong(r, "size"), getLong(r, "step")));
+        HANDLERS.put("__native_list_chunks_exact", (r, c) ->
+            ListNatives.chunksExact(getList(r, "xs"), getLong(r, "size")));
+
+        // Task #19: Transformation operations
+        HANDLERS.put("__native_list_sort_by_key", (r, c) ->
+            ListNatives.sortByKey(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_rotate_left", (r, c) ->
+            ListNatives.rotateLeft(getList(r, "xs"), getLong(r, "n")));
+        HANDLERS.put("__native_list_rotate_right", (r, c) ->
+            ListNatives.rotateRight(getList(r, "xs"), getLong(r, "n")));
+
+        // Task #27: Cross-collection conversions (List to other types)
+        HANDLERS.put("__native_list_to_seq", (r, c) ->
+            ListNatives.toSeq(getList(r, "xs")));
+        HANDLERS.put("__native_list_to_set", (r, c) ->
+            ListNatives.toSet(getList(r, "xs")));
+        HANDLERS.put("__native_list_to_deque", (r, c) ->
+            ListNatives.toDeque(getList(r, "xs")));
+        HANDLERS.put("__native_list_to_sorted_set", (r, c) ->
+            ListNatives.toSortedSet(getList(r, "xs")));
+        HANDLERS.put("__native_list_to_map", (r, c) ->
+            ListNatives.toMap(getList(r, "xs")));
+        HANDLERS.put("__native_list_to_sorted_map", (r, c) ->
+            ListNatives.toSortedMap(getList(r, "xs")));
+        HANDLERS.put("__native_list_from_seq", (r, c) ->
+            ListNatives.fromSeq(getSeq(r, "xs")));
+        HANDLERS.put("__native_list_from_set", (r, c) ->
+            ListNatives.fromSet(getSet(r, "xs")));
+        HANDLERS.put("__native_list_from_deque", (r, c) ->
+            ListNatives.fromDeque(getDeque(r, "xs")));
+        HANDLERS.put("__native_list_from_sorted_set", (r, c) ->
+            ListNatives.fromSortedSet(getSortedSet(r, "xs")));
+        HANDLERS.put("__native_list_from_map", (r, c) ->
+            ListNatives.fromMap(getMap(r, "m")));
+        HANDLERS.put("__native_list_from_sorted_map", (r, c) ->
+            ListNatives.fromSortedMap(getSortedMap(r, "m")));
+
+        // Task #32: Numeric operations
+        HANDLERS.put("__native_list_average", (r, c) ->
+            ListNatives.average(getList(r, "xs")));
+        HANDLERS.put("__native_list_variance", (r, c) ->
+            ListNatives.variance(getList(r, "xs")));
+        HANDLERS.put("__native_list_stddev", (r, c) ->
+            ListNatives.stddev(getList(r, "xs")));
+        HANDLERS.put("__native_list_median", (r, c) ->
+            ListNatives.median(getList(r, "xs")));
+        HANDLERS.put("__native_list_sum_float", (r, c) ->
+            ListNatives.sumFloat(getList(r, "xs")));
+        HANDLERS.put("__native_list_product_float", (r, c) ->
+            ListNatives.productFloat(getList(r, "xs")));
+
+        // Task #36: Comparison operations
+        HANDLERS.put("__native_list_compare", (r, c) ->
+            ListNatives.compare(getList(r, "xs"), getList(r, "ys")));
+        HANDLERS.put("__native_list_lexicographic_compare", (r, c) ->
+            ListNatives.lexicographicCompare(getList(r, "xs"), getList(r, "ys"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_list_is_sorted", (r, c) ->
+            ListNatives.isSorted(getList(r, "xs")));
+        HANDLERS.put("__native_list_is_sorted_by", (r, c) ->
+            ListNatives.isSortedBy(getList(r, "xs"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_list_is_sorted_descending", (r, c) ->
+            ListNatives.isSortedDescending(getList(r, "xs")));
+
+        // Task #33: Binary search operations
+        HANDLERS.put("__native_list_binary_search", (r, c) ->
+            ListNatives.binarySearch(getList(r, "xs"), getField(r, "target")));
+        HANDLERS.put("__native_list_binary_search_insert_point", (r, c) ->
+            ListNatives.binarySearchInsertPoint(getList(r, "xs"), getField(r, "target")));
+        HANDLERS.put("__native_list_lower_bound", (r, c) ->
+            ListNatives.lowerBound(getList(r, "xs"), getField(r, "target")));
+        HANDLERS.put("__native_list_upper_bound", (r, c) ->
+            ListNatives.upperBound(getList(r, "xs"), getField(r, "target")));
+        HANDLERS.put("__native_list_equal_range", (r, c) ->
+            ListNatives.equalRange(getList(r, "xs"), getField(r, "target")));
+        HANDLERS.put("__native_list_binary_search_by", (r, c) ->
+            ListNatives.binarySearchBy(getList(r, "xs"), getField(r, "target"), getFunction(r, "cmp"), c));
     }
 
     // ==================== Set ====================
@@ -358,11 +1012,11 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.isSubset(getSet(r, "s1"), getSet(r, "s2")));
         HANDLERS.put("__native_set_equals", (r, c) ->
             SetNatives.equals(getSet(r, "s1"), getSet(r, "s2")));
-        HANDLERS.put("__native_set_to_array", (r, c) ->
+        HANDLERS.put("__native_set_to_seq", (r, c) ->
             SetNatives.toArray(getSet(r, "s")));
         HANDLERS.put("__native_set_to_list", (r, c) ->
             SetNatives.toList(getSet(r, "s")));
-        HANDLERS.put("__native_set_from_array", (r, c) ->
+        HANDLERS.put("__native_set_from_seq", (r, c) ->
             SetNatives.fromArray(getArray(r, "xs")));
         HANDLERS.put("__native_set_from_list", (r, c) ->
             SetNatives.fromList(getList(r, "xs")));
@@ -374,6 +1028,68 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.map(getSet(r, "s"), getFunction(r, "f"), c));
         HANDLERS.put("__native_set_fold", (r, c) ->
             SetNatives.fold(getSet(r, "s"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_any", (r, c) ->
+            SetNatives.any(getSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_set_all", (r, c) ->
+            SetNatives.all(getSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_set_none", (r, c) ->
+            SetNatives.none(getSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_set_find", (r, c) ->
+            SetNatives.find(getSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_set_count", (r, c) ->
+            SetNatives.count(getSet(r, "s"), getFunction(r, "p"), c));
+
+        // Min/Max/Sum/Product
+        HANDLERS.put("__native_set_min", (r, c) ->
+            SetNatives.min(getSet(r, "s")));
+        HANDLERS.put("__native_set_max", (r, c) ->
+            SetNatives.max(getSet(r, "s")));
+        HANDLERS.put("__native_set_sum", (r, c) ->
+            SetNatives.sum(getSet(r, "s")));
+        HANDLERS.put("__native_set_product", (r, c) ->
+            SetNatives.product(getSet(r, "s")));
+
+        // Conversion/Factory
+        HANDLERS.put("__native_set_to_seq", (r, c) ->
+            SetNatives.toSeq(getSet(r, "s")));
+        HANDLERS.put("__native_set_singleton", (r, c) ->
+            SetNatives.singleton(getField(r, "x")));
+
+        // Additional operations
+        HANDLERS.put("__native_set_reduce", (r, c) ->
+            SetNatives.reduce(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_min_by", (r, c) ->
+            SetNatives.minBy(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_max_by", (r, c) ->
+            SetNatives.maxBy(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_partition", (r, c) ->
+            SetNatives.partition(getSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_set_sum_float", (r, c) ->
+            SetNatives.sumFloat(getSet(r, "s")));
+        HANDLERS.put("__native_set_product_float", (r, c) ->
+            SetNatives.productFloat(getSet(r, "s")));
+
+        // Task #20: Additional operations
+        HANDLERS.put("__native_set_flat_map", (r, c) ->
+            SetNatives.flatMap(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_group_by", (r, c) ->
+            SetNatives.groupBy(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_symmetric_difference", (r, c) ->
+            SetNatives.symmetricDifference(getSet(r, "s1"), getSet(r, "s2")));
+
+        // Task #30: Collect operations
+        HANDLERS.put("__native_set_filter_map", (r, c) ->
+            SetNatives.filterMap(getSet(r, "set"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_collect_seq", (r, c) ->
+            SetNatives.collectArray(getSet(r, "set"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_collect_list", (r, c) ->
+            SetNatives.collectList(getSet(r, "set"), getFunction(r, "f"), c));
+
+        // SortedSet conversions
+        HANDLERS.put("__native_set_to_sorted_set", (r, c) ->
+            SetNatives.toSortedSet(getSet(r, "s")));
+        HANDLERS.put("__native_set_from_sorted_set", (r, c) ->
+            SetNatives.fromSortedSet(getSortedSet(r, "s")));
     }
 
     // ==================== SortedSet ====================
@@ -412,6 +1128,78 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.fromList(getList(r, "xs")));
         HANDLERS.put("__native_sorted_set_from_set", (r, c) ->
             SortedSetNatives.fromSet(getSet(r, "s")));
+
+        // HOF operations
+        HANDLERS.put("__native_sorted_set_filter", (r, c) ->
+            SortedSetNatives.filter(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_fold", (r, c) ->
+            SortedSetNatives.fold(getSortedSet(r, "s"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_map", (r, c) ->
+            SortedSetNatives.map(getSortedSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_any", (r, c) ->
+            SortedSetNatives.any(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_all", (r, c) ->
+            SortedSetNatives.all(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_none", (r, c) ->
+            SortedSetNatives.none(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_find", (r, c) ->
+            SortedSetNatives.find(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_count", (r, c) ->
+            SortedSetNatives.count(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_reduce", (r, c) ->
+            SortedSetNatives.reduce(getSortedSet(r, "s"), getFunction(r, "f"), c));
+
+        // Aggregation
+        HANDLERS.put("__native_sorted_set_sum", (r, c) ->
+            SortedSetNatives.sum(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_sum_float", (r, c) ->
+            SortedSetNatives.sumFloat(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_product", (r, c) ->
+            SortedSetNatives.product(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_product_float", (r, c) ->
+            SortedSetNatives.productFloat(getSortedSet(r, "s")));
+
+        // Conversion
+        HANDLERS.put("__native_sorted_set_to_seq", (r, c) ->
+            SortedSetNatives.toSeq(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_from_seq", (r, c) ->
+            SortedSetNatives.fromArray(getArray(r, "xs")));
+
+        // ForEach
+        HANDLERS.put("__native_sorted_set_for_each", (r, c) ->
+            SortedSetNatives.forEach(getSortedSet(r, "s"), getFunction(r, "f"), c));
+
+        // Task #13: Additional operations
+        HANDLERS.put("__native_sorted_set_partition", (r, c) ->
+            SortedSetNatives.partition(getSortedSet(r, "s"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_set_min_by", (r, c) ->
+            SortedSetNatives.minBy(getSortedSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_max_by", (r, c) ->
+            SortedSetNatives.maxBy(getSortedSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_take", (r, c) ->
+            SortedSetNatives.take(getSortedSet(r, "s"), getLong(r, "n")));
+        HANDLERS.put("__native_sorted_set_drop", (r, c) ->
+            SortedSetNatives.drop(getSortedSet(r, "s"), getLong(r, "n")));
+        HANDLERS.put("__native_sorted_set_range", (r, c) ->
+            SortedSetNatives.range(getSortedSet(r, "s"), getField(r, "lo"), getField(r, "hi")));
+
+        // Task #14: Advanced operations
+        HANDLERS.put("__native_sorted_set_symmetric_difference", (r, c) ->
+            SortedSetNatives.symmetricDifference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+        HANDLERS.put("__native_sorted_set_head_set", (r, c) ->
+            SortedSetNatives.headSet(getSortedSet(r, "s"), getField(r, "to")));
+        HANDLERS.put("__native_sorted_set_tail_set", (r, c) ->
+            SortedSetNatives.tailSet(getSortedSet(r, "s"), getField(r, "from")));
+        HANDLERS.put("__native_sorted_set_sub_set", (r, c) ->
+            SortedSetNatives.subSet(getSortedSet(r, "s"), getField(r, "lo"), getField(r, "hi")));
+
+        // Task #30: Collect operations
+        HANDLERS.put("__native_sorted_set_filter_map", (r, c) ->
+            SortedSetNatives.filterMap(getSortedSet(r, "set"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_collect_seq", (r, c) ->
+            SortedSetNatives.collectArray(getSortedSet(r, "set"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_set_collect_list", (r, c) ->
+            SortedSetNatives.collectList(getSortedSet(r, "set"), getFunction(r, "f"), c));
     }
 
     // ==================== Map ====================
@@ -454,6 +1242,84 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.mergeWith(getMap(r, "m1"), getMap(r, "m2"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_from_keys", (r, c) ->
             MapNatives.fromKeys(listToObjectArray(getList(r, "ks")), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_any", (r, c) ->
+            MapNatives.any(getMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_map_all", (r, c) ->
+            MapNatives.all(getMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_map_none", (r, c) ->
+            MapNatives.none(getMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_map_find", (r, c) ->
+            MapNatives.find(getMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_map_count", (r, c) ->
+            MapNatives.count(getMap(r, "m"), getFunction(r, "p"), c));
+
+        // Additional operations
+        HANDLERS.put("__native_map_contains_value", (r, c) ->
+            MapNatives.containsValue(getMap(r, "m"), getField(r, "v")));
+        HANDLERS.put("__native_map_update", (r, c) ->
+            MapNatives.update(getMap(r, "m"), getField(r, "k"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_get_or_default", (r, c) ->
+            MapNatives.getOrDefault(getMap(r, "m"), getField(r, "k"), getField(r, "default")));
+        HANDLERS.put("__native_map_to_seq", (r, c) ->
+            MapNatives.toSeq(getMap(r, "m")));
+        HANDLERS.put("__native_map_keys_seq", (r, c) ->
+            MapNatives.keysSeq(getMap(r, "m")));
+        HANDLERS.put("__native_map_values_seq", (r, c) ->
+            MapNatives.valuesSeq(getMap(r, "m")));
+        HANDLERS.put("__native_map_singleton", (r, c) ->
+            MapNatives.singleton(getField(r, "k"), getField(r, "v")));
+        HANDLERS.put("__native_map_partition", (r, c) ->
+            MapNatives.partition(getMap(r, "m"), getFunction(r, "p"), c));
+
+        // Task #21: Min/Max operations
+        HANDLERS.put("__native_map_min_key", (r, c) ->
+            MapNatives.minKey(getMap(r, "m")));
+        HANDLERS.put("__native_map_max_key", (r, c) ->
+            MapNatives.maxKey(getMap(r, "m")));
+        HANDLERS.put("__native_map_min_value", (r, c) ->
+            MapNatives.minValue(getMap(r, "m")));
+        HANDLERS.put("__native_map_max_value", (r, c) ->
+            MapNatives.maxValue(getMap(r, "m")));
+        HANDLERS.put("__native_map_invert", (r, c) ->
+            MapNatives.invert(getMap(r, "m")));
+
+        // Task #22: Key/Value operations
+        HANDLERS.put("__native_map_select_keys", (r, c) ->
+            MapNatives.selectKeys(getMap(r, "m"), getArray(r, "ks")));
+        HANDLERS.put("__native_map_reject_keys", (r, c) ->
+            MapNatives.rejectKeys(getMap(r, "m"), getArray(r, "ks")));
+        HANDLERS.put("__native_map_reduce", (r, c) ->
+            MapNatives.reduce(getMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_group_by_value", (r, c) ->
+            MapNatives.groupByValue(getMap(r, "m")));
+
+        // Task #29: Key operations
+        HANDLERS.put("__native_map_map_keys", (r, c) ->
+            MapNatives.mapKeys(getMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_filter_keys", (r, c) ->
+            MapNatives.filterKeys(getMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_map_filter_values", (r, c) ->
+            MapNatives.filterValues(getMap(r, "m"), getFunction(r, "p"), c));
+
+        // Task #37: Multi-map operations
+        HANDLERS.put("__native_map_zip_maps", (r, c) ->
+            MapNatives.zipMaps(getMap(r, "m1"), getMap(r, "m2")));
+        HANDLERS.put("__native_map_diff_maps", (r, c) ->
+            MapNatives.diffMaps(getMap(r, "m1"), getMap(r, "m2")));
+        HANDLERS.put("__native_map_intersect_maps", (r, c) ->
+            MapNatives.intersectMaps(getMap(r, "m1"), getMap(r, "m2")));
+        HANDLERS.put("__native_map_symmetric_diff_maps", (r, c) ->
+            MapNatives.symmetricDiffMaps(getMap(r, "m1"), getMap(r, "m2")));
+
+        // List and SortedMap conversions
+        HANDLERS.put("__native_map_to_list", (r, c) ->
+            MapNatives.toList(getMap(r, "m")));
+        HANDLERS.put("__native_map_from_list", (r, c) ->
+            MapNatives.fromList(getList(r, "xs")));
+        HANDLERS.put("__native_map_flat_map", (r, c) ->
+            MapNatives.flatMap(getMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_to_sorted_map", (r, c) ->
+            MapNatives.toSortedMap(getMap(r, "m")));
     }
 
     // ==================== SortedMap ====================
@@ -486,6 +1352,92 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.maxEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_to_map", (r, c) ->
             SortedMapNatives.toMap(getSortedMap(r, "m")));
+
+        // HOF operations
+        HANDLERS.put("__native_sorted_map_filter", (r, c) ->
+            SortedMapNatives.filter(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_fold", (r, c) ->
+            SortedMapNatives.fold(getSortedMap(r, "m"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_map_map_values", (r, c) ->
+            SortedMapNatives.mapValues(getSortedMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_map_any", (r, c) ->
+            SortedMapNatives.any(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_all", (r, c) ->
+            SortedMapNatives.all(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_none", (r, c) ->
+            SortedMapNatives.none(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_find", (r, c) ->
+            SortedMapNatives.find(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_count", (r, c) ->
+            SortedMapNatives.count(getSortedMap(r, "m"), getFunction(r, "p"), c));
+
+        // Additional operations
+        HANDLERS.put("__native_sorted_map_contains_value", (r, c) ->
+            SortedMapNatives.containsValue(getSortedMap(r, "m"), getField(r, "v")));
+        HANDLERS.put("__native_sorted_map_get_or_default", (r, c) ->
+            SortedMapNatives.getOrDefault(getSortedMap(r, "m"), getField(r, "k"), getField(r, "default")));
+        HANDLERS.put("__native_sorted_map_update", (r, c) ->
+            SortedMapNatives.update(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_map_merge", (r, c) ->
+            SortedMapNatives.merge(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
+        HANDLERS.put("__native_sorted_map_merge_with", (r, c) ->
+            SortedMapNatives.mergeWith(getSortedMap(r, "m1"), getSortedMap(r, "m2"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_map_singleton", (r, c) ->
+            SortedMapNatives.singleton(getField(r, "k"), getField(r, "v")));
+
+        // Conversion
+        HANDLERS.put("__native_sorted_map_to_seq", (r, c) ->
+            SortedMapNatives.toSeq(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_keys_seq", (r, c) ->
+            SortedMapNatives.keysSeq(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_values_seq", (r, c) ->
+            SortedMapNatives.valuesSeq(getSortedMap(r, "m")));
+
+        // Task #15: Additional operations
+        HANDLERS.put("__native_sorted_map_partition", (r, c) ->
+            SortedMapNatives.partition(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_range", (r, c) ->
+            SortedMapNatives.range(getSortedMap(r, "m"), getField(r, "lo"), getField(r, "hi")));
+        HANDLERS.put("__native_sorted_map_floor_key", (r, c) ->
+            SortedMapNatives.floorKey(getSortedMap(r, "m"), getField(r, "k")));
+        HANDLERS.put("__native_sorted_map_ceiling_key", (r, c) ->
+            SortedMapNatives.ceilingKey(getSortedMap(r, "m"), getField(r, "k")));
+        HANDLERS.put("__native_sorted_map_lower_key", (r, c) ->
+            SortedMapNatives.lowerKey(getSortedMap(r, "m"), getField(r, "k")));
+        HANDLERS.put("__native_sorted_map_higher_key", (r, c) ->
+            SortedMapNatives.higherKey(getSortedMap(r, "m"), getField(r, "k")));
+        HANDLERS.put("__native_sorted_map_floor_entry", (r, c) ->
+            SortedMapNatives.floorEntry(getSortedMap(r, "m"), getField(r, "k")));
+        HANDLERS.put("__native_sorted_map_ceiling_entry", (r, c) ->
+            SortedMapNatives.ceilingEntry(getSortedMap(r, "m"), getField(r, "k")));
+
+        // Task #16: Advanced operations
+        HANDLERS.put("__native_sorted_map_head_map", (r, c) ->
+            SortedMapNatives.headMap(getSortedMap(r, "m"), getField(r, "to")));
+        HANDLERS.put("__native_sorted_map_tail_map", (r, c) ->
+            SortedMapNatives.tailMap(getSortedMap(r, "m"), getField(r, "from")));
+        HANDLERS.put("__native_sorted_map_sub_map", (r, c) ->
+            SortedMapNatives.subMap(getSortedMap(r, "m"), getField(r, "lo"), getField(r, "hi")));
+        HANDLERS.put("__native_sorted_map_take", (r, c) ->
+            SortedMapNatives.take(getSortedMap(r, "m"), getLong(r, "n")));
+        HANDLERS.put("__native_sorted_map_drop", (r, c) ->
+            SortedMapNatives.drop(getSortedMap(r, "m"), getLong(r, "n")));
+
+        // Additional higher-order functions
+        HANDLERS.put("__native_sorted_map_map_keys", (r, c) ->
+            SortedMapNatives.mapKeys(getSortedMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_sorted_map_filter_keys", (r, c) ->
+            SortedMapNatives.filterKeys(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_filter_values", (r, c) ->
+            SortedMapNatives.filterValues(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_invert", (r, c) ->
+            SortedMapNatives.invert(getSortedMap(r, "m")));
+
+        // List conversion
+        HANDLERS.put("__native_sorted_map_to_list", (r, c) ->
+            SortedMapNatives.toList(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_from_list", (r, c) ->
+            SortedMapNatives.fromList(getList(r, "xs")));
     }
 
     // ==================== Deque ====================
@@ -518,7 +1470,7 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.equals(getDeque(r, "d1"), getDeque(r, "d2")));
         HANDLERS.put("__native_deque_to_list", (r, c) ->
             DequeNatives.toList(getDeque(r, "d")));
-        HANDLERS.put("__native_deque_to_array", (r, c) ->
+        HANDLERS.put("__native_deque_to_seq", (r, c) ->
             DequeNatives.toArray(getDeque(r, "d")));
         HANDLERS.put("__native_deque_from_list", (r, c) ->
             DequeNatives.fromList(getList(r, "xs")));
@@ -530,6 +1482,118 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.filter(getDeque(r, "d"), getFunction(r, "p"), c));
         HANDLERS.put("__native_deque_fold", (r, c) ->
             DequeNatives.fold(getDeque(r, "d"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_any", (r, c) ->
+            DequeNatives.any(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_all", (r, c) ->
+            DequeNatives.all(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_none", (r, c) ->
+            DequeNatives.none(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_find", (r, c) ->
+            DequeNatives.find(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_count", (r, c) ->
+            DequeNatives.count(getDeque(r, "d"), getFunction(r, "p"), c));
+
+        // Min/Max/Sum/Product
+        HANDLERS.put("__native_deque_min", (r, c) ->
+            DequeNatives.min(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_max", (r, c) ->
+            DequeNatives.max(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_sum", (r, c) ->
+            DequeNatives.sum(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_product", (r, c) ->
+            DequeNatives.product(getDeque(r, "d")));
+
+        // Contains
+        HANDLERS.put("__native_deque_contains", (r, c) ->
+            DequeNatives.contains(getDeque(r, "d"), getField(r, "x")));
+
+        // Conversion
+        HANDLERS.put("__native_deque_to_seq", (r, c) ->
+            DequeNatives.toSeq(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_from_seq", (r, c) ->
+            DequeNatives.fromSeq(getSeq(r, "xs")));
+
+        // Additional operations
+        HANDLERS.put("__native_deque_reduce", (r, c) ->
+            DequeNatives.reduce(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_flat_map", (r, c) ->
+            DequeNatives.flatMap(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_partition", (r, c) ->
+            DequeNatives.partition(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_take", (r, c) ->
+            DequeNatives.take(getDeque(r, "d"), getLong(r, "n")));
+        HANDLERS.put("__native_deque_drop", (r, c) ->
+            DequeNatives.drop(getDeque(r, "d"), getLong(r, "n")));
+        HANDLERS.put("__native_deque_unique", (r, c) ->
+            DequeNatives.unique(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_sort", (r, c) ->
+            DequeNatives.sort(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_sum_float", (r, c) ->
+            DequeNatives.sumFloat(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_product_float", (r, c) ->
+            DequeNatives.productFloat(getDeque(r, "d")));
+
+        // Task #9: Basic operations
+        HANDLERS.put("__native_deque_min_by", (r, c) ->
+            DequeNatives.minBy(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_max_by", (r, c) ->
+            DequeNatives.maxBy(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_get", (r, c) ->
+            DequeNatives.get(getDeque(r, "d"), getLong(r, "i")));
+        HANDLERS.put("__native_deque_slice", (r, c) ->
+            DequeNatives.slice(getDeque(r, "d"), getLong(r, "start"), getLong(r, "end")));
+        HANDLERS.put("__native_deque_index_of", (r, c) ->
+            DequeNatives.indexOf(getDeque(r, "d"), getField(r, "x")));
+        HANDLERS.put("__native_deque_find_index", (r, c) ->
+            DequeNatives.findIndex(getDeque(r, "d"), getFunction(r, "p"), c));
+
+        // Task #10: Slicing operations
+        HANDLERS.put("__native_deque_take_while", (r, c) ->
+            DequeNatives.takeWhile(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_drop_while", (r, c) ->
+            DequeNatives.dropWhile(getDeque(r, "d"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_deque_split_at", (r, c) ->
+            DequeNatives.splitAt(getDeque(r, "d"), getLong(r, "i")));
+        HANDLERS.put("__native_deque_span", (r, c) ->
+            DequeNatives.span(getDeque(r, "d"), getFunction(r, "p"), c));
+
+        // Task #11: Transformation operations
+        HANDLERS.put("__native_deque_scan", (r, c) ->
+            DequeNatives.scan(getDeque(r, "d"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_dedup", (r, c) ->
+            DequeNatives.dedup(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_dedup_by", (r, c) ->
+            DequeNatives.dedupBy(getDeque(r, "d"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_deque_intersperse", (r, c) ->
+            DequeNatives.intersperse(getDeque(r, "d"), getField(r, "sep")));
+
+        // Task #12: Combining operations
+        HANDLERS.put("__native_deque_zip", (r, c) ->
+            DequeNatives.zip(getDeque(r, "d1"), getDeque(r, "d2")));
+        HANDLERS.put("__native_deque_zip_with_index", (r, c) ->
+            DequeNatives.zipWithIndex(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_rotate_left", (r, c) ->
+            DequeNatives.rotateLeft(getDeque(r, "d"), getLong(r, "n")));
+        HANDLERS.put("__native_deque_rotate_right", (r, c) ->
+            DequeNatives.rotateRight(getDeque(r, "d"), getLong(r, "n")));
+
+        // Task #28: Cross-collection conversions (Deque to other types)
+        HANDLERS.put("__native_deque_to_set", (r, c) ->
+            DequeNatives.toSet(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_to_sorted_set", (r, c) ->
+            DequeNatives.toSortedSet(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_to_map", (r, c) ->
+            DequeNatives.toMap(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_to_sorted_map", (r, c) ->
+            DequeNatives.toSortedMap(getDeque(r, "d")));
+        HANDLERS.put("__native_deque_from_set", (r, c) ->
+            DequeNatives.fromSet(getSet(r, "s")));
+        HANDLERS.put("__native_deque_from_sorted_set", (r, c) ->
+            DequeNatives.fromSortedSet(getSortedSet(r, "s")));
+        HANDLERS.put("__native_deque_from_map", (r, c) ->
+            DequeNatives.fromMap(getMap(r, "m")));
+        HANDLERS.put("__native_deque_from_sorted_map", (r, c) ->
+            DequeNatives.fromSortedMap(getSortedMap(r, "m")));
     }
 
     // ==================== NonEmptyList ====================
@@ -541,7 +1605,7 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.fromHeadTail(getField(r, "head"), getList(r, "tail")));
         HANDLERS.put("__native_nel_from_list", (r, c) ->
             NonEmptyListNatives.fromList(getList(r, "xs")));
-        HANDLERS.put("__native_nel_from_array", (r, c) ->
+        HANDLERS.put("__native_nel_from_seq", (r, c) ->
             NonEmptyListNatives.fromArray(getArray(r, "xs")));
         HANDLERS.put("__native_nel_length", (r, c) ->
             NonEmptyListNatives.length(getNonEmptyList(r, "xs")));
@@ -571,7 +1635,7 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.sort(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_to_list", (r, c) ->
             NonEmptyListNatives.toList(getNonEmptyList(r, "xs")));
-        HANDLERS.put("__native_nel_to_array", (r, c) ->
+        HANDLERS.put("__native_nel_to_seq", (r, c) ->
             NonEmptyListNatives.toArray(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_zip", (r, c) ->
             NonEmptyListNatives.zip(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys")));
@@ -702,7 +1766,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_bytes_empty", (r, c) -> BytesNatives.empty());
         HANDLERS.put("__native_bytes_from_string", (r, c) ->
             BytesNatives.fromString(getString(r, "s")));
-        HANDLERS.put("__native_bytes_from_array", (r, c) ->
+        HANDLERS.put("__native_bytes_from_seq", (r, c) ->
             BytesNatives.fromArray(getArray(r, "arr")));
         HANDLERS.put("__native_bytes_from_hex", (r, c) ->
             BytesNatives.fromHex(getString(r, "s")));
@@ -742,7 +1806,7 @@ public final class NativeDispatch extends MezzeNode {
             BytesNatives.toHex(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_to_base64", (r, c) ->
             BytesNatives.toBase64(getBytes(r, "b")));
-        HANDLERS.put("__native_bytes_to_array", (r, c) ->
+        HANDLERS.put("__native_bytes_to_seq", (r, c) ->
             BytesNatives.toArray(getBytes(r, "b")));
 
         // HOF operations
@@ -882,9 +1946,17 @@ public final class NativeDispatch extends MezzeNode {
         throw new RuntimeException("Expected String for field '" + name + "'");
     }
 
+    private static boolean getBool(MezzeRecord r, String name) {
+        Object val = getField(r, name);
+        if (val instanceof Boolean b) return b;
+        throw new RuntimeException("Expected Boolean for field '" + name + "'");
+    }
+
     private static Object[] getArray(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof Object[] arr) return arr;
+        // Handle MezzeSeq - convert to Object[]
+        if (val instanceof MezzeSeq seq) return seq.toArray();
         // Also handle MezzeList - properly convert to Object[] using toArray
         if (val instanceof MezzeList list) return ListNatives.toArray(list);
         throw new RuntimeException("Expected Object[] for field '" + name + "', got: " +
@@ -977,6 +2049,15 @@ public final class NativeDispatch extends MezzeNode {
         throw new RuntimeException("Expected MezzeSortedMap for field '" + name + "'");
     }
 
+    private static MezzeSeq getSeq(MezzeRecord r, String name) {
+        Object val = getField(r, name);
+        if (val instanceof MezzeSeq seq) return seq;
+        // Also handle Object[] - convert to MezzeSeq
+        if (val instanceof Object[] arr) return MezzeSeq.fromArray(arr);
+        throw new RuntimeException("Expected MezzeSeq for field '" + name + "', got: " +
+            (val == null ? "null" : val.getClass().getSimpleName()));
+    }
+
     private static DequeNatives.MezzeDeque getDeque(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof DequeNatives.MezzeDeque deque) return deque;
@@ -1057,31 +2138,31 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     @TruffleBoundary
-    private static MezzeList stringLines(String s) {
+    private static MezzeSeq stringLines(String s) {
         String[] lines = s.split("\n", -1);
         Object[] result = new Object[lines.length];
         System.arraycopy(lines, 0, result, 0, lines.length);
-        return MezzeList.fromArray(result);
+        return MezzeSeq.fromArray(result);
     }
 
     @TruffleBoundary
-    private static MezzeList stringWords(String s) {
+    private static MezzeSeq stringWords(String s) {
         String[] words = s.trim().split("\\s+");
         if (words.length == 1 && words[0].isEmpty()) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
         Object[] result = new Object[words.length];
         System.arraycopy(words, 0, result, 0, words.length);
-        return MezzeList.fromArray(result);
+        return MezzeSeq.fromArray(result);
     }
 
     @TruffleBoundary
-    private static MezzeList stringChars(String s) {
+    private static MezzeSeq stringChars(String s) {
         Object[] result = new Object[s.length()];
         for (int i = 0; i < s.length(); i++) {
             result[i] = String.valueOf(s.charAt(i));
         }
-        return MezzeList.fromArray(result);
+        return MezzeSeq.fromArray(result);
     }
 
     @TruffleBoundary
@@ -1176,15 +2257,6 @@ public final class NativeDispatch extends MezzeNode {
         }
         regex.append("$");
         return s.matches(regex.toString());
-    }
-
-    @TruffleBoundary
-    private static MezzeVariant floatFromString(String s) {
-        try {
-            return MezzeVariant.some(Double.parseDouble(s.trim()));
-        } catch (NumberFormatException e) {
-            return MezzeVariant.none();
-        }
     }
 
     // ==================== Log ====================
@@ -1881,7 +2953,7 @@ public final class NativeDispatch extends MezzeNode {
 
     // Execute fork operation
     @TruffleBoundary
-    private static MezzeList executeFork(Object cont, MezzeList values) {
+    private static MezzeSeq executeFork(Object cont, MezzeList values) {
         java.util.List<Object> results = new java.util.ArrayList<>();
         boolean wasInsideFork = DelimiterStack.isInsideFork();
 
@@ -1893,7 +2965,8 @@ public final class NativeDispatch extends MezzeNode {
                 Object result = resumeContinuation(cont, value);
                 results.add(result);
             } catch (ForkedExecutionException e) {
-                MezzeList nestedResults = executeFork(e.continuation, e.values);
+                // e.values is MezzeList for nested forks (input values)
+                MezzeSeq nestedResults = executeFork(e.continuation, (MezzeList) e.values);
                 for (int j = 0; j < nestedResults.size(); j++) {
                     results.add(nestedResults.get(j));
                 }
@@ -1904,7 +2977,7 @@ public final class NativeDispatch extends MezzeNode {
             }
         }
 
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     // Resume a continuation with a value
