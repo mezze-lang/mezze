@@ -6,10 +6,10 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for records with arrays - debugging parsing issues.
+ * Tests for records with seqs - debugging parsing issues.
  * Migrated from V1 to V2 with unboxed values.
  */
-class RecordWithArrayDebugTest {
+class RecordWithSeqDebugTest {
 
     private val parser = MezzeParser()
 
@@ -21,7 +21,7 @@ class RecordWithArrayDebugTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test
-    fun `test empty array`() {
+    fun `test empty seq`() {
         val code = "[]"
         println("Parsing: $code")
         try {
@@ -34,7 +34,7 @@ class RecordWithArrayDebugTest {
     }
 
     @Test
-    fun `test record with one empty array`() {
+    fun `test record with one empty seq`() {
         val code = "let foo = {x = []}"
         println("Parsing: $code")
         try {
@@ -47,7 +47,7 @@ class RecordWithArrayDebugTest {
     }
 
     @Test
-    fun `test record with two empty arrays`() {
+    fun `test record with two empty seqs`() {
         val code = "let foo = {x = [], y = []}"
         println("Parsing: $code")
         try {
@@ -60,7 +60,7 @@ class RecordWithArrayDebugTest {
     }
 
     @Test
-    fun `test just record expression with two empty arrays`() {
+    fun `test just record expression with two empty seqs`() {
         val code = "{x = [], y = []}"
         println("Parsing: $code")
         try {

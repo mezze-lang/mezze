@@ -76,7 +76,7 @@ object TypeDiffPrinter {
             is MezzeType.RecordType -> formatRecordType(type, indent)
             is MezzeType.VariantType -> formatVariantType(type, indent)
             is MezzeType.TypeApplication -> formatTypeApplication(type, indent)
-            is MezzeType.SeqType -> "Array ${formatType(type.elementType, indent)}"
+            is MezzeType.SeqType -> "Seq ${formatType(type.elementType, indent)}"
             is MezzeType.ListType -> "List ${formatType(type.elementType, indent)}"
             is MezzeType.SetType -> "Set ${formatType(type.elementType, indent)}"
             is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType, indent)} ${formatType(type.valueType, indent)}"

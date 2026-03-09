@@ -4,11 +4,11 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
-class EmptyArrayTest {
+class EmptySeqTest {
     private val parser = MezzeParser()
 
     @Test
-    fun testEmptyArrayAlone() {
+    fun testEmptySeqAlone() {
         val source = "let x: [Int] = []"
         val result = parser.parse(source)
         assertNotNull(result)
@@ -16,7 +16,7 @@ class EmptyArrayTest {
     }
 
     @Test
-    fun testEmptyArrayAfterNonEmpty() {
+    fun testEmptySeqAfterNonEmpty() {
         val source = """
             let nums = [1, 2, 3]
             let empty: [Int] = []

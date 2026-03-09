@@ -43,7 +43,7 @@ object ErrorPrettyPrinter {
                     sb.appendLine()
                     sb.appendLine("   For utility functions, import from stdlib instead:")
                     sb.appendLine("   import std/core/option  # for map, flatMap, etc.")
-                    sb.appendLine("   import std/collections/array  # for array functions")
+                    sb.appendLine("   import std/collections/seq  # for seq functions")
                 } else {
                     sb.appendLine("Searched in: ${error.searchPaths.joinToString(", ")}")
                     sb.appendLine()

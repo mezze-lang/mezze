@@ -689,15 +689,15 @@ class SubstitutionApplier(
             val elementType = when (firstElement) {
                 is SeqRegularElement -> firstElement.expression.inferredType ?: MezzeType.VarType(TypeVar.fresh())
                 is SeqSpreadElement -> {
-                    // For spread element, extract element type from the array type
-                    val arrayType = firstElement.expression.inferredType
-                    if (arrayType is MezzeType.SeqType) arrayType.elementType
+                    // For spread element, extract element type from the seq type
+                    val seqType = firstElement.expression.inferredType
+                    if (seqType is MezzeType.SeqType) seqType.elementType
                     else MezzeType.VarType(TypeVar.fresh())
                 }
             }
             substitution.apply(MezzeType.SeqType(elementType))
         } else {
-            // Empty array: use existing type if available, otherwise fresh type variable
+            // Empty seq: use existing type if available, otherwise fresh type variable
             expr.inferredType?.let { substitution.apply(it) }
                 ?: MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
         }

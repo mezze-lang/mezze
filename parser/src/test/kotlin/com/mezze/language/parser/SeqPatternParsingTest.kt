@@ -8,9 +8,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /**
- * Tests for parsing array patterns in match expressions
+ * Tests for parsing seq patterns in match expressions
  *
- * Array patterns support:
+ * Seq patterns support:
  * - Empty arrays: []
  * - Fixed-length arrays: [x], [x, y], [x, y, z]
  * - Rest patterns: [head, ...tail], [x, y, ...rest]
@@ -23,7 +23,7 @@ class SeqPatternParsingTest {
     // ========== Empty Array Pattern ==========
 
     @Test
-    fun `parse match with empty array pattern`() {
+    fun `parse match with empty seq pattern`() {
         val code = """
             match xs is
               [] -> "empty"
@@ -45,7 +45,7 @@ class SeqPatternParsingTest {
     // ========== Fixed-Length Array Patterns ==========
 
     @Test
-    fun `parse match with single element array pattern`() {
+    fun `parse match with single element seq pattern`() {
         val code = """
             match xs is
               [x] -> x
@@ -67,7 +67,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with two element array pattern`() {
+    fun `parse match with two element seq pattern`() {
         val code = """
             match xs is
               [x, y] -> x + y
@@ -91,7 +91,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with three element array pattern`() {
+    fun `parse match with three element seq pattern`() {
         val code = """
             match xs is
               [a, b, c] -> a + b + c
@@ -181,7 +181,7 @@ class SeqPatternParsingTest {
     // ========== Wildcard Patterns in Arrays ==========
 
     @Test
-    fun `parse match with wildcard in array pattern`() {
+    fun `parse match with wildcard in seq pattern`() {
         val code = """
             match xs is
               [_, x] -> x
@@ -202,7 +202,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with multiple wildcards in array pattern`() {
+    fun `parse match with multiple wildcards in seq pattern`() {
         val code = """
             match xs is
               [_, _, x] -> x
@@ -226,7 +226,7 @@ class SeqPatternParsingTest {
     // ========== Literal Patterns in Arrays ==========
 
     @Test
-    fun `parse match with literal patterns in array`() {
+    fun `parse match with literal patterns in seq`() {
         val code = """
             match xs is
               [1, 2] -> "pair"
@@ -249,7 +249,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with mixed literal and variable patterns in array`() {
+    fun `parse match with mixed literal and variable patterns in seq`() {
         val code = """
             match xs is
               [0, x] -> x
@@ -274,7 +274,7 @@ class SeqPatternParsingTest {
     // ========== Nested Array Patterns ==========
 
     @Test
-    fun `parse match with nested array pattern`() {
+    fun `parse match with nested seq pattern`() {
         val code = """
             match xs is
               [[x]] -> x
@@ -298,7 +298,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with deeply nested array pattern`() {
+    fun `parse match with deeply nested seq pattern`() {
         val code = """
             match xs is
               [[[x]]] -> x
@@ -318,7 +318,7 @@ class SeqPatternParsingTest {
     // ========== Constructor Patterns in Arrays ==========
 
     @Test
-    fun `parse match with variant patterns in array`() {
+    fun `parse match with variant patterns in seq`() {
         val code = """
             match xs is
               [Some {val = x}, None] -> x
@@ -341,7 +341,7 @@ class SeqPatternParsingTest {
     // ========== Multiple Array Patterns with | ==========
 
     @Test
-    fun `parse match with multiple array patterns using pipe`() {
+    fun `parse match with multiple seq patterns using pipe`() {
         val code = """
             match xs is
               [] | [_] -> "zero or one"
@@ -398,7 +398,7 @@ class SeqPatternParsingTest {
             let map = {f, xs} ->
                 match xs is
                     [] -> []
-                    [head, ...tail] -> array::of {x = f {x = head}, xs = map {f = f, xs = tail}}
+                    [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
         """.trimIndent()
 
         val program = parser.parse(code)
@@ -422,7 +422,7 @@ class SeqPatternParsingTest {
     // ========== Edge Cases ==========
 
     @Test
-    fun `parse match with array pattern containing newlines`() {
+    fun `parse match with seq pattern containing newlines`() {
         val code = """
             match xs is
               [
@@ -445,7 +445,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse match with trailing comma in array pattern`() {
+    fun `parse match with trailing comma in seq pattern`() {
         val code = """
             match xs is
               [x, y,] -> x + y
@@ -490,7 +490,7 @@ class SeqPatternParsingTest {
     // ========== Record Expressions with Empty Arrays ==========
 
     @Test
-    fun `parse record with one empty array field`() {
+    fun `parse record with one empty seq field`() {
         val code = "let foo = {x = []}"
 
         val program = parser.parse(code)
@@ -502,7 +502,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse record with two empty array fields`() {
+    fun `parse record with two empty seq fields`() {
         val code = "let foo = {x = [], y = []}"
 
         val program = parser.parse(code)
@@ -566,7 +566,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse array rest pattern with typed lambda params`() {
+    fun `parse seq rest pattern with typed lambda params`() {
         val code = """
             let my_func = {xs: [Int]} ->
                 match xs is
@@ -593,7 +593,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse nested function type with array pattern`() {
+    fun `parse nested function type with seq pattern`() {
         val code = """
             let my_func = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
@@ -607,7 +607,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse nested function type with empty array pattern first`() {
+    fun `parse nested function type with empty seq pattern first`() {
         val code = """
             let my_func = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
@@ -622,7 +622,7 @@ class SeqPatternParsingTest {
     }
 
     @Test
-    fun `parse nested function type with both array match cases`() {
+    fun `parse nested function type with both seq match cases`() {
         val code = """
             let my_func = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
@@ -711,8 +711,8 @@ class SeqPatternParsingTest {
                   [head, ...tail] -> do
                     let rest = my_partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then {yes = array::of {x = head, xs = rest.yes}, no = rest.no}
-                    else {yes = rest.yes, no = array::of {x = head, xs = rest.no}}
+                    then {yes = seq::of {x = head, xs = rest.yes}, no = rest.no}
+                    else {yes = rest.yes, no = seq::of {x = head, xs = rest.no}}
 
             let is_even = {x: Int} -> x % 2 == 0
             my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}

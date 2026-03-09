@@ -263,28 +263,28 @@ class FormatterTest {
     // =========================================================================
 
     @Test
-    fun `format empty array`() {
+    fun `format empty seq`() {
         val input = "let x = []"
         val output = formatter.format(input)
         assertEquals("let x = []\n", output)
     }
 
     @Test
-    fun `format simple array on single line`() {
+    fun `format simple seq on single line`() {
         val input = "let x = [1, 2, 3]"
         val output = formatter.format(input)
         assertEquals("let x = [1, 2, 3]\n", output)
     }
 
     @Test
-    fun `format array with spread`() {
+    fun `format seq with spread`() {
         val input = "let x = [...arr, 4, 5]"
         val output = formatter.format(input)
         assertEquals("let x = [...arr, 4, 5]\n", output)
     }
 
-    // Note: Array access syntax arr[0] is not supported by the parser
-    // Use Array.get {xs = arr, i = 0} instead
+    // Note: Seq index access syntax arr[0] is not supported by the parser
+    // Use seq::get {xs = arr, i = 0} instead
 
     // =========================================================================
     // LAMBDAS
@@ -681,7 +681,7 @@ class FormatterTest {
     }
 
     @Test
-    fun `formatter is idempotent for array with spread`() {
+    fun `formatter is idempotent for seq with spread`() {
         val input = "let x = [...arr, 1, 2]"
         val first = formatter.format(input)
         val second = formatter.format(first)
@@ -758,7 +758,7 @@ class FormatterTest {
     }
 
     @Test
-    fun `format long array on multiple lines`() {
+    fun `format long seq on multiple lines`() {
         val input = "let x = [very_long_element_name_one, very_long_element_name_two, very_long_element_name_three]"
         val output = formatter.format(input)
         // Should break to multiple lines

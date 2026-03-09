@@ -167,7 +167,8 @@
       "Bash(do sed -i '' 's/array::/seq::/g' \"$f\")",
       "Bash(LC_ALL=C sed:*)",
       "Bash(do sed -i '' 's/__native_arraylist_/__native_seq_/g' \"$f\")",
-      "Bash(do cat \"$f\")"
+      "Bash(do cat \"$f\")",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "ask": []

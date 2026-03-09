@@ -1060,7 +1060,7 @@ class ConstraintSolver(
         // Check for List vs Seq confusion
         if (stringContext.contains("Seq pattern")) {
             if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
-                return "Cannot use array pattern syntax [a, b, ...] with List type. " +
+                return "Cannot use seq pattern syntax [a, b, ...] with List type. " +
                     "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
             }
         }

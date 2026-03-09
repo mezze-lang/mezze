@@ -18,11 +18,11 @@ import com.mezze.language.ast.*
  *
  * **Qualified module**:
  * ```mezze
- * let array__concat = {x, y} -> ...
- * let array__flatten = {list} -> fold {init = [], f = array__concat, list}
+ * let seq__concat = {x, y} -> ...
+ * let seq__flatten = {list} -> fold {init = [], f = seq__concat, list}
  * ```
  *
- * Now when another module imports `array`, the internal calls don't
+ * Now when another module imports `seq`, the internal calls don't
  * conflict with the importing module's own `concat` function.
  *
  * ## Design:
