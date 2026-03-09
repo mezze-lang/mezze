@@ -5,15 +5,15 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertTrue
 import kotlin.test.assertContains
+import kotlin.test.assertNotNull
 
 /**
  * Tests for top-level performed effects validation.
  *
  * These tests verify that:
- * 1. Top-level let bindings cannot have performed effects <*>
+ * 1. Top-level let bindings CANNOT have performed effects <*> - must wrap in function
  * 2. Top-level bare expressions with <*> are rejected by checkProgramForExecution
- * 3. checkProgram (for tests/REPL) allows top-level expressions with <*>
- * 4. Functions with <*> in their return type are allowed (they're just definitions)
+ * 3. Functions with <*> in their return type are allowed (they're just definitions)
  */
 class TopLevelPerformedEffectsValidationTest {
     private lateinit var parser: MezzeParser
@@ -30,11 +30,9 @@ class TopLevelPerformedEffectsValidationTest {
     // ========================================================================
 
     @Test
-    fun `direct perform at top-level is allowed for testing`() {
-        // Direct `perform` at top-level is allowed because:
-        // 1. It's a common test pattern
-        // 2. The perform is explicit and visible
-        // 3. The problematic pattern (calling functions with <*>) is caught separately
+    fun `direct perform at top-level is rejected - must wrap in function`() {
+        // Top-level values cannot have performed effects <*>
+        // Must wrap in a function: let result = {} -> perform Counter in State.get {}
         val source = """
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -50,17 +48,16 @@ class TopLevelPerformedEffectsValidationTest {
         val ast = parser.parse(source)
         val result = typeChecker.checkProgram(ast)
 
-        assertTrue(result is TypeChecker.TypeCheckResult.Success,
-            "Direct perform at top-level is allowed for testing/REPL")
+        assertTrue(result is TypeChecker.TypeCheckResult.Failure,
+            "Direct perform at top-level should be rejected")
+        val errorMsg = (result as TypeChecker.TypeCheckResult.Failure).errors.first().message
+        assertContains(errorMsg, "performed effects", ignoreCase = true)
     }
 
     @Test
-    fun `let binding with immediate perform returning unit is allowed`() {
-        // Log.print returns {} (unit), so perform Console in Log.print {} has type {}
-        // We allow this because:
-        // 1. The value is unit - no meaningful data to "leak"
-        // 2. It's useful for test setup and module initialization
-        // 3. Disallowing it would be too restrictive for common patterns
+    fun `let binding with immediate perform returning unit is rejected`() {
+        // Even if perform returns unit, top-level cannot have <*>
+        // Must wrap in function: let result = {} -> perform Console in Log.print {msg = "test"}
         val source = """
             effect Log where {
                 print: {msg: String} -> {} <Log>
@@ -76,8 +73,10 @@ class TopLevelPerformedEffectsValidationTest {
         val ast = parser.parse(source)
         val result = typeChecker.checkProgram(ast)
 
-        assertTrue(result is TypeChecker.TypeCheckResult.Success,
-            "Top-level let with perform returning unit is allowed")
+        assertTrue(result is TypeChecker.TypeCheckResult.Failure,
+            "Top-level let with perform should be rejected even if returning unit")
+        val errorMsg = (result as TypeChecker.TypeCheckResult.Failure).errors.first().message
+        assertContains(errorMsg, "performed effects", ignoreCase = true)
     }
 
     @Test
@@ -325,8 +324,8 @@ class TopLevelPerformedEffectsValidationTest {
     // ========================================================================
 
     @Test
-    fun `direct perform with operation returning value is allowed`() {
-        // Direct perform is allowed - only function calls with <*> are rejected
+    fun `direct perform with operation returning value is rejected`() {
+        // Top-level values cannot have <*>, regardless of whether perform is direct or via function call
         val source = """
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -342,8 +341,10 @@ class TopLevelPerformedEffectsValidationTest {
         val ast = parser.parse(source)
         val result = typeChecker.checkProgram(ast)
 
-        assertTrue(result is TypeChecker.TypeCheckResult.Success,
-            "Direct perform at top-level is allowed")
+        assertTrue(result is TypeChecker.TypeCheckResult.Failure,
+            "Direct perform at top-level should be rejected")
+        val errorMsg = (result as TypeChecker.TypeCheckResult.Failure).errors.first().message
+        assertContains(errorMsg, "performed effects", ignoreCase = true)
     }
 
     @Test
@@ -418,5 +419,109 @@ class TopLevelPerformedEffectsValidationTest {
 
         assertTrue(result is TypeChecker.TypeCheckResult.Success,
             "Valid main calling effectful helper should pass execution check")
+    }
+
+    // ========================================================================
+    // TYPE INFERENCE TESTS FOR PERFORM EXPRESSIONS
+    // ========================================================================
+
+    @Test
+    fun `perform expression wrapped in function infers correct Result type`() {
+        // This tests the fix for the bug where top-level perform inferred wrong type
+        // Previously: | Ok { val: Int <Exception> } | (wrong - anonymous variant with effects inside)
+        // Now: {} -> Result Int String <*> (correct - closed variant with Ok and Err, performed marker)
+        val source = """
+            effect Exception having 'error where {
+                throw: { error: 'error } -> 'a <Exception>
+            }
+
+            impl Exception for ExceptionToResult having 'error = String where {
+                throw = { error } -> suspend_with { value = Err { error } }
+            }
+
+            let safe_div = {x: Int} -> if x == 0 then Exception.throw {error = "zero"} else x
+            let res = safe_div {x = 5}
+            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val result = typeChecker.checkProgram(ast)
+
+        assertTrue(result is TypeChecker.TypeCheckResult.Success,
+            "Perform wrapped in function should type check")
+
+        val typedProgram = (result as TypeChecker.TypeCheckResult.Success).program
+        val handleBinding = typedProgram.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
+            .find { (it.pattern as? com.mezze.language.ast.VariablePattern)?.name == "handle" }
+
+        assertNotNull(handleBinding?.inferredType)
+        val funcType = handleBinding!!.inferredType as com.mezze.language.ast.MezzeType.FunctionType
+
+        // Return type should be Result variant (may be expanded to VariantType or kept as TypeApplication)
+        // The key is it has BOTH Ok and Err constructors (not just Ok as in the bug)
+        val returnType = funcType.returnType
+        when (returnType) {
+            is com.mezze.language.ast.MezzeType.TypeApplication -> {
+                kotlin.test.assertEquals("Result", returnType.constructor,
+                    "Should be Result type alias")
+            }
+            is com.mezze.language.ast.MezzeType.VariantType -> {
+                // Result expands to | Ok {...}, Err {...} |
+                assertTrue(returnType.constructors.containsKey("Ok"),
+                    "Result variant should have Ok constructor")
+                assertTrue(returnType.constructors.containsKey("Err"),
+                    "Result variant should have Err constructor, got: ${returnType.constructors.keys}")
+            }
+            else -> kotlin.test.fail("Return type should be Result (TypeApplication or VariantType), got: $returnType")
+        }
+
+        // Should have performed marker
+        assertNotNull(funcType.effects)
+        assertTrue(funcType.effects!!.performed, "Should have performed marker <*>")
+    }
+
+    @Test
+    fun `top-level perform expression is rejected with correct error`() {
+        val source = """
+            effect Exception having 'error where {
+                throw: { error: 'error } -> 'a <Exception>
+            }
+
+            impl Exception for ExceptionToResult having 'error = String where {
+                throw = { error } -> suspend_with { value = Err { error } }
+            }
+
+            let safe_div = {x: Int} -> if x == 0 then Exception.throw {error = "zero"} else x
+            let res = safe_div {x = 5}
+            let handle = perform ExceptionToResult in Ok {val = res}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val result = typeChecker.checkProgram(ast)
+
+        assertTrue(result is TypeChecker.TypeCheckResult.Failure,
+            "Top-level perform should be rejected")
+        val errorMsg = (result as TypeChecker.TypeCheckResult.Failure).errors.first().message
+        assertContains(errorMsg, "performed effects", ignoreCase = true)
+        assertContains(errorMsg, "handle", ignoreCase = true)
+    }
+
+    @Test
+    fun `unhandled effects at top-level are allowed`() {
+        // Top-level can have <Exception>, just not <*>
+        val source = """
+            effect Exception having 'error where {
+                throw: { error: 'error } -> 'a <Exception>
+            }
+
+            let safe_div = {x: Int} -> if x == 0 then Exception.throw {error = "zero"} else x
+            let res = safe_div {x = 5}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val result = typeChecker.checkProgram(ast)
+
+        assertTrue(result is TypeChecker.TypeCheckResult.Success,
+            "Unhandled effects <Exception> should be allowed at top-level")
     }
 }

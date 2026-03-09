@@ -17,7 +17,8 @@ import kotlin.test.assertNotNull
  * - <Log> = has unhandled effects (suspended)
  *
  * Design decisions:
- * - Top-level VALUES can have <*> - useful for tests and scripts
+ * - Top-level VALUES CANNOT have <*> - must wrap in function
+ * - Top-level VALUES CAN have unhandled effects like <Log>
  * - Top-level FUNCTIONS can return <*> - they're just definitions
  * - 'main' is treated as a regular binding at type-check time
  *   (runtime validation ensures main has correct type for execution)
@@ -67,7 +68,7 @@ class TopLevelEffectRestrictionsTest {
     }
 
     @Test
-    fun `top-level value with performed effects is allowed`() {
+    fun `top-level value with performed effects is NOT allowed - must wrap in function`() {
         val source = """
             effect Log having 'msg where {
                 println: { msg: 'msg } -> {}
@@ -77,11 +78,16 @@ class TopLevelEffectRestrictionsTest {
                 println = { msg } -> {}
             }
 
-            let performedValue = perform Console in Log.println { msg = "hello" }
+            let performedValue = {} -> perform Console in Log.println { msg = "hello" }
         """.trimIndent()
 
         val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
+
+        // When wrapped in a function, it should have type {} -> {} <*>
+        val funcType = getVariableType(typedProgram, "performedValue") as MezzeType.FunctionType
+        assertNotNull(funcType.effects)
+        assertTrue(funcType.effects!!.performed, "Function should have performed marker <*>")
     }
 
     // ========================================================================

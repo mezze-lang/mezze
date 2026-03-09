@@ -531,9 +531,11 @@ class ExpressionConstraintGenerator {
                     // If the field value is a SuspendedType (effectful value), unwrap it:
                     // - Use the inner valueType for the field type (effects are evaluated, not stored)
                     // - Propagate the effects upward to the record expression
+                    // IMPORTANT: Propagate BOTH effects AND effectInstances from the SuspendedType
                     val fieldType = when (val t = fieldResult.type) {
                         is MezzeType.SuspendedType -> {
-                            effects.addAll(t.effects.effects)  // Propagate effects from SuspendedType
+                            effects.addAll(t.effects.effects)  // Propagate simple effects from SuspendedType
+                            effectInstances.addAll(t.effects.effectInstances)  // Propagate effect instances (with associated types)
                             t.valueType  // Use the unwrapped value type
                         }
                         else -> t

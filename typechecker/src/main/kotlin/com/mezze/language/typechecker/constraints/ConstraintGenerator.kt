@@ -329,17 +329,42 @@ class ConstraintGenerator(
                                 addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution)
                             }
 
-                            // CRITICAL: Wrap types in SuspendedType if the binding has effects
+                            // CRITICAL: Wrap types in SuspendedType if the binding has effects OR performed marker
                             // This allows subsequent lookups to see the effects
                             // Example: let program = Log.info {...} should have type {} <Log>, not just {}
-                            val solvedBindingsWithEffects = if (result.effects.isNotEmpty()) {
+                            // IMPORTANT: Preserve effectInstances (with associated types like 'error = String)
+                            // so that perform expressions can properly resolve suspension types
+                            // ALSO IMPORTANT: If performed=true (from perform expressions), wrap in SuspendedType
+                            // with performed marker so top-level validation can reject it
+                            val hasEffectsOrPerformed = result.effects.isNotEmpty() || result.effectInstances.isNotEmpty() || result.performed
+                            val solvedBindingsWithEffects = if (hasEffectsOrPerformed) {
                                 solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
                                     when (solvedType) {
-                                        is MezzeType.SuspendedType -> solvedType  // Already suspended
+                                        is MezzeType.SuspendedType -> {
+                                            // Already suspended - but make sure performed flag is set if needed
+                                            if (result.performed && !solvedType.effects.performed) {
+                                                MezzeType.SuspendedType(
+                                                    valueType = solvedType.valueType,
+                                                    effects = MezzeType.EffectRow(
+                                                        effects = solvedType.effects.effects,
+                                                        effectInstances = solvedType.effects.effectInstances,
+                                                        rowVar = solvedType.effects.rowVar,
+                                                        performed = true
+                                                    )
+                                                )
+                                            } else {
+                                                solvedType
+                                            }
+                                        }
                                         is MezzeType.FunctionType -> solvedType    // Functions have effects in signature
                                         else -> MezzeType.SuspendedType(
                                             valueType = solvedType,
-                                            effects = MezzeType.EffectRow.simple(result.effects)
+                                            effects = MezzeType.EffectRow(
+                                                effects = result.effects,
+                                                effectInstances = result.effectInstances,
+                                                rowVar = null,
+                                                performed = result.performed
+                                            )
                                         )
                                     }
                                 }

@@ -97,22 +97,22 @@ class EffectHandlerUsageValidationTest {
     }
 
     @Test
-    fun `test effect handler call inside perform should succeed`() {
+    fun `test effect handler call inside perform should succeed when wrapped in function`() {
         val source = """
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for BasicLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
-            let result = perform BasicLogger in Log.info {msg = "This should work"}
+
+            let result = {} -> perform BasicLogger in Log.info {msg = "This should work"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
-        // This should succeed because Log.info is called inside perform
+
+        // This should succeed because perform is wrapped in a function
         typeChecker.typeCheck(program).program
     }
 

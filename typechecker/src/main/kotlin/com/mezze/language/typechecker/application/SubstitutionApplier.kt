@@ -302,11 +302,13 @@ class SubstitutionApplier(
         // This allows nested expressions to know their types:
         // - Lambda: extract parameter types and add them to identifierContext
         // - FunctionCall: know the return type for Decode and other abilities
+        // - PerformExpression: use the constraint-solved type instead of computing from inner expr
         val expr = binding.expression
         val expressionWithType = if (preExpressionType != null) {
             when (expr) {
                 is LambdaExpression -> expr.copy(inferredType = preExpressionType)
                 is FunctionCall -> expr.copy(inferredType = preExpressionType)
+                is PerformExpression -> expr.copy(inferredType = preExpressionType)
                 else -> expr
             }
         } else {
@@ -2117,20 +2119,30 @@ class SubstitutionApplier(
     private fun applyToPerform(expr: PerformExpression): PerformExpression {
         val updatedExpression = applyToExpression(expr.expression)
 
-        // Get the inner expression's type
-        val innerType = updatedExpression.inferredType
-
         // Map each handler name to the effect it handles
         val handledEffects = expr.handlers.mapNotNull { handler ->
             performerToEffect[handler.name]
         }.toSet()
 
-        // Compute the result type by removing handled effects
-        val resultType = if (innerType != null && handledEffects.isNotEmpty()) {
-            removeEffectsFromType(innerType, handledEffects)
+        // CRITICAL: Use the pre-set inferredType if available (from constraint solving)
+        // This is set by applyToLetBinding when the binding's expression is a PerformExpression.
+        // The constraint solver correctly unifies the perform body with the suspension type,
+        // so expr.inferredType contains the correct result type (e.g., Result Int String <*>).
+        //
+        // Only fall back to computing from inner expression type if inferredType is not set
+        // (e.g., for nested perform expressions that aren't directly bound).
+        val preSetType = expr.inferredType
+        val resultType = if (preSetType != null) {
+            // Use the constraint-solved type, apply substitution to resolve any remaining type vars
+            substitution.apply(preSetType)
         } else {
-            // Fallback to existing inferred type if we can't compute
-            expr.inferredType?.let { substitution.apply(it) }
+            // Fallback: compute from inner expression's type
+            val innerType = updatedExpression.inferredType
+            if (innerType != null && handledEffects.isNotEmpty()) {
+                removeEffectsFromType(innerType, handledEffects)
+            } else {
+                null
+            }
         }
 
         // Build resolvedHandlers map for O(1) runtime dispatch
