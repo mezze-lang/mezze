@@ -10,14 +10,14 @@ class DebugTest {
     fun `format should preserve operator syntax`() {
         val input = "let f = {x, y} -> x + y"
         val output = formatter.format(input)
-        assertEquals("let f = {x, y} -> x + y\n", output)
+        assertEquals("let f = { x, y } -> x + y\n", output)
     }
 
     @Test
     fun `format variant type`() {
         val input = "type Option 'a = | Some { value: 'a }, None |"
         val output = formatter.format(input)
-        assertEquals("type Option 'a = Some {value: 'a} | None\n", output)
+        assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
     }
 
     @Test
@@ -28,8 +28,8 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         val expected = """effect MyEffect having 'a, 'b where {
-	op1: {x: 'a} -> 'b,
-	op2: {y: 'b} -> 'a
+	op1: { x: 'a } -> 'b,
+	op2: { y: 'b } -> 'a
 }
 """
         assertEquals(expected, output)
@@ -42,7 +42,7 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         val expected = """ability Encoder 'a having 'output where {
-	encode: {val: 'a} -> 'output
+	encode: { val: 'a } -> 'output
 }
 """
         assertEquals(expected, output)
@@ -55,7 +55,7 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         val expected = """ability Ord 'a with Eq 'a where {
-	compare: {left: 'a, right: 'a} -> Int
+	compare: { left: 'a, right: 'a } -> Int
 }
 """
         assertEquals(expected, output)
@@ -68,7 +68,7 @@ class DebugTest {
 }"""
         val output = formatter.format(input)
         val expected = """ability Encode 'repr 'a where {
-	encode: {val: 'a, config: CodecConfig} -> Result 'repr EncodeError
+	encode: { val: 'a, config: CodecConfig } -> Result 'repr EncodeError
 }
 """
         assertEquals(expected, output)
@@ -83,8 +83,8 @@ class DebugTest {
         val output = formatter.format(input)
         // Multi-line with trailing comma (like records)
         val expected = """impl Log ConsoleLogger where {
-	info = {msg} -> {},
-	warn = {msg} -> {},
+	info = { msg } -> {},
+	warn = { msg } -> {},
 }
 """
         assertEquals(expected, output)
@@ -100,7 +100,7 @@ class DebugTest {
         // Multi-line with trailing comma (like records)
         val expected = """impl State Counter having 'state = Int where {
 	get = {} -> 0,
-	put = {value} -> {},
+	put = { value } -> {},
 }
 """
         assertEquals(expected, output)
@@ -113,7 +113,7 @@ class DebugTest {
     random = {} -> 42
 }"""
         val output = formatter.format(input)
-        val expected = """impl Random SeededRandom {seed: Int} where {random = {} -> 42}
+        val expected = """impl Random SeededRandom { seed: Int } where { random = {} -> 42 }
 """
         assertEquals(expected, output)
     }
@@ -125,9 +125,38 @@ class DebugTest {
     eq = {left, right} -> left == right
 }"""
         val output = formatter.format(input)
-        val expected = """impl Eq Int where {eq = {left, right} -> left == right}
+        val expected = """impl Eq Int where { eq = { left, right } -> left == right }
 """
         assertEquals(expected, output)
+    }
+
+    @Test
+    fun `format record literal with spaces`() {
+        val input = "let person = {name = \"Alice\", age = 30}"
+        val output = formatter.format(input)
+        assertEquals("let person = { name = \"Alice\", age = 30 }\n", output)
+    }
+
+    @Test
+    fun `format function call with spaces`() {
+        val input = "let result = add {a = 1, b = 2}"
+        val output = formatter.format(input)
+        assertEquals("let result = add { a = 1, b = 2 }\n", output)
+    }
+
+    @Test
+    fun `format empty record and lambda`() {
+        // Empty records/lambdas should NOT have spaces: {}
+        val input = "let f = {} -> 42"
+        val output = formatter.format(input)
+        assertEquals("let f = {} -> 42\n", output)
+    }
+
+    @Test
+    fun `format record pattern with spaces`() {
+        val input = "let {x, y} = point"
+        val output = formatter.format(input)
+        assertEquals("let { x, y } = point\n", output)
     }
 
 }

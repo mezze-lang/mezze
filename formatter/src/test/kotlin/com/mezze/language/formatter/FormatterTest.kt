@@ -238,21 +238,21 @@ class FormatterTest {
     fun `format simple record on single line`() {
         val input = "let x = {a = 1, b = 2}"
         val output = formatter.format(input)
-        assertEquals("let x = {a = 1, b = 2}\n", output)
+        assertEquals("let x = { a = 1, b = 2 }\n", output)
     }
 
     @Test
     fun `format record shorthand`() {
         val input = "let y = {x}"
         val output = formatter.format(input)
-        assertEquals("let y = {x}\n", output)
+        assertEquals("let y = { x }\n", output)
     }
 
     @Test
     fun `format record with spread`() {
         val input = "let y = {...base, x = 1}"
         val output = formatter.format(input)
-        assertEquals("let y = {...base, x = 1}\n", output)
+        assertEquals("let y = { ...base, x = 1 }\n", output)
     }
 
     // Note: Record update syntax {x | a = 1} is not currently supported by the parser
@@ -294,21 +294,21 @@ class FormatterTest {
     fun `format simple lambda`() {
         val input = "let f = {x} -> x"
         val output = formatter.format(input)
-        assertEquals("let f = {x} -> x\n", output)
+        assertEquals("let f = { x } -> x\n", output)
     }
 
     @Test
     fun `format lambda with multiple parameters`() {
         val input = "let f = {x, y} -> x + y"
         val output = formatter.format(input)
-        assertEquals("let f = {x, y} -> x + y\n", output)
+        assertEquals("let f = { x, y } -> x + y\n", output)
     }
 
     @Test
     fun `format lambda with typed parameters`() {
         val input = "let f = {x: Int, y: Int} -> x + y"
         val output = formatter.format(input)
-        assertEquals("let f = {x: Int, y: Int} -> x + y\n", output)
+        assertEquals("let f = { x: Int, y: Int } -> x + y\n", output)
     }
 
     @Test
@@ -326,7 +326,7 @@ class FormatterTest {
     fun `format function call with record argument`() {
         val input = "let x = foo {a = 1, b = 2}"
         val output = formatter.format(input)
-        assertEquals("let x = foo {a = 1, b = 2}\n", output)
+        assertEquals("let x = foo { a = 1, b = 2 }\n", output)
     }
 
     @Test
@@ -384,7 +384,7 @@ class FormatterTest {
                 None -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome {val} -> val\n\tNone -> 0\n", output)
+        assertEquals("let x = match y is\n\tSome { val } -> val\n\tNone -> 0\n", output)
     }
 
     @Test
@@ -395,7 +395,7 @@ class FormatterTest {
                 _ -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome {val} if val > 0 -> val\n\t_ -> 0\n", output)
+        assertEquals("let x = match y is\n\tSome { val } if val > 0 -> val\n\t_ -> 0\n", output)
     }
 
     @Test
@@ -406,7 +406,7 @@ class FormatterTest {
                 _ -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome {val} | Ok {val} -> val\n\t_ -> 0\n", output)
+        assertEquals("let x = match y is\n\tSome { val } | Ok { val } -> val\n\t_ -> 0\n", output)
     }
 
     // =========================================================================
@@ -453,7 +453,7 @@ class FormatterTest {
     fun `format variant construction with value`() {
         val input = "let x = Some {val = 42}"
         val output = formatter.format(input)
-        assertEquals("let x = Some {val = 42}\n", output)
+        assertEquals("let x = Some { val = 42 }\n", output)
     }
 
     // =========================================================================
@@ -464,14 +464,14 @@ class FormatterTest {
     fun `format simple type alias`() {
         val input = "type Point = {x: Int, y: Int}"
         val output = formatter.format(input)
-        assertEquals("type Point = {x: Int, y: Int}\n", output)
+        assertEquals("type Point = { x: Int, y: Int }\n", output)
     }
 
     @Test
     fun `format variant type`() {
         val input = "type Option 'a = | Some { value: 'a }, None |"
         val output = formatter.format(input)
-        assertEquals("type Option 'a = Some {value: 'a} | None\n", output)
+        assertEquals("type Option 'a = Some { value: 'a } | None\n", output)
     }
 
     @Test
@@ -485,7 +485,7 @@ class FormatterTest {
     fun `format pub type`() {
         val input = "pub type Point = {x: Int, y: Int}"
         val output = formatter.format(input)
-        assertEquals("pub type Point = {x: Int, y: Int}\n", output)
+        assertEquals("pub type Point = { x: Int, y: Int }\n", output)
     }
 
     // =========================================================================
@@ -500,7 +500,7 @@ class FormatterTest {
             }
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("effect Log where {\n\tlog: {msg: String} -> {} <Log>\n}\n", output)
+        assertEquals("effect Log where {\n\tlog: { msg: String } -> {} <Log>\n}\n", output)
     }
 
     @Test
@@ -513,7 +513,7 @@ class FormatterTest {
         """.trimIndent()
         val output = formatter.format(input)
         // Each operation on its own line, comma after all but last
-        assertEquals("effect Console where {\n\tprint: {msg: String} -> {} <Console>,\n\tread: {} -> String <Console>\n}\n", output)
+        assertEquals("effect Console where {\n\tprint: { msg: String } -> {} <Console>,\n\tread: {} -> String <Console>\n}\n", output)
     }
 
     // =========================================================================
@@ -549,7 +549,7 @@ class FormatterTest {
     fun `format selective use`() {
         val input = "use std::option::{Some, None}"
         val output = formatter.format(input)
-        assertEquals("use std::option::{Some, None}\n", output)
+        assertEquals("use std::option::{ Some, None }\n", output)
     }
 
     @Test
@@ -770,7 +770,7 @@ class FormatterTest {
         val input = "let x = {a = 1, b = 2}"
         val output = formatter.format(input)
         // Should stay on single line
-        assertEquals("let x = {a = 1, b = 2}\n", output)
+        assertEquals("let x = { a = 1, b = 2 }\n", output)
     }
 
     @Test
@@ -793,7 +793,7 @@ class FormatterTest {
     fun `format short lambda stays on single line`() {
         val input = "let add = {x, y} -> x + y"
         val output = formatter.format(input)
-        assertEquals("let add = {x, y} -> x + y\n", output)
+        assertEquals("let add = { x, y } -> x + y\n", output)
     }
 
     @Test

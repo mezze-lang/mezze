@@ -194,7 +194,7 @@ class PrettyPrinter {
 
         val singleLine = calculateRecordDefWidth(def) <= config.RECORD_SINGLE_LINE_THRESHOLD
         if (singleLine) {
-            append("{")
+            append("{ ")
             def.fields.forEachIndexed { index, field ->
                 append(field.name)
                 append(": ")
@@ -206,7 +206,7 @@ class PrettyPrinter {
             if (def.isOpen) {
                 append(", ...")
             }
-            append("}")
+            append(" }")
         } else {
             append("{")
             newLine()
@@ -359,14 +359,14 @@ class PrettyPrinter {
         append(decl.performerName)
 
         if (decl.performerParams.isNotEmpty()) {
-            append(" {")
+            append(" { ")
             decl.performerParams.forEachIndexed { index, param ->
                 if (index > 0) append(", ")
                 append(param.name)
                 append(": ")
                 printTypeAnnotation(param.type)
             }
-            append("}")
+            append(" }")
         }
 
         if (decl.associatedTypeBindings.isNotEmpty()) {
@@ -383,14 +383,14 @@ class PrettyPrinter {
         val singleLine = calculateImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
 
         if (singleLine && decl.operations.isNotEmpty()) {
-            append(" where {")
+            append(" where { ")
             decl.operations.forEachIndexed { index, op ->
                 if (index > 0) append(", ")
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
             }
-            append("}")
+            append(" }")
         } else {
             append(" where {")
             newLine()
@@ -454,14 +454,14 @@ class PrettyPrinter {
         val singleLine = calculateAbilityImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
 
         if (singleLine && decl.operations.isNotEmpty()) {
-            append(" where {")
+            append(" where { ")
             decl.operations.forEachIndexed { index, op ->
                 if (index > 0) append(", ")
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
             }
-            append("}")
+            append(" }")
         } else {
             append(" where {")
             newLine()
@@ -520,7 +520,7 @@ class PrettyPrinter {
             is ModulePath -> append(path.segments.joinToString("::"))
             is SelectivePath -> {
                 append(path.module.joinToString("::"))
-                append("::{")
+                append("::{ ")
                 path.items.forEachIndexed { index, item ->
                     if (index > 0) append(", ")
                     append(item.name)
@@ -529,7 +529,7 @@ class PrettyPrinter {
                         append(it)
                     }
                 }
-                append("}")
+                append(" }")
             }
         }
     }
@@ -611,7 +611,7 @@ class PrettyPrinter {
 
         val singleLine = calculateRecordLiteralWidth(expr) <= config.RECORD_SINGLE_LINE_THRESHOLD
         if (singleLine) {
-            append("{")
+            append("{ ")
             var first = true
             for (entry in expr.entries) {
                 if (!first) append(", ")
@@ -623,7 +623,7 @@ class PrettyPrinter {
                 append("...")
                 append(it)
             }
-            append("}")
+            append(" }")
         } else {
             append("{")
             newLine()
@@ -720,7 +720,7 @@ class PrettyPrinter {
     }
 
     private fun printRecordUpdate(expr: RecordUpdate) {
-        append("{")
+        append("{ ")
         printExpression(expr.record)
         append(" | ")
         expr.updates.forEachIndexed { index, update ->
@@ -731,11 +731,11 @@ class PrettyPrinter {
                 printExpression(it)
             }
         }
-        append("}")
+        append(" }")
     }
 
     private fun printRecordUpdateExpression(expr: RecordUpdateExpression) {
-        append("{")
+        append("{ ")
         printExpression(expr.baseRecord)
         append(" | ")
         expr.updates.forEachIndexed { index, update ->
@@ -744,7 +744,7 @@ class PrettyPrinter {
             append(" = ")
             printExpression(update.value)
         }
-        append("}")
+        append(" }")
     }
 
     private fun printVariantConstruction(expr: VariantConstruction) {
@@ -817,13 +817,17 @@ class PrettyPrinter {
     private fun printLambdaParameters(params: LambdaParameters) {
         when (params) {
             is UntypedParameters -> {
-                append("{")
-                append(params.names.joinToString(", "))
-                if (params.isOpen) {
-                    if (params.names.isNotEmpty()) append(", ")
-                    append("...")
+                if (params.names.isEmpty() && !params.isOpen) {
+                    append("{}")
+                } else {
+                    append("{ ")
+                    append(params.names.joinToString(", "))
+                    if (params.isOpen) {
+                        if (params.names.isNotEmpty()) append(", ")
+                        append("...")
+                    }
+                    append(" }")
                 }
-                append("}")
             }
             is TypedParameters -> {
                 printRecordTypeAnnotation(params.recordType)
@@ -1048,7 +1052,11 @@ class PrettyPrinter {
     }
 
     private fun printRecordPattern(pattern: RecordPattern) {
-        append("{")
+        if (pattern.entries.isEmpty() && !pattern.isOpen) {
+            append("{}")
+            return
+        }
+        append("{ ")
         pattern.entries.forEachIndexed { index, entry ->
             if (index > 0) append(", ")
             append(entry.name)
@@ -1061,7 +1069,7 @@ class PrettyPrinter {
             if (pattern.entries.isNotEmpty()) append(", ")
             append("...")
         }
-        append("}")
+        append(" }")
     }
 
     private fun printSeqPattern(pattern: SeqPattern) {
@@ -1166,7 +1174,7 @@ class PrettyPrinter {
         val singleLine = estimatedWidth <= config.RECORD_SINGLE_LINE_THRESHOLD
 
         if (singleLine) {
-            append("{")
+            append("{ ")
             type.entries.forEachIndexed { index, entry ->
                 if (index > 0) append(", ")
                 append(entry.name)
@@ -1178,7 +1186,7 @@ class PrettyPrinter {
                 append("...")
                 append(it)
             }
-            append("}")
+            append(" }")
         } else {
             append("{")
             newLine()
