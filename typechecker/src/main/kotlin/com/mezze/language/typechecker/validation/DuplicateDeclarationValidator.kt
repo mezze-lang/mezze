@@ -279,7 +279,7 @@ object DuplicateDeclarationValidator {
                     ctor.dataType?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList()
                 }
             }
-            is ArrayTypeAnnotation -> {
+            is SeqTypeAnnotation -> {
                 collectTypeVariablesWithLocationFromAnnotation(annotation.elementType)
             }
             is EffectRowAnnotation -> {
@@ -326,7 +326,7 @@ object DuplicateDeclarationValidator {
                     ctor.dataType?.let { collectTypeVariablesInAnnotation(it) } ?: emptySet()
                 }.toSet()
             }
-            is ArrayTypeAnnotation -> {
+            is SeqTypeAnnotation -> {
                 collectTypeVariablesInAnnotation(annotation.elementType)
             }
             is EffectRowAnnotation -> {

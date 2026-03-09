@@ -120,7 +120,7 @@ class LambdaVsRecordTest {
 
     @Test
     fun `test multi-parameter lambda with function call body`() {
-        val source = "{xs, ys} -> __native_arraylist_concat { xs = xs, ys = ys }"
+        val source = "{xs, ys} -> concat { xs = xs, ys = ys }"
         val program = parser.parse(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression

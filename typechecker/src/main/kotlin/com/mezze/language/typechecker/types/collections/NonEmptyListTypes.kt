@@ -39,7 +39,7 @@ object NonEmptyListTypes {
      * Helper to create Array type
      */
     private fun arrayType(elementType: MezzeType): MezzeType {
-        return MezzeType.ArrayType(elementType)
+        return MezzeType.SeqType(elementType)
     }
 
     fun registerAll(context: MutableMap<String, MezzeType>) {
@@ -359,20 +359,20 @@ object NonEmptyListTypes {
             )
         }
 
-        // __native_nel_to_array: {xs: NonEmptyList 'a} -> ['a]
+        // __native_nel_to_seq: {xs: NonEmptyList 'a} -> ['a]
         run {
             val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_to_array"] = MezzeType.FunctionType(
+            context["__native_nel_to_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to nelType(a))),
                 arrayType(a)
             )
         }
 
-        // __native_nel_from_array: {xs: ['a]} -> NonEmptyList 'a
-        // Note: This throws at runtime if array is empty
+        // __native_nel_from_seq: {xs: ['a]} -> NonEmptyList 'a
+        // Note: This throws at runtime if seq is empty
         run {
             val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_from_array"] = MezzeType.FunctionType(
+            context["__native_nel_from_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to arrayType(a))),
                 nelType(a)
             )

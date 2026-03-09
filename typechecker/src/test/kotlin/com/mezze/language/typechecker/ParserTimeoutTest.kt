@@ -14,12 +14,12 @@ class ParserTimeoutTest {
         System.out.flush()
 
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let map = {f: {x: Int} -> Int, xs: [Int]} ->
                 match xs is
                   [] -> []
-                  [head, ...tail] -> array::of {x = f {x = head}, xs = map {f = f, xs = tail}}
+                  [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
         """.trimIndent()
 
         var parserThread: Thread? = null

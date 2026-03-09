@@ -90,10 +90,11 @@ class JsonModuleTest {
     fun `test JArray construction`() {
         val result = eval("""
             use std::codec::json::{Json}
+            use std::collections::seq
 
             let j: Json = JArray {items = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]}
             match j is
-                JArray {items} -> __native_arraylist_length {xs = items}
+                JArray {items} -> seq::length {xs = items}
                 _ -> 0
         """)
         assertEquals(3L, result)
@@ -103,13 +104,14 @@ class JsonModuleTest {
     fun `test JObject construction`() {
         val result = eval("""
             use std::codec::json::{Json}
+            use std::collections::seq
 
             let j: Json = JObject {fields = [
                 {key = "name", value = JString {val = "Alice"}},
                 {key = "age", value = JInt {val = 30}}
             ]}
             match j is
-                JObject {fields} -> __native_arraylist_length {xs = fields}
+                JObject {fields} -> seq::length {xs = fields}
                 _ -> 0
         """)
         assertEquals(2L, result)
@@ -275,11 +277,12 @@ class JsonModuleTest {
     fun `test parse_str with array`() {
         val result = eval("""
             use std::codec::json::{Json, parse_str}
+            use std::collections::seq
 
             let parsed = parse_str {s = "[1, 2, 3]"}
             match parsed is
                 Ok {val} -> match val is
-                    JArray {items} -> __native_arraylist_length {xs = items}
+                    JArray {items} -> seq::length {xs = items}
                     _ -> 0
                 _ -> 0
         """)
@@ -290,11 +293,12 @@ class JsonModuleTest {
     fun `test parse_str with object`() {
         val result = eval("""
             use std::codec::json::{Json, parse_str}
+            use std::collections::seq
 
             let parsed = parse_str {s = "{\"name\": \"Alice\", \"age\": 30}"}
             match parsed is
                 Ok {val} -> match val is
-                    JObject {fields} -> __native_arraylist_length {xs = fields}
+                    JObject {fields} -> seq::length {xs = fields}
                     _ -> 0
                 _ -> 0
         """)
@@ -461,11 +465,12 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, serialize_to_string, JsonConfig}
             use std::codec::core::{FieldTransform}
+            use std::string
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = True, indent = 2, field_transform = Identity, skip_null = False}
             let s = serialize_to_string {json = obj, config = cfg}
-            __native_string_contains {s = s, substring = "\n"}
+            string::contains {s = s, substring = "\n"}
         """)
         assertEquals(true, result)
     }
@@ -475,11 +480,12 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, serialize_to_string, JsonConfig}
             use std::codec::core::{FieldTransform}
+            use std::string
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = False, indent = 2, field_transform = Identity, skip_null = False}
             let s = serialize_to_string {json = obj, config = cfg}
-            __native_string_contains {s = s, substring = "\n"}
+            string::contains {s = s, substring = "\n"}
         """)
         assertEquals(false, result)
     }

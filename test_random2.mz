@@ -2,7 +2,7 @@
 
 use std::effects::log::{Log, Console, println}
 use std::effects::random::{Random, SeededRandom, random_int, random_float}
-use std::collections::array
+use std::collections::seq
 use std::int
 use std::string
 
@@ -21,7 +21,7 @@ let game_demo = {} -> do
     let r4 = roll_dice {}
     let r5 = roll_dice {}
 
-    println {msg = " $(array::map { xs = [r1, r2, r3, r4, r5], f = {x} -> int::to_string { n = x} } |> string::join { strings = @, separator = " ,"}) " }
+    println {msg = " $(seq::map { xs = [r1, r2, r3, r4, r5], f = {x} -> int::to_string { n = x} } |> string::join { strings = @, separator = " ,"}) " }
 
     println {msg = "Flipping coin 3 times:"}
     let f1 = flip_coin {}

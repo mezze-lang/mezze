@@ -33,7 +33,7 @@ pub let run: {computation: {} -> 'a} -> 'a <Concurrency> = {computation} -> do
 # Helper: spawn multiple, await all
 # Uses native loom spawn_all which handles the concurrent spawning internally
 pub let all: {computations: [{} -> 'a]} -> ['a] <Concurrency> = {computations} -> do
-  # Native spawn_all spawns all computations and returns array of results
+  # Native spawn_all spawns all computations and returns seq of results
   __native_loom_spawn_all {fs = computations}
 
 # Usage examples:

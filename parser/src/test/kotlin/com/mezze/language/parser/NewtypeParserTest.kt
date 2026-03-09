@@ -179,7 +179,7 @@ class NewtypeParserTest {
 
         val newtypeDef = typeDecl.definition as NewtypeDefinition
         assertEquals("Names", newtypeDef.constructor)
-        assertTrue(newtypeDef.wrappedType is ArrayTypeAnnotation)
+        assertTrue(newtypeDef.wrappedType is SeqTypeAnnotation)
 
         println("✅ Newtype with Array type parsed successfully!")
     }

@@ -5,13 +5,13 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for array/ArrayList operations in the V2 interpreter.
+ * Tests for seq operations in the V2 interpreter.
  * Migrated from V1 to V2 with unboxed values.
  *
- * In V2, arrays are represented as MezzeSeq internally.
- * Tests use Mezze source code to exercise array operations.
+ * In V2, seqs are represented as MezzeSeq internally.
+ * Tests use Mezze source code to exercise seq operations.
  */
-class ArrayListInterpreterTest {
+class SeqInterpreterTest {
 
     @BeforeEach
     fun setUp() {
@@ -27,9 +27,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test empty array length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let xs: [Int] = []
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """
         assertEquals(0L, eval(code))
     }
@@ -37,9 +37,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test empty array is_empty`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let xs: [Int] = []
-            array::is_empty { xs = xs }
+            seq::is_empty { xs = xs }
         """
         assertEquals(true, eval(code))
     }
@@ -47,8 +47,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test integer array length`() {
         val code = """
-            use std::collections::array
-            array::length { xs = [1, 2, 3, 4, 5] }
+            use std::collections::seq
+            seq::length { xs = [1, 2, 3, 4, 5] }
         """
         assertEquals(5L, eval(code))
     }
@@ -56,8 +56,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test integer array element access`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [1, 2, 3, 4, 5], i = 0 } is
+            use std::collections::seq
+            match seq::get { xs = [1, 2, 3, 4, 5], i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -67,8 +67,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test integer array element access at index 2`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [1, 2, 3, 4, 5], i = 2 } is
+            use std::collections::seq
+            match seq::get { xs = [1, 2, 3, 4, 5], i = 2 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -78,8 +78,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test integer array element access at last index`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [1, 2, 3, 4, 5], i = 4 } is
+            use std::collections::seq
+            match seq::get { xs = [1, 2, 3, 4, 5], i = 4 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -89,8 +89,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test string array length`() {
         val code = """
-            use std::collections::array
-            array::length { xs = ["Alice", "Bob", "Charlie"] }
+            use std::collections::seq
+            seq::length { xs = ["Alice", "Bob", "Charlie"] }
         """
         assertEquals(3L, eval(code))
     }
@@ -98,8 +98,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test string array element access`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = ["Alice", "Bob", "Charlie"], i = 0 } is
+            use std::collections::seq
+            match seq::get { xs = ["Alice", "Bob", "Charlie"], i = 0 } is
                 Some { val } -> val
                 None -> "not found"
         """
@@ -109,8 +109,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test string array element access at index 1`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = ["Alice", "Bob", "Charlie"], i = 1 } is
+            use std::collections::seq
+            match seq::get { xs = ["Alice", "Bob", "Charlie"], i = 1 } is
                 Some { val } -> val
                 None -> "not found"
         """
@@ -120,8 +120,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test string array element access at index 2`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = ["Alice", "Bob", "Charlie"], i = 2 } is
+            use std::collections::seq
+            match seq::get { xs = ["Alice", "Bob", "Charlie"], i = 2 } is
                 Some { val } -> val
                 None -> "not found"
         """
@@ -131,8 +131,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test boolean array length`() {
         val code = """
-            use std::collections::array
-            array::length { xs = [True, False, True] }
+            use std::collections::seq
+            seq::length { xs = [True, False, True] }
         """
         assertEquals(3L, eval(code))
     }
@@ -140,8 +140,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test boolean array element access at index 0`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [True, False, True], i = 0 } is
+            use std::collections::seq
+            match seq::get { xs = [True, False, True], i = 0 } is
                 Some { val } -> val
                 None -> False
         """
@@ -151,8 +151,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test boolean array element access at index 1`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [True, False, True], i = 1 } is
+            use std::collections::seq
+            match seq::get { xs = [True, False, True], i = 1 } is
                 Some { val } -> val
                 None -> True
         """
@@ -162,8 +162,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test boolean array element access at index 2`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [True, False, True], i = 2 } is
+            use std::collections::seq
+            match seq::get { xs = [True, False, True], i = 2 } is
                 Some { val } -> val
                 None -> False
         """
@@ -177,9 +177,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test nested array outer length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
-            array::length { xs = nested }
+            seq::length { xs = nested }
         """
         assertEquals(3L, eval(code))
     }
@@ -187,10 +187,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test nested array inner length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
-            match array::get { xs = nested, i = 0 } is
-                Some { val } -> array::length { xs = val }
+            match seq::get { xs = nested, i = 0 } is
+                Some { val } -> seq::length { xs = val }
                 None -> -1
         """
         assertEquals(2L, eval(code))
@@ -198,7 +198,7 @@ class ArrayListInterpreterTest {
 
     @Test
     fun `test nested array access first inner array element`() {
-        // Use array pattern matching instead of array::get for nested access
+        // Use array pattern matching instead of seq::get for nested access
         val code = """
             let nested = [[1, 2], [3, 4], [5, 6]]
             match nested is
@@ -210,12 +210,12 @@ class ArrayListInterpreterTest {
 
     @Test
     fun `test nested array access second inner array`() {
-        // Use array pattern matching instead of array::get for nested access
+        // Use array pattern matching instead of seq::get for nested access
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
             match nested is
-                [_, second, ...rest] -> array::length { xs = second }
+                [_, second, ...rest] -> seq::length { xs = second }
                 _ -> -1
         """
         assertEquals(2L, eval(code))
@@ -223,7 +223,7 @@ class ArrayListInterpreterTest {
 
     @Test
     fun `test nested array access third inner array element`() {
-        // Use array pattern matching instead of array::get for nested access
+        // Use array pattern matching instead of seq::get for nested access
         val code = """
             let nested = [[1, 2], [3, 4], [5, 6]]
             match nested is
@@ -240,9 +240,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array with computed elements`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1 + 2, 3 * 4, 10 - 5]
-            array::length { xs = arr }
+            seq::length { xs = arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -250,9 +250,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array with computed elements access index 0`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1 + 2, 3 * 4, 10 - 5]
-            match array::get { xs = arr, i = 0 } is
+            match seq::get { xs = arr, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -262,9 +262,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array with computed elements access index 1`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1 + 2, 3 * 4, 10 - 5]
-            match array::get { xs = arr, i = 1 } is
+            match seq::get { xs = arr, i = 1 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -274,9 +274,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array with computed elements access index 2`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1 + 2, 3 * 4, 10 - 5]
-            match array::get { xs = arr, i = 2 } is
+            match seq::get { xs = arr, i = 2 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -290,8 +290,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test single element array length`() {
         val code = """
-            use std::collections::array
-            array::length { xs = [42] }
+            use std::collections::seq
+            seq::length { xs = [42] }
         """
         assertEquals(1L, eval(code))
     }
@@ -299,8 +299,8 @@ class ArrayListInterpreterTest {
     @Test
     fun `test single element array access`() {
         val code = """
-            use std::collections::array
-            match array::get { xs = [42], i = 0 } is
+            use std::collections::seq
+            match seq::get { xs = [42], i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -314,10 +314,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array map operation`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let mapped = array::map { xs = arr, f = { x } -> x * 2 }
-            match array::get { xs = mapped, i = 0 } is
+            let mapped = seq::map { xs = arr, f = { x } -> x * 2 }
+            match seq::get { xs = mapped, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -327,10 +327,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array map preserves length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let mapped = array::map { xs = arr, f = { x } -> x * 2 }
-            array::length { xs = mapped }
+            let mapped = seq::map { xs = arr, f = { x } -> x * 2 }
+            seq::length { xs = mapped }
         """
         assertEquals(3L, eval(code))
     }
@@ -338,10 +338,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array filter operation`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let filtered = array::filter { xs = arr, p = { x } -> x > 1 }
-            array::length { xs = filtered }
+            let filtered = seq::filter { xs = arr, p = { x } -> x > 1 }
+            seq::length { xs = filtered }
         """
         assertEquals(2L, eval(code))
     }
@@ -349,10 +349,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array filter first element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let filtered = array::filter { xs = arr, p = { x } -> x > 1 }
-            match array::get { xs = filtered, i = 0 } is
+            let filtered = seq::filter { xs = arr, p = { x } -> x > 1 }
+            match seq::get { xs = filtered, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -362,9 +362,9 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array fold operation`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            array::fold { xs = arr, init = 0, f = { acc, x } -> acc + x }
+            seq::fold { xs = arr, init = 0, f = { acc, x } -> acc + x }
         """
         assertEquals(6L, eval(code))
     }
@@ -377,13 +377,13 @@ class ArrayListInterpreterTest {
     fun `test array equality via element comparison`() {
         // Compare arrays using fold - all elements at same positions must be equal
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr1 = [1, 2, 3]
             let arr2 = [1, 2, 3]
 
             # Compare lengths first, then elements
-            let len1 = array::length { xs = arr1 }
-            let len2 = array::length { xs = arr2 }
+            let len1 = seq::length { xs = arr1 }
+            let len2 = seq::length { xs = arr2 }
 
             if len1 != len2 then False
             else if len1 == 0 then True
@@ -408,7 +408,7 @@ class ArrayListInterpreterTest {
     fun `test array inequality via element comparison`() {
         // Compare arrays - should find difference at position 2
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr1 = [1, 2, 3]
             let arr2 = [1, 2, 4]
 
@@ -427,10 +427,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array add returns new array`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2]
-            let new_arr = array::add { xs = arr, x = 3 }
-            array::length { xs = new_arr }
+            let new_arr = seq::add { xs = arr, x = 3 }
+            seq::length { xs = new_arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -438,10 +438,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array add does not modify original`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2]
-            let new_arr = array::add { xs = arr, x = 3 }
-            array::length { xs = arr }
+            let new_arr = seq::add { xs = arr, x = 3 }
+            seq::length { xs = arr }
         """
         assertEquals(2L, eval(code))
     }
@@ -450,9 +450,9 @@ class ArrayListInterpreterTest {
     fun `test array set returns new array`() {
         // Use pattern matching to verify set operation
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let result = array::set { xs = arr, i = 0, x = 10 }
+            let result = seq::set { xs = arr, i = 0, x = 10 }
             match result is
                 Some { val } -> match val is
                     [first, ...rest] -> first
@@ -465,10 +465,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array set does not modify original`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let updated = array::set { xs = arr, i = 0, x = 10 }
-            match array::get { xs = arr, i = 0 } is
+            let updated = seq::set { xs = arr, i = 0, x = 10 }
+            match seq::get { xs = arr, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -478,10 +478,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array remove returns new array`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            match array::remove { xs = arr, i = 0 } is
-                Some { val } -> array::length { xs = val }
+            match seq::remove { xs = arr, i = 0 } is
+                Some { val } -> seq::length { xs = val }
                 None -> -1
         """
         assertEquals(2L, eval(code))
@@ -491,9 +491,9 @@ class ArrayListInterpreterTest {
     fun `test array remove result first element`() {
         // Use pattern matching to verify remove operation
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let result = array::remove { xs = arr, i = 0 }
+            let result = seq::remove { xs = arr, i = 0 }
             match result is
                 Some { val } -> match val is
                     [first, ...rest] -> first
@@ -506,10 +506,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array remove does not modify original`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
-            let removed = array::remove { xs = arr, i = 0 }
-            array::length { xs = arr }
+            let removed = seq::remove { xs = arr, i = 0 }
+            seq::length { xs = arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -521,10 +521,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with append`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let rest = [1, 2, 3]
             let combined = [...rest, 4, 5]
-            array::length { xs = combined }
+            seq::length { xs = combined }
         """
         assertEquals(5L, eval(code))
     }
@@ -532,10 +532,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with append first element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let rest = [1, 2, 3]
             let combined = [...rest, 4, 5]
-            match array::get { xs = combined, i = 0 } is
+            match seq::get { xs = combined, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -545,10 +545,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with append last element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let rest = [1, 2, 3]
             let combined = [...rest, 4, 5]
-            match array::get { xs = combined, i = 4 } is
+            match seq::get { xs = combined, i = 4 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -558,11 +558,11 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with multiple spreads`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b]
-            array::length { xs = combined }
+            seq::length { xs = combined }
         """
         assertEquals(4L, eval(code))
     }
@@ -570,11 +570,11 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with multiple spreads element order`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b]
-            match array::get { xs = combined, i = 2 } is
+            match seq::get { xs = combined, i = 2 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -584,10 +584,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with spread only`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
             let copy = [...arr]
-            array::length { xs = copy }
+            seq::length { xs = copy }
         """
         assertEquals(3L, eval(code))
     }
@@ -595,10 +595,10 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread copy preserves elements`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let arr = [1, 2, 3]
             let copy = [...arr]
-            match array::get { xs = copy, i = 1 } is
+            match seq::get { xs = copy, i = 1 } is
                 Some { val } -> val
                 None -> -1
         """
@@ -608,11 +608,11 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with multiple spreads and append`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b, 5, 6]
-            array::length { xs = combined }
+            seq::length { xs = combined }
         """
         assertEquals(6L, eval(code))
     }
@@ -620,11 +620,11 @@ class ArrayListInterpreterTest {
     @Test
     fun `test array spread with multiple spreads and append last element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b, 5, 6]
-            match array::get { xs = combined, i = 5 } is
+            match seq::get { xs = combined, i = 5 } is
                 Some { val } -> val
                 None -> -1
         """

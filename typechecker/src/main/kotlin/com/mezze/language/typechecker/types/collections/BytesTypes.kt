@@ -42,9 +42,9 @@ object BytesTypes {
             MezzeType.BytesType
         )
 
-        // __native_bytes_from_array: {arr: [Int]} -> Bytes
-        context["__native_bytes_from_array"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("arr" to MezzeType.ArrayType(MezzeType.IntType))),
+        // __native_bytes_from_seq: {arr: [Int]} -> Bytes
+        context["__native_bytes_from_seq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("arr" to MezzeType.SeqType(MezzeType.IntType))),
             MezzeType.BytesType
         )
 
@@ -115,7 +115,7 @@ object BytesTypes {
         // __native_bytes_concat_all: {bs: [Bytes]} -> Bytes
         // Efficient bulk concatenation with single allocation
         context["__native_bytes_concat_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("bs" to MezzeType.ArrayType(MezzeType.BytesType))),
+            MezzeType.RecordType(mapOf("bs" to MezzeType.SeqType(MezzeType.BytesType))),
             MezzeType.BytesType
         )
 
@@ -155,10 +155,10 @@ object BytesTypes {
             resultType(MezzeType.StringType, MezzeType.StringType)
         )
 
-        // __native_bytes_to_array: {b: Bytes} -> [Int]
-        context["__native_bytes_to_array"] = MezzeType.FunctionType(
+        // __native_bytes_to_seq: {b: Bytes} -> [Int]
+        context["__native_bytes_to_seq"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType)),
-            MezzeType.ArrayType(MezzeType.IntType)
+            MezzeType.SeqType(MezzeType.IntType)
         )
 
         // __native_bytes_to_hex: {b: Bytes} -> String

@@ -38,10 +38,10 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes from_array`() {
+    fun `test bytes from_seq`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [72, 105] }
+            let b = bytes::from_seq { arr = [72, 105] }
             bytes::length { b = b }
         """)
         assertEquals(2L, result)
@@ -320,7 +320,7 @@ class BytesModuleTest {
     fun `test bytes reverse`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let r = bytes::reverse { b = b }
             match bytes::get { b = r, i = 0 } is
                 Some { val } -> val
@@ -333,7 +333,7 @@ class BytesModuleTest {
     fun `test bytes map`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let m = bytes::map { b = b, f = {x} -> x + 1 }
             match bytes::get { b = m, i = 0 } is
                 Some { val } -> val
@@ -346,7 +346,7 @@ class BytesModuleTest {
     fun `test bytes fold`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             bytes::fold { b = b, init = 0, f = {acc, byte} -> acc + byte }
         """)
         assertEquals(6L, result)
@@ -367,13 +367,13 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes to_array`() {
+    fun `test bytes to_seq`() {
         val result = eval("""
             use std::collections::bytes
-            use std::collections::array
+            use std::collections::seq
             let b = bytes::from_string { s = "Hi" }
-            let arr = bytes::to_array { b = b }
-            array::length { xs = arr }
+            let arr = bytes::to_seq { b = b }
+            seq::length { xs = arr }
         """)
         assertEquals(2L, result)
     }

@@ -19,6 +19,8 @@
 #       let results = Parallel.map {xs = large_list, f = {x} -> expensive_computation {x = x}}
 #       results
 
+use std::collections::seq
+
 # Parallel effect - data parallel operations
 effect Parallel where {
     # === Core Operations ===
@@ -249,13 +251,13 @@ pub let count: {xs: ['a], f: {x: 'a} -> Bool} -> Int <Parallel> = {xs, f} ->
         combine = {left, right} -> left + right
     }
 
-# Flatten nested arrays in parallel
+# Flatten nested seqs in parallel
 pub let flatten: {xs: [['a]]} -> ['a] <Parallel> = {xs} ->
     Parallel.fold {
         xs = xs,
         zero = [],
         map_fn = {x} -> x,
-        combine = {left, right} -> __native_arraylist_concat {xs = left, ys = right}
+        combine = {left, right} -> seq::concat {xs = left, ys = right}
     }
 
 # Flat map - map then flatten in parallel

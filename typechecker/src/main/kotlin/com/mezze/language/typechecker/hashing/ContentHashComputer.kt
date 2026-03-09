@@ -164,7 +164,7 @@ object ContentHashComputer {
                 val constructorNames = annotation.constructors.map { it.name }.sorted().joinToString("_")
                 if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
             }
-            is ArrayTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
+            is SeqTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
             is QualifiedTypeAnnotation -> {
                 val modulePart = annotation.modulePath.joinToString("_")
                 val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
@@ -228,7 +228,7 @@ object ContentHashComputer {
                 val constructorNames = type.constructors.keys.sorted().joinToString("_")
                 if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
             }
-            is MezzeType.ArrayType -> "Array_${mezzeTypeToString(type.elementType)}"
+            is MezzeType.SeqType -> "Array_${mezzeTypeToString(type.elementType)}"
             is MezzeType.ListType -> "List_${mezzeTypeToString(type.elementType)}"
             is MezzeType.SetType -> "Set_${mezzeTypeToString(type.elementType)}"
             is MezzeType.MapType -> "Map_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"

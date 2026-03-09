@@ -256,9 +256,10 @@ class SortedSetIntegrationTest {
     void fromSetConvertsRegularSetToSortedSet() {
         Object result = MezzeTestHelper.run("""
             use std::collections::sorted_set
-            let regular = __native_set_empty {}
-            let r2 = __native_set_insert { s = regular, x = 1 }
-            let r3 = __native_set_insert { s = r2, x = 2 }
+            use std::collections::set
+            let regular = set::empty {}
+            let r2 = set::insert { s = regular, x = 1 }
+            let r3 = set::insert { s = r2, x = 2 }
             let sorted = sorted_set::from_set { s = r3 }
             sorted_set::size { s = sorted }
             """);
@@ -269,10 +270,11 @@ class SortedSetIntegrationTest {
     void toSetConvertsSortedSetToRegularSet() {
         Object result = MezzeTestHelper.run("""
             use std::collections::sorted_set
+            use std::collections::set
             let sorted = sorted_set::singleton { x = 1 }
             let s2 = sorted_set::add { s = sorted, x = 2 }
             let regular = sorted_set::to_set { s = s2 }
-            __native_set_size { s = regular }
+            set::size { s = regular }
             """);
         assertEquals(2L, result);
     }

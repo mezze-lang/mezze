@@ -188,8 +188,8 @@ private fun applySubstitutionToType(
                 args = type.args.map { applySubstitutionToType(it, substitution) }
             )
         }
-        is MezzeType.ArrayType -> {
-            MezzeType.ArrayType(
+        is MezzeType.SeqType -> {
+            MezzeType.SeqType(
                 elementType = applySubstitutionToType(type.elementType, substitution)
             )
         }
@@ -270,7 +270,7 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.TypeApplication -> {
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()
         }
-        is MezzeType.ArrayType -> {
+        is MezzeType.SeqType -> {
             collectFreeTypeVars(type.elementType)
         }
         is MezzeType.ListType -> {

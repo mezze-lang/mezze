@@ -4,7 +4,7 @@ import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 
-class EmptyArraysInRecordTest {
+class EmptySeqsInRecordTest {
 
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
@@ -18,7 +18,7 @@ class EmptyArraysInRecordTest {
     }
 
     @Test
-    fun `simple record with two empty arrays - just the type`() {
+    fun `simple record with two empty seqs - just the type`() {
         val code = """
             let test = {yes = [], no = []}
             test
@@ -46,8 +46,8 @@ class EmptyArraysInRecordTest {
             is com.mezze.language.ast.MezzeType.VarType -> {
                 "VarType(${testType.variable})"
             }
-            is com.mezze.language.ast.MezzeType.ArrayType -> {
-                "ArrayType(${testType.elementType})"
+            is com.mezze.language.ast.MezzeType.SeqType -> {
+                "SeqType(${testType.elementType})"
             }
             else -> {
                 "${testType?.let { it::class.simpleName } ?: "null"}: $testType"
@@ -59,7 +59,7 @@ class EmptyArraysInRecordTest {
     }
 
     @Test
-    fun `simple record with two empty arrays`() {
+    fun `simple record with two empty seqs`() {
         val code = """
             let test = {yes = [], no = []}
             test.no
@@ -93,7 +93,7 @@ class EmptyArraysInRecordTest {
     }
 
     @Test
-    fun `simple match with two empty array record cases`() {
+    fun `simple match with two empty seq record cases`() {
         val code = """
             let f = {x: Int} ->
                 match x is
@@ -231,14 +231,14 @@ class EmptyArraysInRecordTest {
     @Test
     fun `user example - recursive with two field accesses`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let foo = {n: Int} ->
               match n is
                 0 -> {x = [], y = []}
                 _ -> do
                   let k = foo {n = n - 1}
-                  let x = array::of {x = n, xs = k.x}
-                  let y = array::of {x = n, xs = k.y}
+                  let x = seq::of {x = n, xs = k.x}
+                  let y = seq::of {x = n, xs = k.y}
                   {x, y}
 
             foo {n = 5}
@@ -255,15 +255,15 @@ class EmptyArraysInRecordTest {
     @Test
     fun `exact partition function from interpreter test`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> {yes = [], no = []}
                   [head, ...tail] -> do
                     let rest = my_partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then {yes = array::of {x = head, xs = rest.yes}, no = rest.no}
-                    else {yes = rest.yes, no = array::of {x = head, xs = rest.no}}
+                    then {yes = seq::of {x = head, xs = rest.yes}, no = rest.no}
+                    else {yes = rest.yes, no = seq::of {x = head, xs = rest.no}}
 
             let is_even = {x: Int} -> x % 2 == 0
             my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}

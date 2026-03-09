@@ -714,6 +714,177 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
         return new MezzeSeq<>(SeqStorageFactory.fromArray(seen.toArray()));
     }
 
+    /**
+     * Sort using a custom comparator.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSeq<A> sortBy(java.util.Comparator<? super A> comparator) {
+        if (size() <= 1) return this;
+
+        Object[] arr = toArray();
+        java.util.Arrays.sort(arr, (a, b) -> comparator.compare((A) a, (A) b));
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(arr));
+    }
+
+    /**
+     * Sort by extracting a comparable key from each element.
+     */
+    @TruffleBoundary
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public <K extends Comparable<? super K>> MezzeSeq<A> sortOn(Function<? super A, K> keyFn) {
+        if (size() <= 1) return this;
+
+        Object[] arr = toArray();
+        java.util.Arrays.sort(arr, (a, b) -> {
+            K keyA = keyFn.apply((A) a);
+            K keyB = keyFn.apply((A) b);
+            return keyA.compareTo(keyB);
+        });
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(arr));
+    }
+
+    /**
+     * Flatten a sequence of sequences.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public <B> MezzeSeq<B> flatten() {
+        if (isEmpty()) return empty();
+
+        java.util.ArrayList<Object> results = new java.util.ArrayList<>();
+        for (int i = 0; i < size(); i++) {
+            Object elem = get(i);
+            if (elem instanceof MezzeSeq<?> seq) {
+                for (int j = 0; j < seq.size(); j++) {
+                    results.add(seq.get(j));
+                }
+            } else if (elem instanceof Object[] arr) {
+                for (Object o : arr) {
+                    results.add(o);
+                }
+            } else {
+                results.add(elem);
+            }
+        }
+
+        if (results.isEmpty()) return empty();
+        return new MezzeSeq<>(SeqStorageFactory.fromArray(results.toArray()));
+    }
+
+    /**
+     * Unzip a sequence of pairs into two sequences.
+     * Assumes elements are Object[2] pairs.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSeq<Object>[] unzip() {
+        if (isEmpty()) {
+            MezzeSeq<Object>[] result = new MezzeSeq[2];
+            result[0] = empty();
+            result[1] = empty();
+            return result;
+        }
+
+        Object[] firsts = new Object[size()];
+        Object[] seconds = new Object[size()];
+
+        for (int i = 0; i < size(); i++) {
+            Object elem = get(i);
+            if (elem instanceof Object[] pair && pair.length >= 2) {
+                firsts[i] = pair[0];
+                seconds[i] = pair[1];
+            } else {
+                throw new IllegalArgumentException("Element at index " + i + " is not a pair");
+            }
+        }
+
+        MezzeSeq<Object>[] result = new MezzeSeq[2];
+        result[0] = new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(firsts));
+        result[1] = new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(seconds));
+        return result;
+    }
+
+    /**
+     * Insert a separator between each element.
+     */
+    @TruffleBoundary
+    public MezzeSeq<A> intersperse(A separator) {
+        if (size() <= 1) return this;
+
+        Object[] results = new Object[size() * 2 - 1];
+        for (int i = 0; i < size(); i++) {
+            results[i * 2] = get(i);
+            if (i < size() - 1) {
+                results[i * 2 + 1] = separator;
+            }
+        }
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(results));
+    }
+
+    /**
+     * Group elements by key function.
+     * Returns a map from keys to sequences of elements with that key.
+     */
+    @TruffleBoundary
+    public <K> java.util.Map<K, MezzeSeq<A>> groupBy(Function<? super A, K> keyFn) {
+        java.util.LinkedHashMap<K, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
+
+        for (int i = 0; i < size(); i++) {
+            A elem = get(i);
+            K key = keyFn.apply(elem);
+            groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
+        }
+
+        java.util.LinkedHashMap<K, MezzeSeq<A>> result = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<K, java.util.ArrayList<Object>> entry : groups.entrySet()) {
+            result.put(entry.getKey(), new MezzeSeq<>(SeqStorageFactory.fromArray(entry.getValue().toArray())));
+        }
+        return result;
+    }
+
+    /**
+     * Split into chunks of given size.
+     */
+    @TruffleBoundary
+    public MezzeSeq<MezzeSeq<A>> chunk(int chunkSize) {
+        if (chunkSize <= 0) {
+            throw new IllegalArgumentException("Chunk size must be positive");
+        }
+        if (isEmpty()) return empty();
+
+        int numChunks = (size() + chunkSize - 1) / chunkSize;
+        Object[] chunks = new Object[numChunks];
+
+        for (int i = 0; i < numChunks; i++) {
+            int start = i * chunkSize;
+            int end = Math.min(start + chunkSize, size());
+            chunks[i] = slice(start, end);
+        }
+
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(chunks));
+    }
+
+    /**
+     * Sliding window of given size.
+     */
+    @TruffleBoundary
+    public MezzeSeq<MezzeSeq<A>> sliding(int windowSize) {
+        if (windowSize <= 0) {
+            throw new IllegalArgumentException("Window size must be positive");
+        }
+        if (isEmpty() || windowSize > size()) return empty();
+
+        int numWindows = size() - windowSize + 1;
+        Object[] windows = new Object[numWindows];
+
+        for (int i = 0; i < numWindows; i++) {
+            windows[i] = slice(i, i + windowSize);
+        }
+
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(windows));
+    }
+
     // ===== GROUPING =====
 
     /**
@@ -812,6 +983,76 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
         for (int i = 0; i < size(); i++) {
             fn.accept(get(i));
         }
+    }
+
+    // ===== CONVERSION =====
+
+    /**
+     * Convert to Object array.
+     */
+    @TruffleBoundary
+    public Object[] toArray() {
+        Object[] result = new Object[size()];
+        for (int i = 0; i < size(); i++) {
+            result[i] = get(i);
+        }
+        return result;
+    }
+
+    /**
+     * Convert to long array (requires Long elements).
+     */
+    public long[] toLongArray() {
+        if (storage instanceof LongSeqStorage longStorage) {
+            return longStorage.getArray().clone();
+        }
+        throw new UnsupportedOperationException("toLongArray requires Long elements");
+    }
+
+    /**
+     * Convert to double array (requires Double elements).
+     */
+    public double[] toDoubleArray() {
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return doubleStorage.getArray().clone();
+        }
+        throw new UnsupportedOperationException("toDoubleArray requires Double elements");
+    }
+
+    // ===== ALIASES FOR COMPATIBILITY =====
+
+    /**
+     * Alias for first() - returns the head element.
+     */
+    public A head() {
+        return first();
+    }
+
+    /**
+     * Returns all elements except the first.
+     */
+    public MezzeSeq<A> tail() {
+        if (isEmpty()) {
+            throw new NoSuchElementException("Empty sequence");
+        }
+        return drop(1);
+    }
+
+    /**
+     * Returns all elements except the last.
+     */
+    public MezzeSeq<A> init() {
+        if (isEmpty()) {
+            throw new NoSuchElementException("Empty sequence");
+        }
+        return take(size() - 1);
+    }
+
+    /**
+     * Alias for size().
+     */
+    public int length() {
+        return size();
     }
 
     // ===== INTERNAL =====

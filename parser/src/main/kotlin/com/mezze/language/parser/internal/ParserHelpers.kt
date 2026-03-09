@@ -306,11 +306,11 @@ internal fun desugarExpression(expr: Expression): Expression {
             statements = expr.statements.map { desugarStatement(it) },
             result = desugarExpression(expr.result)
         )
-        is ArrayLiteral -> expr.copy(
+        is SeqLiteral -> expr.copy(
             elements = expr.elements.map { element ->
                 when (element) {
-                    is ArrayRegularElement -> ArrayRegularElement(desugarExpression(element.expression))
-                    is ArraySpreadElement -> ArraySpreadElement(desugarExpression(element.expression))
+                    is SeqRegularElement -> SeqRegularElement(desugarExpression(element.expression))
+                    is SeqSpreadElement -> SeqSpreadElement(desugarExpression(element.expression))
                 }
             }
         )
@@ -323,8 +323,8 @@ internal fun desugarExpression(expr: Expression): Expression {
                 update.copy(value = desugarExpression(update.value))
             }
         )
-        is ArrayAccess -> expr.copy(
-            array = desugarExpression(expr.array),
+        is SeqAccess -> expr.copy(
+            seq = desugarExpression(expr.seq),
             index = desugarExpression(expr.index)
         )
         is MemberAccess -> expr.copy(

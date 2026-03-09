@@ -455,8 +455,8 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
         result
     }
 
-// Array type annotation parser
-internal val MezzeParser.arrayTypeAnnotation: Parser<TypeAnnotation>
+// Seq type annotation parser
+internal val MezzeParser.seqTypeAnnotation: Parser<TypeAnnotation>
     get() = { stream ->
         // Parse: [ElementType]
         val lbracket = tok(TokenType.LBRACKET)(stream)
@@ -470,7 +470,7 @@ internal val MezzeParser.arrayTypeAnnotation: Parser<TypeAnnotation>
                         val rbracket = tok(TokenType.RBRACKET)(stream2)
                         when (rbracket) {
                             is ParseResult.Success -> ParseResult.Success(
-                                ArrayTypeAnnotation(elementType.value),
+                                SeqTypeAnnotation(elementType.value),
                                 rbracket.remaining
                             )
                             is ParseResult.Failure -> rbracket
@@ -487,7 +487,7 @@ internal val MezzeParser.arrayTypeAnnotation: Parser<TypeAnnotation>
 internal val MezzeParser.primaryTypeAnnotation: Parser<TypeAnnotation>
     get() = { stream ->
         Parsers.oneOf(
-            arrayTypeAnnotation,
+            seqTypeAnnotation,
             parenTypeAnnotation,
             recordTypeAnnotationParser,
             variantTypeAnnotationParser,
@@ -503,7 +503,7 @@ internal val MezzeParser.primaryTypeAnnotation: Parser<TypeAnnotation>
 internal val MezzeParser.atomicTypeAnnotation: Parser<TypeAnnotation>
     get() = { stream ->
         Parsers.oneOf(
-            arrayTypeAnnotation,      // Allow [Int], [Float], etc.
+            seqTypeAnnotation,      // Allow [Int], [Float], etc.
             parenTypeAnnotation,       // Allow (Int), (Float), etc.
             recordTypeAnnotationParser, // Allow {x: Int}, etc.
             identifierTypeAnnotation   // Allow Int, Float, String, 'a, etc.
@@ -701,7 +701,7 @@ internal val MezzeParser.simpleTypeArgument: Parser<TypeAnnotation>
         // Parse simple type arguments (identifiers, parens, variants, arrays, records, not type applications)
         Parsers.oneOf(
             variantTypeAnnotationParser,
-            arrayTypeAnnotation,
+            seqTypeAnnotation,
             parenTypeAnnotation,
             recordTypeAnnotationParser,
             identifierTypeAnnotation

@@ -36,7 +36,7 @@ object OSThreadTypes {
         val raceResult = MezzeType.VarType(TypeVar("a"))
         context["__native_os_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(racePromise)
+                "ps" to MezzeType.SeqType(racePromise)
             )),
             raceResult
         )
@@ -46,9 +46,9 @@ object OSThreadTypes {
         val allResult = MezzeType.VarType(TypeVar("a"))
         context["__native_os_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(allPromise)
+                "ps" to MezzeType.SeqType(allPromise)
             )),
-            MezzeType.ArrayType(allResult)
+            MezzeType.SeqType(allResult)
         )
 
         // __native_os_timeout: {ms: Int, p: Promise 'a} -> Option 'a
@@ -142,19 +142,19 @@ object OSThreadTypes {
         // __native_os_map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b]
         context["__native_os_map"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.VarType(TypeVar("b"))
                 )
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("b")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("b")))
         )
 
         // __native_os_for_each: {xs: ['a], f: {x: 'a} -> {}} -> {}
         context["__native_os_for_each"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.RecordType(emptyMap())
@@ -166,13 +166,13 @@ object OSThreadTypes {
         // __native_os_filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a]
         context["__native_os_filter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.BoolType
                 )
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
         )
 
         // === Error Handling ===
@@ -181,7 +181,7 @@ object OSThreadTypes {
         val anyPromise = MezzeType.VarType(TypeVar("Promise"))
         context["__native_os_any"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(anyPromise)
+                "ps" to MezzeType.SeqType(anyPromise)
             )),
             MezzeType.VarType(TypeVar("a"))
         )
@@ -195,9 +195,9 @@ object OSThreadTypes {
         ))
         context["__native_os_settle"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(settlePromise)
+                "ps" to MezzeType.SeqType(settlePromise)
             )),
-            MezzeType.ArrayType(resultType)
+            MezzeType.SeqType(resultType)
         )
 
         // === Structured Concurrency Scopes ===

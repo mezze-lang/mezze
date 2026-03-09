@@ -210,7 +210,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
             }
         }
     }
-    is MezzeType.ArrayType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
+    is MezzeType.SeqType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is MezzeType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
@@ -523,7 +523,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is MezzeType.VariantType -> {
         printVariantType(type, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
     }
-    is MezzeType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
+    is MezzeType.SeqType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is MezzeType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
         if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"

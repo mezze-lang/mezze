@@ -45,7 +45,7 @@ class PatternConstraintGenerator {
             is ConstructorPattern -> generateConstructor(pattern, scrutineeType, context, sourceLocation)
             is RecordPattern -> generateRecord(pattern, scrutineeType, context, sourceLocation)
             is LiteralPattern -> generateLiteral(pattern, scrutineeType, context, sourceLocation)
-            is ArrayPattern -> generateArray(pattern, scrutineeType, context, sourceLocation)
+            is SeqPattern -> generateSeq(pattern, scrutineeType, context, sourceLocation)
             is StringInterpolationPattern -> generateStringInterpolation(pattern, scrutineeType, context, sourceLocation)
         }
     }
@@ -393,28 +393,28 @@ class PatternConstraintGenerator {
     }
 
     // ========================================================================
-    // ARRAY PATTERNS
+    // SEQ PATTERNS
     // ========================================================================
 
-    private fun generateArray(
-        pattern: ArrayPattern,
+    private fun generateSeq(
+        pattern: SeqPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
         sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
-        // Array pattern: [x, y, z] or [head, ...tail]
-        // Scrutinee must be array type
+        // Seq pattern: [x, y, z] or [head, ...tail]
+        // Scrutinee must be seq type
 
         val elementType = MezzeType.VarType(TypeVar.fresh())
         val bindings = mutableMapOf<String, MezzeType>()
         val constraints = mutableListOf<Constraint>()
 
-        // Scrutinee must be Array<elementType>
+        // Scrutinee must be Seq<elementType>
         constraints.add(
             Constraint.Equality(
                 left = scrutineeType,
-                right = MezzeType.ArrayType(elementType),
-                context = "Array pattern requires array type",
+                right = MezzeType.SeqType(elementType),
+                context = "Seq pattern requires seq type",
                 sourceLocation = sourceLocation
             )
         )
@@ -427,11 +427,11 @@ class PatternConstraintGenerator {
         }
 
         // CRITICAL FIX: Handle rest pattern (...tail)
-        // The rest pattern binds to an array of the remaining elements
-        // Example: [head, ...tail] binds tail to Array<elementType>
+        // The rest pattern binds to a seq of the remaining elements
+        // Example: [head, ...tail] binds tail to Seq<elementType>
         val restPatternName = pattern.restPattern
         if (restPatternName != null) {
-            bindings[restPatternName] = MezzeType.ArrayType(elementType)
+            bindings[restPatternName] = MezzeType.SeqType(elementType)
         }
 
         return PatternConstraintResult(

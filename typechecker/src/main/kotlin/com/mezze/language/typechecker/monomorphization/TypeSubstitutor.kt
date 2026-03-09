@@ -35,7 +35,7 @@ class TypeSubstitutor(
             is BooleanLiteral -> expr.copy(inferredType = substitutedType)
             is FractionLiteral -> expr.copy(inferredType = substitutedType)
             is StringLiteral -> applyToStringLiteral(expr, substitutedType)
-            is ArrayLiteral -> applyToArrayLiteral(expr, substitutedType)
+            is SeqLiteral -> applyToSeqLiteral(expr, substitutedType)
 
             // Variables
             is Identifier -> expr.copy(inferredType = substitutedType)
@@ -45,9 +45,9 @@ class TypeSubstitutor(
                 inferredType = substitutedType
             )
 
-            // Arrays
-            is ArrayAccess -> expr.copy(
-                array = apply(expr.array),
+            // Seqs
+            is SeqAccess -> expr.copy(
+                seq = apply(expr.seq),
                 index = apply(expr.index),
                 inferredType = substitutedType
             )
@@ -141,7 +141,7 @@ class TypeSubstitutor(
             )
 
             is MezzeType.ListType -> MezzeType.ListType(applyToType(type.elementType))
-            is MezzeType.ArrayType -> MezzeType.ArrayType(applyToType(type.elementType))
+            is MezzeType.SeqType -> MezzeType.SeqType(applyToType(type.elementType))
             is MezzeType.SetType -> MezzeType.SetType(applyToType(type.elementType))
             is MezzeType.SortedMapType -> MezzeType.SortedMapType(
                 keyType = applyToType(type.keyType),
@@ -187,11 +187,11 @@ class TypeSubstitutor(
         return expr.copy(parts = updatedParts, inferredType = substitutedType)
     }
 
-    private fun applyToArrayLiteral(expr: ArrayLiteral, substitutedType: MezzeType?): ArrayLiteral {
+    private fun applyToSeqLiteral(expr: SeqLiteral, substitutedType: MezzeType?): SeqLiteral {
         val updatedElements = expr.elements.map { element ->
             when (element) {
-                is ArrayRegularElement -> ArrayRegularElement(apply(element.expression))
-                is ArraySpreadElement -> ArraySpreadElement(apply(element.expression))
+                is SeqRegularElement -> SeqRegularElement(apply(element.expression))
+                is SeqSpreadElement -> SeqSpreadElement(apply(element.expression))
             }
         }
         return expr.copy(elements = updatedElements, inferredType = substitutedType)
@@ -385,7 +385,7 @@ class TypeSubstitutor(
                     )
                 }
             )
-            is ArrayTypeAnnotation -> MezzeType.ArrayType(
+            is SeqTypeAnnotation -> MezzeType.SeqType(
                 elementType = convertTypeAnnotationToMezzeType(annotation.elementType)
             )
             is TypeApplicationAnnotation -> MezzeType.TypeApplication(
@@ -445,7 +445,7 @@ class TypeSubstitutor(
                     )
                 }
             )
-            is MezzeType.ArrayType -> ArrayTypeAnnotation(
+            is MezzeType.SeqType -> SeqTypeAnnotation(
                 elementType = convertMezzeTypeToAnnotation(type.elementType)
             )
             is MezzeType.TypeApplication -> TypeApplicationAnnotation(
@@ -508,7 +508,7 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
             is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectFromType(it) } }
             is MezzeType.TypeApplication -> type.args.forEach { collectFromType(it) }
             is MezzeType.ListType -> collectFromType(type.elementType)
-            is MezzeType.ArrayType -> collectFromType(type.elementType)
+            is MezzeType.SeqType -> collectFromType(type.elementType)
             is MezzeType.SetType -> collectFromType(type.elementType)
             is MezzeType.SortedMapType -> {
                 collectFromType(type.keyType)
@@ -573,14 +573,14 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
                 collect(e.baseRecord)
                 e.updates.forEach { collect(it.value) }
             }
-            is ArrayLiteral -> e.elements.forEach { element ->
+            is SeqLiteral -> e.elements.forEach { element ->
                 when (element) {
-                    is ArrayRegularElement -> collect(element.expression)
-                    is ArraySpreadElement -> collect(element.expression)
+                    is SeqRegularElement -> collect(element.expression)
+                    is SeqSpreadElement -> collect(element.expression)
                 }
             }
-            is ArrayAccess -> {
-                collect(e.array)
+            is SeqAccess -> {
+                collect(e.seq)
                 collect(e.index)
             }
             is StringLiteral -> {

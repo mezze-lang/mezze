@@ -165,10 +165,10 @@ class InterpolatedStringNode(
 }
 
 /**
- * Array literal node that creates a MezzeList.
+ * Seq literal node that creates a MezzeList.
  */
-@NodeInfo(shortName = "array-literal")
-class ArrayLiteralNode(
+@NodeInfo(shortName = "seq-literal")
+class SeqLiteralNode(
     @field:Children private val elements: Array<MezzeNode>
 ) : MezzeNode() {
 

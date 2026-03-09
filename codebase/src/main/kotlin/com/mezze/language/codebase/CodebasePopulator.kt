@@ -283,7 +283,7 @@ object CodebasePopulator {
             is FunctionTypeAnnotation -> "Fn"
             is RecordTypeAnnotation -> "Record"
             is VariantTypeAnnotation -> "Variant"
-            is ArrayTypeAnnotation -> "Array[${printTypeAnnotation(ann.elementType)}]"
+            is SeqTypeAnnotation -> "Seq[${printTypeAnnotation(ann.elementType)}]"
             is EffectRowAnnotation -> "<${ann.effects.joinToString(",")}>"
         }
     }

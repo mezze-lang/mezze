@@ -3,6 +3,7 @@ package com.mezze.interpreter.v2.nodes.variant;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -133,7 +134,7 @@ public final class MatchBranchNode extends MezzeNode {
      * @param hasRestPattern Whether pattern has ...rest
      * @param bodyNode The body to execute when matched
      */
-    public static MatchBranchNode arrayPattern(int[] elementSlots, int restSlot,
+    public static MatchBranchNode seqPattern(int[] elementSlots, int restSlot,
                                                boolean hasRestPattern, MezzeNode bodyNode) {
         int requiredLength = elementSlots != null ? elementSlots.length : 0;
         return new MatchBranchNode(-3, EMPTY_SLOTS, -1, null, bodyNode,
@@ -591,7 +592,7 @@ public final class MatchBranchNode extends MezzeNode {
     /**
      * Check if this is an array pattern branch.
      */
-    public boolean isArrayPattern() {
+    public boolean isSeqPattern() {
         return tag == -3;
     }
 
@@ -683,6 +684,49 @@ public final class MatchBranchNode extends MezzeNode {
             int restSize = array.length - elementCount;
             Object[] rest = new Object[restSize];
             System.arraycopy(array, elementCount, rest, 0, restSize);
+            frame.setObject(arrayRestSlot, rest);
+        }
+    }
+
+    /**
+     * Check if this array pattern matches the given MezzeSeq - V2 OPTIMIZED.
+     * NO @TruffleBoundary - this is the hot path!
+     */
+    public boolean matchesMezzeSeq(MezzeSeq seq) {
+        int seqSize = seq.size();
+
+        // Check length constraints
+        if (arrayHasRest) {
+            // With rest pattern: need at least arrayRequiredLength elements
+            return seqSize >= arrayRequiredLength;
+        } else {
+            // Without rest pattern: need exactly arrayRequiredLength elements
+            return seqSize == arrayRequiredLength;
+        }
+    }
+
+    /**
+     * Bind MezzeSeq elements to frame slots - V2 OPTIMIZED.
+     * Direct seq access via get().
+     */
+    @ExplodeLoop
+    public void bindMezzeSeqElements(VirtualFrame frame, MezzeSeq seq) {
+        int elementCount = arrayElementSlots.length;
+        if (elementCount == 0 && arrayRestSlot < 0) {
+            return; // Fast path for empty pattern []
+        }
+
+        // Bind each element position
+        for (int i = 0; i < elementCount; i++) {
+            int slot = arrayElementSlots[i];
+            if (slot >= 0) {
+                frame.setObject(slot, seq.get(i));
+            }
+        }
+
+        // Bind rest pattern if present (creates a new MezzeSeq with remaining elements)
+        if (arrayRestSlot >= 0) {
+            MezzeSeq rest = seq.slice(elementCount, seq.size());
             frame.setObject(arrayRestSlot, rest);
         }
     }

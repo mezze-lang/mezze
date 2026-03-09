@@ -4,7 +4,7 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.types.BasicTypes
 import com.mezze.language.typechecker.types.CharTypes
-import com.mezze.language.typechecker.types.collections.ArrayListTypes
+import com.mezze.language.typechecker.types.collections.SeqTypes
 import com.mezze.language.typechecker.types.collections.ListTypes
 import com.mezze.language.typechecker.types.collections.MapTypes
 import com.mezze.language.typechecker.types.collections.SetTypes
@@ -63,7 +63,7 @@ object NativeFunctionTypes {
         BasicTypes.registerAll(context)
         CharTypes.registerAll(context)
 
-        ArrayListTypes.registerAll(context)
+        SeqTypes.registerAll(context)
         ListTypes.registerAll(context)
         MapTypes.registerAll(context)
         SetTypes.registerAll(context)

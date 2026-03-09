@@ -5,6 +5,7 @@ import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -69,6 +70,12 @@ public final class ContinuationForkNode extends MezzeNode {
         MezzeList values;
         if (valuesObj instanceof MezzeList ml) {
             values = ml;
+        } else if (valuesObj instanceof MezzeSeq seq) {
+            MezzeList result = MezzeList.empty();
+            for (int i = seq.size() - 1; i >= 0; i--) {
+                result = result.prepend(seq.get(i));
+            }
+            values = result;
         } else if (valuesObj instanceof Object[] arr) {
             values = MezzeList.fromArray(arr);
         } else {
@@ -95,7 +102,7 @@ public final class ContinuationForkNode extends MezzeNode {
         // After collecting all results, throw ForkedExecutionException so the effect handler
         // can catch it and return the results. We don't return directly because that would
         // assign the result list to the variable at the fork call site.
-        MezzeList results = executeFork(contObj, values);
+        MezzeSeq results = executeFork(contObj, values);
         throw new ForkedExecutionException(contObj, results);
     }
 
@@ -106,7 +113,7 @@ public final class ContinuationForkNode extends MezzeNode {
      * Array grows 2x when needed (amortized O(1) append).
      */
     @TruffleBoundary
-    private MezzeList executeFork(Object cont, MezzeList values) {
+    private MezzeSeq executeFork(Object cont, MezzeList values) {
         // Pre-allocate with extra space for nested forks (common in Choice effect)
         Object[] results = new Object[values.size() * 2];
         int resultCount = 0;
@@ -125,7 +132,8 @@ public final class ContinuationForkNode extends MezzeNode {
                 results[resultCount++] = result;
             } catch (ForkedExecutionException e) {
                 // Nested fork - recursively fork with nested values
-                MezzeList nestedResults = executeFork(e.continuation, e.values);
+                // e.values is MezzeList for nested forks (input values)
+                MezzeSeq nestedResults = executeFork(e.continuation, (MezzeList) e.values);
                 // Add all nested results (cartesian product)
                 for (int j = 0; j < nestedResults.size(); j++) {
                     if (resultCount >= results.length) {
@@ -144,9 +152,9 @@ public final class ContinuationForkNode extends MezzeNode {
         if (resultCount < results.length) {
             Object[] trimmed = new Object[resultCount];
             System.arraycopy(results, 0, trimmed, 0, resultCount);
-            return MezzeList.fromArray(trimmed);
+            return MezzeSeq.fromArray(trimmed);
         }
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**

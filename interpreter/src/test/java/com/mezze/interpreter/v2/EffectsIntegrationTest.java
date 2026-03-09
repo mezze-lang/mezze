@@ -113,10 +113,10 @@ public class EffectsIntegrationTest {
             computation {}
             """);
 
-        // Should return array [2, 4, 6]
-        assertTrue(result instanceof MezzeList);
-        MezzeList list = (MezzeList) result;
-        assertEquals(3, list.size());
+        // Should return seq [2, 4, 6]
+        assertTrue(result instanceof MezzeSeq);
+        MezzeSeq seq = (MezzeSeq) result;
+        assertEquals(3, seq.size());
     }
 
     @Test
@@ -134,9 +134,9 @@ public class EffectsIntegrationTest {
             """);
 
         // Should return only even numbers [2, 4]
-        assertTrue(result instanceof MezzeList);
-        MezzeList list = (MezzeList) result;
-        assertEquals(2, list.size());
+        assertTrue(result instanceof MezzeSeq);
+        MezzeSeq seq = (MezzeSeq) result;
+        assertEquals(2, seq.size());
     }
 
     @Test
@@ -153,9 +153,9 @@ public class EffectsIntegrationTest {
             """);
 
         // Should return [11, 21, 12, 22] - all combinations
-        assertTrue(result instanceof MezzeList);
-        MezzeList list = (MezzeList) result;
-        assertEquals(4, list.size());
+        assertTrue(result instanceof MezzeSeq);
+        MezzeSeq seq = (MezzeSeq) result;
+        assertEquals(4, seq.size());
     }
 
     @Test
@@ -171,9 +171,9 @@ public class EffectsIntegrationTest {
             """);
 
         // Should return [1, 4, 9]
-        assertTrue(result instanceof MezzeList);
-        MezzeList list = (MezzeList) result;
-        assertEquals(3, list.size());
+        assertTrue(result instanceof MezzeSeq);
+        MezzeSeq seq = (MezzeSeq) result;
+        assertEquals(3, seq.size());
     }
 
     // ========================

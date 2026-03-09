@@ -105,10 +105,10 @@ object ContinuationTypes {
                     )),
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
                 ),
-                "values" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+                "values" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
             )),
             // Return type: ['b] (array of all results from resuming with each value)
-            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
         )
 
         // __native_continuation_abort: { delim: 'c } -> 'b

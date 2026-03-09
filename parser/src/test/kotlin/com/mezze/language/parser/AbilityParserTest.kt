@@ -482,7 +482,7 @@ class AbilityParserTest {
         val optionType = itemType as TypeApplicationAnnotation
         assertEquals("Option", optionType.constructor)
         assertEquals(1, optionType.args.size)
-        assertTrue(optionType.args[0] is ArrayTypeAnnotation)
+        assertTrue(optionType.args[0] is SeqTypeAnnotation)
     }
 
     @Test
@@ -541,10 +541,10 @@ class AbilityParserTest {
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val itemType = typeAnnotation.abilityConstraints[0].associatedTypeBindings["'item"]
-        assertTrue(itemType is ArrayTypeAnnotation)
-        val arrayType = itemType as ArrayTypeAnnotation
-        assertTrue(arrayType.elementType is RecordTypeAnnotation)
-        assertEquals(2, (arrayType.elementType as RecordTypeAnnotation).entries.size)
+        assertTrue(itemType is SeqTypeAnnotation)
+        val seqType = itemType as SeqTypeAnnotation
+        assertTrue(seqType.elementType is RecordTypeAnnotation)
+        assertEquals(2, (seqType.elementType as RecordTypeAnnotation).entries.size)
     }
 
     @Test

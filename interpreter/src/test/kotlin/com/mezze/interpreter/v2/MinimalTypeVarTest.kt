@@ -1,5 +1,6 @@
 package com.mezze.interpreter.v2
 
+import com.mezze.interpreter.v2.values.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -25,28 +26,27 @@ class MinimalTypeVarTest {
     @Test
     fun testMinimalCase() {
         // Test type variables work correctly across async boundaries
-        // Using direct native calls to avoid effect system complexity
+        // Using stdlib Async effect for consistency with other tests
         val code = """
-            use std::collections::array
+            use std::effects::async::{Async, LoomAsync}
 
-            newtype Promise 'a = Promise __NativePromise
-
-            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-            let await_p: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-
-            let items = [1, 2, 3]
-            let promises = items |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
-            let results = promises |> array::map {xs = @, f = {x} -> await_p {p = x}}
-            results
+            perform LoomAsync in do
+                let p1 = Async.spawn {f = {} -> 1 * 2}
+                let p2 = Async.spawn {f = {} -> 2 * 2}
+                let p3 = Async.spawn {f = {} -> 3 * 2}
+                let r1 = Async.await {p = p1}
+                let r2 = Async.await {p = p2}
+                let r3 = Async.await {p = p3}
+                [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is Array<*>)
-        val array = result as Array<*>
-        assertEquals(3, array.size)
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq
+        assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
-        assertEquals(2L, array[0])
-        assertEquals(4L, array[1])
-        assertEquals(6L, array[2])
+        assertEquals(2L, seq.get(0))
+        assertEquals(4L, seq.get(1))
+        assertEquals(6L, seq.get(2))
     }
 
     @Test
@@ -65,13 +65,13 @@ class MinimalTypeVarTest {
                 [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is Array<*>)
-        val array = result as Array<*>
-        assertEquals(3, array.size)
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq
+        assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
-        assertEquals(2L, array[0])
-        assertEquals(4L, array[1])
-        assertEquals(6L, array[2])
+        assertEquals(2L, seq.get(0))
+        assertEquals(4L, seq.get(1))
+        assertEquals(6L, seq.get(2))
     }
 
     @Test
@@ -91,12 +91,12 @@ class MinimalTypeVarTest {
                 [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is Array<*>)
-        val array = result as Array<*>
-        assertEquals(3, array.size)
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq
+        assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
-        assertEquals(2L, array[0])
-        assertEquals(4L, array[1])
-        assertEquals(6L, array[2])
+        assertEquals(2L, seq.get(0))
+        assertEquals(4L, seq.get(1))
+        assertEquals(6L, seq.get(2))
     }
 }

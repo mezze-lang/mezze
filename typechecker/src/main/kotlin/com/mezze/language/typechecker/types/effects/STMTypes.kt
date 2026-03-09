@@ -229,17 +229,17 @@ object STMTypes {
         // __native_stm_read_all: {vars: [TVar 'a]} -> ['a]
         context["__native_stm_read_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "vars" to MezzeType.ArrayType(
+                "vars" to MezzeType.SeqType(
                     MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
                 )
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
         )
 
         // __native_stm_write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {}
         context["__native_stm_write_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "pairs" to MezzeType.ArrayType(
+                "pairs" to MezzeType.SeqType(
                     MezzeType.RecordType(mapOf(
                         "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                         "val" to MezzeType.VarType(TypeVar("a"))

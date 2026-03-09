@@ -127,7 +127,7 @@ class AsyncExtendedTest {
     fun `test map applies function to all elements concurrently`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
-            use std::collections::array
+            use std::collections::seq
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5]
@@ -167,12 +167,12 @@ class AsyncExtendedTest {
     fun `test map with empty list`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
-            use std::collections::array
+            use std::collections::seq
 
             perform LoomAsync in do
                 let xs: [Int] = []
                 let result = Async.map {xs = xs, f = {x} -> x * 2}
-                array::length {xs = result}
+                seq::length {xs = result}
         """
         val result = eval(code)
         assertEquals(0L, result)
@@ -270,12 +270,12 @@ class AsyncExtendedTest {
     fun `test filter with no matches returns empty list`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
-            use std::collections::array
+            use std::collections::seq
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
                 let result = Async.filter {xs = xs, f = {x} -> x > 100}
-                array::length {xs = result}
+                seq::length {xs = result}
         """
         val result = eval(code)
         assertEquals(0L, result)

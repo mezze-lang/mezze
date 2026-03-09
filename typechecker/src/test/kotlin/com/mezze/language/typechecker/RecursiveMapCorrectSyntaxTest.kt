@@ -15,11 +15,11 @@ class RecursiveMapCorrectSyntaxTest {
         System.out.flush()
 
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let map = {f: {x: Int} -> Int, xs: [Int]} ->
                 match xs is
                   [] -> []
-                  [head, ...tail] -> array::concat {xs = [f {x = head}], ys = map {f = f, xs = tail}}
+                  [head, ...tail] -> seq::concat {xs = [f {x = head}], ys = map {f = f, xs = tail}}
         """.trimIndent()
 
         println("Parsing...")

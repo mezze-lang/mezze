@@ -416,22 +416,22 @@ class NonEmptyListModuleTest {
     }
 
     @Test
-    fun `test nel to_array`() {
+    fun `test nel to_seq`() {
         val result = eval("""
             use std::collections::nonemptylist
-            use std::collections::array
+            use std::collections::seq
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
-            let arr = nonemptylist::to_array { xs = xs }
-            array::length { xs = arr }
+            let arr = nonemptylist::to_seq { xs = xs }
+            seq::length { xs = arr }
         """)
         assertEquals(3L, result)
     }
 
     @Test
-    fun `test nel from_array`() {
+    fun `test nel from_seq`() {
         val result = eval("""
             use std::collections::nonemptylist
-            let xs = nonemptylist::from_array { xs = [1, 2, 3] }
+            let xs = nonemptylist::from_seq { xs = [1, 2, 3] }
             nonemptylist::length { xs = xs }
         """)
         assertEquals(3L, result)

@@ -77,7 +77,7 @@ class AbilityResolver(
 
             // Collection types
             is MezzeType.ListType -> checkListAbility(type, abilityName, typeArgs)
-            is MezzeType.ArrayType -> checkArrayAbility(type, abilityName, typeArgs)
+            is MezzeType.SeqType -> checkSeqAbility(type, abilityName, typeArgs)
             is MezzeType.SetType -> checkSetAbility(type, abilityName, typeArgs)
             is MezzeType.MapType -> checkMapAbility(type, abilityName, typeArgs)
             is MezzeType.SortedSetType -> checkSortedSetAbility(type, abilityName, typeArgs)
@@ -246,33 +246,33 @@ class AbilityResolver(
         }
     }
 
-    private fun checkArrayAbility(type: MezzeType.ArrayType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
+    private fun checkSeqAbility(type: MezzeType.SeqType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
         return when (abilityName) {
             "Eq" -> {
-                // Array has equals if element type has Eq
+                // Seq has equals if element type has Eq
                 val elementCheck = checkAbility(type.elementType, "Eq")
                 if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Array equality (derived from element)")
+                    AbilityCheckResult.Satisfied("Built-in Seq equality (derived from element)")
                 } else {
                     AbilityCheckResult.Unsatisfied(
-                        reason = "Array Eq requires element type to have Eq",
+                        reason = "Seq Eq requires element type to have Eq",
                         suggestions = listOf("Ensure ${formatType(type.elementType)} has Eq")
                     )
                 }
             }
             "Ord" -> {
-                // Array has Ord (lexicographic) if element type has Ord
+                // Seq has Ord (lexicographic) if element type has Ord
                 val elementCheck = checkAbility(type.elementType, "Ord")
                 if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Array lexicographic ordering (derived from element)")
+                    AbilityCheckResult.Satisfied("Built-in Seq lexicographic ordering (derived from element)")
                 } else {
                     AbilityCheckResult.Unsatisfied(
-                        reason = "Array Ord requires element type to have Ord",
+                        reason = "Seq Ord requires element type to have Ord",
                         suggestions = listOf("Ensure ${formatType(type.elementType)} has Ord")
                     )
                 }
             }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Array to_str")
+            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Seq to_str")
             else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
         }
     }
@@ -659,8 +659,8 @@ class AbilityResolver(
                     for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
                         extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.ArrayType && annotation.constructor == "Array") {
-                    // Handle Array type specially
+                } else if (concreteType is MezzeType.SeqType && annotation.constructor == "Seq") {
+                    // Handle Seq type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
                     }
@@ -749,7 +749,7 @@ class AbilityResolver(
                             false
                         }
                     }
-                    type is MezzeType.ArrayType && annotation.constructor == "Array" -> {
+                    type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     type is MezzeType.ListType && annotation.constructor == "List" -> {
@@ -780,9 +780,9 @@ class AbilityResolver(
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                // Handle [T] syntax for array types
-                type is MezzeType.ArrayType && typeMatchesAnnotation(type.elementType, annotation.elementType)
+            is SeqTypeAnnotation -> {
+                // Handle [T] syntax for seq types
+                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType)
             }
             else -> false
         }

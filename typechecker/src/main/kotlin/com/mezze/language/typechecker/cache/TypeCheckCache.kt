@@ -331,7 +331,7 @@ object TypeCheckCache {
                 }
             "[$constructors]"
         }
-        is MezzeType.ArrayType -> "Array<${typeToString(type.elementType)}>"
+        is MezzeType.SeqType -> "Array<${typeToString(type.elementType)}>"
         is MezzeType.ListType -> "List<${typeToString(type.elementType)}>"
         is MezzeType.SetType -> "Set<${typeToString(type.elementType)}>"
         is MezzeType.SortedSetType -> "SortedSet<${typeToString(type.elementType)}>"

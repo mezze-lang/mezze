@@ -9,12 +9,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Tests for type checking array spread syntax.
+ * Tests for type checking seq spread syntax.
  *
  * Valid syntax: [...arr, elem1, elem2] (spread first, then append)
  * Invalid syntax: [elem1, ...arr] (prepend not allowed - caught at parse time)
  */
-class ArraySpreadTypeCheckTest {
+class SeqSpreadTypeCheckTest {
 
     private val parser = MezzeParser()
     private val typeChecker = TypeChecker()
@@ -22,7 +22,7 @@ class ArraySpreadTypeCheckTest {
     // ========== Basic Spread Tests ==========
 
     @Test
-    fun `spread array preserves element type`() {
+    fun `spread seq preserves element type`() {
         val code = """
             let arr: [Int] = [1, 2, 3]
             let copy = [...arr]
@@ -37,8 +37,8 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 
     @Test
@@ -57,8 +57,8 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 
     @Test
@@ -78,12 +78,12 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 
     @Test
-    fun `spread with string array`() {
+    fun `spread with string seq`() {
         val code = """
             let names = ["Alice", "Bob"]
             let extended = [...names, "Charlie"]
@@ -98,14 +98,14 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.StringType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.StringType)
     }
 
     // ========== Type Error Tests ==========
 
     @Test
-    fun `spread non-array should fail`() {
+    fun `spread non-seq should fail`() {
         val code = """
             let x = 42
             let arr = [...x]
@@ -119,7 +119,7 @@ class ArraySpreadTypeCheckTest {
     }
 
     @Test
-    fun `spread array with incompatible append should fail`() {
+    fun `spread seq with incompatible append should fail`() {
         val code = """
             let nums = [1, 2, 3]
             let mixed = [...nums, "hello"]
@@ -165,8 +165,8 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 
     @Test
@@ -185,14 +185,14 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertTrue((resultType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 
-    // ========== Nested Array Tests ==========
+    // ========== Nested Seq Tests ==========
 
     @Test
-    fun `spread nested arrays`() {
+    fun `spread nested seqs`() {
         val code = """
             let matrix = [[1, 2], [3, 4]]
             let extended = [...matrix, [5, 6]]
@@ -207,9 +207,9 @@ class ArraySpreadTypeCheckTest {
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }
-        assertTrue(resultType is MezzeType.ArrayType)
-        val innerType = (resultType as MezzeType.ArrayType).elementType
-        assertTrue(innerType is MezzeType.ArrayType)
-        assertTrue((innerType as MezzeType.ArrayType).elementType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.SeqType)
+        val innerType = (resultType as MezzeType.SeqType).elementType
+        assertTrue(innerType is MezzeType.SeqType)
+        assertTrue((innerType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
 }

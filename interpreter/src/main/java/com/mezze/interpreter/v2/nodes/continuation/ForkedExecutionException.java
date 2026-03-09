@@ -1,15 +1,17 @@
 package com.mezze.interpreter.v2.nodes.continuation;
 
-import com.mezze.interpreter.v2.values.MezzeList;
-
 /**
- * Exception thrown for nested fork operations.
+ * Exception thrown for fork operations.
+ *
+ * Used in two scenarios:
+ * 1. Nested fork: values is MezzeList of input values to fork over
+ * 2. Top-level fork: values is MezzeSeq of results from fork execution
  */
 public class ForkedExecutionException extends RuntimeException {
     public final Object continuation;
-    public final MezzeList values;
+    public final Object values;  // MezzeList for nested, MezzeSeq for top-level results
 
-    public ForkedExecutionException(Object continuation, MezzeList values) {
+    public ForkedExecutionException(Object continuation, Object values) {
         super("Forked execution");
         this.continuation = continuation;
         this.values = values;

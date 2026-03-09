@@ -909,6 +909,7 @@ public final class AdaptiveAsyncHandler {
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof Object[] arr) return arr;
+        if (val instanceof MezzeSeq seq) return seq.toArray();
         if (val instanceof MezzeList list) return list.toArray();
         throw new RuntimeException("Expected array for '" + name + "'");
     }

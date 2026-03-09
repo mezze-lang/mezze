@@ -339,24 +339,24 @@ class ListInterpreterTest {
     // ========================================
 
     @Test
-    fun `to_array converts list to array`() {
+    fun `to_seq converts list to seq`() {
         val code = """
             use std::collections::list
-            use std::collections::array
+            use std::collections::seq
             let xs = list::range { start = 1, end = 4 }
-            let arr = list::to_array { xs = xs }
-            array::length { xs = arr }
+            let arr = list::to_seq { xs = xs }
+            seq::length { xs = arr }
         """
         val result = eval(code)
         assertEquals(3L, result)
     }
 
     @Test
-    fun `from_array converts array to list`() {
+    fun `from_seq converts seq to list`() {
         val code = """
             use std::collections::list
             let arr = [1, 2, 3]
-            let xs = list::from_array { xs = arr }
+            let xs = list::from_seq { xs = arr }
             list::length { xs = xs }
         """
         val result = eval(code)
@@ -364,10 +364,10 @@ class ListInterpreterTest {
     }
 
     @Test
-    fun `of_array creates list from array elements`() {
+    fun `of_seq creates list from seq elements`() {
         val code = """
             use std::collections::list
-            let xs = list::of_array { elements = [10, 20, 30] }
+            let xs = list::of_seq { elements = [10, 20, 30] }
             list::length { xs = xs }
         """
         val result = eval(code)

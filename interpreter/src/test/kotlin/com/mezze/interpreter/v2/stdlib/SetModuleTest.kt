@@ -212,22 +212,22 @@ class SetModuleTest {
     // ===== Conversion Functions =====
 
     @Test
-    fun `test set to_array`() {
+    fun `test set to_seq`() {
         val result = eval("""
             use std::collections::set
-            use std::collections::array
+            use std::collections::seq
             let s = set::insert { s = set::insert { s = set::empty {}, x = 1 }, x = 2 }
-            let arr = set::to_array { s = s }
-            array::length { xs = arr }
+            let arr = set::to_seq { s = s }
+            seq::length { xs = arr }
         """)
         assertEquals(2L, result)
     }
 
     @Test
-    fun `test set from_array`() {
+    fun `test set from_seq`() {
         val result = eval("""
             use std::collections::set
-            let s = set::from_array { xs = [1, 2, 3, 2, 1] }
+            let s = set::from_seq { xs = [1, 2, 3, 2, 1] }
             set::size { s = s }
         """)
         assertEquals(3L, result)

@@ -86,7 +86,7 @@ data class Substitution(
             is MezzeType.TypeApplication ->
                 type.args.any { needsSubstitution(it) }
 
-            is MezzeType.ArrayType -> needsSubstitution(type.elementType)
+            is MezzeType.SeqType -> needsSubstitution(type.elementType)
             is MezzeType.ListType -> needsSubstitution(type.elementType)
             is MezzeType.SetType -> needsSubstitution(type.elementType)
             is MezzeType.SortedSetType -> needsSubstitution(type.elementType)
@@ -184,7 +184,7 @@ data class Substitution(
                 args = type.args.map { applyWithVisited(it, visitedVars) }
             )
 
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyWithVisited(type.elementType, visitedVars)
             )
 
@@ -387,7 +387,7 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.TypeApplication ->
             type.args.any { occursCheck(typeVar, it) }
 
-        is MezzeType.ArrayType -> occursCheck(typeVar, type.elementType)
+        is MezzeType.SeqType -> occursCheck(typeVar, type.elementType)
         is MezzeType.ListType -> occursCheck(typeVar, type.elementType)
         is MezzeType.SetType -> occursCheck(typeVar, type.elementType)
         is MezzeType.SortedSetType -> occursCheck(typeVar, type.elementType)
@@ -448,7 +448,7 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         is MezzeType.TypeApplication ->
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()
 
-        is MezzeType.ArrayType -> collectFreeTypeVars(type.elementType)
+        is MezzeType.SeqType -> collectFreeTypeVars(type.elementType)
         is MezzeType.ListType -> collectFreeTypeVars(type.elementType)
         is MezzeType.SetType -> collectFreeTypeVars(type.elementType)
         is MezzeType.SortedSetType -> collectFreeTypeVars(type.elementType)

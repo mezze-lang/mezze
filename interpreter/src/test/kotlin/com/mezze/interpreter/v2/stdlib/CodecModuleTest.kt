@@ -133,13 +133,13 @@ class CodecModuleTest {
     fun `test EncodeError path`() {
         val result = eval("""
             use std::codec::core::{EncodeError}
-            use std::collections::array
+            use std::collections::seq
 
             let error: EncodeError = {
                 path = ["user", "name"],
                 message = "Encoding failed"
             }
-            array::length {xs = error.path}
+            seq::length {xs = error.path}
         """)
         assertEquals(2L, result)
     }
@@ -186,9 +186,9 @@ class CodecModuleTest {
     fun `test empty_path is empty array`() {
         val result = eval("""
             use std::codec::core::{empty_path}
-            use std::collections::array
+            use std::collections::seq
 
-            array::is_empty {xs = empty_path}
+            seq::is_empty {xs = empty_path}
         """)
         assertEquals(true, result)
     }
@@ -197,10 +197,10 @@ class CodecModuleTest {
     fun `test append_path adds field`() {
         val result = eval("""
             use std::codec::core::{empty_path, append_path}
-            use std::collections::array
+            use std::collections::seq
 
             let path = append_path {path = empty_path, field = "user"}
-            array::length {xs = path}
+            seq::length {xs = path}
         """)
         assertEquals(1L, result)
     }
@@ -209,11 +209,11 @@ class CodecModuleTest {
     fun `test append_path chains correctly`() {
         val result = eval("""
             use std::codec::core::{empty_path, append_path}
-            use std::collections::array
+            use std::collections::seq
 
             let path1 = append_path {path = empty_path, field = "user"}
             let path2 = append_path {path = path1, field = "address"}
-            array::length {xs = path2}
+            seq::length {xs = path2}
         """)
         assertEquals(2L, result)
     }
@@ -222,10 +222,10 @@ class CodecModuleTest {
     fun `test append_index adds index as string`() {
         val result = eval("""
             use std::codec::core::{empty_path, append_index}
-            use std::collections::array
+            use std::collections::seq
 
             let path = append_index {path = empty_path, index = 0}
-            array::length {xs = path}
+            seq::length {xs = path}
         """)
         assertEquals(1L, result)
     }

@@ -662,9 +662,9 @@ class MezzeTextDocumentService(
                 }
                 null
             }
-            is ArrayPattern -> {
-                // For array patterns, the element type would be the array's element type
-                val elementType = if (scrutineeType is MezzeType.ArrayType) {
+            is SeqPattern -> {
+                // For seq patterns, the element type would be the seq's element type
+                val elementType = if (scrutineeType is MezzeType.SeqType) {
                     scrutineeType.elementType
                 } else null
 
@@ -674,7 +674,7 @@ class MezzeTextDocumentService(
                 }
                 // Check rest pattern
                 if (pattern.restPattern == name) {
-                    return scrutineeType  // Rest is the same array type
+                    return scrutineeType  // Rest is the same seq type
                 }
                 null
             }
@@ -1282,7 +1282,7 @@ class MezzeTextDocumentService(
                     }
                 }
             }
-            is ArrayPattern -> {
+            is SeqPattern -> {
                 for (elem in pattern.elements) {
                     collectPatternBindings(elem, items, state)
                 }
@@ -1620,7 +1620,7 @@ class MezzeTextDocumentService(
             "std::effects::log::{println, Console}" to "Print to console",
             "std::int::{to_string, abs}" to "Integer utilities",
             "std::option::{map, get_or_else}" to "Option utilities",
-            "std::collections::array::{length, map}" to "Array utilities"
+            "std::collections::seq::{length, map}" to "Seq utilities"
         )
 
         return suggestions.map { (import, desc) ->

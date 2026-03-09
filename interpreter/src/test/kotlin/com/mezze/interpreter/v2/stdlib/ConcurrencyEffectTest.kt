@@ -138,11 +138,12 @@ class ConcurrencyEffectTest {
     fun `test spawn with array result`() {
         val result = eval("""
             use std::effects::concurrency::{Concurrency, Loom}
+            use std::collections::seq
 
             perform Loom in do
                 let p = Concurrency.spawn {computation = {} -> [1, 2, 3, 4, 5]}
                 let arr = Concurrency.await {promise = p}
-                __native_arraylist_length {xs = arr}
+                seq::length {xs = arr}
         """)
         assertEquals(5L, result)
     }
@@ -286,10 +287,11 @@ class ConcurrencyEffectTest {
     fun `test all with empty computations`() {
         val result = eval("""
             use std::effects::concurrency::{all, Loom}
+            use std::collections::seq
 
             perform Loom in do
                 let results = all {computations = []}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -298,12 +300,13 @@ class ConcurrencyEffectTest {
     fun `test all with single computation`() {
         val result = eval("""
             use std::effects::concurrency::{all, Loom}
+            use std::collections::seq
 
             perform Loom in do
                 let results = all {computations = [
                     {} -> 42
                 ]}
-                __native_arraylist_length {xs = results} == 1
+                seq::length {xs = results} == 1
         """)
         assertEquals(true, result)
     }

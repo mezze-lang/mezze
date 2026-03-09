@@ -6,7 +6,7 @@ Test files located in: `interpreter/src/test/kotlin/com/mezze/language/interpret
 
 | Module | Functions | Tested | Coverage |
 |--------|-----------|--------|----------|
-| array.mz | 34 | 34 | 100% |
+| seq.mz | 34 | 34 | 100% |
 | list.mz | 40 | 40 | 100% |
 | map.mz | 19 | 19 | 100% |
 | set.mz | 23 | 23 | 100% |
@@ -19,8 +19,8 @@ Test files located in: `interpreter/src/test/kotlin/com/mezze/language/interpret
 
 ---
 
-## array.mz
-Test file: `ArrayModuleInterpreterTest.kt`, `ArrayModuleTest.kt`
+## seq.mz
+Test file: `SeqModuleInterpreterTest.kt`, `SeqModuleTest.kt`
 
 | Function | Tested | Notes |
 |----------|--------|-------|
@@ -93,9 +93,9 @@ Test file: `ListModuleTest.kt`, `ListInterpreterTest.kt`
 | `flat_map` | :white_check_mark: | |
 | `zip` | :white_check_mark: | |
 | `unzip` | :white_check_mark: | |
-| `to_array` | :white_check_mark: | |
-| `from_array` | :white_check_mark: | |
-| `of_array` | :white_check_mark: | |
+| `to_seq` | :white_check_mark: | |
+| `from_seq` | :white_check_mark: | |
+| `of_seq` | :white_check_mark: | |
 | `range` | :white_check_mark: | |
 | `repeat` | :white_check_mark: | |
 | `intersperse` | :white_check_mark: | |
@@ -153,8 +153,8 @@ Test file: `SetModuleTest.kt`
 | `is_subset` | :white_check_mark: | |
 | `is_superset` | :white_check_mark: | |
 | `is_disjoint` | :white_check_mark: | |
-| `to_array` | :white_check_mark: | |
-| `from_array` | :white_check_mark: | |
+| `to_seq` | :white_check_mark: | |
+| `from_seq` | :white_check_mark: | |
 | `to_list` | :white_check_mark: | |
 | `from_list` | :white_check_mark: | |
 | `filter` | :white_check_mark: | |
@@ -184,7 +184,7 @@ Test file: `DequeModuleTest.kt`
 | `is_empty` | :white_check_mark: | |
 | `length` | :white_check_mark: | |
 | `to_list` | :white_check_mark: | |
-| `to_array` | :white_check_mark: | |
+| `to_seq` | :white_check_mark: | |
 | `map` | :white_check_mark: | |
 | `filter` | :white_check_mark: | |
 | `fold` | :white_check_mark: | |
@@ -222,7 +222,7 @@ Test file: `BytesModuleTest.kt`
 |----------|--------|-------|
 | `empty` | :white_check_mark: | |
 | `from_string` | :white_check_mark: | |
-| `from_array` | :white_check_mark: | |
+| `from_seq` | :white_check_mark: | |
 | `from_hex` | :white_check_mark: | |
 | `from_base64` | :white_check_mark: | |
 | `length` | :white_check_mark: | |
@@ -242,7 +242,7 @@ Test file: `BytesModuleTest.kt`
 | `map` | :white_check_mark: | |
 | `fold` | :white_check_mark: | |
 | `to_string` | :white_check_mark: | |
-| `to_array` | :white_check_mark: | |
+| `to_seq` | :white_check_mark: | |
 | `to_hex` | :white_check_mark: | |
 | `to_base64` | :white_check_mark: | |
 
@@ -277,8 +277,8 @@ Test file: `NonEmptyListModuleTest.kt`
 | `intersperse` | :white_check_mark: | |
 | `to_list` | :white_check_mark: | |
 | `from_list` | :white_check_mark: | |
-| `to_array` | :white_check_mark: | |
-| `from_array` | :white_check_mark: | |
+| `to_seq` | :white_check_mark: | |
+| `from_seq` | :white_check_mark: | |
 | `sort` | :white_check_mark: | |
 | `sort_by` | :white_check_mark: | |
 

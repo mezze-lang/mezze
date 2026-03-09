@@ -800,7 +800,7 @@ class EffectParserTest {
         val optionType = stateType as TypeApplicationAnnotation
         assertEquals("Option", optionType.constructor)
         assertEquals(1, optionType.args.size)
-        assertTrue(optionType.args[0] is ArrayTypeAnnotation)
+        assertTrue(optionType.args[0] is SeqTypeAnnotation)
     }
 
     @Test
@@ -862,8 +862,8 @@ class EffectParserTest {
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
-        assertTrue(stateType is ArrayTypeAnnotation)
-        val arrayType = stateType as ArrayTypeAnnotation
+        assertTrue(stateType is SeqTypeAnnotation)
+        val arrayType = stateType as SeqTypeAnnotation
         assertTrue(arrayType.elementType is RecordTypeAnnotation)
         assertEquals(2, (arrayType.elementType as RecordTypeAnnotation).entries.size)
     }

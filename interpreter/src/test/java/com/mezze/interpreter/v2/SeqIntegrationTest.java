@@ -7,10 +7,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for the std::collections::array module functions.
+ * Tests for the std::collections::seq module functions.
  * Uses V2 unboxed values directly.
  */
-class ArrayIntegrationTest {
+class SeqIntegrationTest {
 
     @BeforeEach
     void setUp() {
@@ -24,8 +24,8 @@ class ArrayIntegrationTest {
     @Test
     void lengthReturnsArrayLength() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::length { xs = [1, 2, 3, 4, 5] }
+            use std::collections::seq
+            seq::length { xs = [1, 2, 3, 4, 5] }
             """);
         assertEquals(5L, result);
     }
@@ -33,9 +33,9 @@ class ArrayIntegrationTest {
     @Test
     void isEmptyReturnsTrueForEmptyArray() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
+            use std::collections::seq
             let xs: [Int] = []
-            array::is_empty { xs = xs }
+            seq::is_empty { xs = xs }
             """);
         assertEquals(true, result);
     }
@@ -43,8 +43,8 @@ class ArrayIntegrationTest {
     @Test
     void isEmptyReturnsFalseForNonEmptyArray() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::is_empty { xs = [1] }
+            use std::collections::seq
+            seq::is_empty { xs = [1] }
             """);
         assertEquals(false, result);
     }
@@ -52,8 +52,8 @@ class ArrayIntegrationTest {
     @Test
     void getReturnsElementAtIndex() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::get { xs = [10, 20, 30], i = 1 } is
+            use std::collections::seq
+            match seq::get { xs = [10, 20, 30], i = 1 } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -63,8 +63,8 @@ class ArrayIntegrationTest {
     @Test
     void getReturnsNoneForOutOfBounds() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::get { xs = [10, 20, 30], i = 10 } is
+            use std::collections::seq
+            match seq::get { xs = [10, 20, 30], i = 10 } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -78,9 +78,9 @@ class ArrayIntegrationTest {
     @Test
     void mapTransformsAllElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::map { xs = [1, 2, 3], f = { x } -> x * 2 }
-            match array::get { xs = xs, i = 0 } is
+            use std::collections::seq
+            let xs = seq::map { xs = [1, 2, 3], f = { x } -> x * 2 }
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -90,9 +90,9 @@ class ArrayIntegrationTest {
     @Test
     void filterKeepsMatchingElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::filter { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::filter { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -100,8 +100,8 @@ class ArrayIntegrationTest {
     @Test
     void foldAccumulatesValues() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::fold { xs = [1, 2, 3, 4], init = 0, f = { acc, x } -> acc + x }
+            use std::collections::seq
+            seq::fold { xs = [1, 2, 3, 4], init = 0, f = { acc, x } -> acc + x }
             """);
         assertEquals(10L, result);
     }
@@ -113,8 +113,8 @@ class ArrayIntegrationTest {
     @Test
     void anyReturnsTrueWhenPredicateMatches() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::any { xs = [1, 2, 3, 4, 5], p = { x } -> x > 3 }
+            use std::collections::seq
+            seq::any { xs = [1, 2, 3, 4, 5], p = { x } -> x > 3 }
             """);
         assertEquals(true, result);
     }
@@ -122,8 +122,8 @@ class ArrayIntegrationTest {
     @Test
     void anyReturnsFalseWhenNoElementMatches() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::any { xs = [1, 2, 3], p = { x } -> x > 10 }
+            use std::collections::seq
+            seq::any { xs = [1, 2, 3], p = { x } -> x > 10 }
             """);
         assertEquals(false, result);
     }
@@ -131,8 +131,8 @@ class ArrayIntegrationTest {
     @Test
     void allReturnsTrueWhenAllElementsMatch() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::all { xs = [2, 4, 6, 8], p = { x } -> x % 2 == 0 }
+            use std::collections::seq
+            seq::all { xs = [2, 4, 6, 8], p = { x } -> x % 2 == 0 }
             """);
         assertEquals(true, result);
     }
@@ -140,8 +140,8 @@ class ArrayIntegrationTest {
     @Test
     void allReturnsFalseWhenAnyElementFails() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::all { xs = [2, 4, 5, 8], p = { x } -> x % 2 == 0 }
+            use std::collections::seq
+            seq::all { xs = [2, 4, 5, 8], p = { x } -> x % 2 == 0 }
             """);
         assertEquals(false, result);
     }
@@ -149,8 +149,8 @@ class ArrayIntegrationTest {
     @Test
     void containsFindsElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::contains { xs = [1, 2, 3, 4, 5], x = 3 }
+            use std::collections::seq
+            seq::contains { xs = [1, 2, 3, 4, 5], x = 3 }
             """);
         assertEquals(true, result);
     }
@@ -158,8 +158,8 @@ class ArrayIntegrationTest {
     @Test
     void containsReturnsFalseForMissingElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::contains { xs = [1, 2, 3, 4, 5], x = 10 }
+            use std::collections::seq
+            seq::contains { xs = [1, 2, 3, 4, 5], x = 10 }
             """);
         assertEquals(false, result);
     }
@@ -171,8 +171,8 @@ class ArrayIntegrationTest {
     @Test
     void findReturnsFirstMatchingElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::find { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 } is
+            use std::collections::seq
+            match seq::find { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -182,8 +182,8 @@ class ArrayIntegrationTest {
     @Test
     void findReturnsNoneWhenNotFound() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::find { xs = [1, 2, 3], p = { x } -> x > 10 } is
+            use std::collections::seq
+            match seq::find { xs = [1, 2, 3], p = { x } -> x > 10 } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -193,8 +193,8 @@ class ArrayIntegrationTest {
     @Test
     void findIndexReturnsIndexOfFirstMatch() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::find_index { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 } is
+            use std::collections::seq
+            match seq::find_index { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -204,8 +204,8 @@ class ArrayIntegrationTest {
     @Test
     void findIndexReturnsNoneWhenNotFound() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::find_index { xs = [1, 2, 3], p = { x } -> x > 10 } is
+            use std::collections::seq
+            match seq::find_index { xs = [1, 2, 3], p = { x } -> x > 10 } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -215,8 +215,8 @@ class ArrayIntegrationTest {
     @Test
     void indexOfReturnsIndexOfElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::index_of { xs = [10, 20, 30], x = 20 } is
+            use std::collections::seq
+            match seq::index_of { xs = [10, 20, 30], x = 20 } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -230,9 +230,9 @@ class ArrayIntegrationTest {
     @Test
     void partitionSplitsByPredicate() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let result = array::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            array::length { xs = result.matching }
+            use std::collections::seq
+            let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
+            seq::length { xs = result.matching }
             """);
         assertEquals(3L, result);  // 3, 4, 5
     }
@@ -240,9 +240,9 @@ class ArrayIntegrationTest {
     @Test
     void partitionNonMatchingElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let result = array::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            array::length { xs = result.not_matching }
+            use std::collections::seq
+            let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
+            seq::length { xs = result.not_matching }
             """);
         assertEquals(2L, result);  // 1, 2
     }
@@ -254,10 +254,10 @@ class ArrayIntegrationTest {
     @Test
     void flattenMergesNestedArrays() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
+            use std::collections::seq
             let nested = [[1, 2], [3, 4], [5]]
-            let flat = array::flatten { xss = nested }
-            array::length { xs = flat }
+            let flat = seq::flatten { xss = nested }
+            seq::length { xs = flat }
             """);
         assertEquals(5L, result);
     }
@@ -265,10 +265,10 @@ class ArrayIntegrationTest {
     @Test
     void flattenPreservesOrder() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
+            use std::collections::seq
             let nested = [[1, 2], [3, 4]]
-            let flat = array::flatten { xss = nested }
-            match array::get { xs = flat, i = 2 } is
+            let flat = seq::flatten { xss = nested }
+            match seq::get { xs = flat, i = 2 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -282,8 +282,8 @@ class ArrayIntegrationTest {
     @Test
     void headReturnsFirstElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::head { xs = [10, 20, 30] } is
+            use std::collections::seq
+            match seq::head { xs = [10, 20, 30] } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -293,8 +293,8 @@ class ArrayIntegrationTest {
     @Test
     void lastReturnsLastElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::last { xs = [10, 20, 30] } is
+            use std::collections::seq
+            match seq::last { xs = [10, 20, 30] } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -304,9 +304,9 @@ class ArrayIntegrationTest {
     @Test
     void lastReturnsNoneForEmptyArray() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
+            use std::collections::seq
             let xs: [Int] = []
-            match array::last { xs = xs } is
+            match seq::last { xs = xs } is
                 Some { val } -> 1
                 None -> 0
             """);
@@ -316,9 +316,9 @@ class ArrayIntegrationTest {
     @Test
     void initReturnsAllButLast() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::init { xs = [1, 2, 3, 4] }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::init { xs = [1, 2, 3, 4] }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -326,9 +326,9 @@ class ArrayIntegrationTest {
     @Test
     void tailReturnsAllButFirst() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::tail { xs = [1, 2, 3, 4] }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::tail { xs = [1, 2, 3, 4] }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -340,9 +340,9 @@ class ArrayIntegrationTest {
     @Test
     void sliceExtractsSubarray() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::slice { xs = [1, 2, 3, 4, 5], start = 1, end = 4 }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::slice { xs = [1, 2, 3, 4, 5], start = 1, end = 4 }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -350,9 +350,9 @@ class ArrayIntegrationTest {
     @Test
     void takeReturnsFirstNElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::take { xs = [1, 2, 3, 4, 5], n = 3 }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::take { xs = [1, 2, 3, 4, 5], n = 3 }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -360,9 +360,9 @@ class ArrayIntegrationTest {
     @Test
     void dropSkipsFirstNElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::drop { xs = [1, 2, 3, 4, 5], n = 2 }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::drop { xs = [1, 2, 3, 4, 5], n = 2 }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -374,9 +374,9 @@ class ArrayIntegrationTest {
     @Test
     void zipPairsElementsFromTwoArrays() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let zipped = array::zip { xs = [1, 2, 3], ys = ["a", "b", "c"] }
-            array::length { xs = zipped }
+            use std::collections::seq
+            let zipped = seq::zip { xs = [1, 2, 3], ys = ["a", "b", "c"] }
+            seq::length { xs = zipped }
             """);
         assertEquals(3L, result);
     }
@@ -384,9 +384,9 @@ class ArrayIntegrationTest {
     @Test
     void zipTruncatesToShorterLength() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let zipped = array::zip { xs = [1, 2], ys = ["a", "b", "c", "d"] }
-            array::length { xs = zipped }
+            use std::collections::seq
+            let zipped = seq::zip { xs = [1, 2], ys = ["a", "b", "c", "d"] }
+            seq::length { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -394,10 +394,10 @@ class ArrayIntegrationTest {
     @Test
     void unzipSplitsPairsIntoTwoArrays() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
+            use std::collections::seq
             let pairs = [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
-            let result = array::unzip { xs = pairs }
-            array::length { xs = result.fsts }
+            let result = seq::unzip { xs = pairs }
+            seq::length { xs = result.fsts }
             """);
         assertEquals(2L, result);
     }
@@ -409,9 +409,9 @@ class ArrayIntegrationTest {
     @Test
     void uniqueRemovesDuplicates() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::unique { xs = [1, 2, 1, 3, 2, 4, 1] }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::unique { xs = [1, 2, 1, 3, 2, 4, 1] }
+            seq::length { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -419,9 +419,9 @@ class ArrayIntegrationTest {
     @Test
     void uniquePreservesFirstOccurrence() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::unique { xs = [3, 1, 2, 1, 3] }
-            match array::get { xs = xs, i = 0 } is
+            use std::collections::seq
+            let xs = seq::unique { xs = [3, 1, 2, 1, 3] }
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -435,9 +435,9 @@ class ArrayIntegrationTest {
     @Test
     void reverseReversesArray() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::reverse { xs = [1, 2, 3] }
-            match array::get { xs = xs, i = 0 } is
+            use std::collections::seq
+            let xs = seq::reverse { xs = [1, 2, 3] }
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -447,9 +447,9 @@ class ArrayIntegrationTest {
     @Test
     void sortOrdersElements() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::sort { xs = [3, 1, 4, 1, 5, 9, 2, 6] }
-            match array::get { xs = xs, i = 0 } is
+            use std::collections::seq
+            let xs = seq::sort { xs = [3, 1, 4, 1, 5, 9, 2, 6] }
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> 0
             """);
@@ -459,9 +459,9 @@ class ArrayIntegrationTest {
     @Test
     void concatJoinsTwoArrays() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::concat { xs = [1, 2], ys = [3, 4] }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::concat { xs = [1, 2], ys = [3, 4] }
+            seq::length { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -469,9 +469,9 @@ class ArrayIntegrationTest {
     @Test
     void addAppendsElement() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            let xs = array::add { xs = [1, 2], x = 3 }
-            array::length { xs = xs }
+            use std::collections::seq
+            let xs = seq::add { xs = [1, 2], x = 3 }
+            seq::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -479,9 +479,9 @@ class ArrayIntegrationTest {
     @Test
     void setUpdatesElementAtIndex() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::set { xs = [1, 2, 3], i = 1, x = 99 } is
-                Some { val } -> match array::get { xs = val, i = 1 } is
+            use std::collections::seq
+            match seq::set { xs = [1, 2, 3], i = 1, x = 99 } is
+                Some { val } -> match seq::get { xs = val, i = 1 } is
                     Some { val } -> val
                     None -> -1
                 None -> -2
@@ -492,9 +492,9 @@ class ArrayIntegrationTest {
     @Test
     void removeDeletesElementAtIndex() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            match array::remove { xs = [1, 2, 3], i = 1 } is
-                Some { val } -> array::length { xs = val }
+            use std::collections::seq
+            match seq::remove { xs = [1, 2, 3], i = 1 } is
+                Some { val } -> seq::length { xs = val }
                 None -> -1
             """);
         assertEquals(2L, result);

@@ -169,6 +169,7 @@ class FileSystemEffectTest {
     fun `test list_directory returns files`() {
         val result = eval("""
             use std::effects::filesystem::{FileSystem, MemoryFS}
+            use std::collections::list
 
             perform MemoryFS in do
                 let _ = FileSystem.create_directory {path = "/listdir"}
@@ -176,7 +177,7 @@ class FileSystemEffectTest {
                 let _ = FileSystem.write_file {path = "/listdir/file2.txt", content = "b"}
                 let list_result = FileSystem.list_directory {path = "/listdir"}
                 match list_result is
-                    Ok {val} -> __native_arraylist_length {xs = val}
+                    Ok {val} -> list::length {xs = val}
                     Err {error} -> 0
         """)
         assertEquals(2L, result)

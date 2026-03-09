@@ -87,11 +87,11 @@ pub let to_list: { xs: NonEmptyList 'a } -> List 'a = { xs } ->
 pub let from_list: { xs: List 'a } -> NonEmptyList 'a = { xs } ->
     __native_nel_from_list { xs = xs }
 
-pub let to_array: { xs: NonEmptyList 'a } -> ['a] = { xs } ->
-    __native_nel_to_array { xs = xs }
+pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } ->
+    __native_nel_to_seq { xs = xs }
 
-pub let from_array: { xs: ['a] } -> NonEmptyList 'a = { xs } ->
-    __native_nel_from_array { xs = xs }
+pub let from_seq: { xs: ['a] } -> NonEmptyList 'a = { xs } ->
+    __native_nel_from_seq { xs = xs }
 
 # Sorting
 pub let sort: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->

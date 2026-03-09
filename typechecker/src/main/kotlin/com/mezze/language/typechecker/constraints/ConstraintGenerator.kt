@@ -219,7 +219,7 @@ class ConstraintGenerator(
                             // IMPORTANT: Preserve TypeApplication from annotations (don't expand user-defined type aliases)
                             val authoritativeType = if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
                                 // CRITICAL: If annotation was a TypeApplication (type alias), check if it's user-defined
-                                // Only preserve USER-DEFINED type aliases, not built-in types like Array, List, etc.
+                                // Only preserve USER-DEFINED type aliases, not built-in types like Seq, List, etc.
                                 // This ensures "let x: Person = ..." has type "Person", not "{ name: String, ... }"
                                 if (preConvertedAnnotationType is MezzeType.TypeApplication) {
                                     // Check if this is a user-defined type alias (exists in typeDeclarations)
@@ -232,8 +232,8 @@ class ConstraintGenerator(
                                             args = preConvertedAnnotationType.args.map { substitution.apply(it) }
                                         )
                                     } else {
-                                        // Built-in type (Array, List, etc.) - apply substitution normally
-                                        // This allows Array Int to be treated as ArrayType(IntType)
+                                        // Built-in type (Seq, List, etc.) - apply substitution normally
+                                        // This allows Seq Int to be treated as SeqType(IntType)
                                         substitution.apply(preConvertedAnnotationType)
                                     }
                                 } else {
@@ -827,7 +827,7 @@ class ConstraintGenerator(
                 is MezzeType.TypeApplication -> t.args.forEach { collectTypeVars(it) }
                 is MezzeType.VariantType -> t.constructors.values.forEach { it?.let { collectTypeVars(it) } }
                 is MezzeType.ListType -> collectTypeVars(t.elementType)
-                is MezzeType.ArrayType -> collectTypeVars(t.elementType)
+                is MezzeType.SeqType -> collectTypeVars(t.elementType)
                 is MezzeType.SetType -> collectTypeVars(t.elementType)
                 is MezzeType.SortedMapType -> {
                     collectTypeVars(t.keyType)
@@ -1037,8 +1037,8 @@ class ConstraintGenerator(
                     args = annotation.args.map { convertTypeAnnotationInternal(it) }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(
                     elementType = convertTypeAnnotationInternal(annotation.elementType)
                 )
             }
@@ -1556,7 +1556,7 @@ class ConstraintGenerator(
                             // Type variables are 'letter patterns, not quoted field names like 'fieldName'
                             val hasTypeVar = Regex("'[a-z]\\b").containsMatchIn(msg)
                             val hasEffects = msg.contains("effectful") || msg.contains("<") && msg.contains(">")
-                            val hasCollections = msg.contains("List") || msg.contains("Array") ||
+                            val hasCollections = msg.contains("List") || msg.contains("Seq") ||
                                 msg.contains("[") || msg.contains("Set") || msg.contains("Map")
                             val isClearTypeMismatch = msg.contains("Type mismatch") &&
                                 !hasTypeVar && !hasEffects && !hasCollections
@@ -1637,7 +1637,7 @@ class ConstraintGenerator(
             is MezzeType.ListType -> MezzeType.ListType(
                 elementType = substituteTypeParams(type.elementType, substitution)
             )
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = substituteTypeParams(type.elementType, substitution)
             )
             is MezzeType.SetType -> MezzeType.SetType(
@@ -1815,7 +1815,7 @@ class ConstraintGenerator(
             is MezzeType.TypeApplication -> {
                 type.args.forEach { collectTypeVarsRecursive(it, result) }
             }
-            is MezzeType.ArrayType -> collectTypeVarsRecursive(type.elementType, result)
+            is MezzeType.SeqType -> collectTypeVarsRecursive(type.elementType, result)
             is MezzeType.ListType -> collectTypeVarsRecursive(type.elementType, result)
             is MezzeType.SetType -> collectTypeVarsRecursive(type.elementType, result)
             is MezzeType.SortedMapType -> {
@@ -1868,7 +1868,7 @@ class ConstraintGenerator(
             }
             is MezzeType.TypeApplication ->
                 type.args.any { containsConcreteTypes(it) }
-            is MezzeType.ArrayType ->
+            is MezzeType.SeqType ->
                 containsConcreteTypes(type.elementType)
             is MezzeType.ListType ->
                 containsConcreteTypes(type.elementType)
@@ -2139,10 +2139,10 @@ class ConstraintGenerator(
                 containsFunctionCalls(expr.expression) ||
                 expr.cases.any { containsFunctionCalls(it.expression) }
             }
-            is ArrayLiteral -> expr.elements.any { element ->
+            is SeqLiteral -> expr.elements.any { element ->
                 when (element) {
-                    is ArrayRegularElement -> containsFunctionCalls(element.expression)
-                    is ArraySpreadElement -> containsFunctionCalls(element.expression)
+                    is SeqRegularElement -> containsFunctionCalls(element.expression)
+                    is SeqSpreadElement -> containsFunctionCalls(element.expression)
                 }
             }
             is RecordLiteral -> expr.entries.any { entry ->

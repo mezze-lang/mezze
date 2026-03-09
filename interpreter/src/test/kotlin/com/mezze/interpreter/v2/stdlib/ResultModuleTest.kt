@@ -465,10 +465,10 @@ class ResultModuleTest {
     fun `test result to_list - Ok becomes singleton list`() {
         val source = """
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: Result Int String = Ok { val = 42 }
             let xs = result::to_list { result = res }
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -478,10 +478,10 @@ class ResultModuleTest {
     fun `test result to_list - Err becomes empty list`() {
         val source = """
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: Result Int String = Err { error = "oops" }
             let xs = result::to_list { result = res }
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(0L, eval(source))

@@ -161,7 +161,13 @@
       "Bash(git -C /Users/shriyans/Projects/funk status --short interpreterv2/src/test/kotlin/com/mezze/interpreter/v2/concurrency/VirtualThreadManagementTest.kt)",
       "Bash(# Refresh the lists ls /Users/shriyans/Projects/funk/interpreter/src/test/kotlin/com/mezze/language/interpreter/*.kt)",
       "Bash(# Refresh concurrency lists ls /Users/shriyans/Projects/funk/interpreter/src/test/kotlin/com/mezze/language/interpreter/concurrency/*.kt)",
-      "Bash(git -C /Users/shriyans/Projects/funk log --oneline -20)"
+      "Bash(git -C /Users/shriyans/Projects/funk log --oneline -20)",
+      "Bash(printf:*)",
+      "Bash(do sed -i '' 's/std::collections::array/std::collections::seq/g' \"$f\")",
+      "Bash(do sed -i '' 's/array::/seq::/g' \"$f\")",
+      "Bash(LC_ALL=C sed:*)",
+      "Bash(do sed -i '' 's/__native_arraylist_/__native_seq_/g' \"$f\")",
+      "Bash(do cat \"$f\")"
     ],
     "deny": [],
     "ask": []

@@ -986,11 +986,11 @@ class ConstraintSolver(
 
                 return "Type mismatch in '$op' operator ($side operand): expected $expected but got $actual"
             }
-            is ErrorContext.ArrayElement -> {
+            is ErrorContext.SeqElement -> {
                 val expected = TypeDiffPrinter.formatType(type2)
                 val actual = TypeDiffPrinter.formatType(type1)
 
-                return "Array element at index ${errorContext.elementIndex} has type $actual but array expects $expected"
+                return "Seq element at index ${errorContext.elementIndex} has type $actual but seq expects $expected"
             }
             is ErrorContext.ReturnType -> {
                 val funcName = errorContext.functionName
@@ -1057,8 +1057,8 @@ class ConstraintSolver(
             }
         }
 
-        // Check for List vs Array confusion
-        if (stringContext.contains("Array pattern")) {
+        // Check for List vs Seq confusion
+        if (stringContext.contains("Seq pattern")) {
             if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
                 return "Cannot use array pattern syntax [a, b, ...] with List type. " +
                     "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
@@ -1435,8 +1435,8 @@ class ConstraintSolver(
                     args = annotation.args.map { typeAnnotationToMezzeType(it) }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(typeAnnotationToMezzeType(annotation.elementType))
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
             }
             is RecordTypeAnnotation -> {
                 MezzeType.RecordType(
@@ -1601,7 +1601,7 @@ class ConstraintSolver(
                             false
                         }
                     }
-                    type is MezzeType.ArrayType && annotation.constructor == "Array" -> {
+                    type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     type is MezzeType.ListType && annotation.constructor == "List" -> {
@@ -1643,8 +1643,8 @@ class ConstraintSolver(
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                type is MezzeType.ArrayType && typeMatchesAnnotation(type.elementType, annotation.elementType)
+            is SeqTypeAnnotation -> {
+                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType)
             }
             else -> false
         }
@@ -1748,8 +1748,8 @@ class ConstraintSolver(
                     for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
                         extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.ArrayType && annotation.constructor == "Array") {
-                    // Handle Array type specially
+                } else if (concreteType is MezzeType.SeqType && annotation.constructor == "Seq") {
+                    // Handle Seq type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
                     }
@@ -1777,9 +1777,9 @@ class ConstraintSolver(
                     extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
                 }
             }
-            is ArrayTypeAnnotation -> {
-                // Match array element types
-                if (concreteType is MezzeType.ArrayType) {
+            is SeqTypeAnnotation -> {
+                // Match seq element types
+                if (concreteType is MezzeType.SeqType) {
                     extractTypeParamMappings(annotation.elementType, concreteType.elementType, typeParams, mappings)
                 }
             }
@@ -1851,7 +1851,7 @@ class ConstraintSolver(
             is MezzeType.RecordType -> type.fields.values.any { containsVarType(it) }
             is MezzeType.VariantType -> type.constructors.values.any { it != null && containsVarType(it) }
             is MezzeType.ListType -> containsVarType(type.elementType)
-            is MezzeType.ArrayType -> containsVarType(type.elementType)
+            is MezzeType.SeqType -> containsVarType(type.elementType)
             is MezzeType.SetType -> containsVarType(type.elementType)
             is MezzeType.SortedSetType -> containsVarType(type.elementType)
             is MezzeType.MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
@@ -1915,9 +1915,9 @@ class ConstraintSolver(
                 if (!needsClosingForCodec(type.elementType)) return type
                 MezzeType.ListType(closeOpenRecordsForCodec(type.elementType))
             }
-            is MezzeType.ArrayType -> {
+            is MezzeType.SeqType -> {
                 if (!needsClosingForCodec(type.elementType)) return type
-                MezzeType.ArrayType(closeOpenRecordsForCodec(type.elementType))
+                MezzeType.SeqType(closeOpenRecordsForCodec(type.elementType))
             }
             is MezzeType.SetType -> {
                 if (!needsClosingForCodec(type.elementType)) return type
@@ -1983,7 +1983,7 @@ class ConstraintSolver(
             is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
             is MezzeType.TypeApplication -> type.args.any { needsClosingForCodec(it) }
             is MezzeType.ListType -> needsClosingForCodec(type.elementType)
-            is MezzeType.ArrayType -> needsClosingForCodec(type.elementType)
+            is MezzeType.SeqType -> needsClosingForCodec(type.elementType)
             is MezzeType.SetType -> needsClosingForCodec(type.elementType)
             is MezzeType.SortedSetType -> needsClosingForCodec(type.elementType)
             is MezzeType.MapType -> needsClosingForCodec(type.keyType) || needsClosingForCodec(type.valueType)
@@ -2075,7 +2075,7 @@ class ConstraintSolver(
                 // Derive Eq for lists if element type has Eq
                 (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType)) ||
                 // Derive Eq for arrays if element type has Eq
-                (unwrappedType is MezzeType.ArrayType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
+                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
             }
 
             // Ordering - implemented for comparable types and derivable for records/variants/lists
@@ -2094,7 +2094,7 @@ class ConstraintSolver(
                 // Derive Ord for lists if element type has Ord
                 (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType)) ||
                 // Derive Ord for arrays if element type has Ord
-                (unwrappedType is MezzeType.ArrayType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
+                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
             }
 
             // Inspect - built-in ability for displaying values
@@ -2212,7 +2212,7 @@ class ConstraintSolver(
             is MezzeType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
             is MezzeType.FunctionType -> isConcrete(type.paramType) && isConcrete(type.returnType)
             is MezzeType.TypeApplication -> type.args.all { isConcrete(it) }
-            is MezzeType.ArrayType -> isConcrete(type.elementType)
+            is MezzeType.SeqType -> isConcrete(type.elementType)
             is MezzeType.ListType -> isConcrete(type.elementType)
             is MezzeType.SetType -> isConcrete(type.elementType)
             is MezzeType.SortedSetType -> isConcrete(type.elementType)
@@ -2381,8 +2381,8 @@ class ConstraintSolver(
                     MezzeType.TypeApplication(annotation.constructor, args)
                 }
             }
-            is ArrayTypeAnnotation -> {
-                convertAnnotationToType(annotation.elementType)?.let { MezzeType.ArrayType(it) }
+            is SeqTypeAnnotation -> {
+                convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
             }
             is RecordTypeAnnotation -> {
                 val fields = mutableMapOf<String, MezzeType>()
@@ -3349,8 +3349,8 @@ class ConstraintSolver(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.ArrayType -> {
-                MezzeType.ArrayType(closeRowVarsInType(type.elementType, rowVarsToClose))
+            is MezzeType.SeqType -> {
+                MezzeType.SeqType(closeRowVarsInType(type.elementType, rowVarsToClose))
             }
             is MezzeType.ListType -> {
                 MezzeType.ListType(closeRowVarsInType(type.elementType, rowVarsToClose))
@@ -3522,7 +3522,7 @@ class ConstraintSolver(
                 }
             }
             is MezzeType.TypeApplication -> type.constructor
-            is MezzeType.ArrayType -> "Array ${formatType(type.elementType)}"
+            is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
             is MezzeType.ListType -> "List ${formatType(type.elementType)}"
             is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
             is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
@@ -3575,7 +3575,7 @@ class ConstraintSolver(
             is MezzeType.TypeApplication -> {
                 type.args.flatMap { collectTypeVars(it) }.toSet()
             }
-            is MezzeType.ArrayType -> collectTypeVars(type.elementType)
+            is MezzeType.SeqType -> collectTypeVars(type.elementType)
             is MezzeType.ListType -> collectTypeVars(type.elementType)
             is MezzeType.SetType -> collectTypeVars(type.elementType)
             is MezzeType.SortedMapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
@@ -3622,7 +3622,7 @@ class ConstraintSolver(
                 constructor = type.constructor,
                 args = type.args.map { applyVarSubstitution(it, substitution) }
             )
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyVarSubstitution(type.elementType, substitution)
             )
             is MezzeType.ListType -> MezzeType.ListType(
@@ -3774,8 +3774,8 @@ class ConstraintSolver(
                     args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(
                     elementType = convertTypeAnnotation(annotation.elementType, typeParamSubst)
                 )
             }

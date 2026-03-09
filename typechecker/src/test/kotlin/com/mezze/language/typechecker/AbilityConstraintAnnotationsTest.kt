@@ -279,8 +279,8 @@ class AbilityConstraintAnnotationsTest {
 
         val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
         val resultType = binding.inferredType
-        assertTrue(resultType is MezzeType.ArrayType)
-        assertEquals(MezzeType.IntType, (resultType as MezzeType.ArrayType).elementType)
+        assertTrue(resultType is MezzeType.SeqType)
+        assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
     }
 
     @Test

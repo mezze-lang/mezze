@@ -689,13 +689,13 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `recursive - parse key-value pairs`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let parse_pairs = {lines: [String]} ->
                 match lines is
                     [] -> []
                     ["$(key)=$(value)", ...rest] ->
-                        array::of {x = { k = key, v = value }, xs = parse_pairs {lines = rest}}
+                        seq::of {x = { k = key, v = value }, xs = parse_pairs {lines = rest}}
                     [_, ...rest] -> parse_pairs {lines = rest}
             let result = parse_pairs {lines = ["a=1", "b=2", "invalid", "c=3"]}
         """.trimIndent()

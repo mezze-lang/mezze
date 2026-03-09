@@ -82,16 +82,16 @@ class ContinuationDetector {
             is VariantConstruction -> {
                 expr.value?.let { usesContinuations(it) } ?: false
             }
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 expr.elements.any { element ->
                     when (element) {
-                        is ArrayRegularElement -> usesContinuations(element.expression)
-                        is ArraySpreadElement -> usesContinuations(element.expression)
+                        is SeqRegularElement -> usesContinuations(element.expression)
+                        is SeqSpreadElement -> usesContinuations(element.expression)
                     }
                 }
             }
-            is ArrayAccess -> {
-                usesContinuations(expr.array) || usesContinuations(expr.index)
+            is SeqAccess -> {
+                usesContinuations(expr.seq) || usesContinuations(expr.index)
             }
             is StringLiteral -> {
                 // Check interpolated expressions

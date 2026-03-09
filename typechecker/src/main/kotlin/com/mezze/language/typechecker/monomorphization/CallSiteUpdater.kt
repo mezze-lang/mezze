@@ -99,17 +99,17 @@ class CallSiteUpdater(
                 }
             )
 
-            is ArrayLiteral -> expr.copy(
+            is SeqLiteral -> expr.copy(
                 elements = expr.elements.map { element ->
                     when (element) {
-                        is ArrayRegularElement -> ArrayRegularElement(update(element.expression))
-                        is ArraySpreadElement -> ArraySpreadElement(update(element.expression))
+                        is SeqRegularElement -> SeqRegularElement(update(element.expression))
+                        is SeqSpreadElement -> SeqSpreadElement(update(element.expression))
                     }
                 }
             )
 
-            is ArrayAccess -> expr.copy(
-                array = update(expr.array),
+            is SeqAccess -> expr.copy(
+                seq = update(expr.seq),
                 index = update(expr.index)
             )
 

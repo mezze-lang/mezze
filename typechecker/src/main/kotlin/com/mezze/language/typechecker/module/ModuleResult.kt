@@ -51,7 +51,7 @@ sealed class ModuleLoadResult {
  * A module that has been loaded and parsed (but not yet type-checked).
  */
 data class LoadedModule(
-    val modulePath: String,           // Module path (e.g., "std::collections::array")
+    val modulePath: String,           // Module path (e.g., "std::collections::seq")
     val filePath: String,              // Physical file path
     val program: Program,              // Parsed AST
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)

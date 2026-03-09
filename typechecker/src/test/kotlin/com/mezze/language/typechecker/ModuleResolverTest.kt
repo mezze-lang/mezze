@@ -15,11 +15,10 @@ class ModuleResolverTest {
         // Core type modules should be skipped and return empty modules
         val coreModules = listOf(
             "std::core::primitives",
-            "std::core::abilities", 
+            "std::core::abilities",
             "std::core::operators",
             "std::types::int",
-            "std::types::string",
-            "std::collections::arraylist"
+            "std::types::string"
         )
         
         for (coreModule in coreModules) {

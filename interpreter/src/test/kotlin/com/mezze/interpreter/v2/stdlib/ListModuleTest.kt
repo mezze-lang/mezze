@@ -258,23 +258,23 @@ class ListModuleTest {
     // === Conversion ===
 
     @Test
-    fun `test list to_array and from_array roundtrip`() {
+    fun `test list to_seq and from_seq roundtrip`() {
         val result = eval("""
             use std::collections::list
             let xs = list::range { start = 1, end = 5 }
-            let arr = list::to_array { xs = xs }
-            let ys = list::from_array { xs = arr }
+            let arr = list::to_seq { xs = xs }
+            let ys = list::from_seq { xs = arr }
             list::length { xs = ys }
         """)
         assertEquals(4L, result)
     }
 
     @Test
-    fun `test list of_array`() {
+    fun `test list of_seq`() {
         val result = eval("""
             use std::collections::list
             let arr = [1, 2, 3, 4, 5]
-            let xs = list::of_array { elements = arr }
+            let xs = list::of_seq { elements = arr }
             list::length { xs = xs }
         """)
         assertEquals(5L, result)
@@ -494,7 +494,7 @@ class ListModuleTest {
     fun `test list sort`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_array { elements = [3, 1, 4, 1, 5, 9, 2, 6] }
+            let xs = list::of_seq { elements = [3, 1, 4, 1, 5, 9, 2, 6] }
             let sorted = list::sort { xs = xs }
             match list::head { xs = sorted } is
                 Some { val } -> val
@@ -507,7 +507,7 @@ class ListModuleTest {
     fun `test list sort_by`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_array { elements = [3, 1, 4, 1, 5] }
+            let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } ->
                 if a > b then 1
                 else if a < b then -1
@@ -524,7 +524,7 @@ class ListModuleTest {
     fun `test list sort_by - descending`() {
         val result = eval("""
             use std::collections::list
-            let xs = list::of_array { elements = [3, 1, 4, 1, 5] }
+            let xs = list::of_seq { elements = [3, 1, 4, 1, 5] }
             let sorted = list::sort_by { xs = xs, cmp = { a, b } ->
                 if a < b then 1
                 else if a > b then -1

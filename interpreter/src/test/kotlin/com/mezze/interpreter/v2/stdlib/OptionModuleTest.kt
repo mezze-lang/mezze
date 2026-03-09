@@ -465,10 +465,10 @@ class OptionModuleTest {
     fun `test option to_list - Some becomes singleton list`() {
         val source = """
             use std::option
-            use std::collections::array
+            use std::collections::seq
             let opt = Some { val = 42 }
             let xs = option::to_list { opt = opt }
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -478,10 +478,10 @@ class OptionModuleTest {
     fun `test option to_list - None becomes empty list`() {
         val source = """
             use std::option
-            use std::collections::array
+            use std::collections::seq
             let opt: Option Int = None
             let xs = option::to_list { opt = opt }
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(0L, eval(source))

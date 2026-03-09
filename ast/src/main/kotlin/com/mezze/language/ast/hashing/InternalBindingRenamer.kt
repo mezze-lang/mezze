@@ -100,13 +100,13 @@ class InternalBindingRenamer {
             expression = renameExpr(expr.expression)
         )
 
-        // Arrays
-        is ArrayLiteral -> expr.copy(
-            elements = expr.elements.map { renameArrayElement(it) }
+        // Seqs
+        is SeqLiteral -> expr.copy(
+            elements = expr.elements.map { renameSeqElement(it) }
         )
 
-        is ArrayAccess -> expr.copy(
-            array = renameExpr(expr.array),
+        is SeqAccess -> expr.copy(
+            seq = renameExpr(expr.seq),
             index = renameExpr(expr.index)
         )
 
@@ -357,7 +357,7 @@ class InternalBindingRenamer {
             is LiteralPattern -> {
                 // No binding
             }
-            is ArrayPattern -> {
+            is SeqPattern -> {
                 for (elem in pattern.elements) {
                     addPatternBindings(elem)
                 }
@@ -416,7 +416,7 @@ class InternalBindingRenamer {
             isOpen = pattern.isOpen
         )
         is LiteralPattern -> pattern
-        is ArrayPattern -> ArrayPattern(
+        is SeqPattern -> SeqPattern(
             elements = pattern.elements.map { renamePattern(it) },
             restPattern = pattern.restPattern?.let { name ->
                 env[name] ?: name
@@ -445,9 +445,9 @@ class InternalBindingRenamer {
         is ExpressionPart -> ExpressionPart(renameExpr(part.expression))
     }
 
-    private fun renameArrayElement(elem: ArrayElement): ArrayElement = when (elem) {
-        is ArrayRegularElement -> ArrayRegularElement(renameExpr(elem.expression))
-        is ArraySpreadElement -> ArraySpreadElement(renameExpr(elem.expression))
+    private fun renameSeqElement(elem: SeqElement): SeqElement = when (elem) {
+        is SeqRegularElement -> SeqRegularElement(renameExpr(elem.expression))
+        is SeqSpreadElement -> SeqSpreadElement(renameExpr(elem.expression))
     }
 
     private fun renameRecordEntry(entry: RecordLiteralEntry): RecordLiteralEntry = when (entry) {

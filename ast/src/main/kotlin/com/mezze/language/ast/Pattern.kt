@@ -16,7 +16,7 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * - ConstructorPattern: Matches variant constructors
  * - RecordPattern: Matches record structures
  * - LiteralPattern: Matches exact literal values
- * - ArrayPattern: Matches array structures
+ * - SeqPattern: Matches seq structures
  * - LiteralValue: Values that can appear in patterns
  * - Pattern utilities: isIrrefutable(), extractBindings(), kindDescription()
  *
@@ -75,11 +75,11 @@ data class LiteralPattern(
 ) : Pattern
 
 /**
- * Array pattern for matching arrays
+ * Seq pattern for matching seqs
  * Examples: [] -> "empty", [x, y] -> "pair", [head, ...tail] -> "list"
  */
 @Serializable
-data class ArrayPattern(
+data class SeqPattern(
     val elements: List<Pattern>,       // Fixed-position patterns
     val restPattern: String? = null,   // Optional rest pattern name (...tail)
     val sourceLocation: SourceLocation? = null
@@ -166,7 +166,7 @@ data class BooleanLiteralValue(val value: Boolean) : LiteralValue
  * Refutable patterns (can fail to match):
  * - ConstructorPattern: may not match if wrong constructor
  * - LiteralPattern: may not match if wrong value
- * - ArrayPattern: may not match if array length doesn't match
+ * - SeqPattern: may not match if seq length doesn't match
  */
 fun Pattern.isIrrefutable(): Boolean = when (this) {
     is VariablePattern -> true
@@ -176,7 +176,7 @@ fun Pattern.isIrrefutable(): Boolean = when (this) {
     }
     is ConstructorPattern -> false  // Variant constructors can fail to match
     is LiteralPattern -> false      // Literal values can fail to match
-    is ArrayPattern -> false        // Array patterns can fail to match (length mismatch)
+    is SeqPattern -> false          // Seq patterns can fail to match (length mismatch)
     is StringInterpolationPattern -> false  // String patterns can fail to match
 }
 
@@ -193,7 +193,7 @@ fun Pattern.extractBindings(): List<String> = when (this) {
     }
     is ConstructorPattern -> recordPattern?.extractBindings() ?: emptyList()
     is LiteralPattern -> emptyList()
-    is ArrayPattern -> {
+    is SeqPattern -> {
         val elementBindings = elements.flatMap { it.extractBindings() }
         val restBinding = restPattern?.let { listOf(it) } ?: emptyList()
         elementBindings + restBinding
@@ -215,6 +215,6 @@ fun Pattern.kindDescription(): String = when (this) {
     is RecordPattern -> "record pattern"
     is ConstructorPattern -> "constructor pattern"
     is LiteralPattern -> "literal pattern"
-    is ArrayPattern -> "array pattern"
+    is SeqPattern -> "seq pattern"
     is StringInterpolationPattern -> "string interpolation pattern"
 }

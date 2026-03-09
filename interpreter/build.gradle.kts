@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
+    implementation(project(":datastructures"))
 
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
@@ -37,6 +38,7 @@ dependencies {
 
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testImplementation(project(":typechecker"))
 }
 
 tasks.test {
@@ -57,7 +59,8 @@ tasks.test {
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/sun.misc=ALL-UNNAMED"
+        "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+        "--add-modules=jdk.incubator.vector"
     )
 
     maxHeapSize = "2g"

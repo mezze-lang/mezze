@@ -91,3 +91,129 @@ pub let to_set = { s } ->
 # Check if two sorted sets are equal
 pub let equals = { s1, s2 } ->
     __native_sorted_set_equals { s1 = s1, s2 = s2 }
+
+# === Additional Operations ===
+
+# Partition set into two sets based on predicate
+pub let partition = { s, p } ->
+    __native_sorted_set_partition { s = s, p = p }
+
+# Find element with minimum key, returns Option
+pub let min_by = { s, f } ->
+    __native_sorted_set_min_by { s = s, f = f }
+
+# Find element with maximum key, returns Option
+pub let max_by = { s, f } ->
+    __native_sorted_set_max_by { s = s, f = f }
+
+# Take first n elements (in sorted order)
+pub let take = { s, n } ->
+    __native_sorted_set_take { s = s, n = n }
+
+# Drop first n elements (in sorted order)
+pub let drop = { s, n } ->
+    __native_sorted_set_drop { s = s, n = n }
+
+# Get elements in range [lo, hi] inclusive
+pub let range = { s, lo, hi } ->
+    __native_sorted_set_range { s = s, lo = lo, hi = hi }
+
+# === Advanced Set Operations ===
+
+# Symmetric difference: elements in either set but not both
+pub let symmetric_difference = { s1, s2 } ->
+    __native_sorted_set_symmetric_difference { s1 = s1, s2 = s2 }
+
+# Elements strictly less than given element
+pub let head_set = { s, to } ->
+    __native_sorted_set_head_set { s = s, to = to }
+
+# Elements greater than or equal to given element
+pub let tail_set = { s, from } ->
+    __native_sorted_set_tail_set { s = s, from = from }
+
+# === Collect Operations ===
+
+# Apply function returning Option to each element, collect only Some values into SortedSet
+pub let filter_map = { set, f } ->
+    __native_sorted_set_filter_map { set = set, f = f }
+
+# Apply function returning Option to each element, collect only Some values into Seq
+pub let collect_seq = { set, f } ->
+    __native_sorted_set_collect_seq { set = set, f = f }
+
+# Apply function returning Option to each element, collect only Some values into List
+pub let collect_list = { set, f } ->
+    __native_sorted_set_collect_list { set = set, f = f }
+
+# === Higher-Order Functions ===
+
+# Filter elements by predicate
+pub let filter: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> SortedSet 'a <...> = { s, p } ->
+    __native_sorted_set_filter { s = s, p = p }
+
+# Transform elements (returns SortedSet, so duplicates are removed)
+pub let map: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> SortedSet 'b <...> = { s, f } ->
+    __native_sorted_set_map { s = s, f = f }
+
+# Fold over elements in sorted order
+pub let fold: { s: SortedSet 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { s, init, f } ->
+    __native_sorted_set_fold { s = s, init = init, f = f }
+
+# Check if any element matches predicate
+pub let any: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+    __native_sorted_set_any { s = s, p = p }
+
+# Check if all elements match predicate
+pub let all: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+    __native_sorted_set_all { s = s, p = p }
+
+# Check if no element matches predicate
+pub let none: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+    __native_sorted_set_none { s = s, p = p }
+
+# Find first element matching predicate (returns Option)
+pub let find: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
+    __native_sorted_set_find { s = s, p = p }
+
+# Count elements matching predicate
+pub let count: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
+    __native_sorted_set_count { s = s, p = p }
+
+# Reduce to single value (returns Option)
+pub let reduce: { s: SortedSet 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
+    __native_sorted_set_reduce { s = s, f = f }
+
+# === Aggregation ===
+
+# Sum integer elements
+pub let sum: { s: SortedSet Int } -> Int = { s } ->
+    __native_sorted_set_sum { s = s }
+
+# Sum float elements
+pub let sum_float: { s: SortedSet Float } -> Float = { s } ->
+    __native_sorted_set_sum_float { s = s }
+
+# Product of integer elements
+pub let product: { s: SortedSet Int } -> Int = { s } ->
+    __native_sorted_set_product { s = s }
+
+# Product of float elements
+pub let product_float: { s: SortedSet Float } -> Float = { s } ->
+    __native_sorted_set_product_float { s = s }
+
+# === Seq Conversions ===
+
+# Convert to Seq in sorted order
+pub let to_seq: { s: SortedSet 'a } -> ['a] = { s } ->
+    __native_sorted_set_to_seq { s = s }
+
+# Create sorted set from Seq
+pub let from_seq: { xs: ['a] } -> SortedSet 'a = { xs } ->
+    __native_sorted_set_from_seq { xs = xs }
+
+# === Side Effects ===
+
+# Execute function for each element (for side effects)
+pub let for_each: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> {} <...> = { s, f } ->
+    __native_sorted_set_for_each { s = s, f = f }

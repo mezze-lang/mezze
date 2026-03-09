@@ -50,7 +50,7 @@ object EnvironmentTypes {
 
         context["__native_env_get_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.ArrayType(MezzeType.RecordType(mapOf("key" to MezzeType.StringType, "value" to MezzeType.StringType)))
+            MezzeType.SeqType(MezzeType.RecordType(mapOf("key" to MezzeType.StringType, "value" to MezzeType.StringType)))
         )
     }
 
@@ -93,7 +93,7 @@ object EnvironmentTypes {
 
         context["__native_env_process_args"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.ArrayType(MezzeType.StringType)
+            MezzeType.SeqType(MezzeType.StringType)
         )
     }
 
@@ -109,7 +109,7 @@ object EnvironmentTypes {
     private fun registerMockEnvironmentOperations(context: MutableMap<String, MezzeType>) {
         context["__native_mock_env_get"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "env_vars" to MezzeType.ArrayType(MezzeType.RecordType(mapOf("key" to MezzeType.StringType, "value" to MezzeType.StringType))),
+                "env_vars" to MezzeType.SeqType(MezzeType.RecordType(mapOf("key" to MezzeType.StringType, "value" to MezzeType.StringType))),
                 "name" to MezzeType.StringType
             )),
             optionType(MezzeType.StringType)

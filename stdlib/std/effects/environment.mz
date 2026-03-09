@@ -64,7 +64,7 @@ impl Environment for MockEnvironment {
 }
 
 # Convenience functions
-pub let get_env: { name: String } -> (Option String) <Environment> = { name } -> Environment.get_env { name = name }
+pub let get_env: { name: String } -> Option String <Environment> = { name } -> Environment.get_env { name = name }
 pub let current_dir: {} -> String <Environment> = {} -> Environment.current_dir {}
 pub let os_info: {} -> { name: String, version: String, arch: String } <Environment> = {} -> do
     let name = Environment.os_name {}

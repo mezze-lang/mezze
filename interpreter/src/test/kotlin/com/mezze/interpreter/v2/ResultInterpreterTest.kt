@@ -260,10 +260,10 @@ class ResultInterpreterTest {
     fun `to_list converts Ok to singleton`() {
         val code = """
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: (Result Int String) = Ok { val = 42 }
             let arr = result::to_list { result = res }
-            array::length { xs = arr }
+            seq::length { xs = arr }
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -273,10 +273,10 @@ class ResultInterpreterTest {
     fun `to_list converts Err to empty`() {
         val code = """
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: (Result Int String) = Err { error = "failed" }
             let arr = result::to_list { result = res }
-            array::length { xs = arr }
+            seq::length { xs = arr }
         """
         val result = eval(code)
         assertEquals(0L, result)

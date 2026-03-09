@@ -21,7 +21,7 @@ import java.nio.file.Paths
  * ## Usage:
  * ```kotlin
  * val loader = ModuleLoader.create()
- * val result = loader.loadModule("std::collections::array")
+ * val result = loader.loadModule("std::collections::seq")
  *
  * when (result) {
  *     is ModuleLoadResult.Success -> {
@@ -45,7 +45,7 @@ class ModuleLoader(
      * This loads and parses the module, but does NOT type-check it yet.
      * Type-checking is done by ModuleTypeChecker.
      *
-     * @param modulePath Module path (e.g., "std::collections::array")
+     * @param modulePath Module path (e.g., "std::collections::seq")
      * @return ModuleLoadResult (Success or Failure)
      */
     fun loadModule(modulePath: String): ModuleLoadResult {
@@ -86,7 +86,7 @@ class ModuleLoader(
     /**
      * Get a module from the cache if it's already been loaded.
      *
-     * @param modulePath Module path (e.g., "std::collections::array")
+     * @param modulePath Module path (e.g., "std::collections::seq")
      * @return LoadedModule if cached, null otherwise
      */
     fun getModule(modulePath: String): LoadedModule? {

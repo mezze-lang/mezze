@@ -228,13 +228,13 @@ class DequeIntegrationTest {
     }
 
     @Test
-    void toArrayConvertsDequeToArray() {
+    void toSeqConvertsDequeToSeq() {
         Object result = MezzeTestHelper.run("""
             use std::collections::deque
-            use std::collections::array
+            use std::collections::seq
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
-            let arr = deque::to_array { d = d }
-            array::length { xs = arr }
+            let arr = deque::to_seq { d = d }
+            seq::length { xs = arr }
             """);
         assertEquals(2L, result);
     }

@@ -29,6 +29,6 @@ impl Choice for AllPaths where {
 }
 
 # Helper function to run a computation that uses Choice effect
-# Returns an array with results from all successful paths
+# Returns a seq with results from all successful paths
 pub let run_all_paths: { computation: {} -> 'a <Choice> } -> ['a] = { computation } ->
     perform AllPaths in computation {}

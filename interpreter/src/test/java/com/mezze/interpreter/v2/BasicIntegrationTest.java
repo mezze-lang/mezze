@@ -238,38 +238,40 @@ public class BasicIntegrationTest {
         Object result = MezzeTestHelper.run("""
             [1, 2, 3]
             """);
-        // V2 uses Object[] for array literals (not MezzeList)
-        assertTrue(result instanceof Object[], "Result should be Object[], got: " +
+        // V2 uses MezzeSeq for sequence literals
+        assertTrue(result instanceof MezzeSeq, "Result should be MezzeSeq, got: " +
             (result == null ? "null" : result.getClass().getName() + " = " + result));
-        Object[] arr = (Object[]) result;
-        assertEquals(3, arr.length);
-        assertEquals(1L, arr[0]);
-        assertEquals(2L, arr[1]);
-        assertEquals(3L, arr[2]);
+        MezzeSeq seq = (MezzeSeq) result;
+        assertEquals(3, seq.size());
+        assertEquals(1L, seq.get(0));
+        assertEquals(2L, seq.get(1));
+        assertEquals(3L, seq.get(2));
     }
 
     @Test
-    void testNativeArraylistLength() {
+    void testSeqLength() {
         Object result = MezzeTestHelper.run("""
-            __native_arraylist_length { xs = [1, 2, 3] }
+            use std::collections::seq
+            seq::length { xs = [1, 2, 3] }
             """);
         assertEquals(3L, result);
     }
 
     @Test
-    void testNativeArraylistLengthViaFunction() {
+    void testSeqLengthViaFunction() {
         Object result = MezzeTestHelper.run("""
-            let length = {xs} -> __native_arraylist_length { xs = xs }
+            use std::collections::seq
+            let length = {xs} -> seq::length { xs = xs }
             length { xs = [1, 2, 3, 4] }
             """);
         assertEquals(4L, result);
     }
 
     @Test
-    void testStdlibArrayModule() {
+    void testStdlibSeqModule() {
         Object result = MezzeTestHelper.run("""
-            use std::collections::array
-            array::length { xs = [1, 2, 3, 4, 5] }
+            use std::collections::seq
+            seq::length { xs = [1, 2, 3, 4, 5] }
             """);
         assertEquals(5L, result);
     }
@@ -333,17 +335,17 @@ public class BasicIntegrationTest {
     }
 
     // ========================
-    // Native console print
+    // String operations (stdlib)
     // ========================
 
     @Test
-    void testNativeConsolePrint() {
-        // This should not throw - it prints to stdout
+    void testStringLength() {
+        // Test string length using stdlib
         Object result = MezzeTestHelper.run("""
-            __native_console_print { msg = "test output" }
+            use std::string
+            string::length { s = "hello" }
             """);
-        // Returns MezzeUnit
-        assertTrue(MezzeTestHelper.isUnit(result));
+        assertEquals(5L, result);
     }
 
     // ========================

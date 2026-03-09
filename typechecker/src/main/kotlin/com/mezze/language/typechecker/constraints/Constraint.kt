@@ -60,8 +60,8 @@ sealed class ErrorContext {
         val isLeftOperand: Boolean
     ) : ErrorContext()
 
-    /** Array literal: all elements must have same type */
-    data class ArrayElement(val elementIndex: Int) : ErrorContext()
+    /** Seq literal: all elements must have same type */
+    data class SeqElement(val elementIndex: Int) : ErrorContext()
 
     /** Return type: expression type must match function return type */
     data class ReturnType(val functionName: String?) : ErrorContext()

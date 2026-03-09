@@ -84,11 +84,11 @@ class ConstructorResolutionTest {
                     collectVariantConstructions(case.expression, results)
                 }
             }
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 expr.elements.forEach { elem ->
                     when (elem) {
-                        is ArrayRegularElement -> collectVariantConstructions(elem.expression, results)
-                        is ArraySpreadElement -> collectVariantConstructions(elem.expression, results)
+                        is SeqRegularElement -> collectVariantConstructions(elem.expression, results)
+                        is SeqSpreadElement -> collectVariantConstructions(elem.expression, results)
                     }
                 }
             }

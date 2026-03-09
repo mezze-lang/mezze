@@ -315,4 +315,465 @@ public final class MapNatives {
         );
         return args;
     }
+
+    // ==================== Predicate Operations ====================
+
+    @TruffleBoundary
+    public static boolean any(MezzeMap map, MezzeFunction predicate,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            MezzeRecord kvRecord = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
+            if (result instanceof Boolean && (Boolean) result) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @TruffleBoundary
+    public static boolean all(MezzeMap map, MezzeFunction predicate,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            MezzeRecord kvRecord = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
+            if (!(result instanceof Boolean) || !(Boolean) result) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @TruffleBoundary
+    public static boolean none(MezzeMap map, MezzeFunction predicate,
+                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        return !any(map, predicate, callNode);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant find(MezzeMap map, MezzeFunction predicate,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            MezzeRecord kvRecord = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
+            if (result instanceof Boolean && (Boolean) result) {
+                return MezzeVariant.some(kvRecord);
+            }
+        }
+        return MezzeVariant.none();
+    }
+
+    @TruffleBoundary
+    public static long count(MezzeMap map, MezzeFunction predicate,
+                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        long cnt = 0;
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            MezzeRecord kvRecord = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
+            if (result instanceof Boolean && (Boolean) result) {
+                cnt++;
+            }
+        }
+        return cnt;
+    }
+
+    // ==================== Contains Value ====================
+
+    @TruffleBoundary
+    public static boolean containsValue(MezzeMap map, Object value) {
+        return map.getMap().containsValue(value);
+    }
+
+    // ==================== Update ====================
+
+    @TruffleBoundary
+    public static MezzeMap update(MezzeMap map, Object key, MezzeFunction fn,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeVariant existing = map.get(key);
+        Object newValue = callNode.call(fn.getCallTarget(), prepareArgsVal(fn, existing));
+        return map.insert(key, newValue);
+    }
+
+    // ==================== Get Or Default ====================
+
+    @TruffleBoundary
+    public static Object getOrDefault(MezzeMap map, Object key, Object defaultValue) {
+        MezzeVariant result = map.get(key);
+        if (result.isNone()) {
+            return defaultValue;
+        }
+        return result.getPayloadValue();
+    }
+
+    // ==================== To Seq ====================
+
+    @TruffleBoundary
+    public static MezzeSeq toSeq(MezzeMap map) {
+        return MezzeSeq.fromArray(map.entries());
+    }
+
+    @TruffleBoundary
+    public static MezzeSeq keysSeq(MezzeMap map) {
+        return MezzeSeq.fromArray(map.keys());
+    }
+
+    @TruffleBoundary
+    public static MezzeSeq valuesSeq(MezzeMap map) {
+        return MezzeSeq.fromArray(map.values());
+    }
+
+    // ==================== Singleton ====================
+
+    @TruffleBoundary
+    public static MezzeMap singleton(Object key, Object value) {
+        return empty().insert(key, value);
+    }
+
+    // ==================== Additional Operations ====================
+
+    @TruffleBoundary
+    public static MezzeRecord partition(MezzeMap map, MezzeFunction predicate,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        java.util.LinkedHashMap<Object, Object> passMap = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<Object, Object> failMap = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            Object result = callNode.call(predicate.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(
+                    new String[]{"k", "v"},
+                    new Object[]{entry.getKey(), entry.getValue()})});
+            if (result instanceof Boolean && (Boolean) result) {
+                passMap.put(entry.getKey(), entry.getValue());
+            } else {
+                failMap.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return MezzeRecord.fromFields(
+            new String[]{"pass", "fail"},
+            new Object[]{new MezzeMap(passMap), new MezzeMap(failMap)}
+        );
+    }
+
+    // ==================== Task #21: Min/Max Operations ====================
+
+    @TruffleBoundary
+    public static MezzeVariant minKey(MezzeMap map) {
+        if (map.isEmpty()) return MezzeVariant.none();
+        Object minKey = null;
+        for (Object key : map.getMap().keySet()) {
+            if (minKey == null || compare(key, minKey) < 0) {
+                minKey = key;
+            }
+        }
+        return MezzeVariant.some(minKey);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant maxKey(MezzeMap map) {
+        if (map.isEmpty()) return MezzeVariant.none();
+        Object maxKey = null;
+        for (Object key : map.getMap().keySet()) {
+            if (maxKey == null || compare(key, maxKey) > 0) {
+                maxKey = key;
+            }
+        }
+        return MezzeVariant.some(maxKey);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant minValue(MezzeMap map) {
+        if (map.isEmpty()) return MezzeVariant.none();
+        Object minVal = null;
+        for (Object val : map.getMap().values()) {
+            if (minVal == null || compare(val, minVal) < 0) {
+                minVal = val;
+            }
+        }
+        return MezzeVariant.some(minVal);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant maxValue(MezzeMap map) {
+        if (map.isEmpty()) return MezzeVariant.none();
+        Object maxVal = null;
+        for (Object val : map.getMap().values()) {
+            if (maxVal == null || compare(val, maxVal) > 0) {
+                maxVal = val;
+            }
+        }
+        return MezzeVariant.some(maxVal);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap invert(MezzeMap map) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            result.put(entry.getValue(), entry.getKey());
+        }
+        return new MezzeMap(result);
+    }
+
+    // ==================== Task #22: Key/Value Operations ====================
+
+    @TruffleBoundary
+    public static MezzeMap selectKeys(MezzeMap map, Object[] keys) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Object key : keys) {
+            if (map.containsKey(key)) {
+                result.put(key, map.getMap().get(key));
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap rejectKeys(MezzeMap map, Object[] keys) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>(map.getMap());
+        for (Object key : keys) {
+            result.remove(key);
+        }
+        return new MezzeMap(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant reduce(MezzeMap map, MezzeFunction f,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (map.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        java.util.Iterator<Map.Entry<Object, Object>> iter = map.getMap().entrySet().iterator();
+        Map.Entry<Object, Object> first = iter.next();
+        MezzeRecord acc = MezzeRecord.fromFields(
+            new String[]{"k", "v"},
+            new Object[]{first.getKey(), first.getValue()}
+        );
+        while (iter.hasNext()) {
+            Map.Entry<Object, Object> entry = iter.next();
+            MezzeRecord current = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object result = callNode.call(f.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(
+                    new String[]{"acc", "entry"},
+                    new Object[]{acc, current}
+                )});
+            acc = (MezzeRecord) result;
+        }
+        return MezzeVariant.some(acc);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap groupByValue(MezzeMap map) {
+        java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            groups.computeIfAbsent(entry.getValue(), k -> new java.util.ArrayList<>())
+                  .add(entry.getKey());
+        }
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, java.util.ArrayList<Object>> entry : groups.entrySet()) {
+            result.put(entry.getKey(), MezzeList.fromArray(entry.getValue().toArray()));
+        }
+        return new MezzeMap(result);
+    }
+
+    // ==================== Task #29: Key Operations ====================
+
+    @TruffleBoundary
+    public static MezzeMap mapKeys(MezzeMap map, MezzeFunction f,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            Object newKey = callNode.call(f.getCallTarget(), prepareArgsVal(f, entry.getKey()));
+            result.put(newKey, entry.getValue());
+        }
+        return new MezzeMap(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap filterKeys(MezzeMap map, MezzeFunction predicate,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.getKey()));
+            if (res instanceof Boolean && (Boolean) res) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeMap filterValues(MezzeMap map, MezzeFunction predicate,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.getValue()));
+            if (res instanceof Boolean && (Boolean) res) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    // ==================== Comparison Helper ====================
+
+    private static int compare(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
+        }
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        return 0;
+    }
+
+    // ==================== Task #37: Multi-Map Operations ====================
+
+    /**
+     * Zip two maps together. For keys present in both, creates pairs of values.
+     * Returns Map of {k, {first: v1, second: v2}} for keys present in both maps.
+     */
+    @TruffleBoundary
+    public static MezzeMap zipMaps(MezzeMap m1, MezzeMap m2) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : m1.getMap().entrySet()) {
+            Object key = entry.getKey();
+            if (m2.getMap().containsKey(key)) {
+                result.put(key, MezzeRecord.fromFields(
+                    new String[]{"first", "second"},
+                    new Object[]{entry.getValue(), m2.getMap().get(key)}
+                ));
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    /**
+     * Compute the difference of two maps: keys in m1 but not in m2.
+     * Returns entries from m1 where key is not present in m2.
+     */
+    @TruffleBoundary
+    public static MezzeMap diffMaps(MezzeMap m1, MezzeMap m2) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : m1.getMap().entrySet()) {
+            if (!m2.getMap().containsKey(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    /**
+     * Compute the intersection of two maps: keys present in both.
+     * Takes values from m1 for shared keys.
+     */
+    @TruffleBoundary
+    public static MezzeMap intersectMaps(MezzeMap m1, MezzeMap m2) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : m1.getMap().entrySet()) {
+            if (m2.getMap().containsKey(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    /**
+     * Symmetric difference: keys in either map but not both.
+     * Entries from m1 for keys only in m1, entries from m2 for keys only in m2.
+     */
+    @TruffleBoundary
+    public static MezzeMap symmetricDiffMaps(MezzeMap m1, MezzeMap m2) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : m1.getMap().entrySet()) {
+            if (!m2.getMap().containsKey(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        for (Map.Entry<Object, Object> entry : m2.getMap().entrySet()) {
+            if (!m1.getMap().containsKey(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    // ==================== List/SortedMap Conversions ====================
+
+    /**
+     * Convert Map to List of {k, v} records.
+     */
+    @TruffleBoundary
+    public static MezzeList toList(MezzeMap map) {
+        Object[] entries = new Object[map.size()];
+        int i = 0;
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            entries[i++] = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+        }
+        return MezzeList.fromArray(entries);
+    }
+
+    /**
+     * Convert List of {k, v} records to Map.
+     */
+    @TruffleBoundary
+    public static MezzeMap fromList(MezzeList list) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (int i = 0; i < list.size(); i++) {
+            Object elem = list.get(i);
+            if (elem instanceof MezzeRecord rec) {
+                Object k = rec.getField("k");
+                Object v = rec.getField("v");
+                result.put(k, v);
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    /**
+     * FlatMap over map entries.
+     * Applies function to each {k, v} entry, expecting a Map result, and merges all results.
+     */
+    @TruffleBoundary
+    public static MezzeMap flatMap(MezzeMap map, MezzeFunction f,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            MezzeRecord kvRecord = MezzeRecord.fromFields(
+                new String[]{"k", "v"},
+                new Object[]{entry.getKey(), entry.getValue()}
+            );
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgsKV(f, kvRecord));
+            if (mapped instanceof MezzeMap innerMap) {
+                result.putAll(innerMap.getMap());
+            }
+        }
+        return new MezzeMap(result);
+    }
+
+    /**
+     * Convert Map to SortedMap.
+     */
+    @TruffleBoundary
+    public static SortedMapNatives.MezzeSortedMap toSortedMap(MezzeMap map) {
+        return SortedMapNatives.fromMap(map);
+    }
 }

@@ -442,7 +442,7 @@ class STMModuleTest {
             use std::effects::stm::{STM, SequentialSTM, tqueue_from_list, read_tqueue}
             use std::collections::list
 
-            let items = list::from_array {xs = [10, 20, 30]}
+            let items = list::from_seq {xs = [10, 20, 30]}
             let q = tqueue_from_list {items = items}
             perform SequentialSTM in read_tqueue {q = q}
         """)
@@ -609,13 +609,14 @@ class STMModuleTest {
     fun `test read_all reads multiple TVars`() {
         val result = eval("""
             use std::effects::stm::{STM, SequentialSTM, tvar, read_all}
+            use std::collections::seq
 
             let a = tvar {init = 1}
             let b = tvar {init = 2}
             let c = tvar {init = 3}
             perform SequentialSTM in do
                 let values = read_all {vars = [a, b, c]}
-                __native_arraylist_length {xs = values}
+                seq::length {xs = values}
         """)
         assertEquals(3L, result)
     }
@@ -624,12 +625,13 @@ class STMModuleTest {
     fun `test read_all returns correct values`() {
         val result = eval("""
             use std::effects::stm::{STM, SequentialSTM, tvar, read_all}
+            use std::collections::seq
 
             let a = tvar {init = 10}
             let b = tvar {init = 20}
             perform SequentialSTM in do
                 let values = read_all {vars = [a, b]}
-                match __native_arraylist_get {xs = values, i = 0} is
+                match seq::get {xs = values, i = 0} is
                     Some {val} -> val
                     None -> 0
         """)

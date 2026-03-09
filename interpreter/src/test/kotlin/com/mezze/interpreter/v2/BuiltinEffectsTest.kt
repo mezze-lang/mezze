@@ -28,45 +28,29 @@ class BuiltinEffectsTest {
     @Test
     fun testBuiltinLogEffect() {
         val source = """
-            # Declare Log effect
-            effect Log where {
-              print : {msg: String} -> {} <Log>
-            }
+            use std::effects::log::{Log, Console, println}
 
-            # Use native implementation
-            impl Log for NativeConsole where {
-              print : {msg: String} -> {} = {msg} -> __native_console_print {msg = msg}
-            }
-
-            # Test the effect
-            let result = perform NativeConsole in Log.print {msg = "Hello World!"}
-
-            result
+            # Test the effect using stdlib Log
+            perform Console in do
+                println {msg = "Hello World!"}
+                42
         """.trimIndent()
 
         // This should execute and print to console
         val result = eval(source)
-        // Result should be unit
-        assertTrue(isUnitResult(result))
+        // Result should be 42 since we return that after logging
+        assertEquals(42L, result)
     }
 
     @Test
     fun testBuiltinRandomEffect() {
         val source = """
-            # Declare Random effect
-            effect Random where {
-              nextInt : {min: Int, max: Int} -> Int <Random>
-            }
+            use std::effects::random::{Random, SeededRandom}
 
-            # Use native implementation
-            impl Random for NativeRandom where {
-              nextInt : {min: Int, max: Int} -> Int = {min, max} -> __native_random_int {min = min, max = max}
-            }
-
-            # Test the effect
-            let result = perform NativeRandom in Random.nextInt {min = 1, max = 10}
-
-            result
+            # Test the effect using stdlib Random with SeededRandom for determinism
+            perform SeededRandom { seed = 42 } in do
+                let result = Random.random_int {min = 1, max = 10}
+                result
         """.trimIndent()
 
         val result = eval(source)

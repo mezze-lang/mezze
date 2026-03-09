@@ -1,4 +1,4 @@
-package com.mezze.interpreter.v2.nodes.array;
+package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeSeq;
@@ -10,20 +10,20 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
- * Array/List length node - returns primitive long.
+ * Seq/List length node - returns primitive long.
  *
  * Type-specialized for MezzeSeq (Vavr Vector) and MezzeList (Vavr List).
  */
-@NodeChild("arrayNode")
-@NodeInfo(shortName = "array-len")
-public abstract class ArrayLengthNode extends MezzeNode {
+@NodeChild("seqNode")
+@NodeInfo(shortName = "seq-len")
+public abstract class SeqLengthNode extends MezzeNode {
 
     /**
      * MezzeSeq (Vavr Vector) length.
      */
     @Specialization
-    protected long lengthArray(MezzeSeq array) {
-        return array.size();
+    protected long lengthSeq(MezzeSeq seq) {
+        return seq.size();
     }
 
     /**
@@ -52,9 +52,9 @@ public abstract class ArrayLengthNode extends MezzeNode {
     }
 
     /**
-     * Create an array length node.
+     * Create a seq length node.
      */
-    public static ArrayLengthNode create(MezzeNode arrayNode) {
-        return ArrayLengthNodeGen.create(arrayNode);
+    public static SeqLengthNode create(MezzeNode seqNode) {
+        return SeqLengthNodeGen.create(seqNode);
     }
 }

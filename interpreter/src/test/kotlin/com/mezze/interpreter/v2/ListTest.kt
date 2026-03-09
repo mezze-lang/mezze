@@ -252,14 +252,14 @@ class ListTest {
     // ============================================================================
 
     @Test
-    @DisplayName("List to array conversion")
-    fun testToArray() {
+    @DisplayName("List to seq conversion")
+    fun testToSeq() {
         val code = """
-            use std::collections::list::{empty, cons, to_array}
-            use std::collections::array::{length}
+            use std::collections::list::{empty, cons, to_seq}
+            use std::collections::seq::{length}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
-            let arr = to_array { xs = xs }
+            let arr = to_seq { xs = xs }
 
             length { xs = arr }
         """
@@ -267,14 +267,14 @@ class ListTest {
     }
 
     @Test
-    @DisplayName("Array to list conversion")
-    fun testFromArray() {
+    @DisplayName("Seq to list conversion")
+    fun testFromSeq() {
         val code = """
-            use std::collections::array::{of}
-            use std::collections::list::{from_array, length}
+            use std::collections::seq::{of}
+            use std::collections::list::{from_seq, length}
 
             let arr = of { x = 1, xs = of { x = 2, xs = of { x = 3, xs = [] } } }
-            let xs = from_array { xs = arr }
+            let xs = from_seq { xs = arr }
 
             length { xs = xs }
         """
@@ -319,11 +319,11 @@ class ListTest {
     @DisplayName("List equality - equal lists")
     fun testListEqualityTrue() {
         val code = """
-            use std::collections::list::{empty, cons}
+            use std::collections::list::{empty, cons, equals}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
-            let eq_result = xs == ys
+            let eq_result = equals { xs = xs, ys = ys }
 
             if eq_result then 1 else 0
         """
@@ -334,11 +334,11 @@ class ListTest {
     @DisplayName("List equality - different lists")
     fun testListEqualityFalse() {
         val code = """
-            use std::collections::list::{empty, cons}
+            use std::collections::list::{empty, cons, equals}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 1, tail = cons { head = 3, tail = empty {} } }
-            let eq_result = xs == ys
+            let eq_result = equals { xs = xs, ys = ys }
 
             if eq_result then 1 else 0
         """

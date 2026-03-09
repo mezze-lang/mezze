@@ -10,15 +10,15 @@ class IsolateParseErrorTest {
     @Test
     fun `test simplified partition function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> { yes = [], no = [] }
                   [head, ...tail] -> do
                     let rest = partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then { yes = array::of {x = head, xs = rest.yes}, no = rest.no }
-                    else { yes = rest.yes, no = array::of {x = head, xs = rest.no} }
+                    then { yes = seq::of {x = head, xs = rest.yes}, no = rest.no }
+                    else { yes = rest.yes, no = seq::of {x = head, xs = rest.no} }
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = partition {pred = is_even, xs = [1, 2, 3, 4, 5]}
@@ -162,15 +162,15 @@ class IsolateParseErrorTest {
     @Test
     fun `test with rest pattern do block and if expression`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> { yes = [], no = [] }
                   [head, ...tail] -> do
                     let rest = partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then { yes = array::of {x = head, xs = rest.yes}, no = rest.no }
-                    else { yes = rest.yes, no = array::of {x = head, xs = rest.no} }
+                    then { yes = seq::of {x = head, xs = rest.yes}, no = rest.no }
+                    else { yes = rest.yes, no = seq::of {x = head, xs = rest.no} }
 
             partition
         """.trimIndent()
@@ -228,8 +228,8 @@ class IsolateParseErrorTest {
     @Test
     fun `test record with array concat in field`() {
         val code = """
-            use std::collections::array
-            { yes = array::concat {xs = [1], ys = [2]}, no = [] }
+            use std::collections::seq
+            { yes = seq::concat {xs = [1], ys = [2]}, no = [] }
         """.trimIndent()
         println("Parsing: $code")
         val result = parser.parse(code)
@@ -240,10 +240,10 @@ class IsolateParseErrorTest {
     @Test
     fun `test in match context with array concat`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let f = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
-                  [head, ...tail] -> { yes = array::of {x = head, xs = tail}, no = [] }
+                  [head, ...tail] -> { yes = seq::of {x = head, xs = tail}, no = [] }
                   _ -> { yes = [], no = [] }
             f
         """.trimIndent()

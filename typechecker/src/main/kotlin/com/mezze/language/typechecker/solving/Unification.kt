@@ -279,14 +279,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication ->
             unifyTypeApplications(type1, type2, typeDeclarations)
 
-        // CASE 7: Array type unification
-        type1 is MezzeType.ArrayType && type2 is MezzeType.ArrayType ->
+        // CASE 7: Seq type unification
+        type1 is MezzeType.SeqType && type2 is MezzeType.SeqType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
-        // CASE 7a: Cross-unification between ArrayType and TypeApplication("Array", ...)
-        type1 is MezzeType.ArrayType && type2 is MezzeType.TypeApplication && type2.constructor == "Array" && type2.args.size == 1 ->
+        // CASE 7a: Cross-unification between SeqType and TypeApplication("Seq", ...)
+        type1 is MezzeType.SeqType && type2 is MezzeType.TypeApplication && type2.constructor == "Seq" && type2.args.size == 1 ->
             unify(type1.elementType, type2.args[0], typeDeclarations)
-        type1 is MezzeType.TypeApplication && type1.constructor == "Array" && type1.args.size == 1 && type2 is MezzeType.ArrayType ->
+        type1 is MezzeType.TypeApplication && type1.constructor == "Seq" && type1.args.size == 1 && type2 is MezzeType.SeqType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
         // CASE 8: List type unification
@@ -1033,7 +1033,7 @@ private fun formatTypeRaw(type: MezzeType): String {
             "| ${constructorStrs.joinToString(", ")}${if (type.constructors.size > 3) ", ..." else ""} |"
         }
         is MezzeType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ${type.args.joinToString(" ") { formatType(it) }}" else ""}"
-        is MezzeType.ArrayType -> "Array ${formatType(type.elementType)}"
+        is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
         is MezzeType.ListType -> "List ${formatType(type.elementType)}"
         is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
         is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
@@ -1101,8 +1101,8 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
                     args = type.args.map { substituteTypeParams(it) }
                 )
             }
-            is MezzeType.ArrayType -> {
-                MezzeType.ArrayType(substituteTypeParams(type.elementType))
+            is MezzeType.SeqType -> {
+                MezzeType.SeqType(substituteTypeParams(type.elementType))
             }
             is MezzeType.ListType -> {
                 MezzeType.ListType(substituteTypeParams(type.elementType))
@@ -1251,8 +1251,8 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
                     args = type.args.map { substituteTypeParams(it) }
                 )
             }
-            is MezzeType.ArrayType -> {
-                MezzeType.ArrayType(substituteTypeParams(type.elementType))
+            is MezzeType.SeqType -> {
+                MezzeType.SeqType(substituteTypeParams(type.elementType))
             }
             is MezzeType.ListType -> {
                 MezzeType.ListType(substituteTypeParams(type.elementType))

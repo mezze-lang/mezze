@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2
 
 import com.mezze.interpreter.v2.values.MezzeList
+import com.mezze.interpreter.v2.values.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -30,7 +31,7 @@ class StructuredConcurrencyTest {
 
     // Common setup code - uses stdlib
     private val setupCode = """
-        use std::collections::array
+        use std::collections::seq
 
         newtype Promise 'a = Promise __NativePromise
 
@@ -115,10 +116,10 @@ class StructuredConcurrencyTest {
             let parallel_sum: {} -> Int = {} -> do
                 let tasks = [{} -> 10, {} -> 20, {} -> 30]
 
-                let promises = array::map {xs = tasks, f = {x} -> spawn {f = x}}
-                let results = array::map {xs = promises, f = {x} -> await {p =x}}
+                let promises = seq::map {xs = tasks, f = {x} -> spawn {f = x}}
+                let results = seq::map {xs = promises, f = {x} -> await {p =x}}
 
-                array::fold {xs = results, init = 0, f = {acc, x} -> acc + x}
+                seq::fold {xs = results, init = 0, f = {acc, x} -> acc + x}
 
             parallel_sum {}
         """
@@ -132,8 +133,8 @@ class StructuredConcurrencyTest {
             $setupCode
 
             let parallel_map: {fn: {x: Int} -> Int, items: [Int]} -> [Int] = {fn, items} -> do
-                let promises = items |> array::map {xs = @, f = {x} -> spawn {f = {} -> fn {x = x}}}
-                promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} -> fn {x = x}}}
+                promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
             let double = {x} -> x * 2
             let items = [1, 2, 3, 4, 5]
@@ -141,11 +142,11 @@ class StructuredConcurrencyTest {
             parallel_map {fn = double, items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is Array<*>, "Expected Array but got ${result::class.java}")
-        val arr = result as Array<*>
-        assertEquals(5, arr.size)
-        assertEquals(2L, arr[0])
-        assertEquals(10L, arr[4])
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq
+        assertEquals(5, seq.size())
+        assertEquals(2L, seq.get(0))
+        assertEquals(10L, seq.get(4))
     }
 
     @Test
@@ -154,11 +155,11 @@ class StructuredConcurrencyTest {
             $setupCode
 
             let parallel_filter: {pred: {x: Int} -> Bool, items: [Int]} -> [Int] = {pred, items} -> do
-                let promises = items |> array::map {xs = @, f = {x} -> spawn {f = {} ->
+                let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} ->
                     if pred {x = x} then [x] else []
                 }}
-                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
-                results |> array::fold {xs = @, init = [], f = {acc, x} -> array::concat {xs = acc, ys = x}}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
+                results |> seq::fold {xs = @, init = [], f = {acc, x} -> seq::concat {xs = acc, ys = x}}
 
             let is_even = {x} -> x % 2 == 0
             let items = [1, 2, 3, 4, 5, 6]
@@ -166,9 +167,9 @@ class StructuredConcurrencyTest {
             parallel_filter {pred = is_even, items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is Array<*>, "Expected Array but got ${result::class.java}")
-        val arr = result as Array<*>
-        assertEquals(3, arr.size)
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq
+        assertEquals(3, seq.size())
     }
 
     // =============================================================================
@@ -299,9 +300,9 @@ class StructuredConcurrencyTest {
 
             let complex_fan_out: {} -> Int = {} -> do
                 let workers = [1, 2, 3, 4, 5]
-                let promises = workers |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
-                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                let promises = workers |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             complex_fan_out {}
         """
@@ -361,16 +362,16 @@ class StructuredConcurrencyTest {
             $setupCode
 
             let process_batch: {items: [Int]} -> [Int] = {items} -> do
-                let promises = items |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
-                promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                let promises = items |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
+                promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
             let items = [1, 2, 3, 4, 5]
             process_batch {items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is Array<*>, "Expected Array but got ${result::class.java}")
-        val arr = result as Array<*>
-        assertEquals(5, arr.size)
+        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq
+        assertEquals(5, seq.size())
     }
 
     @Test
@@ -380,9 +381,9 @@ class StructuredConcurrencyTest {
 
             let aggregate: {} -> Int = {} -> do
                 let sources = [10, 20, 30, 40, 50]
-                let promises = sources |> array::map {xs = @, f = {x} -> spawn {f = {} -> x}}
-                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                let promises = sources |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x}}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             aggregate {}
         """
@@ -396,11 +397,11 @@ class StructuredConcurrencyTest {
             $setupCode
 
             let map_reduce: {data: [Int]} -> Int = {data} -> do
-                let map_promises = data |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
-                let mapped = map_promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                let map_promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
+                let mapped = map_promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
                 let reduce_promise = spawn {f = {} ->
-                    mapped |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                    mapped |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
                 }
                 await {p =reduce_promise}
 
@@ -471,12 +472,12 @@ class StructuredConcurrencyTest {
                 then promises
                 else do
                     let p = spawn {f = {} -> n}
-                    spawn_tasks {n = n - 1, promises = array::concat {xs = promises, ys = [p]}}
+                    spawn_tasks {n = n - 1, promises = seq::concat {xs = promises, ys = [p]}}
 
             let dynamic: {count: Int} -> Int = {count} -> do
                 let promises = spawn_tasks {n = count, promises = []}
-                let results = promises |> array::map {xs = @, f = {x} -> await {p = x}}
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p = x}}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             dynamic {count = 5}
         """

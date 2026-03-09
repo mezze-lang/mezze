@@ -242,16 +242,16 @@ sealed interface UsePath
  */
 @Serializable
 data class ModulePath(val segments: List<String>) : UsePath {
-    /** Full qualified path string (e.g., "std::collections::array") */
+    /** Full qualified path string (e.g., "std::collections::seq") */
     val fullPath: String get() = segments.joinToString("::")
 
-    /** Short name - last segment (e.g., "array" from "std::collections::array") */
+    /** Short name - last segment (e.g., "array" from "std::collections::seq") */
     val shortName: String get() = segments.lastOrNull() ?: ""
 
     /** Check if this is a qualified (multi-segment) path */
     val isQualified: Boolean get() = segments.size > 1
 
-    /** Parent module path (e.g., "std::collections" from "std::collections::array") */
+    /** Parent module path (e.g., "std::collections" from "std::collections::seq") */
     val parent: ModulePath? get() = if (segments.size > 1) {
         ModulePath(segments.dropLast(1))
     } else null

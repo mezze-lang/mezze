@@ -67,7 +67,7 @@ data class FunctionTypeAnnotation(
 ) : TypeAnnotation
 
 @Serializable
-data class ArrayTypeAnnotation(
+data class SeqTypeAnnotation(
     val elementType: TypeAnnotation
 ) : TypeAnnotation
 
@@ -252,8 +252,8 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
                 MezzeType.VarType(TypeVar(annotation.constructor))
             }
         }
-        is ArrayTypeAnnotation -> {
-            MezzeType.ArrayType(convertTypeAnnotation(annotation.elementType))
+        is SeqTypeAnnotation -> {
+            MezzeType.SeqType(convertTypeAnnotation(annotation.elementType))
         }
         is QualifiedTypeAnnotation -> {
             // Qualified type like codec::Entry String Json

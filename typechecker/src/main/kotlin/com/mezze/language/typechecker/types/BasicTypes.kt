@@ -537,11 +537,11 @@ object BasicTypes {
 
         context["__native_string_split"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "delimiter" to MezzeType.StringType)),
-            MezzeType.ArrayType(MezzeType.StringType)
+            MezzeType.SeqType(MezzeType.StringType)
         )
 
         context["__native_string_join"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("strings" to MezzeType.ArrayType(MezzeType.StringType), "separator" to MezzeType.StringType)),
+            MezzeType.RecordType(mapOf("strings" to MezzeType.SeqType(MezzeType.StringType), "separator" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
@@ -621,11 +621,11 @@ object BasicTypes {
 
         context["string::split"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "delimiter" to MezzeType.StringType)),
-            MezzeType.ArrayType(MezzeType.StringType)
+            MezzeType.SeqType(MezzeType.StringType)
         )
 
         context["string::join"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("strings" to MezzeType.ArrayType(MezzeType.StringType), "separator" to MezzeType.StringType)),
+            MezzeType.RecordType(mapOf("strings" to MezzeType.SeqType(MezzeType.StringType), "separator" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
@@ -679,17 +679,17 @@ object BasicTypes {
         // Splitting utilities
         context["__native_string_lines"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            MezzeType.ArrayType(MezzeType.StringType)
+            MezzeType.SeqType(MezzeType.StringType)
         )
 
         context["__native_string_words"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            MezzeType.ArrayType(MezzeType.StringType)
+            MezzeType.SeqType(MezzeType.StringType)
         )
 
         context["__native_string_chars"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            MezzeType.ArrayType(MezzeType.CharType)
+            MezzeType.SeqType(MezzeType.CharType)
         )
 
         // Padding

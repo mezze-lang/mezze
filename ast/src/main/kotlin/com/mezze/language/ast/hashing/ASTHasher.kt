@@ -163,16 +163,16 @@ object ASTHasher {
                 builder.appendLong(expr.denominator)
             }
 
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 builder.append(byteArrayOf(HashTags.ARRAY))
                 builder.appendList(expr.elements) { elem ->
-                    hashArrayElementInto(elem, this)
+                    hashSeqElementInto(elem, this)
                 }
             }
 
-            is ArrayAccess -> {
+            is SeqAccess -> {
                 builder.append(byteArrayOf(HashTags.INDEX_ACCESS))
-                hashExpressionInto(expr.array, builder)
+                hashExpressionInto(expr.seq, builder)
                 hashExpressionInto(expr.index, builder)
             }
 
@@ -340,13 +340,13 @@ object ASTHasher {
         }
     }
 
-    private fun hashArrayElementInto(elem: ArrayElement, builder: MezzeHashBuilder) {
+    private fun hashSeqElementInto(elem: SeqElement, builder: MezzeHashBuilder) {
         when (elem) {
-            is ArrayRegularElement -> {
+            is SeqRegularElement -> {
                 builder.appendBoolean(false)  // not spread
                 hashExpressionInto(elem.expression, builder)
             }
-            is ArraySpreadElement -> {
+            is SeqSpreadElement -> {
                 builder.appendBoolean(true)  // is spread
                 hashExpressionInto(elem.expression, builder)
             }
@@ -441,8 +441,8 @@ object ASTHasher {
                 builder.append(byteArrayOf(HashTags.LITERAL_PATTERN))
                 hashLiteralValueInto(pattern.value, builder)
             }
-            is ArrayPattern -> {
-                builder.append(byteArrayOf(HashTags.ARRAY_PATTERN))
+            is SeqPattern -> {
+                builder.append(byteArrayOf(HashTags.SEQ_PATTERN))
                 builder.appendList(pattern.elements) { hashBindingPatternInto(it, this) }
                 // Rest pattern name is excluded (alpha-renamed)
                 builder.appendBoolean(pattern.restPattern != null)
@@ -525,7 +525,7 @@ object ASTHasher {
                     appendNullable(ctor.dataType) { hashTypeAnnotationInto(it, this) }
                 }
             }
-            is ArrayTypeAnnotation -> {
+            is SeqTypeAnnotation -> {
                 builder.appendInt(5)
                 hashTypeAnnotationInto(annotation.elementType, builder)
             }

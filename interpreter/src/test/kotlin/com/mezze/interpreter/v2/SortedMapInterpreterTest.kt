@@ -261,10 +261,10 @@ class SortedMapInterpreterTest {
     fun `convert from regular map preserves entries`() {
         val result = eval("""
             use std::collections::sorted_map
-            # Use native directly to avoid module lookup issues
-            let m = __native_map_empty {}
-            let m2 = __native_map_insert { m = m, k = 1, v = 10 }
-            let m3 = __native_map_insert { m = m2, k = 2, v = 20 }
+            use std::collections::map
+            let m = map::empty {}
+            let m2 = map::insert { m = m, k = 1, v = 10 }
+            let m3 = map::insert { m = m2, k = 2, v = 20 }
             let sorted = sorted_map::from_map { m = m3 }
             sorted_map::size { m = sorted }
         """)
@@ -275,11 +275,12 @@ class SortedMapInterpreterTest {
     fun `convert to regular map preserves entries`() {
         val result = eval("""
             use std::collections::sorted_map
+            use std::collections::map
             let m = sorted_map::empty {}
             let m2 = sorted_map::insert { m = m, k = 1, v = 10 }
             let m3 = sorted_map::insert { m = m2, k = 2, v = 20 }
             let regular = sorted_map::to_map { m = m3 }
-            __native_map_size { m = regular }
+            map::size { m = regular }
         """)
         assertEquals(2L, result)
     }

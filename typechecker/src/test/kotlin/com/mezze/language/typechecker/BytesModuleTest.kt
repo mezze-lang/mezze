@@ -57,10 +57,10 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes from_array function`() {
+    fun `test bytes from_seq function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [72, 101, 108, 108, 111] }
+            let b = bytes::from_seq { arr = [72, 101, 108, 108, 111] }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -274,7 +274,7 @@ class BytesModuleTest {
     fun `test bytes reverse function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let reversed = bytes::reverse { b = b }
         """.trimIndent()
 
@@ -286,7 +286,7 @@ class BytesModuleTest {
     fun `test bytes map function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let doubled = bytes::map { b = b, f = { x } -> x * 2 }
         """.trimIndent()
 
@@ -298,7 +298,7 @@ class BytesModuleTest {
     fun `test bytes fold function`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3, 4] }
+            let b = bytes::from_seq { arr = [1, 2, 3, 4] }
             let sum: Int = bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte }
         """.trimIndent()
 
@@ -350,11 +350,11 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes to_array function returns array of Int`() {
+    fun `test bytes to_seq function returns seq of Int`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [65, 66, 67] }
-            let arr: [Int] = bytes::to_array { b = b }
+            let b = bytes::from_seq { arr = [65, 66, 67] }
+            let arr: [Int] = bytes::to_seq { b = b }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -419,7 +419,7 @@ class BytesModuleTest {
     fun `test bytes map rejects wrong function signature`() {
         val source = """
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             # Function returns String instead of Int
             let mapped = bytes::map { b = b, f = { x } -> "wrong" }
         """.trimIndent()

@@ -5,10 +5,10 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for array operations including pattern matching and map.
+ * Tests for seq operations including pattern matching and map.
  * Migrated from V1 to V2 with unboxed values.
  */
-class SimpleArrayTest {
+class SimpleSeqTest {
 
     @BeforeEach
     fun setUp() {
@@ -36,11 +36,11 @@ class SimpleArrayTest {
     @Test
     fun `test recursive map using stdlib`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let double = {x} -> x * 2
-            let result = array::map {f = double, xs = [1, 2, 3]}
-            array::length {xs = result}
+            let result = seq::map {f = double, xs = [1, 2, 3]}
+            seq::length {xs = result}
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -49,11 +49,11 @@ class SimpleArrayTest {
     @Test
     fun `test recursive map values`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let double = {x} -> x * 2
-            let result = array::map {f = double, xs = [1, 2, 3]}
-            match array::get {xs = result, i = 0} is
+            let result = seq::map {f = double, xs = [1, 2, 3]}
+            match seq::get {xs = result, i = 0} is
                 Some { val } -> val
                 None -> -1
         """
@@ -63,11 +63,11 @@ class SimpleArrayTest {
     @Test
     fun `test recursive map second value`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let double = {x} -> x * 2
-            let result = array::map {f = double, xs = [1, 2, 3]}
-            match array::get {xs = result, i = 1} is
+            let result = seq::map {f = double, xs = [1, 2, 3]}
+            match seq::get {xs = result, i = 1} is
                 Some { val } -> val
                 None -> -1
         """
@@ -77,11 +77,11 @@ class SimpleArrayTest {
     @Test
     fun `test recursive map third value`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let double = {x} -> x * 2
-            let result = array::map {f = double, xs = [1, 2, 3]}
-            match array::get {xs = result, i = 2} is
+            let result = seq::map {f = double, xs = [1, 2, 3]}
+            match seq::get {xs = result, i = 2} is
                 Some { val } -> val
                 None -> -1
         """

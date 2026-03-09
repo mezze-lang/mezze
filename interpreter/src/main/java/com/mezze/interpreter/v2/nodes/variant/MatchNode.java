@@ -3,6 +3,7 @@ package com.mezze.interpreter.v2.nodes.variant;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -296,6 +297,11 @@ public final class MatchNode extends MezzeNode {
             return executeObjectArrayMatch(frame, array);
         }
 
+        // Check for MezzeSeq pattern matching (optimized Seq type)
+        if (value instanceof MezzeSeq seq) {
+            return executeMezzeSeqMatch(frame, seq);
+        }
+
         // Check for array pattern matching (MezzeList for immutable lists)
         if (value instanceof MezzeList list) {
             // Fast path: use precomputed hasListPatterns flag (O(1) check)
@@ -491,7 +497,7 @@ public final class MatchNode extends MezzeNode {
         for (int i = 0; i < branchCount; i++) {
             MatchBranchNode branch = branches[i];
 
-            if (branch.isArrayPattern()) {
+            if (branch.isSeqPattern()) {
                 if (branchProfiles[i].profile(branch.matchesObjectArray(array))) {
                     branch.bindObjectArrayElements(frame, array);
                     return branch.execute(frame);
@@ -512,6 +518,36 @@ public final class MatchNode extends MezzeNode {
     }
 
     /**
+     * Execute MezzeSeq pattern matching - V2 OPTIMIZED.
+     * Uses @ExplodeLoop for JIT unrolling.
+     */
+    @ExplodeLoop
+    private Object executeMezzeSeqMatch(VirtualFrame frame, MezzeSeq seq) {
+        // Try each array pattern branch
+        for (int i = 0; i < branchCount; i++) {
+            MatchBranchNode branch = branches[i];
+
+            if (branch.isSeqPattern()) {
+                if (branchProfiles[i].profile(branch.matchesMezzeSeq(seq))) {
+                    branch.bindMezzeSeqElements(frame, seq);
+                    return branch.execute(frame);
+                }
+            }
+        }
+
+        // Try wildcard
+        if (wildcardBranchIndex >= 0) {
+            MatchBranchNode wildcard = branches[wildcardBranchIndex];
+            wildcard.bindValue(frame, seq);
+            return wildcard.execute(frame);
+        }
+
+        noMatchProfile.enter();
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        throw new RuntimeException("No matching pattern for value: " + seq);
+    }
+
+    /**
      * Execute array pattern matching - OPTIMIZED.
      * Uses @ExplodeLoop for JIT unrolling.
      */
@@ -521,7 +557,7 @@ public final class MatchNode extends MezzeNode {
         for (int i = 0; i < branchCount; i++) {
             MatchBranchNode branch = branches[i];
 
-            if (branch.isArrayPattern()) {
+            if (branch.isSeqPattern()) {
                 if (branchProfiles[i].profile(branch.matchesArray(list))) {
                     branch.bindArrayElements(frame, list);
                     return branch.execute(frame);

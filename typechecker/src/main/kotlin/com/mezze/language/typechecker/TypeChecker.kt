@@ -1980,11 +1980,11 @@ class TypeChecker(
                     expr
                 }
             }
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 val transformedElements = expr.elements.map { element ->
                     when (element) {
-                        is ArrayRegularElement -> ArrayRegularElement(transformExpression(element.expression))
-                        is ArraySpreadElement -> ArraySpreadElement(transformExpression(element.expression))
+                        is SeqRegularElement -> SeqRegularElement(transformExpression(element.expression))
+                        is SeqSpreadElement -> SeqSpreadElement(transformExpression(element.expression))
                     }
                 }
                 if (transformedElements != expr.elements) {
@@ -1993,11 +1993,11 @@ class TypeChecker(
                     expr
                 }
             }
-            is ArrayAccess -> {
-                val transformedArray = transformExpression(expr.array)
+            is SeqAccess -> {
+                val transformedSeq = transformExpression(expr.seq)
                 val transformedIndex = transformExpression(expr.index)
-                if (transformedArray !== expr.array || transformedIndex !== expr.index) {
-                    expr.copy(array = transformedArray, index = transformedIndex)
+                if (transformedSeq !== expr.seq || transformedIndex !== expr.index) {
+                    expr.copy(seq = transformedSeq, index = transformedIndex)
                 } else {
                     expr
                 }

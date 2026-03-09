@@ -453,10 +453,12 @@ public final class IONatives {
     }
 
     /**
-     * Get array elements from either MezzeList or Object[] (Array in Mezze).
+     * Get array elements from MezzeSeq, MezzeList, or Object[] (Array in Mezze).
      */
     private static Object[] getArrayElements(Object arr) {
-        if (arr instanceof MezzeList list) {
+        if (arr instanceof MezzeSeq seq) {
+            return seq.toArray();
+        } else if (arr instanceof MezzeList list) {
             return list.toArray();
         } else if (arr instanceof Object[] objArr) {
             return objArr;
@@ -788,9 +790,11 @@ public final class IONatives {
         }
 
         // Process rules to find matching mock
-        // Handle both MezzeList and Object[] (array literals)
+        // Handle MezzeSeq, MezzeList, and Object[] (array literals)
         Object[] ruleStore = null;
-        if (rulesObj instanceof MezzeList rules) {
+        if (rulesObj instanceof MezzeSeq seq) {
+            ruleStore = seq.toArray();
+        } else if (rulesObj instanceof MezzeList rules) {
             ruleStore = rules.toArray();
         } else if (rulesObj instanceof Object[] arr) {
             ruleStore = arr;
@@ -837,7 +841,9 @@ public final class IONatives {
         // Check methods
         Object methodsObj = getField(rule, "methods");
         Object[] methodStore = null;
-        if (methodsObj instanceof MezzeList methods) {
+        if (methodsObj instanceof MezzeSeq seq) {
+            methodStore = seq.toArray();
+        } else if (methodsObj instanceof MezzeList methods) {
             methodStore = methods.toArray();
         } else if (methodsObj instanceof Object[] arr) {
             methodStore = arr;

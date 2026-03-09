@@ -19,9 +19,9 @@ pub let empty = {} ->
 pub let from_string = { s } ->
     __native_bytes_from_string { s = s }
 
-# Create bytes from an array of integers (0-255)
-pub let from_array = { arr } ->
-    __native_bytes_from_array { arr = arr }
+# Create bytes from a seq of integers (0-255)
+pub let from_seq = { arr } ->
+    __native_bytes_from_seq { arr = arr }
 
 # Create bytes from a hex string (e.g., "48656c6c6f"), returns Option
 pub let from_hex = { s } ->
@@ -112,9 +112,9 @@ pub let fold = { b, init, f } ->
 pub let to_string = { b } ->
     __native_bytes_to_string { b = b }
 
-# Convert to an array of integers (0-255)
-pub let to_array = { b } ->
-    __native_bytes_to_array { b = b }
+# Convert to a seq of integers (0-255)
+pub let to_seq = { b } ->
+    __native_bytes_to_seq { b = b }
 
 # Convert to a hexadecimal string (lowercase)
 pub let to_hex = { b } ->

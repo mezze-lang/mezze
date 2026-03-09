@@ -14,6 +14,7 @@
 #       # Both tasks are automatically awaited when scope exits
 
 use std::effects::concurrency::{Concurrency, Loom}
+use std::collections::seq
 
 # Scope effect - structured concurrency with automatic awaiting
 effect Scope where {
@@ -50,8 +51,8 @@ pub let with_scope: { computation: {} -> 'a <Scope, Concurrency> } -> 'a <Concur
 pub let fork_all: { tasks: [{ task: {} -> 'a }] } -> ['a] <Scope, Concurrency> = { tasks } -> do
     # Fork all tasks and collect handles
     let fork_task = { t } -> Scope.fork_with_handle { task = t.task }
-    let handles = __native_arraylist_map { xs = tasks, f = fork_task }
+    let handles = seq::map { xs = tasks, f = fork_task }
 
     # Await all handles
     let await_handle = { h } -> h.await {}
-    __native_arraylist_map { xs = handles, f = await_handle }
+    seq::map { xs = handles, f = await_handle }

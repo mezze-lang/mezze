@@ -30,7 +30,7 @@ pub let iff = { l: Bool, r: Bool } ->
     }
 
 # Additional bool utilities
-# TODO: Array pattern matching [head, ...tail] not yet supported in parser
+# TODO: Seq pattern matching [head, ...tail] not yet supported in parser
 # These functions are temporarily commented out until the feature is implemented
 
 # pub let all = { xs: [Bool] } ->

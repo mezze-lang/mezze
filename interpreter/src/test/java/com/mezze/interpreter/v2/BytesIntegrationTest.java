@@ -44,7 +44,7 @@ class BytesIntegrationTest {
     void bytesFromArray() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [72, 101, 108, 108, 111] }
+            let b = bytes::from_seq { arr = [72, 101, 108, 108, 111] }
             bytes::length { b = b }
             """);
         assertEquals(5L, result);
@@ -279,7 +279,7 @@ class BytesIntegrationTest {
     void bytesReverse() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let rev = bytes::reverse { b = b }
             match bytes::get { b = rev, i = 0 } is
                 Some { val } -> val
@@ -292,7 +292,7 @@ class BytesIntegrationTest {
     void bytesMapDoublesEachByte() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let doubled = bytes::map { b = b, f = { x } -> x * 2 }
             match bytes::get { b = doubled, i = 1 } is
                 Some { val } -> val
@@ -305,7 +305,7 @@ class BytesIntegrationTest {
     void bytesFoldSumsAllBytes() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3, 4] }
+            let b = bytes::from_seq { arr = [1, 2, 3, 4] }
             bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte }
             """);
         assertEquals(10L, result); // 1 + 2 + 3 + 4 = 10
@@ -319,7 +319,7 @@ class BytesIntegrationTest {
     void bytesToArrayReturnsArrayOfInts() {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [65, 66, 67] }
+            let b = bytes::from_seq { arr = [65, 66, 67] }
             bytes::fold { b = b, init = 0, f = { acc, byte } -> if acc == 0 then byte else acc }
             """);
         assertEquals(65L, result);

@@ -249,8 +249,8 @@ object AbilityValidator {
                     args = annotation.args.map { substituteTypeParameters(it, substitution) }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                ArrayTypeAnnotation(
+            is SeqTypeAnnotation -> {
+                SeqTypeAnnotation(
                     elementType = substituteTypeParameters(annotation.elementType, substitution)
                 )
             }
@@ -285,7 +285,7 @@ object AbilityValidator {
             is TypeApplicationAnnotation -> {
                 annotation.args.any { hasTypeVariables(it) }
             }
-            is ArrayTypeAnnotation -> hasTypeVariables(annotation.elementType)
+            is SeqTypeAnnotation -> hasTypeVariables(annotation.elementType)
             is EffectRowAnnotation -> false
             is QualifiedTypeAnnotation -> annotation.args.any { hasTypeVariables(it) }
         }
@@ -314,7 +314,7 @@ object AbilityValidator {
                 a.args.size == b.args.size &&
                 a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
             }
-            a is ArrayTypeAnnotation && b is ArrayTypeAnnotation -> {
+            a is SeqTypeAnnotation && b is SeqTypeAnnotation -> {
                 typeAnnotationsMatch(a.elementType, b.elementType)
             }
             a is QualifiedTypeAnnotation && b is QualifiedTypeAnnotation -> {
@@ -352,7 +352,7 @@ object AbilityValidator {
                 if (annotation.args.isEmpty()) annotation.constructor
                 else "${annotation.constructor} ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
             }
-            is ArrayTypeAnnotation -> "[${typeAnnotationToString(annotation.elementType)}]"
+            is SeqTypeAnnotation -> "[${typeAnnotationToString(annotation.elementType)}]"
             is EffectRowAnnotation -> "<${annotation.effects.joinToString(", ")}>"
             is QualifiedTypeAnnotation -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
@@ -439,7 +439,7 @@ object AbilityValidator {
             is RecordTypeAnnotation -> "Record"
             is VariantTypeAnnotation -> "Variant"
             is FunctionTypeAnnotation -> "Function"
-            is ArrayTypeAnnotation -> "Array"
+            is SeqTypeAnnotation -> "Seq"
             is EffectRowAnnotation -> "EffectRow"
         }
     }

@@ -267,20 +267,20 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
             currentTracker
         }
 
-        is ArrayLiteral -> {
+        is SeqLiteral -> {
             var currentTracker = tracker
             for (element in expr.elements) {
                 val elementExpr = when (element) {
-                    is ArrayRegularElement -> element.expression
-                    is ArraySpreadElement -> element.expression
+                    is SeqRegularElement -> element.expression
+                    is SeqSpreadElement -> element.expression
                 }
                 currentTracker = analyzeExpression(elementExpr, currentTracker)
             }
             currentTracker
         }
 
-        is ArrayAccess -> {
-            var currentTracker = analyzeExpression(expr.array, tracker)
+        is SeqAccess -> {
+            var currentTracker = analyzeExpression(expr.seq, tracker)
             currentTracker = analyzeExpression(expr.index, currentTracker)
             currentTracker
         }

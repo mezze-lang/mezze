@@ -388,7 +388,7 @@ object HashTags {
     const val AS_PATTERN: Byte = 0x27
     const val OR_PATTERN: Byte = 0x28
     const val TUPLE_PATTERN: Byte = 0x29
-    const val ARRAY_PATTERN: Byte = 0x2A
+    const val SEQ_PATTERN: Byte = 0x2A
     const val REST_PATTERN: Byte = 0x2B
     const val STRING_INTERPOLATION_PATTERN: Byte = 0x2C
 
@@ -398,7 +398,7 @@ object HashTags {
     const val FUNCTION_TYPE: Byte = 0x32
     const val RECORD_TYPE: Byte = 0x33
     const val VARIANT_TYPE: Byte = 0x34
-    const val ARRAY_TYPE: Byte = 0x35
+    const val SEQ_TYPE: Byte = 0x35
     const val EFFECT_ROW: Byte = 0x36
     const val FORALL_TYPE: Byte = 0x37
     const val ABILITY_CONSTRAINT: Byte = 0x38

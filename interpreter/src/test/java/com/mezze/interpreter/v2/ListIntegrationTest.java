@@ -261,7 +261,7 @@ class ListIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
-            list::fold_right { xs = xs, init = 0, f = { x, acc } -> acc * 10 + x }
+            list::fold_right { xs = xs, init = 0, f = { acc, x } -> acc * 10 + x }
             """);
         assertEquals(321L, result);
     }
@@ -313,33 +313,33 @@ class ListIntegrationTest {
     // ========================================
 
     @Test
-    void toArrayConvertsListToArray() {
+    void toSeqConvertsListToSeq() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            use std::collections::array
+            use std::collections::seq
             let xs = list::range { start = 1, end = 4 }
-            let arr = list::to_array { xs = xs }
-            array::length { xs = arr }
+            let arr = list::to_seq { xs = xs }
+            seq::length { xs = arr }
             """);
         assertEquals(3L, result);
     }
 
     @Test
-    void fromArrayConvertsArrayToList() {
+    void fromSeqConvertsSeqToList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let arr = [1, 2, 3]
-            let xs = list::from_array { xs = arr }
+            let xs = list::from_seq { xs = arr }
             list::length { xs = xs }
             """);
         assertEquals(3L, result);
     }
 
     @Test
-    void ofArrayCreatesListFromArrayElements() {
+    void ofSeqCreatesListFromSeqElements() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            let xs = list::of_array { elements = [10, 20, 30] }
+            let xs = list::of_seq { elements = [10, 20, 30] }
             list::length { xs = xs }
             """);
         assertEquals(3L, result);

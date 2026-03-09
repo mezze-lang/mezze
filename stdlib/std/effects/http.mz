@@ -39,7 +39,7 @@
 use std::codec::json::{Json, to_string, parse_str}
 use std::codec::core::{Encode, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, EncodeFormat, DecodeFormat}
 use std::collections::map
-use std::collections::array
+use std::collections::seq
 use std::collections::bytes
 use std::string
 use std::int
@@ -786,7 +786,7 @@ pub let async_post_body_with: { url: String, body: 'a, config: HttpConfig } -> R
 # CONCURRENT FETCH
 # =============================================================================
 
-# Fetch multiple URLs concurrently (returns array in same order)
+# Fetch multiple URLs concurrently (returns seq in same order)
 pub let fetch_all: { urls: [String] } -> [Result Response HttpError] <Http, Async> = { urls } ->
     Async.map { xs = urls, f = { x } -> get { url = x } }
 
@@ -795,19 +795,19 @@ pub let fetch_all_ok: { urls: [String] } -> Result [Response] HttpError <Http, A
     let results = fetch_all { urls = urls }
     collect_results { results = results }
 
-# Helper to collect array of Results into Result of array
+# Helper to collect seq of Results into Result of seq
 let collect_results: { results: [Result 'a 'e] } -> Result ['a] 'e = { results } -> do
-    let len = array::length { xs = results }
+    let len = seq::length { xs = results }
     collect_results_loop { results = results, idx = 0, len = len, acc = [] }
 
 let collect_results_loop: { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] } -> Result ['a] 'e = { results, idx, len, acc } ->
     if idx >= len then
         Ok { val = acc }
     else
-        match array::get { xs = results, i = idx } is
+        match seq::get { xs = results, i = idx } is
             Some { val } ->
                 match val is
-                    Ok { val = v } -> collect_results_loop { results = results, idx = idx + 1, len = len, acc = array::add { xs = acc, x = v } }
+                    Ok { val = v } -> collect_results_loop { results = results, idx = idx + 1, len = len, acc = seq::add { xs = acc, x = v } }
                     Err { error } -> Err { error = error }
             None -> Ok { val = acc }  # Should not happen
 

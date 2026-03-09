@@ -1221,10 +1221,10 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList stmReadAll(MezzeRecord args) {
+    public static MezzeSeq stmReadAll(MezzeRecord args) {
         MezzeList vars = getList(args, "vars");
         Object[] store = vars.toArray();
-        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+        if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
         Object[] results = new Object[store.length];
 
         // Check if we're in a transaction (OptimisticSTM) or not (SequentialSTM)
@@ -1240,7 +1240,7 @@ public final class ConcurrencyNatives {
                 results[i] = tvar.read();
             }
         }
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1479,24 +1479,24 @@ public final class ConcurrencyNatives {
     // ==================== Sequential Operations ====================
 
     @TruffleBoundary
-    public static MezzeList sequentialMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq sequentialMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
-        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+        if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
         Object[] results = new Object[store.length];
         for (int i = 0; i < store.length; i++) {
             results[i] = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
         }
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
-    public static MezzeList sequentialFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq sequentialFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
-        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+        if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
         java.util.List<Object> results = new java.util.ArrayList<>();
         for (Object x : store) {
             Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1504,7 +1504,7 @@ public final class ConcurrencyNatives {
                 results.add(x);
             }
         }
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -1598,7 +1598,7 @@ public final class ConcurrencyNatives {
         if (store == null) {
             return MezzeRecord.fromFields(
                 new String[]{"satisfying", "notSatisfying"},
-                new Object[]{MezzeList.fromArray(new Object[0]), MezzeList.fromArray(new Object[0])}
+                new Object[]{MezzeSeq.fromArray(new Object[0]), MezzeSeq.fromArray(new Object[0])}
             );
         }
         java.util.List<Object> trueList = new java.util.ArrayList<>();
@@ -1613,7 +1613,7 @@ public final class ConcurrencyNatives {
         }
         return MezzeRecord.fromFields(
             new String[]{"matching", "not_matching"},
-            new Object[]{MezzeList.fromArray(trueList.toArray()), MezzeList.fromArray(falseList.toArray())}
+            new Object[]{MezzeSeq.fromArray(trueList.toArray()), MezzeSeq.fromArray(falseList.toArray())}
         );
     }
 
@@ -1654,11 +1654,11 @@ public final class ConcurrencyNatives {
      * Uses Truffle thread builder for proper context sharing.
      */
     @TruffleBoundary
-    public static MezzeList parallelMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq parallelMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
-        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+        if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
 
         // Sequential for small arrays
         if (store.length < PARALLEL_THRESHOLD) {
@@ -1707,10 +1707,10 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel map interrupted", e);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
-    private static MezzeList sequentialMap(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeSeq sequentialMap(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         Object[] results = new Object[store.length];
@@ -1722,18 +1722,18 @@ public final class ConcurrencyNatives {
             callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
             results[i] = callNode.call(callTarget, callArgs);
         }
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
      * Parallel filter using batched ForkJoin execution.
      */
     @TruffleBoundary
-    public static MezzeList parallelFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq parallelFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
-        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+        if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
 
         // Sequential for small arrays
         if (store.length < PARALLEL_THRESHOLD) {
@@ -1788,10 +1788,10 @@ public final class ConcurrencyNatives {
         for (int i = 0; i < store.length; i++) {
             if (keep[i]) results.add(store[i]);
         }
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
-    private static MezzeList sequentialFilter(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeSeq sequentialFilter(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         Object[] callArgs = getCallArgsBuffer(closure.length + 1);
@@ -1806,7 +1806,7 @@ public final class ConcurrencyNatives {
                 results.add(x);
             }
         }
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     private static final String[] LEFT_RIGHT_FIELDS = new String[]{"left", "right"};
@@ -2327,12 +2327,12 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList sequentialGroupBy(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq sequentialGroupBy(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
-            return MezzeList.fromArray(new Object[0]);
+            return MezzeSeq.fromArray(new Object[0]);
         }
         java.util.Map<Object, java.util.List<Object>> groups = new java.util.LinkedHashMap<>();
         for (Object x : store) {
@@ -2344,10 +2344,10 @@ public final class ConcurrencyNatives {
         for (var entry : groups.entrySet()) {
             result.add(MezzeRecord.fromFields(
                 new String[]{"key", "values"},
-                new Object[]{entry.getKey(), MezzeList.fromArray(entry.getValue().toArray())}
+                new Object[]{entry.getKey(), MezzeSeq.fromArray(entry.getValue().toArray())}
             ));
         }
-        return MezzeList.fromArray(result.toArray());
+        return MezzeSeq.fromArray(result.toArray());
     }
 
     @TruffleBoundary
@@ -2472,7 +2472,7 @@ public final class ConcurrencyNatives {
         Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
             return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
-                new Object[]{MezzeList.fromArray(new Object[0]), MezzeList.fromArray(new Object[0])});
+                new Object[]{MezzeSeq.fromArray(new Object[0]), MezzeSeq.fromArray(new Object[0])});
         }
 
         // Sequential for small arrays
@@ -2535,7 +2535,7 @@ public final class ConcurrencyNatives {
         }
 
         return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
-            new Object[]{MezzeList.fromArray(matching.toArray()), MezzeList.fromArray(notMatching.toArray())});
+            new Object[]{MezzeSeq.fromArray(matching.toArray()), MezzeSeq.fromArray(notMatching.toArray())});
     }
 
     private static MezzeRecord sequentialPartition(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
@@ -2557,11 +2557,11 @@ public final class ConcurrencyNatives {
             }
         }
         return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
-            new Object[]{MezzeList.fromArray(matching.toArray()), MezzeList.fromArray(notMatching.toArray())});
+            new Object[]{MezzeSeq.fromArray(matching.toArray()), MezzeSeq.fromArray(notMatching.toArray())});
     }
 
     @TruffleBoundary
-    public static MezzeList parallelGroupBy(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq parallelGroupBy(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         // GroupBy is complex to parallelize correctly; fall back to sequential
         return sequentialGroupBy(args, callNode);
     }
@@ -2678,7 +2678,7 @@ public final class ConcurrencyNatives {
 
     // === Parallel cfg variants ===
     @TruffleBoundary
-    public static MezzeList parallelMapCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
+    public static MezzeSeq parallelMapCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
         return parallelMap(args, callNode, node);
     }
 
@@ -2693,19 +2693,19 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList parallelFilterCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
+    public static MezzeSeq parallelFilterCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
         return parallelFilter(args, callNode, node);
     }
 
     // ==================== ForkJoin Operations ====================
 
     @TruffleBoundary
-    public static MezzeList forkjoinMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
+    public static MezzeSeq forkjoinMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
         return parallelMap(args, callNode, node); // Use parallel impl
     }
 
     @TruffleBoundary
-    public static MezzeList forkjoinFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
+    public static MezzeSeq forkjoinFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
         return parallelFilter(args, callNode, node);
     }
 
@@ -2840,6 +2840,7 @@ public final class ConcurrencyNatives {
     private static Object[] getArray(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof Object[] arr) return arr;
+        if (value instanceof MezzeSeq seq) return seq.toArray();
         if (value instanceof MezzeList list) {
             Object[] result = new Object[list.size()];
             for (int i = 0; i < list.size(); i++) {

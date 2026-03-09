@@ -70,14 +70,14 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
-        is ArrayLiteral -> expr.copy(
-            elements = expr.elements.map { normalizeArrayElement(it) },
+        is SeqLiteral -> expr.copy(
+            elements = expr.elements.map { normalizeSeqElement(it) },
             inferredType = null,
             sourceLocation = null
         )
 
-        is ArrayAccess -> expr.copy(
-            array = normalizeExpression(expr.array),
+        is SeqAccess -> expr.copy(
+            seq = normalizeExpression(expr.seq),
             index = normalizeExpression(expr.index),
             inferredType = null,
             sourceLocation = null
@@ -202,9 +202,9 @@ object ASTNormalizer {
         is ExpressionPart -> ExpressionPart(normalizeExpression(part.expression))
     }
 
-    private fun normalizeArrayElement(elem: ArrayElement): ArrayElement = when (elem) {
-        is ArrayRegularElement -> ArrayRegularElement(normalizeExpression(elem.expression))
-        is ArraySpreadElement -> ArraySpreadElement(normalizeExpression(elem.expression))
+    private fun normalizeSeqElement(elem: SeqElement): SeqElement = when (elem) {
+        is SeqRegularElement -> SeqRegularElement(normalizeExpression(elem.expression))
+        is SeqSpreadElement -> SeqSpreadElement(normalizeExpression(elem.expression))
     }
 
     private fun normalizeRecordEntry(entry: RecordLiteralEntry): RecordLiteralEntry = when (entry) {
@@ -283,7 +283,7 @@ object ASTNormalizer {
             isOpen = pattern.isOpen
         )
         is LiteralPattern -> pattern
-        is ArrayPattern -> ArrayPattern(
+        is SeqPattern -> SeqPattern(
             elements = pattern.elements.map { normalizePattern(it) },
             restPattern = pattern.restPattern
         )

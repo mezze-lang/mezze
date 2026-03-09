@@ -11,18 +11,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertContains
 
 /**
- * Comprehensive tests for array pattern matching type checking
+ * Comprehensive tests for seq pattern matching type checking
  *
  * Tests cover:
- * - Empty array patterns
- * - Fixed-length array patterns
+ * - Empty seq patterns
+ * - Fixed-length seq patterns
  * - Rest patterns ([head, ...tail])
- * - Nested array patterns
+ * - Nested seq patterns
  * - Type inference and checking
  * - Exhaustiveness checking
  * - Error cases
  */
-class ArrayPatternTypeCheckTest {
+class SeqPatternTypeCheckTest {
 
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
@@ -56,7 +56,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `empty array pattern - basic matching`() {
+    fun `empty seq pattern - basic matching`() {
         val code = """
             let is_empty = {xs: [Int]} ->
                 match xs is
@@ -70,7 +70,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `empty array pattern - with non-empty case`() {
+    fun `empty seq pattern - with non-empty case`() {
         val code = """
             let describe = {xs: [Int]} ->
                 match xs is
@@ -88,7 +88,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `single element array pattern`() {
+    fun `single element seq pattern`() {
         val code = """
             let get_only = {xs: [Int]} ->
                 match xs is
@@ -102,7 +102,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `two element array pattern`() {
+    fun `two element seq pattern`() {
         val code = """
             let add_pair = {xs: [Int]} ->
                 match xs is
@@ -116,7 +116,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `three element array pattern`() {
+    fun `three element seq pattern`() {
         val code = """
             let add_triple = {xs: [Int]} ->
                 match xs is
@@ -225,12 +225,12 @@ class ArrayPatternTypeCheckTest {
     @Test
     fun `recursive map function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let map = {f: {x: Int} -> Int, xs: [Int]} ->
                 match xs is
                   [] -> []
-                  [head, ...tail] -> array::of {x = f {x = head}, xs = map {f = f, xs = tail}}
+                  [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
 
             let double = {x: Int} -> x * 2
             let result = map {f = double, xs = [1, 2, 3]}
@@ -243,14 +243,14 @@ class ArrayPatternTypeCheckTest {
     @Test
     fun `recursive filter function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let filter = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> []
                   [head, ...tail] ->
                     if pred {x = head}
-                    then array::of {x = head, xs = filter {pred = pred, xs = tail}}
+                    then seq::of {x = head, xs = filter {pred = pred, xs = tail}}
                     else filter {pred = pred, xs = tail}
 
             let is_positive = {x: Int} -> x > 0
@@ -282,7 +282,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `nested array pattern - simple`() {
+    fun `nested seq pattern - simple`() {
         val code = """
             let get_inner_first = {xs: [[Int]]} ->
                 match xs is
@@ -296,7 +296,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `nested array pattern - matrix first element`() {
+    fun `nested seq pattern - matrix first element`() {
         val code = """
             let get_top_left = {matrix: [[Int]]} ->
                 match matrix is
@@ -310,7 +310,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `nested array pattern - pairs`() {
+    fun `nested seq pattern - pairs`() {
         val code = """
             let sum_pairs = {pairs: [[Int]]} ->
                 match pairs is
@@ -403,7 +403,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `literal pattern - boolean array`() {
+    fun `literal pattern - boolean seq`() {
         val code = """
             let check_pattern = {xs: [Bool]} ->
                 match xs is
@@ -438,12 +438,12 @@ class ArrayPatternTypeCheckTest {
     @Test
     fun `variant patterns - filter Somes`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let get_all_somes = {xs} ->
                 match xs is
                   [] -> []
-                  [Some {val = x}, ...tail] -> array::of {x = x, xs = get_all_somes {xs = tail}}
+                  [Some {val = x}, ...tail] -> seq::of {x = x, xs = get_all_somes {xs = tail}}
                   [None, ...tail] -> get_all_somes {xs = tail}
             let result = get_all_somes {xs = [Some {val = 1}, None, Some {val = 2}]}
         """.trimIndent()
@@ -490,7 +490,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `guard - check array element value`() {
+    fun `guard - check seq element value`() {
         val code = """
             let starts_with_positive = {xs: [Int]} ->
                 match xs is
@@ -536,7 +536,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `type inference - infer array type from pattern`() {
+    fun `type inference - infer seq type from pattern`() {
         val code = """
             let get_head = {xs} ->
                 match xs is
@@ -564,11 +564,11 @@ class ArrayPatternTypeCheckTest {
     }
 
     // ==========================================================================
-    // SECTION 12: String Arrays
+    // SECTION 12: String Seqs
     // ==========================================================================
 
     @Test
-    fun `string array pattern matching`() {
+    fun `string seq pattern matching`() {
         val code = """
             let get_greeting = {names: [String]} ->
                 match names is
@@ -583,7 +583,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `string array with literal patterns`() {
+    fun `string seq with literal patterns`() {
         val code = """
             let is_help_command = {args: [String]} ->
                 match args is
@@ -597,18 +597,18 @@ class ArrayPatternTypeCheckTest {
     }
 
     // ==========================================================================
-    // SECTION 13: Polymorphic Array Functions
+    // SECTION 13: Polymorphic Seq Functions
     // ==========================================================================
 
     @Test
     fun `polymorphic reverse function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let reverse_helper = {xs, acc} ->
                 match xs is
                   [] -> acc
-                  [head, ...tail] -> reverse_helper {xs = tail, acc = array::of {x = head, xs = acc}}
+                  [head, ...tail] -> reverse_helper {xs = tail, acc = seq::of {x = head, xs = acc}}
 
             let reverse = {xs} -> reverse_helper {xs = xs, acc = []}
 
@@ -623,7 +623,7 @@ class ArrayPatternTypeCheckTest {
     @Test
     fun `polymorphic take function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let take = {n: Int, xs} ->
                 match xs is
@@ -633,7 +633,7 @@ class ArrayPatternTypeCheckTest {
                     then []
                     else do
                       let rest = take {n = (n - 1), xs = tail}
-                      array::of {x = head, xs = rest}
+                      seq::of {x = head, xs = rest}
 
             let result = take {n = 2, xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
@@ -647,7 +647,7 @@ class ArrayPatternTypeCheckTest {
     // ==========================================================================
 
     @Test
-    fun `edge case - single wildcard for any array`() {
+    fun `edge case - single wildcard for any seq`() {
         val code = """
             let always_empty = {xs: [Int]} ->
                 match xs is
@@ -660,7 +660,7 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `edge case - deeply nested arrays`() {
+    fun `edge case - deeply nested seqs`() {
         val code = """
             let get_deep = {xs: [[[Int]]]} ->
                 match xs is
@@ -710,7 +710,7 @@ class ArrayPatternTypeCheckTest {
     @Test
     fun `real world - partition function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
@@ -718,8 +718,8 @@ class ArrayPatternTypeCheckTest {
                   [head, ...tail] -> do
                     let rest = partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then { yes = array::of {x = head, xs = rest.yes}, no = rest.no }
-                    else { yes = rest.yes, no = array::of {x = head, xs = rest.no} }
+                    then { yes = seq::of {x = head, xs = rest.yes}, no = rest.no }
+                    else { yes = rest.yes, no = seq::of {x = head, xs = rest.no} }
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = partition {pred = is_even, xs = [1, 2, 3, 4, 5]}
@@ -730,9 +730,9 @@ class ArrayPatternTypeCheckTest {
     }
 
     @Test
-    fun `real world - zip two arrays`() {
+    fun `real world - zip two seqs`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let zip = {xs, ys} ->
                 match xs is
@@ -740,7 +740,7 @@ class ArrayPatternTypeCheckTest {
                   [x, ...xs_tail] ->
                     match ys is
                       [] -> []
-                      [y, ...ys_tail] -> array::of {x = {x = x, y = y}, xs = zip {xs = xs_tail, ys = ys_tail}}
+                      [y, ...ys_tail] -> seq::of {x = {x = x, y = y}, xs = zip {xs = xs_tail, ys = ys_tail}}
 
             let result = zip {xs = [1, 2, 3], ys = ["a", "b", "c"]}
         """.trimIndent()

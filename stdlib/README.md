@@ -15,7 +15,7 @@ stdlib/std/
 ├── nat.mz           # Natural numbers (0, 1, 2, ...)
 ├── frac.mz          # Fractions/rationals
 ├── collections/       # Collection types and operations
-│   ├── array.mz
+│   ├── seq.mz
 │   ├── map.mz
 │   └── set.mz
 ├── math/              # Mathematical functions
@@ -141,14 +141,14 @@ let main2 = {} -> do
 
 ### Collections (`std::collections`)
 
-**`std::collections::array`** - Array/list operations
+**`std::collections::seq`** - Sequence/list operations
 ```mezze
-use std::collections::array
+use std::collections::seq
 
 let numbers = [1, 2, 3, 4, 5]
-let doubled = array::map { xs = numbers, f = { x } -> x * 2 }
-let evens = array::filter { xs = numbers, p = { x } -> x % 2 == 0 }
-let sum = array::fold { xs = numbers, init = 0, f = { acc, x } -> acc + x }
+let doubled = seq::map { xs = numbers, f = { x } -> x * 2 }
+let evens = seq::filter { xs = numbers, p = { x } -> x % 2 == 0 }
+let sum = seq::fold { xs = numbers, init = 0, f = { acc, x } -> acc + x }
 ```
 
 **`std::collections::map`** - Map/dictionary operations
@@ -164,7 +164,7 @@ let value = map::get { m = m2, key = "foo" }  # Some 42
 ```mezze
 use std::collections::set
 
-let s = set::from_array { xs = [1, 2, 3, 2, 1] }
+let s = set::from_seq { xs = [1, 2, 3, 2, 1] }
 let has = set::contains { s = s, x = 2 }  # true
 let size = set::size { s = s }  # 3
 ```
@@ -293,14 +293,14 @@ int::to_string { val = 42 }
 
 ### Selective import
 ```mezze
-use std::collections::array::{map, filter, fold}
+use std::collections::seq::{map, filter, fold}
 
 map { xs = [1, 2, 3], f = { x } -> x * 2 }
 ```
 
 ### Aliased import
 ```mezze
-use std::collections::array as arr
+use std::collections::seq as arr
 
 arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 ```
@@ -318,7 +318,7 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 - `std::frac` - Fractions
 
 ### Collections
-- `std::collections::array` - Arrays/lists
+- `std::collections::seq` - Sequences/lists
 - `std::collections::map` - Maps/dictionaries
 - `std::collections::set` - Sets
 

@@ -2,6 +2,7 @@ package com.mezze.interpreter.v2.stdlib
 
 import com.mezze.interpreter.v2.MezzeTestHelper
 import com.mezze.interpreter.v2.values.MezzeList
+import com.mezze.interpreter.v2.values.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -21,13 +22,14 @@ class ChoiceEffectTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Helper to check collection length in V2 (MezzeList or Object[])
+    // Helper to check collection length in V2 (MezzeSeq, MezzeList or Object[])
     private fun assertCollectionLength(expected: Int, result: Any?) {
         assertNotNull(result)
         val length = when {
+            result is MezzeSeq -> result.size()
             result is MezzeList -> result.size()
             result!!.javaClass.isArray -> java.lang.reflect.Array.getLength(result)
-            else -> fail("Expected collection (MezzeList or array), got ${result.javaClass.name}")
+            else -> fail("Expected collection (MezzeSeq, MezzeList or array), got ${result.javaClass.name}")
         }
         assertEquals(expected, length)
     }
@@ -154,13 +156,14 @@ class ChoiceEffectTest {
     fun `test run_all_paths helper`() {
         val result = eval("""
             use std::effects::choice::{Choice, run_all_paths}
-            use std::collections::array
+            use std::collections::seq
 
             let results = run_all_paths { computation = {} -> do
                 let x = Choice.choose { options = [1, 2] }
                 x
             }
-            array::length {xs = results}
+            # run_all_paths returns ['a] (Seq)
+            seq::length {xs = results}
         """)
         assertEquals(2L, result)
     }

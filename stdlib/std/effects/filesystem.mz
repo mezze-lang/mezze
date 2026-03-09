@@ -1,6 +1,7 @@
 # std/effects/filesystem.mezze - File system effects (async by default)
 
 use std::string::{split, join}
+use std::collections::seq
 
 # FileSystem error types (exported for pattern matching)
 pub type FileSystemError = | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int }, AlreadyExists { path: String }, DirectoryNotEmpty { path: String }, NotADirectory { path: String }, InvalidPath { path: String } |
@@ -69,9 +70,9 @@ pub let path_join: { parts: [String] } -> String = { parts } ->
 # Get the file name from a path (last component)
 pub let file_name: { path: String } -> String = { path } -> do
     let parts = split { s = path, delimiter = "/" }
-    let len = __native_arraylist_length { xs = parts }
+    let len = seq::length { xs = parts }
     match len > 0 is
-        True -> match __native_arraylist_get { xs = parts, i = len - 1 } is
+        True -> match seq::get { xs = parts, i = len - 1 } is
             Some { val } -> val
             None -> ""
         False -> ""
@@ -79,10 +80,10 @@ pub let file_name: { path: String } -> String = { path } -> do
 # Get the parent directory of a path
 pub let parent: { path: String } -> String = { path } -> do
     let parts = split { s = path, delimiter = "/" }
-    let len = __native_arraylist_length { xs = parts }
+    let len = seq::length { xs = parts }
     match len > 1 is
         True -> do
-            let init_parts = __native_arraylist_slice { xs = parts, start = 0, end = len - 1 }
+            let init_parts = seq::slice { xs = parts, start = 0, end = len - 1 }
             join { strings = init_parts, separator = "/" }
         False -> "/"
 
@@ -90,9 +91,9 @@ pub let parent: { path: String } -> String = { path } -> do
 pub let extension: { path: String } -> Option String = { path } -> do
     let name = file_name { path = path }
     let parts = split { s = name, delimiter = "." }
-    let len = __native_arraylist_length { xs = parts }
+    let len = seq::length { xs = parts }
     match len > 1 is
-        True -> __native_arraylist_get { xs = parts, i = len - 1 }
+        True -> seq::get { xs = parts, i = len - 1 }
         False -> None
 
 # Check if path has given extension

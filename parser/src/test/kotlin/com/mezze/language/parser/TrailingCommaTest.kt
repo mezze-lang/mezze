@@ -33,7 +33,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
-        val array = letBinding.expression as ArrayLiteral
+        val array = letBinding.expression as SeqLiteral
         assertEquals(3, array.elements.size)
     }
 
@@ -51,7 +51,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
-        val array = letBinding.expression as ArrayLiteral
+        val array = letBinding.expression as SeqLiteral
         assertEquals(3, array.elements.size)
     }
 
@@ -63,7 +63,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
-        val array = letBinding.expression as ArrayLiteral
+        val array = letBinding.expression as SeqLiteral
         assertEquals(3, array.elements.size)
     }
 
@@ -75,7 +75,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
-        val array = letBinding.expression as ArrayLiteral
+        val array = letBinding.expression as SeqLiteral
         assertEquals(2, array.elements.size)
     }
 
@@ -87,7 +87,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
-        val array = letBinding.expression as ArrayLiteral
+        val array = letBinding.expression as SeqLiteral
         assertEquals(1, array.elements.size)
     }
 
@@ -172,7 +172,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val pattern = matchExpr.cases[0].patterns.first() as ArrayPattern
+        val pattern = matchExpr.cases[0].patterns.first() as SeqPattern
         assertEquals(2, pattern.elements.size)
     }
 
@@ -192,7 +192,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val pattern = matchExpr.cases[0].patterns.first() as ArrayPattern
+        val pattern = matchExpr.cases[0].patterns.first() as SeqPattern
         assertEquals(3, pattern.elements.size)
     }
 
@@ -208,7 +208,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val pattern = matchExpr.cases[0].patterns.first() as ArrayPattern
+        val pattern = matchExpr.cases[0].patterns.first() as SeqPattern
         assertEquals(1, pattern.elements.size)
         assertEquals("tail", pattern.restPattern)
     }
@@ -225,7 +225,7 @@ class TrailingCommaTest {
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val pattern = matchExpr.cases[0].patterns.first() as ArrayPattern
+        val pattern = matchExpr.cases[0].patterns.first() as SeqPattern
         assertEquals(1, pattern.elements.size)
     }
 

@@ -23,15 +23,15 @@ import com.mezze.interpreter.v2.nodes.variant.VariantConstructNode
 import com.mezze.interpreter.v2.nodes.variant.MatchNode
 import com.mezze.interpreter.v2.nodes.variant.MatchBranchNode
 import com.mezze.interpreter.v2.nodes.control.IfLetBindingNode
-import com.mezze.interpreter.v2.nodes.array.ArrayAccessNode
-import com.mezze.interpreter.v2.nodes.array.ArrayLiteralNode as OptimizedArrayLiteralNode
-import com.mezze.interpreter.v2.nodes.array.ArraySliceNode
-import com.mezze.interpreter.v2.nodes.array.ArraySpreadNode
+import com.mezze.interpreter.v2.nodes.seq.SeqAccessNode
+import com.mezze.interpreter.v2.nodes.seq.SeqLiteralNode as OptimizedSeqLiteralNode
+import com.mezze.interpreter.v2.nodes.seq.SeqSliceNode
+import com.mezze.interpreter.v2.nodes.seq.SeqSpreadNode
 import com.mezze.interpreter.v2.nodes.effect.HandleNode
 import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinBinaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinUnaryNodes.*
-import com.mezze.interpreter.v2.nodes.builtin.NativeFunctions
+import com.mezze.interpreter.v2.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.v2.nodes.inline.*
 import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as OptimizedAbilityCallNode
 import com.mezze.interpreter.v2.nodes.ability.DictionaryAbilityCallNode
@@ -607,8 +607,8 @@ class ASTToTruffleConverterV2(
             is FunctionCall -> convertFunctionCall(expr)
             is LambdaExpression -> convertLambdaExpression(expr)
             is RecordLiteral -> convertRecordLiteral(expr)
-            is ArrayLiteral -> convertArrayLiteral(expr)
-            is ArrayAccess -> convertArrayAccess(expr)
+            is SeqLiteral -> convertSeqLiteral(expr)
+            is SeqAccess -> convertSeqAccess(expr)
             is MemberAccess -> convertMemberAccess(expr)
             is VariantConstruction -> convertVariantConstruction(expr)
             is DoExpression -> convertDoExpression(expr)
@@ -847,10 +847,10 @@ class ASTToTruffleConverterV2(
                         branches.add(MatchBranchNode.literalPattern(litValue, bodyNode))
                     }
                 }
-                is ArrayPattern -> {
-                    // Array pattern: [x, y], [head, ...tail], [], [[nested]], [Ok {val}], [True, False], etc.
-                    // Track nested array patterns: (elementIndex, tempSlot, nestedPattern)
-                    val nestedArrayPatterns = mutableListOf<Triple<Int, Int, ArrayPattern>>()
+                is SeqPattern -> {
+                    // Seq pattern: [x, y], [head, ...tail], [], [[nested]], [Ok {val}], [True, False], etc.
+                    // Track nested seq patterns: (elementIndex, tempSlot, nestedPattern)
+                    val nestedSeqPatterns = mutableListOf<Triple<Int, Int, SeqPattern>>()
                     // Track nested constructor patterns: (elementIndex, tempSlot, nestedPattern)
                     val nestedConstructorPatterns = mutableListOf<Triple<Int, Int, ConstructorPattern>>()
                     // Track nested literal patterns: (elementIndex, tempSlot, nestedPattern)
@@ -860,10 +860,10 @@ class ASTToTruffleConverterV2(
                         when (elemPattern) {
                             is VariablePattern -> getOrCreateSlot(elemPattern.name)
                             is WildcardPattern -> -1 // No binding needed
-                            is ArrayPattern -> {
-                                // Nested array pattern - allocate temp slot for intermediate array
+                            is SeqPattern -> {
+                                // Nested seq pattern - allocate temp slot for intermediate seq
                                 val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
-                                nestedArrayPatterns.add(Triple(idx, tempSlot, elemPattern))
+                                nestedSeqPatterns.add(Triple(idx, tempSlot, elemPattern))
                                 tempSlot
                             }
                             is ConstructorPattern -> {
@@ -899,9 +899,9 @@ class ASTToTruffleConverterV2(
 
                     var bodyNode = convertExpression(case.expression)
 
-                    // Wrap body with nested array pattern extraction (in reverse order)
-                    for ((_, tempSlot, nestedPattern) in nestedArrayPatterns.reversed()) {
-                        bodyNode = wrapBodyWithNestedArrayExtraction(tempSlot, nestedPattern, bodyNode)
+                    // Wrap body with nested seq pattern extraction (in reverse order)
+                    for ((_, tempSlot, nestedPattern) in nestedSeqPatterns.reversed()) {
+                        bodyNode = wrapBodyWithNestedSeqExtraction(tempSlot, nestedPattern, bodyNode)
                     }
 
                     // Wrap body with nested constructor pattern extraction (in reverse order)
@@ -914,7 +914,7 @@ class ASTToTruffleConverterV2(
                         bodyNode = wrapBodyWithNestedLiteralCheck(tempSlot, nestedPattern, bodyNode)
                     }
 
-                    branches.add(MatchBranchNode.arrayPattern(elementSlots, restSlot, hasRestPattern, bodyNode))
+                    branches.add(MatchBranchNode.seqPattern(elementSlots, restSlot, hasRestPattern, bodyNode))
                 }
                 is RecordPattern -> {
                     // Record pattern: {x, y} or {name = n, age = a}
@@ -1015,11 +1015,11 @@ class ASTToTruffleConverterV2(
                     }
                 }
             }
-            is ArrayPattern -> {
+            is SeqPattern -> {
                 for (elemPattern in pattern.elements) {
                     when (elemPattern) {
                         is VariablePattern -> getOrCreateSlot(elemPattern.name)
-                        is ArrayPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested array pattern
+                        is SeqPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested array pattern
                         is ConstructorPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested constructor pattern
                         else -> {} // WildcardPattern etc
                     }
@@ -1074,9 +1074,9 @@ class ASTToTruffleConverterV2(
                     }
                 }
             }
-            is ArrayPattern -> {
+            is SeqPattern -> {
                 // Get element type from array type
-                val elemType = (matchedType as? MezzeType.ArrayType)?.elementType
+                val elemType = (matchedType as? MezzeType.SeqType)?.elementType
                     ?: (matchedType as? MezzeType.ListType)?.elementType
                 for (elemPattern in pattern.elements) {
                     when (elemPattern) {
@@ -1084,7 +1084,7 @@ class ASTToTruffleConverterV2(
                             val kind = if (elemType != null) kindFromType(elemType) else ReadLocalNode.KIND_OBJECT
                             getOrCreateSlotWithKind(elemPattern.name, kind)
                         }
-                        is ArrayPattern -> preCreatePatternSlotsWithTypeRecursive(elemPattern, elemType)
+                        is SeqPattern -> preCreatePatternSlotsWithTypeRecursive(elemPattern, elemType)
                         is ConstructorPattern -> preCreatePatternSlotsWithTypeRecursive(elemPattern, elemType)
                         else -> {}
                     }
@@ -1681,14 +1681,14 @@ class ASTToTruffleConverterV2(
                 } || visit(e.result)
                 is LambdaExpression -> false
                 is RecordLiteral -> e.getFieldEntries().any { it.value?.let { v -> visit(v) } == true }
-                is ArrayLiteral -> e.elements.any { element ->
+                is SeqLiteral -> e.elements.any { element ->
                     when (element) {
-                        is ArrayRegularElement -> visit(element.expression)
-                        is ArraySpreadElement -> visit(element.expression)
+                        is SeqRegularElement -> visit(element.expression)
+                        is SeqSpreadElement -> visit(element.expression)
                     }
                 }
                 is MemberAccess -> visit(e.receiver)
-                is ArrayAccess -> visit(e.array) || visit(e.index)
+                is SeqAccess -> visit(e.seq) || visit(e.index)
                 is VariantConstruction -> e.value?.let { visit(it) } == true
                 is PerformExpression -> visit(e.expression)
                 else -> false
@@ -1758,16 +1758,16 @@ class ASTToTruffleConverterV2(
                         visit(spread.expression)
                     }
                 }
-                is ArrayLiteral -> {
+                is SeqLiteral -> {
                     e.elements.forEach { element ->
                         when (element) {
-                            is ArrayRegularElement -> visit(element.expression)
-                            is ArraySpreadElement -> visit(element.expression)
+                            is SeqRegularElement -> visit(element.expression)
+                            is SeqSpreadElement -> visit(element.expression)
                         }
                     }
                 }
-                is ArrayAccess -> {
-                    visit(e.array)
+                is SeqAccess -> {
+                    visit(e.seq)
                     visit(e.index)
                 }
                 is MemberAccess -> {
@@ -1877,41 +1877,41 @@ class ASTToTruffleConverterV2(
         )
     }
 
-    private fun convertArrayLiteral(arrayLit: ArrayLiteral): MezzeNode {
+    private fun convertSeqLiteral(seqLit: SeqLiteral): MezzeNode {
         // Check if there are spread elements
-        val hasSpread = arrayLit.elements.any { it is ArraySpreadElement }
+        val hasSpread = seqLit.elements.any { it is SeqSpreadElement }
 
         if (hasSpread) {
-            // Array has spread elements - use ArraySpreadNode
+            // Seq has spread elements - use SeqSpreadNode
             // Spreads come first, then regular elements (enforced by parser)
-            val spreadArrays = mutableListOf<MezzeNode>()
+            val spreadSeqs = mutableListOf<MezzeNode>()
             val appendElements = mutableListOf<MezzeNode>()
 
-            for (element in arrayLit.elements) {
+            for (element in seqLit.elements) {
                 when (element) {
-                    is ArraySpreadElement -> spreadArrays.add(convertExpression(element.expression))
-                    is ArrayRegularElement -> appendElements.add(convertExpression(element.expression))
+                    is SeqSpreadElement -> spreadSeqs.add(convertExpression(element.expression))
+                    is SeqRegularElement -> appendElements.add(convertExpression(element.expression))
                 }
             }
 
-            return ArraySpreadNode.create(
-                spreadArrays.toTypedArray(),
+            return SeqSpreadNode.create(
+                spreadSeqs.toTypedArray(),
                 appendElements.toTypedArray()
             )
         } else {
-            // Simple array without spread - use ArrayLiteralNode
-            val elementNodes = arrayLit.elements.map { element ->
-                (element as ArrayRegularElement).expression
+            // Simple seq without spread - use SeqLiteralNode
+            val elementNodes = seqLit.elements.map { element ->
+                (element as SeqRegularElement).expression
             }.map { convertExpression(it) }.toTypedArray()
 
-            return OptimizedArrayLiteralNode.create(elementNodes)
+            return OptimizedSeqLiteralNode.create(elementNodes)
         }
     }
 
-    private fun convertArrayAccess(arrayAccess: ArrayAccess): MezzeNode {
-        val arrayNode = convertExpression(arrayAccess.array)
-        val indexNode = convertExpression(arrayAccess.index)
-        return ArrayAccessNode.create(arrayNode, indexNode)
+    private fun convertSeqAccess(seqAccess: SeqAccess): MezzeNode {
+        val seqNode = convertExpression(seqAccess.seq)
+        val indexNode = convertExpression(seqAccess.index)
+        return SeqAccessNode.create(seqNode, indexNode)
     }
 
     private fun convertMemberAccess(memberAccess: MemberAccess): MezzeNode {
@@ -2278,7 +2278,7 @@ class ASTToTruffleConverterV2(
      * Convert native function calls to specialized Truffle nodes.
      * Returns null if the function is not a recognized native function.
      *
-     * Uses NativeFunctions dispatch for all __native_* functions.
+     * Uses NativeDispatch for all __native_* functions.
      * Continuation functions have specialized nodes for control flow.
      */
     private fun convertNativeFunctionCall(funcName: String, args: Expression): MezzeNode? {
@@ -2296,21 +2296,15 @@ class ASTToTruffleConverterV2(
             "__native_continuation_deactivate" -> ContinuationDeactivateNode.create(convertExpression(args))
 
             // Built-in crash function for program termination with error
-            "crash" -> com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create("crash", convertExpression(args))
+            "crash" -> NativeDispatch.create("crash", convertExpression(args))
 
-            // All other native functions use the dispatch node
+            // All other native functions use NativeDispatch
             else -> {
-                if (funcName.startsWith("__native_")) {
-                    // Try NativeFunctions first (optimized jump table for common ops)
-                    if (NativeFunctions.isNativeFunction(funcName)) {
-                        NativeFunctions.create(funcName, convertExpression(args))
-                    } else {
-                        // Fall back to NativeDispatch (HashMap-based, handles all remaining natives)
-                        com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create(funcName, convertExpression(args))
-                    }
-                } else if (funcName.startsWith("native_") && com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.isNativeFunction(funcName)) {
+                if (funcName.startsWith("__native_") && NativeDispatch.isNativeFunction(funcName)) {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                } else if (funcName.startsWith("native_") && NativeDispatch.isNativeFunction(funcName)) {
                     // Legacy native functions without double underscore prefix (backward compatibility)
-                    com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create(funcName, convertExpression(args))
+                    NativeDispatch.create(funcName, convertExpression(args))
                 } else {
                     null
                 }
@@ -2447,25 +2441,25 @@ class ASTToTruffleConverterV2(
     }
 
     /**
-     * Wraps a body node with nested array pattern extraction.
+     * Wraps a body node with nested seq pattern extraction.
      *
      * For a pattern like `[[x, ...rest], ...rows]`:
-     * 1. The outer array pattern binds element 0 to a temp slot (the inner array)
-     * 2. This method extracts `x` and `rest` from that inner array
+     * 1. The outer seq pattern binds element 0 to a temp slot (the inner seq)
+     * 2. This method extracts `x` and `rest` from that inner seq
      *
-     * @param tempSlot The slot holding the intermediate array
-     * @param nestedPattern The nested ArrayPattern to match against
+     * @param tempSlot The slot holding the intermediate seq
+     * @param nestedPattern The nested SeqPattern to match against
      * @param bodyNode The original body node to wrap
      * @return A BlockNode that extracts elements then executes the body
      */
-    private fun wrapBodyWithNestedArrayExtraction(
+    private fun wrapBodyWithNestedSeqExtraction(
         tempSlot: Int,
-        nestedPattern: ArrayPattern,
+        nestedPattern: SeqPattern,
         bodyNode: MezzeNode
     ): MezzeNode {
         val statements = mutableListOf<MezzeNode>()
-        // Track further nested array patterns: (tempSlot, pattern)
-        val furtherNestedArrays = mutableListOf<Pair<Int, ArrayPattern>>()
+        // Track further nested seq patterns: (tempSlot, pattern)
+        val furtherNestedSeqs = mutableListOf<Pair<Int, SeqPattern>>()
         // Track further nested constructor patterns: (tempSlot, pattern)
         val furtherNestedConstructors = mutableListOf<Pair<Int, ConstructorPattern>>()
 
@@ -2474,27 +2468,27 @@ class ASTToTruffleConverterV2(
             when (elemPattern) {
                 is VariablePattern -> {
                     val targetSlot = getOrCreateSlot(elemPattern.name)
-                    // array[idx] -> targetSlot
-                    val accessNode = ArrayAccessNode.create(
+                    // seq[idx] -> targetSlot
+                    val accessNode = SeqAccessNode.create(
                         ReadLocalNode.createObject(tempSlot),
                         IntLiteralNode(idx.toLong())
                     )
                     statements.add(WriteLocalNode.createObject(accessNode, targetSlot))
                 }
-                is ArrayPattern -> {
-                    // Further nested array - allocate temp slot
+                is SeqPattern -> {
+                    // Further nested seq - allocate temp slot
                     val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
-                    val accessNode = ArrayAccessNode.create(
+                    val accessNode = SeqAccessNode.create(
                         ReadLocalNode.createObject(tempSlot),
                         IntLiteralNode(idx.toLong())
                     )
                     statements.add(WriteLocalNode.createObject(accessNode, nestedTempSlot))
-                    furtherNestedArrays.add(nestedTempSlot to elemPattern)
+                    furtherNestedSeqs.add(nestedTempSlot to elemPattern)
                 }
                 is ConstructorPattern -> {
                     // Further nested constructor - allocate temp slot
                     val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
-                    val accessNode = ArrayAccessNode.create(
+                    val accessNode = SeqAccessNode.create(
                         ReadLocalNode.createObject(tempSlot),
                         IntLiteralNode(idx.toLong())
                     )
@@ -2514,7 +2508,7 @@ class ASTToTruffleConverterV2(
         nestedPattern.restPattern?.let { restName ->
             val restSlot = getOrCreateSlot(restName)
             // Create a slice from index=elements.size to end
-            val sliceNode = ArraySliceNode.create(
+            val sliceNode = SeqSliceNode.create(
                 ReadLocalNode.createObject(tempSlot),
                 IntLiteralNode(nestedPattern.elements.size.toLong())
             )
@@ -2523,8 +2517,8 @@ class ASTToTruffleConverterV2(
 
         // Recursively wrap body with further nested extractions
         var wrappedBody = bodyNode
-        for ((nestedSlot, nestedPat) in furtherNestedArrays.reversed()) {
-            wrappedBody = wrapBodyWithNestedArrayExtraction(nestedSlot, nestedPat, wrappedBody)
+        for ((nestedSlot, nestedPat) in furtherNestedSeqs.reversed()) {
+            wrappedBody = wrapBodyWithNestedSeqExtraction(nestedSlot, nestedPat, wrappedBody)
         }
         for ((nestedSlot, nestedPat) in furtherNestedConstructors.reversed()) {
             wrappedBody = wrapBodyWithNestedConstructorExtraction(nestedSlot, nestedPat, wrappedBody)

@@ -2,6 +2,7 @@
 
 use std::math::core
 use std::math::trig
+use std::collections::seq
 
 # Random effect definition
 effect Random where {
@@ -68,11 +69,11 @@ pub let bernoulli: { p: Float } -> Int <Random> = { p } -> do
 
 # Generate random element from list (returns None for empty list)
 pub let random_element: { xs: ['a] } -> Option 'a <Random> = { xs } -> do
-    let len = __native_arraylist_length { xs = xs }
+    let len = seq::length { xs = xs }
     match len > 0 is
         True -> do
             let idx = Random.random_int { min = 0, max = len - 1 }
-            __native_arraylist_get { xs = xs, i = idx }
+            seq::get { xs = xs, i = idx }
         False -> None
 
 # =============================================================================

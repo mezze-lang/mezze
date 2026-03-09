@@ -40,10 +40,10 @@ class BytesInterpreterTest {
     }
 
     @Test
-    fun `bytes from array`() {
+    fun `bytes from seq`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [72, 101, 108, 108, 111] }
+            let b = bytes::from_seq { arr = [72, 101, 108, 108, 111] }
             bytes::length { b = b }
         """)
         assertEquals(5L, result)
@@ -278,7 +278,7 @@ class BytesInterpreterTest {
     fun `bytes reverse`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let rev = bytes::reverse { b = b }
             match bytes::get { b = rev, i = 0 } is
                 Some { val } -> val
@@ -291,7 +291,7 @@ class BytesInterpreterTest {
     fun `bytes map doubles each byte`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3] }
+            let b = bytes::from_seq { arr = [1, 2, 3] }
             let doubled = bytes::map { b = b, f = { x } -> x * 2 }
             match bytes::get { b = doubled, i = 1 } is
                 Some { val } -> val
@@ -304,7 +304,7 @@ class BytesInterpreterTest {
     fun `bytes fold sums all bytes`() {
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [1, 2, 3, 4] }
+            let b = bytes::from_seq { arr = [1, 2, 3, 4] }
             bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte }
         """)
         assertEquals(10L, result) // 1 + 2 + 3 + 4 = 10
@@ -315,13 +315,13 @@ class BytesInterpreterTest {
     // ========================================
 
     @Test
-    fun `bytes to_array returns array of ints`() {
-        // Test that to_array returns an array by checking it's not empty
-        // The array should have 3 elements [65, 66, 67]
+    fun `bytes to_seq returns seq of ints`() {
+        // Test that to_seq returns a seq by checking it's not empty
+        // The seq should have 3 elements [65, 66, 67]
         val result = eval("""
             use std::collections::bytes
-            let b = bytes::from_array { arr = [65, 66, 67] }
-            let arr = bytes::to_array { b = b }
+            let b = bytes::from_seq { arr = [65, 66, 67] }
+            let arr = bytes::to_seq { b = b }
             # Check first element via fold
             bytes::fold { b = b, init = 0, f = { acc, byte } -> if acc == 0 then byte else acc }
         """)

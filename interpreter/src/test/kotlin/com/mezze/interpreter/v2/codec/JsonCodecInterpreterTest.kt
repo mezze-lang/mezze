@@ -332,9 +332,9 @@ class JsonCodecInterpreterTest {
     @Test
     fun `serialize JArray`() {
         val source = """
-            # Define Json type locally for testing (with Array for items)
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: Array Json } |
-            let items: Array Json = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]
+            # Define Json type locally for testing (with Seq for items)
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] } |
+            let items: [Json] = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]
             let json: Json = JArray {items = items}
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -355,8 +355,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JObject`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: Array Json }, JObject { fields: Array {key: String, value: Json} } |
-            let fields: Array {key: String, value: Json} = [
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] }, JObject { fields: [{key: String, value: Json}] } |
+            let fields: [{key: String, value: Json}] = [
                 {key = "name", value = JString {val = "Alice"}},
                 {key = "age", value = JInt {val = 30}}
             ]

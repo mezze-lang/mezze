@@ -242,10 +242,10 @@ class ResultIntegrationTest {
     void toListConvertsOkToSingleton() {
         Object result = MezzeTestHelper.run("""
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: (Result Int String) = Ok { val = 42 }
             let arr = result::to_list { result = res }
-            array::length { xs = arr }
+            seq::length { xs = arr }
             """);
         assertEquals(1L, result);
     }
@@ -254,10 +254,10 @@ class ResultIntegrationTest {
     void toListConvertsErrToEmpty() {
         Object result = MezzeTestHelper.run("""
             use std::result
-            use std::collections::array
+            use std::collections::seq
             let res: (Result Int String) = Err { error = "failed" }
             let arr = result::to_list { result = res }
-            array::length { xs = arr }
+            seq::length { xs = arr }
             """);
         assertEquals(0L, result);
     }

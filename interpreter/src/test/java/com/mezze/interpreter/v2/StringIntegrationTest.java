@@ -248,9 +248,9 @@ class StringIntegrationTest {
     void splitDividesStringByDelimiter() {
         Object result = MezzeTestHelper.run("""
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::split { s = "a,b,c", delimiter = "," }
-            array::length { xs = parts }
+            seq::length { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -268,9 +268,9 @@ class StringIntegrationTest {
     void linesSplitsByNewlines() {
         Object result = MezzeTestHelper.run("""
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::lines { s = "a\\nb\\nc" }
-            array::length { xs = parts }
+            seq::length { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -279,9 +279,9 @@ class StringIntegrationTest {
     void wordsSplitsByWhitespace() {
         Object result = MezzeTestHelper.run("""
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::words { s = "hello   world  test" }
-            array::length { xs = parts }
+            seq::length { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -317,9 +317,9 @@ class StringIntegrationTest {
     void charsConvertsToCharacterArray() {
         Object result = MezzeTestHelper.run("""
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let cs = string::chars { s = "abc" }
-            array::length { xs = cs }
+            seq::length { xs = cs }
             """);
         assertEquals(3L, result);
     }

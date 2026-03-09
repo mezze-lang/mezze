@@ -2,6 +2,7 @@ package com.mezze.interpreter.v2.nodes.builtin.effects;
 
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -54,13 +55,13 @@ public final class EnvironmentNatives {
         Object[] entries = new Object[env.size()];
         int i = 0;
         for (var entry : env.entrySet()) {
-            // Create tuple as a record with first/second fields
+            // Create tuple as a record with key/value fields
             entries[i++] = MezzeRecord.fromFields(
-                new String[]{"first", "second"},
+                new String[]{"key", "value"},
                 new Object[]{entry.getKey(), entry.getValue()}
             );
         }
-        return MezzeList.fromArray(entries);
+        return MezzeSeq.fromArray(entries);
     }
 
     @TruffleBoundary
@@ -100,7 +101,7 @@ public final class EnvironmentNatives {
     @TruffleBoundary
     public static Object processArgs(MezzeRecord args) {
         String[] procArgs = ProcessHandle.current().info().arguments().orElse(new String[0]);
-        return MezzeList.fromArray(procArgs);
+        return MezzeSeq.fromArray(procArgs);
     }
 
     @TruffleBoundary

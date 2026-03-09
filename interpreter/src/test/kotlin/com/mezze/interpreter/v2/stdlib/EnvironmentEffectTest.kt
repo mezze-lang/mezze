@@ -25,10 +25,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment current_dir returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let dir = Environment.current_dir {}
-                __native_string_length { s = dir } > 0
+                string::length { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -37,10 +38,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment os_name returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let name = Environment.os_name {}
-                __native_string_length { s = name } > 0
+                string::length { s = name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -61,10 +63,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment arch returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let arch = Environment.arch {}
-                __native_string_length { s = arch } > 0
+                string::length { s = arch } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -73,10 +76,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment os_version returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let version = Environment.os_version {}
-                __native_string_length { s = version } > 0
+                string::length { s = version } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -85,10 +89,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment process_args returns array`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::collections::seq
 
             perform SystemEnvironment in do
                 let args = Environment.process_args {}
-                __native_arraylist_length { xs = args } >= 0
+                seq::length { xs = args } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -97,10 +102,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment get_all_env returns array`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
+            use std::collections::seq
 
             perform SystemEnvironment in do
                 let vars = Environment.get_all_env {}
-                __native_arraylist_length { xs = vars } >= 0
+                seq::length { xs = vars } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -135,10 +141,11 @@ class EnvironmentEffectTest {
     fun `test current_dir convenience function`() {
         val result = eval("""
             use std::effects::environment::{current_dir, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let dir = current_dir {}
-                __native_string_length { s = dir } > 0
+                string::length { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -147,10 +154,11 @@ class EnvironmentEffectTest {
     fun `test os_info convenience function`() {
         val result = eval("""
             use std::effects::environment::{os_info, SystemEnvironment}
+            use std::string
 
             perform SystemEnvironment in do
                 let info = os_info {}
-                __native_string_length { s = info.name } > 0
+                string::length { s = info.name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }

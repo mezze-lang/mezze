@@ -192,10 +192,11 @@ class MutexModuleTest {
     fun `test with_lock with list result`() {
         val result = eval("""
             use std::effects::concurrent::mutex::{mutex, with_lock}
+            use std::collections::seq
 
             let m = mutex {}
             let list = with_lock {mutex = m, f = {} -> [1, 2, 3]}
-            __native_arraylist_length {xs = list}
+            seq::length {xs = list}
         """)
         assertEquals(3L, result)
     }

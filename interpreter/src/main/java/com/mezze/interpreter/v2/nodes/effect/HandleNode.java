@@ -312,13 +312,13 @@ public final class HandleNode extends MezzeNode {
 
         Throwable bodyException = null;
         Object result = null;
-        MezzeList forkedResults = null;
+        Object forkedResults = null;
 
         try {
             // Execute the body with the handler (and scope if scoped effect) installed
             result = bodyNode.execute(frame);
         } catch (ForkedExecutionException e) {
-            // Fork completed - capture results, run finalize_scope, then return values
+            // Fork completed - capture results (MezzeSeq), run finalize_scope, then return values
             forkedResults = e.values;
         } catch (Throwable t) {
             // Capture exception for later - finalize_scope must still run

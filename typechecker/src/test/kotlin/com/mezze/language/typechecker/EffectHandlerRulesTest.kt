@@ -116,7 +116,7 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler can use other effects`() {
         val source = """
-            use std::collections::array
+            use std::collections::seq
 
             effect Database where {
               query: { sql: String } -> [String] <Database>
@@ -133,7 +133,7 @@ class EffectHandlerRulesTest {
             impl Auth for DatabaseAuth where {
               check: { token: String } -> Boolean <Database> = { token } -> do
                 let results = Database.query { sql = "SELECT * FROM tokens" }
-                array::length {xs = results} > 0
+                seq::length {xs = results} > 0
             }
 
             let authenticate = { token } -> Auth.check { token = token }

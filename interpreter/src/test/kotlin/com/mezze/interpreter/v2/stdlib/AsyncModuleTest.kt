@@ -24,6 +24,7 @@ class AsyncModuleTest {
     private fun withCoopAsync(body: String): String = """
         use std::effects::async::{Async, CoopAsync}
         use std::control::continuation
+        use std::collections::seq
 
         perform CoopAsync {cont = continuation::new {}} in do
             $body
@@ -84,7 +85,7 @@ class AsyncModuleTest {
             let p2 = Async.spawn {f = {} -> 2}
             let p3 = Async.spawn {f = {} -> 3}
             let results = Async.all {ps = [p1, p2, p3]}
-            __native_arraylist_length {xs = results}
+            seq::length {xs = results}
         """))
         assertEquals(3L, result)
     }
@@ -95,7 +96,7 @@ class AsyncModuleTest {
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
             let results = Async.all {ps = [p1, p2]}
-            match __native_arraylist_get {xs = results, i = 0} is
+            match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
         """))
@@ -150,7 +151,7 @@ class AsyncModuleTest {
     fun `test map applies function concurrently`() {
         val result = eval(withCoopAsync("""
             let results = Async.map {xs = [1, 2, 3], f = {x} -> x * 2}
-            __native_arraylist_length {xs = results}
+            seq::length {xs = results}
         """))
         assertEquals(3L, result)
     }
@@ -159,7 +160,7 @@ class AsyncModuleTest {
     fun `test map preserves order`() {
         val result = eval(withCoopAsync("""
             let results = Async.map {xs = [10, 20, 30], f = {x} -> x + 1}
-            match __native_arraylist_get {xs = results, i = 0} is
+            match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
         """))
@@ -183,7 +184,7 @@ class AsyncModuleTest {
     fun `test filter keeps matching elements`() {
         val result = eval(withCoopAsync("""
             let results = Async.filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-            __native_arraylist_length {xs = results}
+            seq::length {xs = results}
         """))
         assertEquals(2L, result)
     }
@@ -293,7 +294,7 @@ class AsyncModuleTest {
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let results = Async.settle {ps = [p1, p2]}
-            __native_arraylist_length {xs = results}
+            seq::length {xs = results}
         """))
         assertEquals(2L, result)
     }
@@ -309,7 +310,7 @@ class AsyncModuleTest {
                 f = {x} -> x * x
             }
             # Sum the results
-            let sum = __native_arraylist_fold {
+            let sum = seq::fold {
                 xs = tasks,
                 init = 0,
                 f = {acc, x} -> acc + x

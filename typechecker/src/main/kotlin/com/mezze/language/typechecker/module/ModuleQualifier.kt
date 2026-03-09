@@ -10,7 +10,7 @@ import com.mezze.language.ast.*
  *
  * ## Example:
  *
- * **Original module** (std::collections::array):
+ * **Original module** (std::collections::seq):
  * ```mezze
  * let concat = {x, y} -> ...
  * let flatten = {list} -> fold {init = [], f = concat, list}
@@ -36,7 +36,7 @@ import com.mezze.language.ast.*
  * val qualifier = ModuleQualifier()
  * val qualifiedProgram = qualifier.qualifyModule(
  *     program = module.program,
- *     modulePath = "std::collections::array",
+ *     modulePath = "std::collections::seq",
  *     definedNames = setOf("concat", "map", "filter")
  * )
  * ```
@@ -49,7 +49,7 @@ class ModuleQualifier {
      * names are qualified with the module prefix.
      *
      * @param program The program to qualify
-     * @param modulePath The module path (e.g., "std::collections::array")
+     * @param modulePath The module path (e.g., "std::collections::seq")
      * @param definedNames Set of names defined in this module
      * @return Qualified program
      */
@@ -59,7 +59,7 @@ class ModuleQualifier {
         definedNames: Set<String>
     ): Program {
         // Convert module path to qualified prefix
-        // Example: "std::collections::array" -> "std__collections__array__"
+        // Example: "std::collections::seq" -> "std__collections__array__"
         val prefix = modulePath.replace("::", "__") + "__"
 
         // Transform all program items
@@ -265,18 +265,18 @@ class ModuleQualifier {
                 value = expr.value?.let { qualifyExpression(it, moduleNames, prefix) }
             )
 
-            // Array operations - qualify elements/indices
-            is ArrayLiteral -> expr.copy(
+            // Seq operations - qualify elements/indices
+            is SeqLiteral -> expr.copy(
                 elements = expr.elements.map { element ->
                     when (element) {
-                        is ArrayRegularElement -> ArrayRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
-                        is ArraySpreadElement -> ArraySpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is SeqRegularElement -> SeqRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is SeqSpreadElement -> SeqSpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
                     }
                 }
             )
 
-            is ArrayAccess -> expr.copy(
-                array = qualifyExpression(expr.array, moduleNames, prefix),
+            is SeqAccess -> expr.copy(
+                seq = qualifyExpression(expr.seq, moduleNames, prefix),
                 index = qualifyExpression(expr.index, moduleNames, prefix)
             )
 

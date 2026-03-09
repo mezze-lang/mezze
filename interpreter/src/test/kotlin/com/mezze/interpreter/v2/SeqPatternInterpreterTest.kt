@@ -5,18 +5,18 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Comprehensive tests for array pattern matching in the interpreter
+ * Comprehensive tests for seq pattern matching in the interpreter
  *
  * Tests runtime behavior of:
- * - Empty array patterns
- * - Fixed-length array patterns
+ * - Empty seq patterns
+ * - Fixed-length seq patterns
  * - Rest patterns ([head, ...tail])
- * - Nested array patterns
- * - Recursive functions using array patterns
+ * - Nested seq patterns
+ * - Recursive functions using seq patterns
  *
  * Migrated from V1 to V2 with unboxed values.
  */
-class ArrayPatternInterpreterTest {
+class SeqPatternInterpreterTest {
 
     @BeforeEach
     fun setUp() {
@@ -26,11 +26,11 @@ class ArrayPatternInterpreterTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ==========================================================================
-    // SECTION 1: Empty Array Pattern
+    // SECTION 1: Empty Seq Pattern
     // ==========================================================================
 
     @Test
-    fun `empty array pattern - matches empty array`() {
+    fun `empty seq pattern - matches empty seq`() {
         val code = """
             match [] is
               [] -> "empty"
@@ -40,7 +40,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `empty array pattern - does not match non-empty array`() {
+    fun `empty seq pattern - does not match non-empty seq`() {
         val code = """
             match [1, 2, 3] is
               [] -> "empty"
@@ -50,7 +50,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `is_empty function using array patterns`() {
+    fun `is_empty function using seq patterns`() {
         val code = """
             let is_empty = {xs: [Int]} ->
                 match xs is
@@ -63,11 +63,11 @@ class ArrayPatternInterpreterTest {
     }
 
     // ==========================================================================
-    // SECTION 2: Fixed-Length Array Patterns
+    // SECTION 2: Fixed-Length Seq Patterns
     // ==========================================================================
 
     @Test
-    fun `single element array pattern`() {
+    fun `single element seq pattern`() {
         val code = """
             match [42] is
               [x] -> x
@@ -77,7 +77,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `two element array pattern`() {
+    fun `two element seq pattern`() {
         val code = """
             match [10, 20] is
               [x, y] -> x + y
@@ -87,7 +87,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `three element array pattern`() {
+    fun `three element seq pattern`() {
         val code = """
             match [1, 2, 3] is
               [a, b, c] -> a + b + c
@@ -129,14 +129,14 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `rest pattern - get tail length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let get_tail = {xs: [Int]} ->
                 match xs is
                   [head, ...tail] -> tail
                   _ -> []
 
             let tail = get_tail {xs = [1, 2, 3, 4, 5]}
-            array::length {xs = tail}
+            seq::length {xs = tail}
         """
         assertEquals(4L, eval(code))
     }
@@ -154,9 +154,9 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `rest pattern - only rest length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             match [1, 2, 3] is
-              [...all] -> array::length {xs = all}
+              [...all] -> seq::length {xs = all}
         """
         assertEquals(3L, eval(code))
     }
@@ -194,15 +194,15 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `recursive map function length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_map = {f: {x: Int} -> Int, xs: [Int]} ->
                 match xs is
                   [] -> []
-                  [head, ...tail] -> array::of {x = f {x = head}, xs = my_map {f = f, xs = tail}}
+                  [head, ...tail] -> seq::of {x = f {x = head}, xs = my_map {f = f, xs = tail}}
 
             let double = {x: Int} -> x * 2
             let result = my_map {f = double, xs = [1, 2, 3]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -210,18 +210,18 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `recursive filter function length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_filter = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> []
                   [head, ...tail] ->
                     if pred {x = head}
-                    then array::of {x = head, xs = my_filter {pred = pred, xs = tail}}
+                    then seq::of {x = head, xs = my_filter {pred = pred, xs = tail}}
                     else my_filter {pred = pred, xs = tail}
 
             let is_positive = {x: Int} -> x > 0
             let result = my_filter {pred = is_positive, xs = [-1, 2, -3, 4, 5]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -257,20 +257,20 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `wildcard pattern with rest length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let skip_first = {xs: [Int]} ->
                 match xs is
                   [_, ...tail] -> tail
                   _ -> []
 
             let result = skip_first {xs = [1, 2, 3, 4]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(3L, eval(code))
     }
 
     // ==========================================================================
-    // SECTION 6: Literal Patterns in Arrays
+    // SECTION 6: Literal Patterns in Seqs
     // ==========================================================================
 
     @Test
@@ -294,7 +294,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `literal pattern - boolean array`() {
+    fun `literal pattern - boolean seq`() {
         val code = """
             match [True, False] is
               [True, False] -> "pattern1"
@@ -305,11 +305,11 @@ class ArrayPatternInterpreterTest {
     }
 
     // ==========================================================================
-    // SECTION 7: Nested Array Patterns
+    // SECTION 7: Nested Seq Patterns
     // ==========================================================================
 
     @Test
-    fun `nested array pattern - simple`() {
+    fun `nested seq pattern - simple`() {
         val code = """
             match [[42]] is
               [[x]] -> x
@@ -319,7 +319,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `nested array pattern - matrix first element`() {
+    fun `nested seq pattern - matrix first element`() {
         val code = """
             match [[1, 2], [3, 4]] is
               [[x, ...rest], ...rows] -> x
@@ -329,11 +329,11 @@ class ArrayPatternInterpreterTest {
     }
 
     // ==========================================================================
-    // SECTION 8: String Arrays
+    // SECTION 8: String Seqs
     // ==========================================================================
 
     @Test
-    fun `string array pattern matching`() {
+    fun `string seq pattern matching`() {
         val code = """
             let get_greeting = {names: [String]} ->
                 match names is
@@ -347,7 +347,7 @@ class ArrayPatternInterpreterTest {
     }
 
     @Test
-    fun `string array with literal patterns`() {
+    fun `string seq with literal patterns`() {
         val code = """
             let is_help_command = {args: [String]} ->
                 match args is
@@ -391,11 +391,11 @@ class ArrayPatternInterpreterTest {
     }
 
     // ==========================================================================
-    // SECTION 10: Guards with Array Patterns
+    // SECTION 10: Guards with Seq Patterns
     // ==========================================================================
 
     @Test
-    fun `guard - check array element value`() {
+    fun `guard - check seq element value`() {
         val code = """
             let starts_with_positive = {xs: [Int]} ->
                 match xs is
@@ -440,15 +440,15 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - reverse function length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let reverse_helper = {xs: [Int], acc: [Int]} ->
                 match xs is
                   [] -> acc
-                  [head, ...tail] -> reverse_helper {xs = tail, acc = array::of {x = head, xs = acc}}
+                  [head, ...tail] -> reverse_helper {xs = tail, acc = seq::of {x = head, xs = acc}}
 
             let reverse = {xs: [Int]} -> reverse_helper {xs = xs, acc = []}
             let result = reverse {xs = [1, 2, 3, 4, 5]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(5L, eval(code))
     }
@@ -456,15 +456,15 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - reverse function first element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let reverse_helper = {xs: [Int], acc: [Int]} ->
                 match xs is
                   [] -> acc
-                  [head, ...tail] -> reverse_helper {xs = tail, acc = array::of {x = head, xs = acc}}
+                  [head, ...tail] -> reverse_helper {xs = tail, acc = seq::of {x = head, xs = acc}}
 
             let reverse = {xs: [Int]} -> reverse_helper {xs = xs, acc = []}
             let result = reverse {xs = [1, 2, 3, 4, 5]}
-            match array::get {xs = result, i = 0} is
+            match seq::get {xs = result, i = 0} is
                 Some { val } -> val
                 None -> -1
         """
@@ -474,17 +474,17 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - take n elements length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_take = {n: Int, xs: [Int]} ->
                 match xs is
                   [] -> []
                   [head, ...tail] ->
                     if n <= 0
                     then []
-                    else array::of {x = head, xs = my_take {n = n - 1, xs = tail}}
+                    else seq::of {x = head, xs = my_take {n = n - 1, xs = tail}}
 
             let result = my_take {n = 3, xs = [1, 2, 3, 4, 5]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -492,7 +492,7 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - drop n elements length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let drop = {n: Int, xs: [Int]} ->
                 match xs is
                   [] -> []
@@ -502,7 +502,7 @@ class ArrayPatternInterpreterTest {
                     else drop {n = n - 1, xs = tail}
 
             let result = drop {n = 2, xs = [1, 2, 3, 4, 5]}
-            array::length {xs = result}
+            seq::length {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -510,19 +510,19 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - partition function yes count`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> {yes = [], no = []}
                   [head, ...tail] -> do
                     let rest = my_partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then {yes = array::of {x = head, xs = rest.yes}, no = rest.no}
-                    else {yes = rest.yes, no = array::of {x = head, xs = rest.no}}
+                    then {yes = seq::of {x = head, xs = rest.yes}, no = rest.no}
+                    else {yes = rest.yes, no = seq::of {x = head, xs = rest.no}}
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
-            array::length {xs = result.yes}
+            seq::length {xs = result.yes}
         """
         assertEquals(3L, eval(code))
     }
@@ -530,19 +530,19 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `real world - partition function no count`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
             let my_partition = {pred: {x: Int} -> Bool, xs: [Int]} ->
                 match xs is
                   [] -> {yes = [], no = []}
                   [head, ...tail] -> do
                     let rest = my_partition {pred = pred, xs = tail}
                     if pred {x = head}
-                    then {yes = array::of {x = head, xs = rest.yes}, no = rest.no}
-                    else {yes = rest.yes, no = array::of {x = head, xs = rest.no}}
+                    then {yes = seq::of {x = head, xs = rest.yes}, no = rest.no}
+                    else {yes = rest.yes, no = seq::of {x = head, xs = rest.no}}
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
-            array::length {xs = result.no}
+            seq::length {xs = result.no}
         """
         assertEquals(3L, eval(code))
     }

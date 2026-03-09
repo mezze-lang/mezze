@@ -202,9 +202,9 @@ class StringModuleTest {
     fun `test string split`() {
         val source = """
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::split { s = "a,b,c", delimiter = "," }
-            array::length { xs = parts }
+            seq::length { xs = parts }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -214,9 +214,9 @@ class StringModuleTest {
     fun `test string split - no delimiter found`() {
         val source = """
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::split { s = "hello", delimiter = "," }
-            array::length { xs = parts }
+            seq::length { xs = parts }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -226,9 +226,9 @@ class StringModuleTest {
     fun `test string split - empty string`() {
         val source = """
             use std::string
-            use std::collections::array
+            use std::collections::seq
             let parts = string::split { s = "", delimiter = "," }
-            array::length { xs = parts }
+            seq::length { xs = parts }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -428,9 +428,10 @@ class StringModuleTest {
     fun `test string lines`() {
         val source = """
             use std::string
+            use std::collections::seq
             let s = "line1\nline2\nline3"
             let lines = string::lines { s = s }
-            __native_arraylist_length { xs = lines }
+            seq::length { xs = lines }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -440,9 +441,10 @@ class StringModuleTest {
     fun `test string words`() {
         val source = """
             use std::string
+            use std::collections::seq
             let s = "hello world foo"
             let words = string::words { s = s }
-            __native_arraylist_length { xs = words }
+            seq::length { xs = words }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -452,9 +454,10 @@ class StringModuleTest {
     fun `test string chars`() {
         val source = """
             use std::string
+            use std::collections::seq
             let s = "hello"
             let chars = string::chars { s = s }
-            __native_arraylist_length { xs = chars }
+            seq::length { xs = chars }
         """.trimIndent()
 
         assertEquals(5L, eval(source))

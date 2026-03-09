@@ -99,7 +99,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test state effect with List type executes correctly - length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -110,7 +110,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform ListState in State.get {}
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(3L, eval(code))
@@ -119,7 +119,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test state effect with List type executes correctly - first element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -130,7 +130,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform ListState in State.get {}
-            match array::get { xs = xs, i = 0 } is
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -141,7 +141,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test state effect with List type executes correctly - second element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -152,7 +152,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform ListState in State.get {}
-            match array::get { xs = xs, i = 1 } is
+            match seq::get { xs = xs, i = 1 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -163,7 +163,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test state effect with List type executes correctly - third element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect State having 'state where {
                 get: {} -> 'state <State>
@@ -174,7 +174,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform ListState in State.get {}
-            match array::get { xs = xs, i = 2 } is
+            match seq::get { xs = xs, i = 2 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -399,7 +399,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test collection effect with list of associated type - length`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect Collection having 'item where {
                 getAll: {} -> ['item] <Collection>
@@ -410,7 +410,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform IntCollection in Collection.getAll {}
-            array::length { xs = xs }
+            seq::length { xs = xs }
         """.trimIndent()
 
         assertEquals(3L, eval(code))
@@ -419,7 +419,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test collection effect with list of associated type - first element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect Collection having 'item where {
                 getAll: {} -> ['item] <Collection>
@@ -430,7 +430,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform IntCollection in Collection.getAll {}
-            match array::get { xs = xs, i = 0 } is
+            match seq::get { xs = xs, i = 0 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -441,7 +441,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test collection effect with list of associated type - second element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect Collection having 'item where {
                 getAll: {} -> ['item] <Collection>
@@ -452,7 +452,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform IntCollection in Collection.getAll {}
-            match array::get { xs = xs, i = 1 } is
+            match seq::get { xs = xs, i = 1 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()
@@ -463,7 +463,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test collection effect with list of associated type - third element`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             effect Collection having 'item where {
                 getAll: {} -> ['item] <Collection>
@@ -474,7 +474,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let xs = perform IntCollection in Collection.getAll {}
-            match array::get { xs = xs, i = 2 } is
+            match seq::get { xs = xs, i = 2 } is
                 Some { val } -> val
                 None -> -1
         """.trimIndent()

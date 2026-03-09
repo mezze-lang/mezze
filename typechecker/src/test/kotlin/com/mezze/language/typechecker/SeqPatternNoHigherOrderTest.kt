@@ -4,7 +4,7 @@ import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 
-class ArrayPatternNoHigherOrderTest {
+class SeqPatternNoHigherOrderTest {
 
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
@@ -18,7 +18,7 @@ class ArrayPatternNoHigherOrderTest {
     }
 
     @Test
-    fun `recursive with array patterns but NO higher-order function`() {
+    fun `recursive with seq patterns but NO higher-order function`() {
         val code = """
             let sum = {xs: [Int]} ->
                 match xs is
@@ -37,14 +37,14 @@ class ArrayPatternNoHigherOrderTest {
     @Test
     fun `recursive map-like function with separate double function`() {
         val code = """
-            use std::collections::array
+            use std::collections::seq
 
             let double = {x: Int} -> x * 2
 
             let map_double = {xs: [Int]} ->
                 match xs is
                   [] -> []
-                  [head, ...tail] -> array::of {x = double {x = head}, xs = map_double {xs = tail}}
+                  [head, ...tail] -> seq::of {x = double {x = head}, xs = map_double {xs = tail}}
 
             let result = map_double {xs = [1, 2, 3]}
         """.trimIndent()

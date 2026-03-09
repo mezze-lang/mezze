@@ -1,7 +1,8 @@
-package com.mezze.interpreter.v2.nodes.array;
+package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -12,34 +13,45 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 import java.util.Arrays;
 
 /**
- * Array slice node for extracting a sub-array.
+ * Seq slice node for extracting a sub-sequence.
  * Used for rest patterns like `[x, ...rest]` where we need to slice from index to end.
  *
  * Optimized for JIT compilation:
- * - Specialized for Object[] and MezzeList
+ * - Specialized for MezzeSeq, Object[] and MezzeList
  * - Uses branch profiles for polymorphic cases
  */
-@NodeInfo(shortName = "array-slice")
-@NodeChild(value = "arrayNode", type = MezzeNode.class)
+@NodeInfo(shortName = "seq-slice")
+@NodeChild(value = "seqNode", type = MezzeNode.class)
 @NodeChild(value = "startNode", type = MezzeNode.class)
-public abstract class ArraySliceNode extends MezzeNode {
+public abstract class SeqSliceNode extends MezzeNode {
 
     /**
      * Create a slice node that slices from start index to end.
      */
-    public static ArraySliceNode create(MezzeNode arrayNode, MezzeNode startNode) {
-        return ArraySliceNodeGen.create(arrayNode, startNode);
+    public static SeqSliceNode create(MezzeNode seqNode, MezzeNode startNode) {
+        return SeqSliceNodeGen.create(seqNode, startNode);
     }
 
     @Specialization
-    protected Object sliceObjectArray(Object[] array, long start,
+    protected MezzeSeq sliceMezzeSeq(MezzeSeq seq, long start,
+            @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
+        int startIdx = (int) start;
+        if (startIdx >= seq.size()) {
+            emptyProfile.enter(this);
+            return MezzeSeq.empty();
+        }
+        return seq.slice(startIdx, seq.size());
+    }
+
+    @Specialization
+    protected MezzeSeq sliceObjectArray(Object[] array, long start,
             @Cached @Shared("emptyProfile") InlinedBranchProfile emptyProfile) {
         int startIdx = (int) start;
         if (startIdx >= array.length) {
             emptyProfile.enter(this);
-            return new Object[0];
+            return MezzeSeq.empty();
         }
-        return Arrays.copyOfRange(array, startIdx, array.length);
+        return MezzeSeq.fromArray(Arrays.copyOfRange(array, startIdx, array.length));
     }
 
     @Specialization

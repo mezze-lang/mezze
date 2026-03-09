@@ -537,7 +537,7 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
                 val rbracket = tok(TokenType.RBRACKET)(stream1)
                 if (rbracket is ParseResult.Success) {
                     ParseResult.Success(
-                        ArrayLiteral(emptyList<ArrayElement>(), sourceLocation = arrayLocation),
+                        SeqLiteral(emptyList<SeqElement>(), sourceLocation = arrayLocation),
                         rbracket.remaining
                     )
                 } else {
@@ -557,7 +557,7 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
 
                             when (rbracket2) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    ArrayLiteral(elements.value, sourceLocation = arrayLocation),
+                                    SeqLiteral(elements.value, sourceLocation = arrayLocation),
                                     rbracket2.remaining
                                 )
                                 is ParseResult.Failure -> {
@@ -579,12 +579,12 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
  * Valid: [...xs, a, b, c] or [...xs]
  * Invalid: [a, ...xs] or [a, ...xs, b]
  */
-private fun validateArraySpreadPosition(elements: List<ArrayElement>, location: SourceLocation?) {
+private fun validateArraySpreadPosition(elements: List<SeqElement>, location: SourceLocation?) {
     var seenRegular = false
     for (element in elements) {
         when (element) {
-            is ArrayRegularElement -> seenRegular = true
-            is ArraySpreadElement -> {
+            is SeqRegularElement -> seenRegular = true
+            is SeqSpreadElement -> {
                 if (seenRegular) {
                     throw ParseException(
                         "Array spread must come before regular elements. Use [...arr, elem1, elem2] syntax.",
@@ -598,7 +598,7 @@ private fun validateArraySpreadPosition(elements: List<ArrayElement>, location: 
     }
 }
 
-internal val MezzeParser.arrayElementParser: Parser<ArrayElement>
+internal val MezzeParser.arrayElementParser: Parser<SeqElement>
     get() = { stream ->
         val current = stream.current()
 
@@ -610,7 +610,7 @@ internal val MezzeParser.arrayElementParser: Parser<ArrayElement>
                     val expr = expression(ellipsis.remaining)
                     when (expr) {
                         is ParseResult.Success -> ParseResult.Success(
-                            ArraySpreadElement(expr.value),
+                            SeqSpreadElement(expr.value),
                             expr.remaining
                         )
                         is ParseResult.Failure -> expr
@@ -623,7 +623,7 @@ internal val MezzeParser.arrayElementParser: Parser<ArrayElement>
             val expr = expression(stream)
             when (expr) {
                 is ParseResult.Success -> ParseResult.Success(
-                    ArrayRegularElement(expr.value),
+                    SeqRegularElement(expr.value),
                     expr.remaining
                 )
                 is ParseResult.Failure -> expr
@@ -1530,12 +1530,12 @@ internal fun MezzeParser.desugarPipe(pipeValue: Expression, target: Expression):
                 result = desugarPipe(pipeValue, target.result)
             )
 
-            // Recurse into array literals
-            is ArrayLiteral -> target.copy(
+            // Recurse into seq literals
+            is SeqLiteral -> target.copy(
                 elements = target.elements.map { element ->
                     when (element) {
-                        is ArrayRegularElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
-                        is ArraySpreadElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
+                        is SeqRegularElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
+                        is SeqSpreadElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
                     }
                 }
             )

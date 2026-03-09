@@ -13,7 +13,7 @@ import com.mezze.language.parser.internal.lib.*
  * - Constructor patterns (Cons { head, tail })
  * - Record patterns ({ x, y = pattern })
  * - Literal patterns (42, "hello", true)
- * - Array patterns ([x, y, ...rest])
+ * - Seq patterns ([x, y, ...rest])
  * - Let binding patterns (irrefutable patterns only)
  * - Pattern utilities and validation
  *
@@ -66,7 +66,7 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
     }
 
 // Array pattern parser
-internal val MezzeParser.arrayPattern: Parser<Pattern>
+internal val MezzeParser.seqPattern: Parser<Pattern>
     get() = { stream ->
         // Parse: [] or [x] or [x, y] or [x, ...rest]
         val lbracket = tok(TokenType.LBRACKET)(stream)
@@ -74,15 +74,15 @@ internal val MezzeParser.arrayPattern: Parser<Pattern>
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbracket.remaining)
 
-                // Check for empty array pattern []
+                // Check for empty seq pattern []
                 if (stream1.current()?.type == TokenType.RBRACKET) {
                     ParseResult.Success(
-                        ArrayPattern(emptyList(), null),
+                        SeqPattern(emptyList(), null),
                         stream1.advance()
                     )
                 } else {
                     // Use recursive parsing approach to avoid labeled returns in loops
-                    fun parseArrayElements(
+                    fun parseSeqElements(
                         s: TokenStream,
                         accum: List<Pattern>
                     ): ParseResult<Pair<List<Pattern>, Pair<String?, TokenStream>>> {
@@ -122,14 +122,14 @@ internal val MezzeParser.arrayPattern: Parser<Pattern>
                                         else -> {
                                             // Expected identifier or end of pattern
                                             ellipsisStream.failure(
-                                                "After '...' in array pattern, expected a name for the rest or ']' to end the pattern. Examples: [first, ...rest] or [first, ...]"
+                                                "After '...' in seq pattern, expected a name for the rest or ']' to end the pattern. Examples: [first, ...rest] or [first, ...]"
                                             )
                                         }
                                     }
                                 }
                             }
                         } else if (s.current()?.type == TokenType.RBRACKET) {
-                            // End of array pattern
+                            // End of seq pattern
                             ParseResult.Success(Pair(accum, Pair(null, s)), s)
                         } else {
                             // Parse pattern element
@@ -147,14 +147,14 @@ internal val MezzeParser.arrayPattern: Parser<Pattern>
                                                 ParseResult.Success(Pair(newAccum, Pair(null, afterComma)), afterComma)
                                             } else {
                                                 // Continue parsing
-                                                parseArrayElements(afterComma, newAccum)
+                                                parseSeqElements(afterComma, newAccum)
                                             }
                                         }
                                         TokenType.RBRACKET -> {
                                             ParseResult.Success(Pair(newAccum, Pair(null, afterPattern)), afterPattern)
                                         }
                                         else -> afterPattern.failure(
-                                            "Expected ',' to continue array pattern or ']' to end it, but got ${tokenGotDescription(afterPattern.current())}"
+                                            "Expected ',' to continue seq pattern or ']' to end it, but got ${tokenGotDescription(afterPattern.current())}"
                                         )
                                     }
                                 }
@@ -163,7 +163,7 @@ internal val MezzeParser.arrayPattern: Parser<Pattern>
                         }
                     }
 
-                    val elementsResult = parseArrayElements(stream1, emptyList())
+                    val elementsResult = parseSeqElements(stream1, emptyList())
                     when (elementsResult) {
                         is ParseResult.Success -> {
                             val (elements, restAndStream) = elementsResult.value
@@ -172,7 +172,7 @@ internal val MezzeParser.arrayPattern: Parser<Pattern>
                             val rbracket = tok(TokenType.RBRACKET)(currentStream)
                             when (rbracket) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    ArrayPattern(elements, restPat),
+                                    SeqPattern(elements, restPat),
                                     rbracket.remaining
                                 )
                                 is ParseResult.Failure -> rbracket
@@ -192,7 +192,7 @@ internal val MezzeParser.patternParser: Parser<Pattern>
         Parsers.oneOf(
             wildcardPattern,
             literalPattern,
-            arrayPattern,
+            seqPattern,
             standaloneRecordPattern,
             constructorPattern,
             variablePattern

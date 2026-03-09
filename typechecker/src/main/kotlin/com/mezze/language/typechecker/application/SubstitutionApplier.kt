@@ -576,7 +576,7 @@ class SubstitutionApplier(
             is BooleanLiteral -> applyToBooleanLiteral(expr)
             is FractionLiteral -> applyToFractionLiteral(expr)
             is StringLiteral -> applyToStringLiteral(expr)
-            is ArrayLiteral -> applyToArrayLiteral(expr)
+            is SeqLiteral -> applyToSeqLiteral(expr)
 
             // Variables
             is Identifier -> applyToIdentifier(expr)
@@ -588,8 +588,8 @@ class SubstitutionApplier(
                 inferredType = expr.inferredType?.let { substitution.apply(it) }
             )
 
-            // Arrays
-            is ArrayAccess -> applyToArrayAccess(expr)
+            // Seqs
+            is SeqAccess -> applyToSeqAccess(expr)
 
             // Records
             is RecordLiteral -> applyToRecordLiteral(expr)
@@ -675,31 +675,31 @@ class SubstitutionApplier(
         return expr.copy(parts = updatedParts, inferredType = updatedType)
     }
 
-    private fun applyToArrayLiteral(expr: ArrayLiteral): ArrayLiteral {
+    private fun applyToSeqLiteral(expr: SeqLiteral): SeqLiteral {
         val updatedElements = expr.elements.map { element ->
             when (element) {
-                is ArrayRegularElement -> ArrayRegularElement(applyToExpression(element.expression))
-                is ArraySpreadElement -> ArraySpreadElement(applyToExpression(element.expression))
+                is SeqRegularElement -> SeqRegularElement(applyToExpression(element.expression))
+                is SeqSpreadElement -> SeqSpreadElement(applyToExpression(element.expression))
             }
         }
         // CRITICAL FIX: Compute type based on expression structure
-        // Array type is Array<elementType>, where elementType is the type of the first element
+        // Seq type is Seq<elementType>, where elementType is the type of the first element
         val updatedType = if (updatedElements.isNotEmpty()) {
             val firstElement = updatedElements.first()
             val elementType = when (firstElement) {
-                is ArrayRegularElement -> firstElement.expression.inferredType ?: MezzeType.VarType(TypeVar.fresh())
-                is ArraySpreadElement -> {
+                is SeqRegularElement -> firstElement.expression.inferredType ?: MezzeType.VarType(TypeVar.fresh())
+                is SeqSpreadElement -> {
                     // For spread element, extract element type from the array type
                     val arrayType = firstElement.expression.inferredType
-                    if (arrayType is MezzeType.ArrayType) arrayType.elementType
+                    if (arrayType is MezzeType.SeqType) arrayType.elementType
                     else MezzeType.VarType(TypeVar.fresh())
                 }
             }
-            substitution.apply(MezzeType.ArrayType(elementType))
+            substitution.apply(MezzeType.SeqType(elementType))
         } else {
             // Empty array: use existing type if available, otherwise fresh type variable
             expr.inferredType?.let { substitution.apply(it) }
-                ?: MezzeType.ArrayType(MezzeType.VarType(TypeVar.fresh()))
+                ?: MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
         }
         return expr.copy(elements = updatedElements, inferredType = updatedType)
     }
@@ -731,15 +731,15 @@ class SubstitutionApplier(
     }
 
     // ========================================================================
-    // ARRAYS
+    // SEQS
     // ========================================================================
 
-    private fun applyToArrayAccess(expr: ArrayAccess): ArrayAccess {
-        val updatedArray = applyToExpression(expr.array)
+    private fun applyToSeqAccess(expr: SeqAccess): SeqAccess {
+        val updatedSeq = applyToExpression(expr.seq)
         val updatedIndex = applyToExpression(expr.index)
         val updatedType = expr.inferredType?.let { substitution.apply(it) }
         return expr.copy(
-            array = updatedArray,
+            seq = updatedSeq,
             index = updatedIndex,
             inferredType = updatedType
         )
@@ -1612,8 +1612,8 @@ class SubstitutionApplier(
                             typeMatchesAnnotation(argType, argAnnotation)
                         }
                     }
-                    is MezzeType.ArrayType -> {
-                        annotation.constructor == "Array" &&
+                    is MezzeType.SeqType -> {
+                        annotation.constructor == "Seq" &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
@@ -1655,8 +1655,8 @@ class SubstitutionApplier(
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                type is MezzeType.ArrayType &&
+            is SeqTypeAnnotation -> {
+                type is MezzeType.SeqType &&
                 typeMatchesAnnotation(type.elementType, annotation.elementType)
             }
             is FunctionTypeAnnotation -> {
@@ -1706,7 +1706,7 @@ class SubstitutionApplier(
                 else "${type.constructor}<${type.args.joinToString(", ") { prettyPrintType(it) }}>"
             }
             is MezzeType.ListType -> "List<${prettyPrintType(type.elementType)}>"
-            is MezzeType.ArrayType -> "Array<${prettyPrintType(type.elementType)}>"
+            is MezzeType.SeqType -> "Seq<${prettyPrintType(type.elementType)}>"
             else -> type.toString()
         }
     }
@@ -1741,10 +1741,10 @@ class SubstitutionApplier(
                 result.add(type.elementType)
                 collectNestedTypesImpl(type.elementType, result)
             }
-            is MezzeType.ArrayType -> {
+            is MezzeType.SeqType -> {
                 result.add(type.elementType)
                 collectNestedTypesImpl(type.elementType, result)
-                // Array encoder converts to List, so we need the List impl too
+                // Seq encoder converts to List, so we need the List impl too
                 val listType = MezzeType.ListType(type.elementType)
                 result.add(listType)
                 collectNestedTypesImpl(listType, result)
@@ -1802,7 +1802,7 @@ class SubstitutionApplier(
                 MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
             }
             is MezzeType.ListType -> MezzeType.ListType(closeOpenRecords(type.elementType))
-            is MezzeType.ArrayType -> MezzeType.ArrayType(closeOpenRecords(type.elementType))
+            is MezzeType.SeqType -> MezzeType.SeqType(closeOpenRecords(type.elementType))
             is MezzeType.SetType -> MezzeType.SetType(closeOpenRecords(type.elementType))
             is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeOpenRecords(type.elementType))
             is MezzeType.MapType -> MezzeType.MapType(
@@ -1826,7 +1826,7 @@ class SubstitutionApplier(
             is MezzeType.RecordType -> type.fields.values.any { containsVarType(it) }
             is MezzeType.VariantType -> type.constructors.values.any { it != null && containsVarType(it) }
             is MezzeType.ListType -> containsVarType(type.elementType)
-            is MezzeType.ArrayType -> containsVarType(type.elementType)
+            is MezzeType.SeqType -> containsVarType(type.elementType)
             is MezzeType.SetType -> containsVarType(type.elementType)
             is MezzeType.SortedSetType -> containsVarType(type.elementType)
             is MezzeType.MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
@@ -2308,8 +2308,8 @@ class SubstitutionApplier(
                     args = annotation.args.map { convertTypeAnnotation(it) }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(
                     elementType = convertTypeAnnotation(annotation.elementType)
                 )
             }
@@ -2397,7 +2397,7 @@ class SubstitutionApplier(
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is MezzeType.ArrayType -> MezzeType.ArrayType(closeGeneratedRowVars(type.elementType, bindingName))
+            is MezzeType.SeqType -> MezzeType.SeqType(closeGeneratedRowVars(type.elementType, bindingName))
             is MezzeType.ListType -> MezzeType.ListType(closeGeneratedRowVars(type.elementType, bindingName))
             is MezzeType.SetType -> MezzeType.SetType(closeGeneratedRowVars(type.elementType, bindingName))
             is MezzeType.SortedMapType -> MezzeType.SortedMapType(

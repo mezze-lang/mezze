@@ -684,8 +684,8 @@ class TypeValidator(
                     for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
                         extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.ArrayType && annotation.constructor == "Array") {
-                    // Handle Array type specially
+                } else if (concreteType is MezzeType.SeqType && annotation.constructor == "Seq") {
+                    // Handle Seq type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
                     }
@@ -713,9 +713,9 @@ class TypeValidator(
                     extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
                 }
             }
-            is ArrayTypeAnnotation -> {
-                // Match array element types
-                if (concreteType is MezzeType.ArrayType) {
+            is SeqTypeAnnotation -> {
+                // Match seq element types
+                if (concreteType is MezzeType.SeqType) {
                     extractTypeParamMappings(annotation.elementType, concreteType.elementType, typeParams, mappings)
                 }
             }
@@ -771,8 +771,8 @@ class TypeValidator(
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Eq", it) }) ||
                 // Derive Eq for lists if element type has Eq
                 (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType)) ||
-                // Derive Eq for arrays if element type has Eq
-                (unwrappedType is MezzeType.ArrayType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
+                // Derive Eq for seqs if element type has Eq
+                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
             }
 
             // Ordering - implemented for comparable types and derivable for records/variants/lists
@@ -790,8 +790,8 @@ class TypeValidator(
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Ord", it) }) ||
                 // Derive Ord for lists if element type has Ord
                 (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType)) ||
-                // Derive Ord for arrays if element type has Ord
-                (unwrappedType is MezzeType.ArrayType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
+                // Derive Ord for seqs if element type has Ord
+                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
             }
 
             // Inspect - built-in ability for displaying values (to_str)
@@ -924,7 +924,7 @@ class TypeValidator(
             convertAnnotationToType(annotation)
         } catch (e: Exception) {
             // Skip validation if annotation can't be converted
-            // This can happen with array annotations or other edge cases
+            // This can happen with seq annotations or other edge cases
             return emptyList()
         }
 
@@ -1269,8 +1269,8 @@ class TypeValidator(
                 type1.args.zip(type2.args).all { (a, b) -> alphaEquivalent(a, b, mapping) }
             }
 
-            // Both are array types
-            type1 is MezzeType.ArrayType && type2 is MezzeType.ArrayType -> {
+            // Both are seq types
+            type1 is MezzeType.SeqType && type2 is MezzeType.SeqType -> {
                 alphaEquivalent(type1.elementType, type2.elementType, mapping)
             }
 
@@ -1670,7 +1670,7 @@ class TypeValidator(
                         }
                         // Other literal patterns don't cover constructors
                     }
-                    is RecordPattern, is ArrayPattern -> {
+                    is RecordPattern, is SeqPattern -> {
                         // Other patterns don't cover specific constructors
                     }
                     is StringInterpolationPattern -> {
@@ -1931,7 +1931,7 @@ class TypeValidator(
             is VariablePattern,
             is WildcardPattern,
             is LiteralPattern,
-            is ArrayPattern,
+            is SeqPattern,
             is StringInterpolationPattern -> {
                 // These patterns don't need exhaustiveness checking here
                 // (StringInterpolationPattern is refutable, but that's checked elsewhere)
@@ -2105,18 +2105,18 @@ class TypeValidator(
                 errors.addAll(receiverErrors)
             }
 
-            is ArrayAccess -> {
-                val arrayErrors = validatePatternsInExpression(expr.array, substitution)
+            is SeqAccess -> {
+                val seqErrors = validatePatternsInExpression(expr.seq, substitution)
                 val indexErrors = validatePatternsInExpression(expr.index, substitution)
-                errors.addAll(arrayErrors)
+                errors.addAll(seqErrors)
                 errors.addAll(indexErrors)
             }
 
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 for (element in expr.elements) {
                     val elementExpr = when (element) {
-                        is ArrayRegularElement -> element.expression
-                        is ArraySpreadElement -> element.expression
+                        is SeqRegularElement -> element.expression
+                        is SeqSpreadElement -> element.expression
                     }
                     val elemErrors = validatePatternsInExpression(elementExpr, substitution)
                     errors.addAll(elemErrors)
@@ -2412,16 +2412,16 @@ class TypeValidator(
                 errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is ArrayAccess -> {
-                errors.addAll(validatePerformExpressionsInExpression(expr.array, implDeclarations, effectDeclarations, functionDefinitions))
+            is SeqAccess -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.seq, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.index, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 for (element in expr.elements) {
                     val elementExpr = when (element) {
-                        is ArrayRegularElement -> element.expression
-                        is ArraySpreadElement -> element.expression
+                        is SeqRegularElement -> element.expression
+                        is SeqSpreadElement -> element.expression
                     }
                     errors.addAll(validatePerformExpressionsInExpression(elementExpr, implDeclarations, effectDeclarations, functionDefinitions))
                 }
@@ -2651,14 +2651,14 @@ class TypeValidator(
 
                 is VariantConstruction -> e.value?.let { traverse(it) }
                 is MemberAccess -> traverse(e.receiver)
-                is ArrayAccess -> {
-                    traverse(e.array)
+                is SeqAccess -> {
+                    traverse(e.seq)
                     traverse(e.index)
                 }
-                is ArrayLiteral -> e.elements.forEach { element ->
+                is SeqLiteral -> e.elements.forEach { element ->
                     when (element) {
-                        is ArrayRegularElement -> traverse(element.expression)
-                        is ArraySpreadElement -> traverse(element.expression)
+                        is SeqRegularElement -> traverse(element.expression)
+                        is SeqSpreadElement -> traverse(element.expression)
                     }
                 }
                 is RecordUpdate -> {
@@ -2933,8 +2933,8 @@ class TypeValidator(
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                type is MezzeType.ArrayType && typeMatchesAnnotation(type.elementType, annotation.elementType)
+            is SeqTypeAnnotation -> {
+                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType)
             }
             is TypeApplicationAnnotation -> {
                 when {
@@ -2944,7 +2944,7 @@ class TypeValidator(
                             typeMatchesAnnotation(argType, argAnnotation)
                         }
                     }
-                    type is MezzeType.ArrayType && annotation.constructor == "Array" -> {
+                    type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     type is MezzeType.ListType && annotation.constructor == "List" -> {

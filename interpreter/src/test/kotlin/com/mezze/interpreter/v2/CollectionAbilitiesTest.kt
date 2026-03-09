@@ -23,10 +23,10 @@ class CollectionAbilitiesTest {
     @Test
     fun `array equals - same elements`() {
         val result = eval("""
-            use std::collections::array
-            let a1 = array::of { x = 1, xs = array::of { x = 2, xs = array::of { x = 3, xs = [] } } }
-            let a2 = array::of { x = 1, xs = array::of { x = 2, xs = array::of { x = 3, xs = [] } } }
-            array::equals { l = a1, r = a2 }
+            use std::collections::seq
+            let a1 = seq::of { x = 1, xs = seq::of { x = 2, xs = seq::of { x = 3, xs = [] } } }
+            let a2 = seq::of { x = 1, xs = seq::of { x = 2, xs = seq::of { x = 3, xs = [] } } }
+            seq::equals { l = a1, r = a2 }
         """)
         assertEquals(true, result)
     }
@@ -34,10 +34,10 @@ class CollectionAbilitiesTest {
     @Test
     fun `array equals - different elements`() {
         val result = eval("""
-            use std::collections::array
-            let a1 = array::of { x = 1, xs = array::of { x = 2, xs = array::of { x = 3, xs = [] } } }
-            let a2 = array::of { x = 1, xs = array::of { x = 2, xs = array::of { x = 4, xs = [] } } }
-            array::equals { l = a1, r = a2 }
+            use std::collections::seq
+            let a1 = seq::of { x = 1, xs = seq::of { x = 2, xs = seq::of { x = 3, xs = [] } } }
+            let a2 = seq::of { x = 1, xs = seq::of { x = 2, xs = seq::of { x = 4, xs = [] } } }
+            seq::equals { l = a1, r = a2 }
         """)
         assertEquals(false, result)
     }
@@ -45,10 +45,10 @@ class CollectionAbilitiesTest {
     @Test
     fun `array equals - different lengths`() {
         val result = eval("""
-            use std::collections::array
-            let a1 = array::of { x = 1, xs = array::of { x = 2, xs = [] } }
-            let a2 = array::of { x = 1, xs = array::of { x = 2, xs = array::of { x = 3, xs = [] } } }
-            array::equals { l = a1, r = a2 }
+            use std::collections::seq
+            let a1 = seq::of { x = 1, xs = seq::of { x = 2, xs = [] } }
+            let a2 = seq::of { x = 1, xs = seq::of { x = 2, xs = seq::of { x = 3, xs = [] } } }
+            seq::equals { l = a1, r = a2 }
         """)
         assertEquals(false, result)
     }
@@ -56,10 +56,10 @@ class CollectionAbilitiesTest {
     @Test
     fun `array equals - empty arrays`() {
         val result = eval("""
-            use std::collections::array
+            use std::collections::seq
             let a1: [Int] = []
             let a2: [Int] = []
-            array::equals { l = a1, r = a2 }
+            seq::equals { l = a1, r = a2 }
         """)
         assertEquals(true, result)
     }

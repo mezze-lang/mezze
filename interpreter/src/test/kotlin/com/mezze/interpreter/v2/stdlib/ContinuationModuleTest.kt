@@ -41,13 +41,15 @@ class ContinuationModuleTest {
         // Use run_all_paths helper which has correct type annotation for returning ['a]
         val result = eval("""
             use std::effects::choice::{Choice, run_all_paths}
+            use std::collections::seq
 
             let test = {} -> run_all_paths { computation = {} ->
                 Choice.choose { options = [1, 2, 3] }
             }
 
             let results = test {}
-            __native_arraylist_length {xs = results}
+            # run_all_paths returns ['a] (Seq)
+            seq::length {xs = results}
         """)
         assertEquals(3L, result)
     }
@@ -121,13 +123,15 @@ class ContinuationModuleTest {
         // Use run_all_paths helper which has correct type annotation for returning ['a]
         val result = eval("""
             use std::effects::choice::{Choice, run_all_paths}
+            use std::collections::seq
 
             let test = {} -> run_all_paths { computation = {} ->
                 Choice.choose { options = [1, 2] }
             }
 
             let results = test {}
-            __native_arraylist_length {xs = results}
+            # run_all_paths returns ['a] (Seq)
+            seq::length {xs = results}
         """)
         assertEquals(2L, result)
     }

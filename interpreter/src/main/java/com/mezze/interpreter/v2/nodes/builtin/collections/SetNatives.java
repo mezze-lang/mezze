@@ -235,4 +235,368 @@ public final class SetNatives {
         );
         return args;
     }
+
+    // ==================== Predicate Operations ====================
+
+    @TruffleBoundary
+    public static boolean any(MezzeSet set, MezzeFunction predicate,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Object element : set.getSet()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            if (result instanceof Boolean && (Boolean) result) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @TruffleBoundary
+    public static boolean all(MezzeSet set, MezzeFunction predicate,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Object element : set.getSet()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            if (!(result instanceof Boolean) || !(Boolean) result) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @TruffleBoundary
+    public static boolean none(MezzeSet set, MezzeFunction predicate,
+                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        return !any(set, predicate, callNode);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant find(MezzeSet set, MezzeFunction predicate,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        for (Object element : set.getSet()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            if (result instanceof Boolean && (Boolean) result) {
+                return MezzeVariant.some(element);
+            }
+        }
+        return MezzeVariant.none();
+    }
+
+    @TruffleBoundary
+    public static long count(MezzeSet set, MezzeFunction predicate,
+                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        long cnt = 0;
+        for (Object element : set.getSet()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
+            if (result instanceof Boolean && (Boolean) result) {
+                cnt++;
+            }
+        }
+        return cnt;
+    }
+
+    // ==================== Min/Max/Sum/Product ====================
+
+    @TruffleBoundary
+    public static MezzeVariant min(MezzeSet set) {
+        if (set.isEmpty()) return MezzeVariant.none();
+        Object minVal = null;
+        for (Object elem : set.getSet()) {
+            if (minVal == null || compare(elem, minVal) < 0) {
+                minVal = elem;
+            }
+        }
+        return MezzeVariant.some(minVal);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant max(MezzeSet set) {
+        if (set.isEmpty()) return MezzeVariant.none();
+        Object maxVal = null;
+        for (Object elem : set.getSet()) {
+            if (maxVal == null || compare(elem, maxVal) > 0) {
+                maxVal = elem;
+            }
+        }
+        return MezzeVariant.some(maxVal);
+    }
+
+    @TruffleBoundary
+    public static long sum(MezzeSet set) {
+        long total = 0;
+        for (Object elem : set.getSet()) {
+            if (elem instanceof Long l) total += l;
+            else if (elem instanceof Integer n) total += n;
+        }
+        return total;
+    }
+
+    @TruffleBoundary
+    public static long product(MezzeSet set) {
+        if (set.isEmpty()) return 1L;
+        long result = 1;
+        for (Object elem : set.getSet()) {
+            if (elem instanceof Long l) result *= l;
+            else if (elem instanceof Integer n) result *= n;
+        }
+        return result;
+    }
+
+    // ==================== To Seq ====================
+
+    @TruffleBoundary
+    public static MezzeSeq toSeq(MezzeSet set) {
+        return MezzeSeq.fromArray(set.toArray());
+    }
+
+    // ==================== Singleton ====================
+
+    @TruffleBoundary
+    public static MezzeSet singleton(Object element) {
+        return empty().insert(element);
+    }
+
+    // ==================== Additional Operations ====================
+
+    @TruffleBoundary
+    public static MezzeVariant reduce(MezzeSet set, MezzeFunction f,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (set.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        java.util.Iterator<Object> iter = set.getSet().iterator();
+        Object acc = iter.next();
+        while (iter.hasNext()) {
+            acc = callNode.call(f.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(new String[]{"acc", "x"}, new Object[]{acc, iter.next()})});
+        }
+        return MezzeVariant.some(acc);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant minBy(MezzeSet set, MezzeFunction f,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (set.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Object minElem = null;
+        Object minKey = null;
+        for (Object elem : set.getSet()) {
+            Object key = callNode.call(f.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            if (minKey == null || compare(key, minKey) < 0) {
+                minKey = key;
+                minElem = elem;
+            }
+        }
+        return MezzeVariant.some(minElem);
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant maxBy(MezzeSet set, MezzeFunction f,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (set.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Object maxElem = null;
+        Object maxKey = null;
+        for (Object elem : set.getSet()) {
+            Object key = callNode.call(f.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            if (maxKey == null || compare(key, maxKey) > 0) {
+                maxKey = key;
+                maxElem = elem;
+            }
+        }
+        return MezzeVariant.some(maxElem);
+    }
+
+    @TruffleBoundary
+    public static MezzeRecord partition(MezzeSet set, MezzeFunction predicate,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        java.util.LinkedHashSet<Object> trueSet = new java.util.LinkedHashSet<>();
+        java.util.LinkedHashSet<Object> falseSet = new java.util.LinkedHashSet<>();
+        for (Object elem : set.getSet()) {
+            Object result = callNode.call(predicate.getCallTarget(),
+                new Object[]{MezzeRecord.fromFields(new String[]{"val"}, new Object[]{elem})});
+            if (result instanceof Boolean && (Boolean) result) {
+                trueSet.add(elem);
+            } else {
+                falseSet.add(elem);
+            }
+        }
+        return MezzeRecord.fromFields(
+            new String[]{"pass", "fail"},
+            new Object[]{new MezzeSet(trueSet), new MezzeSet(falseSet)}
+        );
+    }
+
+    @TruffleBoundary
+    public static double sumFloat(MezzeSet set) {
+        double result = 0.0;
+        for (Object elem : set.getSet()) {
+            if (elem instanceof Double) {
+                result += (Double) elem;
+            } else if (elem instanceof Long) {
+                result += (Long) elem;
+            }
+        }
+        return result;
+    }
+
+    @TruffleBoundary
+    public static double productFloat(MezzeSet set) {
+        double result = 1.0;
+        for (Object elem : set.getSet()) {
+            if (elem instanceof Double) {
+                result *= (Double) elem;
+            } else if (elem instanceof Long) {
+                result *= (Long) elem;
+            }
+        }
+        return result;
+    }
+
+    // ==================== Helper for comparison ====================
+
+    private static int compare(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
+        }
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        return 0;
+    }
+
+    // ==================== Task #20: Additional Operations ====================
+
+    @TruffleBoundary
+    public static MezzeSet flatMap(MezzeSet set, MezzeFunction f,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashSet<Object> result = new LinkedHashSet<>();
+        for (Object elem : set.getSet()) {
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            if (mapped instanceof MezzeSet innerSet) {
+                result.addAll(innerSet.getSet());
+            }
+        }
+        return new MezzeSet(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeList groupBy(MezzeSet set, MezzeFunction keyFn,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
+        for (Object elem : set.getSet()) {
+            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
+        }
+        Object[] result = new Object[groups.size()];
+        int idx = 0;
+        for (var entry : groups.entrySet()) {
+            result[idx++] = MezzeRecord.fromFields(
+                new String[]{"key", "values"},
+                new Object[]{entry.getKey(), fromArray(entry.getValue().toArray())}
+            );
+        }
+        return MezzeList.fromArray(result);
+    }
+
+    @TruffleBoundary
+    public static MezzeSet symmetricDifference(MezzeSet s1, MezzeSet s2) {
+        LinkedHashSet<Object> result = new LinkedHashSet<>();
+        for (Object elem : s1.getSet()) {
+            if (!s2.contains(elem)) {
+                result.add(elem);
+            }
+        }
+        for (Object elem : s2.getSet()) {
+            if (!s1.contains(elem)) {
+                result.add(elem);
+            }
+        }
+        return new MezzeSet(result);
+    }
+
+    // ==================== Task #30: Collect Operations ====================
+
+    /**
+     * Apply a function that returns Option to each element and collect only the Some values.
+     * Similar to flatMap but specifically for Option-returning functions.
+     */
+    @TruffleBoundary
+    public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        LinkedHashSet<Object> result = new LinkedHashSet<>();
+        for (Object elem : set.getSet()) {
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            if (mapped instanceof MezzeVariant v && v.isSome()) {
+                // Some wraps value in { val = value }, so extract it
+                Object payload = v.getPayloadValue();
+                if (payload instanceof MezzeRecord rec) {
+                    result.add(rec.getField("val"));
+                }
+            }
+        }
+        return new MezzeSet(result);
+    }
+
+    /**
+     * Filter elements and transform them in one pass, returning a Seq.
+     * The function returns Option[B] - None filters out, Some(b) includes b.
+     */
+    @TruffleBoundary
+    public static Object[] collectArray(MezzeSet set, MezzeFunction f,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+        for (Object elem : set.getSet()) {
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            if (mapped instanceof MezzeVariant v && v.isSome()) {
+                Object payload = v.getPayloadValue();
+                if (payload instanceof MezzeRecord rec) {
+                    result.add(rec.getField("val"));
+                }
+            }
+        }
+        return result.toArray();
+    }
+
+    /**
+     * Like filterMap but returns a List for ordered result.
+     */
+    @TruffleBoundary
+    public static MezzeList collectList(MezzeSet set, MezzeFunction f,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+        for (Object elem : set.getSet()) {
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, elem));
+            if (mapped instanceof MezzeVariant v && v.isSome()) {
+                Object payload = v.getPayloadValue();
+                if (payload instanceof MezzeRecord rec) {
+                    result.add(rec.getField("val"));
+                }
+            }
+        }
+        return MezzeList.fromArray(result.toArray());
+    }
+
+    // ==================== SortedSet Conversions ====================
+
+    /**
+     * Convert Set to SortedSet.
+     */
+    @TruffleBoundary
+    public static SortedSetNatives.MezzeSortedSet toSortedSet(MezzeSet set) {
+        return SortedSetNatives.fromSet(set);
+    }
+
+    /**
+     * Convert SortedSet to Set.
+     */
+    @TruffleBoundary
+    public static MezzeSet fromSortedSet(SortedSetNatives.MezzeSortedSet sortedSet) {
+        return fromArray(sortedSet.toArray());
+    }
 }

@@ -2,6 +2,7 @@ package com.mezze.interpreter.v2
 
 import com.mezze.interpreter.v2.values.MezzeList
 import com.mezze.interpreter.v2.values.MezzeRecord
+import com.mezze.interpreter.v2.values.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertEquals
@@ -22,36 +23,39 @@ class ChoiceEffectTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Helper to get collection size in V2 (MezzeList or Object[])
+    // Helper to get collection size in V2 (MezzeSeq, MezzeList or Object[])
     private fun getCollectionSize(result: Any?): Int {
         return when {
+            result is MezzeSeq -> result.size()
             result is MezzeList -> result.size()
             result != null && result.javaClass.isArray -> java.lang.reflect.Array.getLength(result)
-            else -> throw AssertionError("Expected collection (MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
+            else -> throw AssertionError("Expected collection (MezzeSeq, MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
         }
     }
 
     // Helper to convert collection to list of Long values
     private fun getCollectionAsLongList(result: Any?): List<Long> {
         return when {
+            result is MezzeSeq -> (0 until result.size()).map { result.get(it) as Long }
             result is MezzeList -> (0 until result.size()).map { result.get(it) as Long }
             result != null && result.javaClass.isArray -> {
                 val length = java.lang.reflect.Array.getLength(result)
                 (0 until length).map { java.lang.reflect.Array.get(result, it) as Long }
             }
-            else -> throw AssertionError("Expected collection (MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
+            else -> throw AssertionError("Expected collection (MezzeSeq, MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
         }
     }
 
     // Helper to get collection elements
     private fun getCollectionElements(result: Any?): List<Any?> {
         return when {
+            result is MezzeSeq -> (0 until result.size()).map { result.get(it) }
             result is MezzeList -> (0 until result.size()).map { result.get(it) }
             result != null && result.javaClass.isArray -> {
                 val length = java.lang.reflect.Array.getLength(result)
                 (0 until length).map { java.lang.reflect.Array.get(result, it) }
             }
-            else -> throw AssertionError("Expected collection (MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
+            else -> throw AssertionError("Expected collection (MezzeSeq, MezzeList or array), got ${result?.javaClass?.name ?: "null"}")
         }
     }
 

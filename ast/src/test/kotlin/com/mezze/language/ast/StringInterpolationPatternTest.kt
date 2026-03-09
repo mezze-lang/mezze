@@ -155,12 +155,12 @@ class StringInterpolationPatternTest {
             )
             val literalPattern = LiteralPattern(IntLiteralValue(42))
             val constructorPattern = ConstructorPattern("Some", null)
-            val arrayPattern = ArrayPattern(listOf(VariablePattern("x")), null)
+            val seqPattern = SeqPattern(listOf(VariablePattern("x")), null)
 
             assertFalse(stringPattern.isIrrefutable())
             assertFalse(literalPattern.isIrrefutable())
             assertFalse(constructorPattern.isIrrefutable())
-            assertFalse(arrayPattern.isIrrefutable())
+            assertFalse(seqPattern.isIrrefutable())
         }
 
         @Test
@@ -278,7 +278,7 @@ class StringInterpolationPatternTest {
             assertEquals("constructor pattern", ConstructorPattern("Some", null).kindDescription())
             assertEquals("record pattern", RecordPattern(emptyList()).kindDescription())
             assertEquals("literal pattern", LiteralPattern(IntLiteralValue(42)).kindDescription())
-            assertEquals("array pattern", ArrayPattern(emptyList(), null).kindDescription())
+            assertEquals("seq pattern", SeqPattern(emptyList(), null).kindDescription())
         }
     }
 
@@ -792,7 +792,7 @@ class StringInterpolationPatternTest {
                 HashTags.AS_PATTERN,
                 HashTags.OR_PATTERN,
                 HashTags.TUPLE_PATTERN,
-                HashTags.ARRAY_PATTERN,
+                HashTags.SEQ_PATTERN,
                 HashTags.REST_PATTERN,
                 HashTags.STRING_INTERPOLATION_PATTERN
             )

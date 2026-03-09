@@ -382,6 +382,7 @@ public class STMScopedEffectsTest {
     void testTVarWithListValue() {
         String code = """
             use std::effects::stm::{STM, OptimisticSTM, TVar, tvar, deref}
+            use std::collections::seq
 
             let test = {} -> do
                 let list_var = tvar {init = [1, 2, 3]}
@@ -389,11 +390,11 @@ public class STMScopedEffectsTest {
                 # Add an element
                 perform OptimisticSTM in do
                     let current = STM.read {var = list_var}
-                    let new_list = __native_arraylist_concat {xs = current, ys = [4]}
+                    let new_list = seq::concat {xs = current, ys = [4]}
                     STM.write {var = list_var, val = new_list}
 
                 let final = deref {var = list_var}
-                __native_arraylist_length {xs = final}
+                seq::length {xs = final}
 
             test {}
             """;

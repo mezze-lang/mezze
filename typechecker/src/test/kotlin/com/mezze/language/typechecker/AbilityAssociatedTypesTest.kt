@@ -738,8 +738,8 @@ class AbilityAssociatedTypesTest {
             .find { it.variableName == "result" }
         assertNotNull(resultBinding)
         val resultType = resultBinding!!.inferredType
-        assertTrue(resultType is MezzeType.ArrayType, "Expected ArrayType but got $resultType")
-        assertEquals(MezzeType.IntType, (resultType as MezzeType.ArrayType).elementType)
+        assertTrue(resultType is MezzeType.SeqType, "Expected SeqType but got $resultType")
+        assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
     }
 
     @Test
@@ -768,8 +768,8 @@ class AbilityAssociatedTypesTest {
         assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
         val typeApp = resultType as MezzeType.TypeApplication
         assertEquals("Option", typeApp.constructor)
-        assertTrue(typeApp.args[0] is MezzeType.ArrayType)
-        assertEquals(MezzeType.IntType, (typeApp.args[0] as MezzeType.ArrayType).elementType)
+        assertTrue(typeApp.args[0] is MezzeType.SeqType)
+        assertEquals(MezzeType.IntType, (typeApp.args[0] as MezzeType.SeqType).elementType)
     }
 
     @Test

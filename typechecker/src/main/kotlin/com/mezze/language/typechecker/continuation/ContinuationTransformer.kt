@@ -544,16 +544,16 @@ class ContinuationTransformer {
             is VariantConstruction -> {
                 expr.value?.let { collectUsedVariablesRecursive(it, collector) }
             }
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 expr.elements.forEach { element ->
                     when (element) {
-                        is ArrayRegularElement -> collectUsedVariablesRecursive(element.expression, collector)
-                        is ArraySpreadElement -> collectUsedVariablesRecursive(element.expression, collector)
+                        is SeqRegularElement -> collectUsedVariablesRecursive(element.expression, collector)
+                        is SeqSpreadElement -> collectUsedVariablesRecursive(element.expression, collector)
                     }
                 }
             }
-            is ArrayAccess -> {
-                collectUsedVariablesRecursive(expr.array, collector)
+            is SeqAccess -> {
+                collectUsedVariablesRecursive(expr.seq, collector)
                 collectUsedVariablesRecursive(expr.index, collector)
             }
             is RecordUpdate -> {
@@ -651,11 +651,11 @@ class ContinuationTransformer {
                     entry.value?.let { collectDefinedVariablesRecursive(it, collector) }
                 }
             }
-            is ArrayLiteral -> {
+            is SeqLiteral -> {
                 expr.elements.forEach { element ->
                     when (element) {
-                        is ArrayRegularElement -> collectDefinedVariablesRecursive(element.expression, collector)
-                        is ArraySpreadElement -> collectDefinedVariablesRecursive(element.expression, collector)
+                        is SeqRegularElement -> collectDefinedVariablesRecursive(element.expression, collector)
+                        is SeqSpreadElement -> collectDefinedVariablesRecursive(element.expression, collector)
                     }
                 }
             }

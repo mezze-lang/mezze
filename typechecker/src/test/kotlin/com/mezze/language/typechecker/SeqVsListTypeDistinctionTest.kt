@@ -8,15 +8,15 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 
 /**
- * Comprehensive test suite for Array vs List type distinction.
+ * Comprehensive test suite for Seq vs List type distinction.
  *
  * Arrays and Lists should be treated as distinct types:
- * - Array: Built-in mutable sequence type with syntax [1, 2, 3]
+ * - Seq: Built-in mutable sequence type with syntax [1, 2, 3]
  * - List: Immutable linked list type from stdlib (Cons/Nil constructors)
  *
  * These types should NOT unify with each other.
  */
-class ArrayVsListTypeDistinctionTest {
+class SeqVsListTypeDistinctionTest {
 
     private val parser = MezzeParser()
     private lateinit var typeChecker: TypeChecker
@@ -33,7 +33,7 @@ class ArrayVsListTypeDistinctionTest {
     // =============================================================================
 
     @Test
-    fun `test array literal has Array type`() {
+    fun `test array literal has Seq type`() {
         val source = "let arr = [1, 2, 3]"
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
@@ -41,9 +41,9 @@ class ArrayVsListTypeDistinctionTest {
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
 
-        // Should be Array type, not List type
-        assertTrue(inferredType is MezzeType.ArrayType,
-                  "Array literal should have ArrayType, got: ${prettyPrintType(inferredType!!)}")
+        // Should be Seq type, not List type
+        assertTrue(inferredType is MezzeType.SeqType,
+                  "Seq literal should have SeqType, got: ${prettyPrintType(inferredType!!)}")
     }
 
     @Test
@@ -66,26 +66,26 @@ class ArrayVsListTypeDistinctionTest {
         // Should be a TypeApplication of List, not Array
         assertTrue(inferredType is MezzeType.TypeApplication || inferredType is MezzeType.VariantType,
                   "List constructor should create TypeApplication or VariantType, got: ${prettyPrintType(inferredType!!)}")
-        assertFalse(inferredType is MezzeType.ArrayType,
-                   "List constructor should NOT create ArrayType")
+        assertFalse(inferredType is MezzeType.SeqType,
+                   "List constructor should NOT create SeqType")
     }
 
     @Test
-    fun `test Array and List are distinct types`() {
+    fun `test Seq and List are distinct types`() {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let arr = [1, 2, 3]
             let lst = Cons { head = 1, tail = Nil }
 
-            # This should fail - Array and List are not the same type
+            # This should fail - Seq and List are not the same type
             let assign_arr_to_list : (List Int) = arr
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should fail because Array Int cannot be assigned to List Int
-        assertThrows<TypeCheckError>("Array should not unify with List") {
+        // Should fail because Seq Int cannot be assigned to List Int
+        assertThrows<TypeCheckError>("Seq should not unify with List") {
             typeChecker.typeCheck(program)
         }
     }
@@ -97,14 +97,14 @@ class ArrayVsListTypeDistinctionTest {
 
             let lst = Cons { head = 1, tail = Nil }
 
-            # This should fail - List and Array are not the same type
+            # This should fail - List and Seq are not the same type
             let assign_list_to_arr : [Int] = lst
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should fail because List Int cannot be assigned to Array Int
-        assertThrows<TypeCheckError>("List should not unify with Array") {
+        // Should fail because List Int cannot be assigned to Seq Int
+        assertThrows<TypeCheckError>("List should not unify with Seq") {
             typeChecker.typeCheck(program)
         }
     }
@@ -114,7 +114,7 @@ class ArrayVsListTypeDistinctionTest {
     // =============================================================================
 
     @Test
-    fun `test function expecting Array rejects List`() {
+    fun `test function expecting Seq rejects List`() {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
@@ -126,13 +126,13 @@ class ArrayVsListTypeDistinctionTest {
 
             let lst = Cons { head = 42, tail = Nil }
 
-            # This should fail - function expects Array, got List
+            # This should fail - function expects Seq, got List
             let result = take_array { arr = lst }
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Function expecting Array should reject List") {
+        assertThrows<TypeCheckError>("Function expecting Seq should reject List") {
             typeChecker.typeCheck(program)
         }
     }
@@ -149,7 +149,7 @@ class ArrayVsListTypeDistinctionTest {
 
             let arr = [1, 2, 3]
 
-            # This should fail - function expects List, got Array
+            # This should fail - function expects List, got Seq
             let result = take_list { lst = arr }
         """.trimIndent()
 
@@ -161,7 +161,7 @@ class ArrayVsListTypeDistinctionTest {
     }
 
     @Test
-    fun `test function accepting Array works with Array`() {
+    fun `test function accepting Seq works with Array`() {
         val source = """
             let get_first : { arr: [Int] } -> Int = { arr } ->
                 match arr is
@@ -175,7 +175,7 @@ class ArrayVsListTypeDistinctionTest {
 
         val program = parser.parse(source)
 
-        // Should succeed - Array matches Array
+        // Should succeed - Seq matches Seq
         val typedProgram = typeChecker.typeCheck(program).program
 
         val resultBinding = typedProgram.items.find {
@@ -252,13 +252,13 @@ class ArrayVsListTypeDistinctionTest {
 
             let arr = [1, 2, 3]
 
-            # This should fail - Array cannot be matched with list pattern
+            # This should fail - Seq cannot be matched with list pattern
             let result = process { val = arr }
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Array should not match list constructor patterns") {
+        assertThrows<TypeCheckError>("Seq should not match list constructor patterns") {
             typeChecker.typeCheck(program)
         }
     }
@@ -268,7 +268,7 @@ class ArrayVsListTypeDistinctionTest {
     // =============================================================================
 
     @Test
-    fun `test polymorphic function with Array parameter`() {
+    fun `test polymorphic function with Seq parameter`() {
         val source = """
             let get_element : { arr: ['a] } -> 'a = { arr } ->
                 match arr is
@@ -335,19 +335,19 @@ class ArrayVsListTypeDistinctionTest {
 
             let arr = [1, 2, 3]
 
-            # This should fail - Array cannot be passed to List function
+            # This should fail - Seq cannot be passed to List function
             let result = map_list { lst = arr, f = { x: Int } -> x * 2 }
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Array should not be accepted by List function") {
+        assertThrows<TypeCheckError>("Seq should not be accepted by List function") {
             typeChecker.typeCheck(program)
         }
     }
 
     @Test
-    fun `test passing List to Array function fails`() {
+    fun `test passing List to Seq function fails`() {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
@@ -358,13 +358,13 @@ class ArrayVsListTypeDistinctionTest {
 
             let lst = Cons { head = 1, tail = Nil }
 
-            # This should fail - List cannot be passed to Array function
+            # This should fail - List cannot be passed to Seq function
             let result = get_element { arr = lst }
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("List should not be accepted by Array function") {
+        assertThrows<TypeCheckError>("List should not be accepted by Seq function") {
             typeChecker.typeCheck(program)
         }
     }
@@ -374,11 +374,11 @@ class ArrayVsListTypeDistinctionTest {
     // =============================================================================
 
     @Test
-    fun `test nested Array and List are distinct`() {
+    fun `test nested Seq and List are distinct`() {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
-            # Array of Arrays
+            # Seq of Seqs
             let arr_of_arrs = [[1, 2], [3, 4]]
 
             # List of Lists (conceptually)
@@ -391,7 +391,7 @@ class ArrayVsListTypeDistinctionTest {
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Nested Array and List should not unify") {
+        assertThrows<TypeCheckError>("Nested Seq and List should not unify") {
             typeChecker.typeCheck(program)
         }
     }
@@ -404,28 +404,28 @@ class ArrayVsListTypeDistinctionTest {
             let list1 = Cons { head = 1, tail = Nil }
             let list2 = Cons { head = 2, tail = Nil }
 
-            # Array containing List elements is valid
+            # Seq containing List elements is valid
             let arr_of_lists = [list1, list2]
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should succeed - Array can contain List elements
+        // Should succeed - Seq can contain List elements
         val typedProgram = typeChecker.typeCheck(program).program
 
         val arrBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "arr_of_lists"
         } as LetBinding
 
-        assertTrue(arrBinding.inferredType is MezzeType.ArrayType,
-                  "Should be ArrayType")
+        assertTrue(arrBinding.inferredType is MezzeType.SeqType,
+                  "Should be SeqType")
 
-        val arrayType = arrBinding.inferredType as MezzeType.ArrayType
+        val arrayType = arrBinding.inferredType as MezzeType.SeqType
         // Element type should be List type
         assertTrue(arrayType.elementType is MezzeType.TypeApplication ||
                   arrayType.elementType is MezzeType.VariantType ||
                   arrayType.elementType is MezzeType.VarType,
-                  "Array elements should be List type")
+                  "Seq elements should be List type")
     }
 
     @Test
@@ -436,14 +436,14 @@ class ArrayVsListTypeDistinctionTest {
             let arr1 = [1, 2]
             let arr2 = [3, 4]
 
-            # List containing Array elements is valid
+            # List containing Seq elements is valid
             let list_of_arrs = Cons { head = arr1,
                                      tail = Cons { head = arr2, tail = Nil } }
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should succeed - List can contain Array elements
+        // Should succeed - List can contain Seq elements
         val typedProgram = typeChecker.typeCheck(program).program
 
         val lstBinding = typedProgram.items.find {
@@ -501,7 +501,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test array concat with arrays works`() {
         val source = """
-            # Simple array operations
+            # Simple seq operations
             let arr1 = [1, 2, 3]
             let arr2 = [4, 5, 6]
 
@@ -517,7 +517,7 @@ class ArrayVsListTypeDistinctionTest {
 
         val program = parser.parse(source)
 
-        // Should succeed - array operations with arrays
+        // Should succeed - seq operations with arrays
         val typedProgram = typeChecker.typeCheck(program).program
 
         val resultBinding = typedProgram.items.find {
@@ -533,7 +533,7 @@ class ArrayVsListTypeDistinctionTest {
     // =============================================================================
 
     @Test
-    fun `test clear error message when Array and List mismatch`() {
+    fun `test clear error message when Seq and List mismatch`() {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
@@ -542,7 +542,7 @@ class ArrayVsListTypeDistinctionTest {
 
             let take_array : { x: [Int] } -> Int = { x } -> 0
 
-            # Should give clear error about Array vs List mismatch
+            # Should give clear error about Seq vs List mismatch
             let result = take_array { x = lst }
         """.trimIndent()
 
@@ -552,7 +552,7 @@ class ArrayVsListTypeDistinctionTest {
             typeChecker.typeCheck(program)
         }
 
-        // Error message should mention Array and List
+        // Error message should mention Seq and List
         val message = exception.message ?: ""
         assertTrue(message.isNotEmpty(), "Error message should not be empty")
 

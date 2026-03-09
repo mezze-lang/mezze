@@ -736,9 +736,9 @@ class ContextBuilder {
                 // Variant types as ability targets are rare
                 "Variant"
             }
-            is ArrayTypeAnnotation -> {
-                // Array Int → "Array_Int"
-                "Array_${getTypeName(annotation.elementType)}"
+            is SeqTypeAnnotation -> {
+                // Seq Int → "Seq_Int"
+                "Seq_${getTypeName(annotation.elementType)}"
             }
             is EffectRowAnnotation -> {
                 // Shouldn't happen, but handle gracefully
@@ -852,9 +852,9 @@ class ContextBuilder {
                             MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
                         }
                     }
-                    "Array" -> {
+                    "Seq" -> {
                         if (annotation.args.size == 1) {
-                            MezzeType.ArrayType(convertTypeAnnotationInternal(annotation.args[0]))
+                            MezzeType.SeqType(convertTypeAnnotationInternal(annotation.args[0]))
                         } else {
                             MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
                         }
@@ -885,8 +885,8 @@ class ContextBuilder {
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(
                     elementType = convertTypeAnnotationInternal(annotation.elementType)
                 )
             }
@@ -928,7 +928,7 @@ class ContextBuilder {
             is MezzeType.TypeApplication -> {
                 type.args.forEach { collectTypeVarsFromType(it, typeVars) }
             }
-            is MezzeType.ArrayType -> collectTypeVarsFromType(type.elementType, typeVars)
+            is MezzeType.SeqType -> collectTypeVarsFromType(type.elementType, typeVars)
             is MezzeType.ListType -> collectTypeVarsFromType(type.elementType, typeVars)
             is MezzeType.SetType -> collectTypeVarsFromType(type.elementType, typeVars)
             is MezzeType.SortedMapType -> {

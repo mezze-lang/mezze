@@ -567,7 +567,7 @@ private fun formatType(type: MezzeType): String {
         is MezzeType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
         is MezzeType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}]"
         is MezzeType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ..." else ""}"
-        is MezzeType.ArrayType -> "Array ${formatType(type.elementType)}"
+        is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
         is MezzeType.ListType -> "List ${formatType(type.elementType)}"
         is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
         is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"

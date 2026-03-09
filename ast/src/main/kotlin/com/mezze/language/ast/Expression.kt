@@ -13,7 +13,7 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * - Expression: All expression types (Lambda, Application, Match, If, etc.)
  * - Literal expressions: IntLiteral, FloatLiteral, StringLiteral, etc.
  * - String interpolation: StringInterpolationPart hierarchy
- * - Variables and access: Identifier, MemberAccess, ArrayAccess
+ * - Variables and access: Identifier, MemberAccess, SeqAccess
  * - Records: RecordLiteral, RecordUpdate, RecordLiteralEntry hierarchy
  * - Variants: VariantConstruction
  * - Functions: LambdaExpression, FunctionCall, LambdaParameters hierarchy
@@ -158,58 +158,58 @@ data class FractionLiteral(
 ) : Expression
 
 @Serializable
-data class ArrayLiteral(
-    val elements: List<ArrayElement>,
+data class SeqLiteral(
+    val elements: List<SeqElement>,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression {
     /**
-     * Check if this array literal contains any spread elements
+     * Check if this seq literal contains any spread elements
      */
-    fun hasSpreadElements(): Boolean = elements.any { it is ArraySpreadElement }
+    fun hasSpreadElements(): Boolean = elements.any { it is SeqSpreadElement }
 
     /**
      * Get all regular (non-spread) elements
      */
-    fun getRegularElements(): List<ArrayRegularElement> = elements.filterIsInstance<ArrayRegularElement>()
+    fun getRegularElements(): List<SeqRegularElement> = elements.filterIsInstance<SeqRegularElement>()
 
     /**
      * Get all spread elements
      */
-    fun getSpreadElements(): List<ArraySpreadElement> = elements.filterIsInstance<ArraySpreadElement>()
+    fun getSpreadElements(): List<SeqSpreadElement> = elements.filterIsInstance<SeqSpreadElement>()
 
     companion object {
         /**
-         * Create an ArrayLiteral from a list of expressions (all regular elements)
+         * Create a SeqLiteral from a list of expressions (all regular elements)
          * For backward compatibility
          */
-        fun fromExpressions(expressions: List<Expression>, sourceLocation: SourceLocation? = null): ArrayLiteral =
-            ArrayLiteral(expressions.map { ArrayRegularElement(it) }, sourceLocation = sourceLocation)
+        fun fromExpressions(expressions: List<Expression>, sourceLocation: SourceLocation? = null): SeqLiteral =
+            SeqLiteral(expressions.map { SeqRegularElement(it) }, sourceLocation = sourceLocation)
     }
 }
 
 /**
- * Sealed class for array elements - either regular expressions or spread expressions
+ * Sealed class for seq elements - either regular expressions or spread expressions
  */
 @Serializable
-@JsonClassDiscriminator("arrayElementKind")
-sealed class ArrayElement
+@JsonClassDiscriminator("seqElementKind")
+sealed class SeqElement
 
 /**
- * Regular array element (a single expression)
+ * Regular seq element (a single expression)
  */
 @Serializable
-data class ArrayRegularElement(val expression: Expression) : ArrayElement()
+data class SeqRegularElement(val expression: Expression) : SeqElement()
 
 /**
- * Spread element in an array literal (...expr)
+ * Spread element in a seq literal (...expr)
  */
 @Serializable
-data class ArraySpreadElement(val expression: Expression) : ArrayElement()
+data class SeqSpreadElement(val expression: Expression) : SeqElement()
 
 @Serializable
-data class ArrayAccess(
-    val array: Expression,
+data class SeqAccess(
+    val seq: Expression,
     val index: Expression,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null

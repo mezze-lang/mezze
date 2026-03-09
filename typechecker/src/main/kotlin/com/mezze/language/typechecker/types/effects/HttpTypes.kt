@@ -59,7 +59,7 @@ object HttpTypes {
 
     // MockRule type: { methods: [Method], url: UrlPattern, response: Result Response HttpError }
     private val mockRuleType = MezzeType.RecordType(mapOf(
-        "methods" to MezzeType.ArrayType(MezzeType.TypeApplication("Method", emptyList())),
+        "methods" to MezzeType.SeqType(MezzeType.TypeApplication("Method", emptyList())),
         "url" to urlPatternType,
         "response" to httpResultType
     ))
@@ -98,7 +98,7 @@ object HttpTypes {
         )
 
         // MockRule array type for MockHttpClient
-        val mockRulesType = MezzeType.ArrayType(mockRuleType)
+        val mockRulesType = MezzeType.SeqType(mockRuleType)
 
         // __native_http_mock_request: {req: Request, rules: [MockRule]} -> Result Response HttpError
         // Used by MockHttpClient implementation

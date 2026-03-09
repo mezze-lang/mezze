@@ -26,10 +26,11 @@ class ParallelEffectTest {
     fun `test map doubles each element`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.map {xs = [1, 2, 3], f = {x} -> x * 2}
-                match __native_arraylist_get {xs = results, i = 0} is
+                match seq::get {xs = results, i = 0} is
                     Some {val} -> val
                     None -> 0
         """)
@@ -40,10 +41,11 @@ class ParallelEffectTest {
     fun `test map with empty array`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.map {xs = [], f = {x} -> x * 2}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -52,10 +54,11 @@ class ParallelEffectTest {
     fun `test map preserves order`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.map {xs = [3, 1, 4, 1, 5], f = {x} -> x + 10}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(5L, result)
     }
@@ -80,10 +83,11 @@ class ParallelEffectTest {
     fun `test filter keeps matching elements`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2 == 0}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(3L, result)
     }
@@ -92,10 +96,11 @@ class ParallelEffectTest {
     fun `test filter with no matches`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [1, 3, 5], f = {x} -> x % 2 == 0}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -104,10 +109,11 @@ class ParallelEffectTest {
     fun `test filter with all matches`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(3L, result)
     }
@@ -355,10 +361,11 @@ class ParallelEffectTest {
     fun `test partition separates by predicate`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                __native_arraylist_length {xs = r.matching}
+                seq::length {xs = r.matching}
         """)
         assertEquals(2L, result) // [2, 4]
     }
@@ -367,10 +374,11 @@ class ParallelEffectTest {
     fun `test partition returns not_matching`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                __native_arraylist_length {xs = r.not_matching}
+                seq::length {xs = r.not_matching}
         """)
         assertEquals(3L, result) // [1, 3, 5]
     }
@@ -381,10 +389,11 @@ class ParallelEffectTest {
     fun `test group_by groups by key`() {
         val result = eval("""
             use std::effects::parallel::{Parallel, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let groups = Parallel.group_by {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2}
-                __native_arraylist_length {xs = groups}
+                seq::length {xs = groups}
         """)
         assertEquals(2L, result) // 2 groups: even and odd
     }
@@ -445,10 +454,11 @@ class ParallelEffectTest {
     fun `test flatten helper`() {
         val result = eval("""
             use std::effects::parallel::{flatten, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = flatten {xs = [[1, 2], [3], [4, 5, 6]]}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(6L, result)
     }
@@ -457,10 +467,11 @@ class ParallelEffectTest {
     fun `test flat_map helper`() {
         val result = eval("""
             use std::effects::parallel::{flat_map, Sequential}
+            use std::collections::seq
 
             perform Sequential in do
                 let results = flat_map {xs = [1, 2, 3], f = {x} -> [x, x * 10]}
-                __native_arraylist_length {xs = results}
+                seq::length {xs = results}
         """)
         assertEquals(6L, result) // [1,10,2,20,3,30]
     }

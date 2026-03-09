@@ -430,7 +430,7 @@ class StateMachineExecutionTest {
                 else if n < 100 then "medium"
                 else "large"
 
-            use std::collections::array
+            use std::collections::seq
 
             let results = [
                 classify {n = -5},
@@ -440,7 +440,7 @@ class StateMachineExecutionTest {
                 classify {n = 500}
             ]
 
-            array::length { xs = results }
+            seq::length { xs = results }
         """.trimIndent()
         assertEquals(5L, eval(code))
     }

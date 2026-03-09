@@ -263,10 +263,11 @@ class AtomModuleTest {
     fun `test atom with list value`() {
         val result = eval("""
             use std::effects::concurrent::atom::{atom, deref}
+            use std::collections::seq
 
             let items = atom {value = [1, 2, 3]}
             let current = deref {atom = items}
-            __native_arraylist_length {xs = current}
+            seq::length {xs = current}
         """)
         assertEquals(3L, result)
     }

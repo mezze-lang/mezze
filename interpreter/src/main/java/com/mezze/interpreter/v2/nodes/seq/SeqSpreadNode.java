@@ -1,6 +1,7 @@
-package com.mezze.interpreter.v2.nodes.array;
+package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -11,17 +12,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Node for array literal with spread elements.
- * Handles the pattern [...xs, a, b, c] where spread arrays come first
+ * Node for seq literal with spread elements.
+ * Handles the pattern [...xs, a, b, c] where spread sequences come first
  * and regular elements are appended.
  *
- * V2 uses Object[] for ArrayList representation.
+ * V2 uses MezzeSeq for sequence representation.
  */
-@NodeInfo(shortName = "array-spread")
-public final class ArraySpreadNode extends MezzeNode {
+@NodeInfo(shortName = "seq-spread")
+public final class SeqSpreadNode extends MezzeNode {
 
     @Children
-    private final MezzeNode[] spreadArrays;
+    private final MezzeNode[] spreadSeqs;
 
     @Children
     private final MezzeNode[] appendElements;
@@ -32,20 +33,20 @@ public final class ArraySpreadNode extends MezzeNode {
     @CompilationFinal
     private final int appendCount;
 
-    public ArraySpreadNode(MezzeNode[] spreadArrays, MezzeNode[] appendElements) {
-        this.spreadArrays = spreadArrays;
+    public SeqSpreadNode(MezzeNode[] spreadSeqs, MezzeNode[] appendElements) {
+        this.spreadSeqs = spreadSeqs;
         this.appendElements = appendElements;
-        this.spreadCount = spreadArrays.length;
+        this.spreadCount = spreadSeqs.length;
         this.appendCount = appendElements.length;
     }
 
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
-        // Execute spread arrays
+        // Execute spread seqs
         Object[] spreadValues = new Object[spreadCount];
         for (int i = 0; i < spreadCount; i++) {
-            spreadValues[i] = spreadArrays[i].execute(frame);
+            spreadValues[i] = spreadSeqs[i].execute(frame);
         }
 
         // Execute append elements
@@ -55,18 +56,20 @@ public final class ArraySpreadNode extends MezzeNode {
         }
 
         // Build result
-        return buildArrayWithSpread(spreadValues, appendValues);
+        return buildSeqWithSpread(spreadValues, appendValues);
     }
 
     @TruffleBoundary
-    private Object[] buildArrayWithSpread(Object[] spreadValues, Object[] appendValues) {
-        // First pass: calculate total size to avoid ArrayList resizing
+    private MezzeSeq buildSeqWithSpread(Object[] spreadValues, Object[] appendValues) {
+        // First pass: calculate total size
         int totalSize = appendValues.length;
         for (Object spreadValue : spreadValues) {
-            if (spreadValue instanceof Object[] arr) {
+            if (spreadValue instanceof MezzeSeq seq) {
+                totalSize += seq.size();
+            } else if (spreadValue instanceof Object[] arr) {
                 totalSize += arr.length;
             } else {
-                throw new RuntimeException("Spread operator requires an array, got: " +
+                throw new RuntimeException("Spread operator requires a sequence, got: " +
                     (spreadValue == null ? "null" : spreadValue.getClass().getSimpleName()));
             }
         }
@@ -75,20 +78,25 @@ public final class ArraySpreadNode extends MezzeNode {
         Object[] result = new Object[totalSize];
         int idx = 0;
 
-        // Copy spread arrays
+        // Copy spread sequences
         for (Object spreadValue : spreadValues) {
-            Object[] arr = (Object[]) spreadValue;  // Already type-checked above
-            System.arraycopy(arr, 0, result, idx, arr.length);
-            idx += arr.length;
+            if (spreadValue instanceof MezzeSeq seq) {
+                for (int i = 0; i < seq.size(); i++) {
+                    result[idx++] = seq.get(i);
+                }
+            } else if (spreadValue instanceof Object[] arr) {
+                System.arraycopy(arr, 0, result, idx, arr.length);
+                idx += arr.length;
+            }
         }
 
         // Copy append elements
         System.arraycopy(appendValues, 0, result, idx, appendValues.length);
 
-        return result;
+        return MezzeSeq.fromArray(result);
     }
 
-    public static ArraySpreadNode create(MezzeNode[] spreadArrays, MezzeNode[] appendElements) {
-        return new ArraySpreadNode(spreadArrays, appendElements);
+    public static SeqSpreadNode create(MezzeNode[] spreadSeqs, MezzeNode[] appendElements) {
+        return new SeqSpreadNode(spreadSeqs, appendElements);
     }
 }

@@ -888,19 +888,19 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList loomAll(MezzeRecord args) {
+    public static MezzeSeq loomAll(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         Object[] results = new Object[promises.length];
 
         // Fast path: empty array
         if (promises.length == 0) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
 
         // Fast path: single promise
         if (promises.length == 1) {
             results[0] = loomAwaitPromise((MezzePromise) promises[0]);
-            return MezzeList.fromArray(results);
+            return MezzeSeq.fromArray(results);
         }
 
         // OPTIMIZATION: For many promises, use batched polling instead of serial await
@@ -914,7 +914,7 @@ public final class AsyncNatives {
             results[i] = loomAwaitPromise((MezzePromise) promises[i]);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
@@ -922,7 +922,7 @@ public final class AsyncNatives {
      * First collects all already-done promises, then awaits remaining.
      * This avoids blocking on one slow promise when others are ready.
      */
-    private static MezzeList batchedAll(Object[] promises, Object[] results) {
+    private static MezzeSeq batchedAll(Object[] promises, Object[] results) {
         int remaining = promises.length;
         boolean[] collected = new boolean[promises.length];
 
@@ -950,7 +950,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
@@ -1211,12 +1211,12 @@ public final class AsyncNatives {
      * - All other arrays: Batched ForkJoin (no 1-thread-per-element)
      */
     @TruffleBoundary
-    public static MezzeList loomMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq loomMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
         if (xs.length == 0) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
 
         // Sequential fallback for small arrays
@@ -1233,7 +1233,7 @@ public final class AsyncNatives {
      * Batched parallel map using Truffle virtual threads.
      * Uses virtual threads to ensure proper Truffle context propagation.
      */
-    private static MezzeList batchedMapWithForkJoin(Object[] xs, MezzeFunction f,
+    private static MezzeSeq batchedMapWithForkJoin(Object[] xs, MezzeFunction f,
                                                      IndirectCallNode callNode, MezzeNode node) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
@@ -1283,11 +1283,11 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     // Fast sequential map for small arrays - uses thread-local buffer
-    private static MezzeList sequentialMapInternal(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeSeq sequentialMapInternal(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         Object[] results = new Object[xs.length];
@@ -1303,7 +1303,7 @@ public final class AsyncNatives {
             results[i] = callNode.call(callTarget, callArgs);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
@@ -1407,12 +1407,12 @@ public final class AsyncNatives {
      * - All other arrays: Batched ForkJoin (no 1-thread-per-element)
      */
     @TruffleBoundary
-    public static MezzeList loomFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq loomFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
         if (xs.length == 0) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
 
         // Sequential fallback for small arrays
@@ -1428,7 +1428,7 @@ public final class AsyncNatives {
      * Batched filter using Truffle virtual threads.
      * Uses virtual threads to ensure proper Truffle context propagation.
      */
-    private static MezzeList batchedFilterWithTruffleThreads(Object[] xs, MezzeFunction f, IndirectCallNode callNode, MezzeNode node) {
+    private static MezzeSeq batchedFilterWithTruffleThreads(Object[] xs, MezzeFunction f, IndirectCallNode callNode, MezzeNode node) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         final int closureLen = closure.length;
@@ -1486,11 +1486,11 @@ public final class AsyncNatives {
                 results.add(xs[i]);
             }
         }
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     // Fast sequential filter for small arrays - uses thread-local buffer
-    private static MezzeList sequentialFilterInternal(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeSeq sequentialFilterInternal(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
 
@@ -1508,7 +1508,7 @@ public final class AsyncNatives {
                 results.add(x);
             }
         }
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     /**
@@ -1588,7 +1588,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList loomSettle(MezzeRecord args) {
+    public static MezzeSeq loomSettle(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         Object[] results = new Object[promises.length];
 
@@ -1607,7 +1607,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1784,7 +1784,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList osAll(MezzeRecord args) {
+    public static MezzeSeq osAll(MezzeRecord args) {
         return loomAll(args);
     }
 
@@ -1986,12 +1986,12 @@ public final class AsyncNatives {
      * and use a bounded pool of platform threads.
      */
     @TruffleBoundary
-    public static MezzeList osMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq osMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
         if (xs.length == 0) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
 
         // Sequential fallback for small arrays
@@ -2044,7 +2044,7 @@ public final class AsyncNatives {
             throw new RuntimeException("Map interrupted", e);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
@@ -2111,12 +2111,12 @@ public final class AsyncNatives {
      * OPTIMIZATION: OS thread filter now uses batched execution.
      */
     @TruffleBoundary
-    public static MezzeList osFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+    public static MezzeSeq osFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
         if (xs.length == 0) {
-            return MezzeList.empty();
+            return MezzeSeq.empty();
         }
 
         // Sequential fallback for small arrays
@@ -2176,7 +2176,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -2185,7 +2185,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList osSettle(MezzeRecord args) {
+    public static MezzeSeq osSettle(MezzeRecord args) {
         return loomSettle(args);
     }
 
@@ -2262,7 +2262,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList coopAll(MezzeRecord args) {
+    public static MezzeSeq coopAll(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         Object[] results = new Object[promises.length];
 
@@ -2274,7 +2274,7 @@ public final class AsyncNatives {
             results[i] = p.result;
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -2329,7 +2329,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList coopMap(MezzeRecord args, IndirectCallNode callNode) {
+    public static MezzeSeq coopMap(MezzeRecord args, IndirectCallNode callNode) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
@@ -2342,7 +2342,7 @@ public final class AsyncNatives {
             results[i] = callNode.call(callTarget, appendArg(closure, arg));
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -2362,7 +2362,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList coopFilter(MezzeRecord args, IndirectCallNode callNode) {
+    public static MezzeSeq coopFilter(MezzeRecord args, IndirectCallNode callNode) {
         Object[] xs = getArray(args, "xs");
         MezzeFunction f = getFunction(args, "f");
 
@@ -2378,7 +2378,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -2401,7 +2401,7 @@ public final class AsyncNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList coopSettle(MezzeRecord args) {
+    public static MezzeSeq coopSettle(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         Object[] results = new Object[promises.length];
 
@@ -2414,7 +2414,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -2493,6 +2493,7 @@ public final class AsyncNatives {
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof Object[] arr) return arr;
+        if (val instanceof MezzeSeq seq) return seq.toArray();
         if (val instanceof MezzeList list) return list.toArray();
         throw new RuntimeException("Expected array for '" + name + "'");
     }
@@ -2502,6 +2503,13 @@ public final class AsyncNatives {
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof MezzeList list) return list;
+        if (val instanceof MezzeSeq seq) {
+            MezzeList result = MezzeList.empty();
+            for (int i = seq.size() - 1; i >= 0; i--) {
+                result = result.prepend(seq.get(i));
+            }
+            return result;
+        }
         if (val instanceof Object[] arr) return MezzeList.fromArray(arr);
         throw new RuntimeException("Expected list for '" + name + "'");
     }

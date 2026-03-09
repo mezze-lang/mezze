@@ -69,9 +69,9 @@ object LoomTypes {
         // The fs parameter accepts functions with any effects
         context["__native_loom_spawn_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "fs" to MezzeType.ArrayType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+                "fs" to MezzeType.SeqType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
             )),
-            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
         )
 
         // __native_loom_spawn_race: {fs: [{} -> 'a <...>]} -> 'a
@@ -79,7 +79,7 @@ object LoomTypes {
         // The fs parameter accepts functions with any effects
         context["__native_loom_spawn_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "fs" to MezzeType.ArrayType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+                "fs" to MezzeType.SeqType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
@@ -87,7 +87,7 @@ object LoomTypes {
         // __native_loom_race: {ps: [Promise 'a]} -> 'a
         context["__native_loom_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType)
+                "ps" to MezzeType.SeqType(promiseType)
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
@@ -95,9 +95,9 @@ object LoomTypes {
         // __native_loom_all: {ps: [Promise 'a]} -> ['a]
         context["__native_loom_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType)
+                "ps" to MezzeType.SeqType(promiseType)
             )),
-            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
         )
 
         // __native_loom_timeout: {ms: Int, p: Promise 'a} -> Option 'a
@@ -199,20 +199,20 @@ object LoomTypes {
         // The f parameter accepts any effects (<...>)
         context["__native_loom_map"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "f" to effectPolymorphicMapper(
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
                 )
             )),
-            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
         )
 
         // __native_loom_for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {}
         // The f parameter accepts any effects (<...>)
         context["__native_loom_for_each"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "f" to effectPolymorphicMapper(
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.RecordType(emptyMap())
@@ -225,13 +225,13 @@ object LoomTypes {
         // The f parameter accepts any effects (<...>)
         context["__native_loom_filter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "f" to effectPolymorphicMapper(
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.BoolType
                 )
             )),
-            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
         )
 
         // === Error Handling ===
@@ -239,7 +239,7 @@ object LoomTypes {
         // __native_loom_any: {ps: [Promise 'a]} -> 'a
         context["__native_loom_any"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType)
+                "ps" to MezzeType.SeqType(promiseType)
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
@@ -253,9 +253,9 @@ object LoomTypes {
         ))
         context["__native_loom_settle"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType)
+                "ps" to MezzeType.SeqType(promiseType)
             )),
-            MezzeType.ArrayType(resultType)
+            MezzeType.SeqType(resultType)
         )
 
         // === Structured Concurrency Scopes ===

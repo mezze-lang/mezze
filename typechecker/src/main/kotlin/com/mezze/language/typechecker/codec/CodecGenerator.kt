@@ -80,7 +80,7 @@ class CodecGenerator {
 
             // Collections - check element types
             is MezzeType.ListType -> isSerializable(type.elementType)
-            is MezzeType.ArrayType -> isSerializable(type.elementType)
+            is MezzeType.SeqType -> isSerializable(type.elementType)
             is MezzeType.SetType -> isSerializable(type.elementType)
             is MezzeType.SortedSetType -> isSerializable(type.elementType)
             is MezzeType.MapType -> isSerializable(type.keyType) && isSerializable(type.valueType)
@@ -123,7 +123,7 @@ class CodecGenerator {
                 "|$sortedCtors|"
             }
             is MezzeType.ListType -> "List[${normalizeType(type.elementType)}]"
-            is MezzeType.ArrayType -> "Array[${normalizeType(type.elementType)}]"
+            is MezzeType.SeqType -> "Array[${normalizeType(type.elementType)}]"
             is MezzeType.SetType -> "Set[${normalizeType(type.elementType)}]"
             is MezzeType.SortedSetType -> "SortedSet[${normalizeType(type.elementType)}]"
             is MezzeType.MapType -> "Map[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
@@ -164,7 +164,7 @@ class CodecGenerator {
 
             // Collections
             dataType is MezzeType.ListType -> generateListEncode(formatType, dataType)
-            dataType is MezzeType.ArrayType -> generateArrayEncode(formatType, dataType)
+            dataType is MezzeType.SeqType -> generateArrayEncode(formatType, dataType)
             dataType is MezzeType.SetType -> generateSetEncode(formatType, dataType)
             dataType is MezzeType.SortedSetType -> generateSortedSetEncode(formatType, dataType)
             dataType is MezzeType.MapType -> generateMapEncode(formatType, dataType)
@@ -233,7 +233,7 @@ class CodecGenerator {
 
             // Collections
             dataType is MezzeType.ListType -> generateListDecode(formatType, dataType)
-            dataType is MezzeType.ArrayType -> generateArrayDecode(formatType, dataType)
+            dataType is MezzeType.SeqType -> generateArrayDecode(formatType, dataType)
             dataType is MezzeType.SetType -> generateSetDecode(formatType, dataType)
             dataType is MezzeType.SortedSetType -> generateSortedSetDecode(formatType, dataType)
             dataType is MezzeType.MapType -> generateMapDecode(formatType, dataType)
@@ -348,14 +348,14 @@ class CodecGenerator {
     }
 
     /** Create an array literal from expressions */
-    private fun array(elements: List<Expression>): ArrayLiteral {
-        return ArrayLiteral(elements = elements.map { ArrayRegularElement(it) })
+    private fun array(elements: List<Expression>): SeqLiteral {
+        return SeqLiteral(elements = elements.map { SeqRegularElement(it) })
     }
 
-    /** Create a list from an array expression using __native_list_from_array */
+    /** Create a list from a seq expression using __native_list_from_seq */
     private fun listFromArray(elements: List<Expression>): Expression {
         return call(
-            id("__native_list_from_array"),
+            id("__native_list_from_seq"),
             record("xs" to array(elements))
         )
     }
@@ -447,9 +447,9 @@ class CodecGenerator {
     /** Call append_path using native array operations directly */
     private fun appendPath(pathExpr: Expression, fieldName: String): Expression {
         // Use native arraylist functions since paths are now Array String
-        // Inline: __native_arraylist_add {xs = path, x = field}
+        // Inline: __native_seq_add {xs = path, x = field}
         return call(
-            id("__native_arraylist_add"),
+            id("__native_seq_add"),
             record(
                 "xs" to pathExpr,
                 "x" to str(fieldName)
@@ -476,9 +476,9 @@ class CodecGenerator {
     /** Call append_index using native array operations directly */
     private fun appendIndex(pathExpr: Expression, indexExpr: Expression): Expression {
         // Use native arraylist functions since paths are now Array String
-        // Inline: __native_arraylist_add {xs = path, x = __native_int_to_string {n = index}}
+        // Inline: __native_seq_add {xs = path, x = __native_int_to_string {n = index}}
         return call(
-            id("__native_arraylist_add"),
+            id("__native_seq_add"),
             record(
                 "xs" to pathExpr,
                 "x" to call(id("__native_int_to_string"), record("n" to indexExpr))
@@ -644,7 +644,7 @@ class CodecGenerator {
             }
             // For complex types, generate a typed Encode.encode call
             // SubstitutionApplier will resolve this to the correct impl using content hash
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.ArrayType, is MezzeType.SetType,
+            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
                 // Use typed ability call - SubstitutionApplier resolves by type
                 typedEncodeCall(type, valueExpr)
@@ -742,7 +742,7 @@ class CodecGenerator {
             }
             // For complex types, call Decode.decode and let ability resolution find the impl
             // This allows the SubstitutionApplier to resolve the correct impl by content hash
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.ArrayType, is MezzeType.SetType,
+            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
                 // Use Decode.decode ability call - SubstitutionApplier will resolve to correct impl
                 // CRITICAL: Set inferredType on the arguments record so ability resolution works
@@ -964,9 +964,9 @@ class CodecGenerator {
     /**
      * Generate encode for Array - convert to List first using native function.
      */
-    private fun generateArrayEncode(formatType: MezzeType, arrayType: MezzeType.ArrayType): ImplAbilityDeclaration {
-        // Use __native_array_to_list to convert array to list
-        val toListCall = call(id("__native_array_to_list"), record("arr" to id("val")))
+    private fun generateArrayEncode(formatType: MezzeType, arrayType: MezzeType.SeqType): ImplAbilityDeclaration {
+        // Use __native_seq_to_list to convert seq to list
+        val toListCall = call(id("__native_seq_to_list"), record("xs" to id("val")))
 
         // Create list type for encoding
         val listType = MezzeType.ListType(arrayType.elementType)
@@ -1578,7 +1578,7 @@ class CodecGenerator {
             }
             // For complex types, generate a typed Decode.decode call
             // SubstitutionApplier will resolve this to the correct impl using content hash
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.ArrayType, is MezzeType.SetType,
+            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
                 // Use typed ability call - SubstitutionApplier resolves by type
                 typedDecodeCall(type, valueExpr)
@@ -1722,7 +1722,7 @@ class CodecGenerator {
     /**
      * Generate decode for Array - decode as List then convert.
      */
-    private fun generateArrayDecode(formatType: MezzeType, arrayType: MezzeType.ArrayType): ImplAbilityDeclaration {
+    private fun generateArrayDecode(formatType: MezzeType, arrayType: MezzeType.SeqType): ImplAbilityDeclaration {
         // Decode as List[ElementType] first, then convert to Array
         val listType = MezzeType.ListType(arrayType.elementType)
 
@@ -2028,7 +2028,7 @@ class CodecGenerator {
                 }
             )
             is MezzeType.ListType -> TypeApplicationAnnotation("List", listOf(mezzeTypeToAnnotation(type.elementType)))
-            is MezzeType.ArrayType -> ArrayTypeAnnotation(mezzeTypeToAnnotation(type.elementType))
+            is MezzeType.SeqType -> SeqTypeAnnotation(mezzeTypeToAnnotation(type.elementType))
             is MezzeType.SetType -> TypeApplicationAnnotation("Set", listOf(mezzeTypeToAnnotation(type.elementType)))
             is MezzeType.SortedSetType -> TypeApplicationAnnotation("SortedSet", listOf(mezzeTypeToAnnotation(type.elementType)))
             is MezzeType.MapType -> TypeApplicationAnnotation("Map", listOf(

@@ -12,22 +12,22 @@ import com.mezze.language.ast.*
  *
  * **Module Import** (imports all public exports):
  * ```mezze
- * use std::collections::array
+ * use std::collections::seq
  * ```
  *
  * **Selective Import** (imports specific items):
  * ```mezze
- * use std::collections::array::{map, filter, fold}
+ * use std::collections::seq::{map, filter, fold}
  * ```
  *
  * **Aliased Import**:
  * ```mezze
- * use std::collections::array as arr
+ * use std::collections::seq as arr
  * ```
  *
  * **Re-export** (import and re-export):
  * ```mezze
- * pub use std::collections::array::{map, filter}
+ * pub use std::collections::seq::{map, filter}
  * ```
  *
  * ## Design:
@@ -143,7 +143,7 @@ class ImportResolver(
     /**
      * Process a module path import (imports all exports).
      *
-     * Example: use std::collections::array
+     * Example: use std::collections::seq
      *
      * Module imports use the last segment as the qualifier.
      * e.g., `use std::math::core` makes items available as `core::pi`
@@ -222,7 +222,7 @@ class ImportResolver(
     /**
      * Process a selective path import (imports specific items).
      *
-     * Example: use std::collections::array::{map, filter, fold}
+     * Example: use std::collections::seq::{map, filter, fold}
      */
     private fun processSelectivePath(
         path: SelectivePath,
@@ -679,7 +679,7 @@ class ImportResolver(
             is MezzeType.VariantType -> {
                 type.constructors.values.forEach { collectTypeApplicationConstructors(it, result) }
             }
-            is MezzeType.ArrayType -> {
+            is MezzeType.SeqType -> {
                 collectTypeApplicationConstructors(type.elementType, result)
             }
             is MezzeType.ListType -> {

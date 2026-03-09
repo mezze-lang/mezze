@@ -2,11 +2,12 @@ package com.mezze.interpreter.v2.nodes;
 
 import com.mezze.interpreter.v2.nodes.literal.IntLiteralNode;
 import com.mezze.interpreter.v2.nodes.literal.StringLiteralNode;
-import com.mezze.interpreter.v2.nodes.array.ArrayLiteralNode;
+import com.mezze.interpreter.v2.nodes.seq.SeqLiteralNode;
 import com.mezze.interpreter.v2.nodes.variable.ReadLocalNode;
 import com.mezze.interpreter.v2.nodes.variant.MatchBranchNode;
 import com.mezze.interpreter.v2.nodes.variant.MatchNode;
 import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.interpreter.v2.values.MezzeSeq;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.FrameSlotKind;
@@ -15,26 +16,26 @@ import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for array pattern matching in V2.
+ * Tests for seq pattern matching in V2.
  *
- * Run with: ./gradlew :interpreterv2:test --tests "*ArrayPatternMatchTest*"
+ * Run with: ./gradlew :interpreterv2:test --tests "*SeqPatternMatchTest*"
  */
-public class ArrayPatternMatchTest {
+public class SeqPatternMatchTest {
 
     /**
      * Test: match [] { [] -> 0 }
      */
     @Test
-    void testEmptyArrayPattern() {
-        // Create empty array
-        MezzeNode emptyArrayNode = ArrayLiteralNode.create(new MezzeNode[0]);
+    void testEmptySeqPattern() {
+        // Create empty seq
+        MezzeNode emptySeqNode = SeqLiteralNode.create(new MezzeNode[0]);
 
-        // Create match with empty array pattern
-        MatchBranchNode emptyBranch = MatchBranchNode.arrayPattern(
+        // Create match with empty seq pattern
+        MatchBranchNode emptyBranch = MatchBranchNode.seqPattern(
                 new int[0], -1, false, new IntLiteralNode(0)
         );
 
-        MatchNode matchNode = new MatchNode(emptyArrayNode, new MatchBranchNode[]{emptyBranch}, -1);
+        MatchNode matchNode = new MatchNode(emptySeqNode, new MatchBranchNode[]{emptyBranch}, -1);
 
         // Execute
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
@@ -56,7 +57,7 @@ public class ArrayPatternMatchTest {
         FrameDescriptor fd = builder.build();
 
         // Create [1, 2]
-        MezzeNode arrayNode = ArrayLiteralNode.create(new MezzeNode[]{
+        MezzeNode seqNode = SeqLiteralNode.create(new MezzeNode[]{
                 new IntLiteralNode(1),
                 new IntLiteralNode(2)
         });
@@ -65,11 +66,11 @@ public class ArrayPatternMatchTest {
         MezzeNode bodyNode = new IntLiteralNode(42);
 
         // Create match with [x, y] pattern
-        MatchBranchNode branch = MatchBranchNode.arrayPattern(
+        MatchBranchNode branch = MatchBranchNode.seqPattern(
                 new int[]{slotX, slotY}, -1, false, bodyNode
         );
 
-        MatchNode matchNode = new MatchNode(arrayNode, new MatchBranchNode[]{branch}, -1);
+        MatchNode matchNode = new MatchNode(seqNode, new MatchBranchNode[]{branch}, -1);
 
         // Execute
         MezzeRootNode root = new MezzeRootNode(null, fd, matchNode, "test-two", 0, 0, new int[0]);
@@ -90,7 +91,7 @@ public class ArrayPatternMatchTest {
         FrameDescriptor fd = builder.build();
 
         // Create [1, 2, 3]
-        MezzeNode arrayNode = ArrayLiteralNode.create(new MezzeNode[]{
+        MezzeNode seqNode = SeqLiteralNode.create(new MezzeNode[]{
                 new IntLiteralNode(1),
                 new IntLiteralNode(2),
                 new IntLiteralNode(3)
@@ -100,11 +101,11 @@ public class ArrayPatternMatchTest {
         MezzeNode bodyNode = new ReadLocalNode(slotHead, ReadLocalNode.KIND_OBJECT);
 
         // Create match with [head, ...tail] pattern
-        MatchBranchNode branch = MatchBranchNode.arrayPattern(
+        MatchBranchNode branch = MatchBranchNode.seqPattern(
                 new int[]{slotHead}, slotTail, true, bodyNode
         );
 
-        MatchNode matchNode = new MatchNode(arrayNode, new MatchBranchNode[]{branch}, -1);
+        MatchNode matchNode = new MatchNode(seqNode, new MatchBranchNode[]{branch}, -1);
 
         // Execute
         MezzeRootNode root = new MezzeRootNode(null, fd, matchNode, "test-rest", 0, 0, new int[0]);
@@ -126,25 +127,25 @@ public class ArrayPatternMatchTest {
         FrameDescriptor fd = builder.build();
 
         // Create [1, 2]
-        MezzeNode arrayNode = ArrayLiteralNode.create(new MezzeNode[]{
+        MezzeNode seqNode = SeqLiteralNode.create(new MezzeNode[]{
                 new IntLiteralNode(1),
                 new IntLiteralNode(2)
         });
 
         // Create branches
-        MatchBranchNode emptyBranch = MatchBranchNode.arrayPattern(
+        MatchBranchNode emptyBranch = MatchBranchNode.seqPattern(
                 new int[0], -1, false, new IntLiteralNode(0)
         );
-        MatchBranchNode singleBranch = MatchBranchNode.arrayPattern(
+        MatchBranchNode singleBranch = MatchBranchNode.seqPattern(
                 new int[]{slotX}, -1, false, new IntLiteralNode(1)
         );
-        MatchBranchNode pairBranch = MatchBranchNode.arrayPattern(
+        MatchBranchNode pairBranch = MatchBranchNode.seqPattern(
                 new int[]{slotX, slotY}, -1, false, new IntLiteralNode(2)
         );
         MatchBranchNode wildcardBranch = MatchBranchNode.wildcard(slotWild, new IntLiteralNode(3));
 
         MatchNode matchNode = new MatchNode(
-                arrayNode,
+                seqNode,
                 new MatchBranchNode[]{emptyBranch, singleBranch, pairBranch, wildcardBranch},
                 3 // wildcard index
         );
@@ -161,13 +162,13 @@ public class ArrayPatternMatchTest {
      * Test: match [1, 2, 3] { [_, ...rest] -> rest.size }
      */
     @Test
-    void testRestPatternBindsCorrectly() {
+    void testRestSeqPatternBindsCorrectly() {
         FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
         int slotRest = builder.addSlot(FrameSlotKind.Object, "rest", null);
         FrameDescriptor fd = builder.build();
 
         // Create [1, 2, 3]
-        MezzeNode arrayNode = ArrayLiteralNode.create(new MezzeNode[]{
+        MezzeNode seqNode = SeqLiteralNode.create(new MezzeNode[]{
                 new IntLiteralNode(1),
                 new IntLiteralNode(2),
                 new IntLiteralNode(3)
@@ -177,47 +178,47 @@ public class ArrayPatternMatchTest {
         MezzeNode bodyNode = new ReadLocalNode(slotRest, ReadLocalNode.KIND_OBJECT);
 
         // Create match with [_, ...rest] pattern (-1 for first slot = no binding)
-        MatchBranchNode branch = MatchBranchNode.arrayPattern(
+        MatchBranchNode branch = MatchBranchNode.seqPattern(
                 new int[]{-1}, slotRest, true, bodyNode
         );
 
-        MatchNode matchNode = new MatchNode(arrayNode, new MatchBranchNode[]{branch}, -1);
+        MatchNode matchNode = new MatchNode(seqNode, new MatchBranchNode[]{branch}, -1);
 
         // Execute
         MezzeRootNode root = new MezzeRootNode(null, fd, matchNode, "test-rest-bind", 0, 0, new int[0]);
         CallTarget target = root.getCallTarget();
         Object result = target.call();
 
-        // V2 uses Object[] for arrays (not MezzeList)
-        assertTrue(result instanceof Object[], "Rest should be Object[], got: " +
+        // V2 uses MezzeSeq for sequences
+        assertTrue(result instanceof MezzeSeq, "Rest should be MezzeSeq, got: " +
             (result == null ? "null" : result.getClass().getName()));
-        Object[] rest = (Object[]) result;
-        assertEquals(2, rest.length, "Rest should have 2 elements [2, 3]");
-        assertEquals(2L, rest[0], "First rest element should be 2");
-        assertEquals(3L, rest[1], "Second rest element should be 3");
+        MezzeSeq rest = (MezzeSeq) result;
+        assertEquals(2, rest.size(), "Rest should have 2 elements [2, 3]");
+        assertEquals(2L, rest.get(0), "First rest element should be 2");
+        assertEquals(3L, rest.get(1), "Second rest element should be 3");
     }
 
     /**
-     * Performance test for array pattern matching.
+     * Performance test for seq pattern matching.
      */
     @Test
-    void testArrayPatternPerformance() {
+    void testSeqPatternPerformance() {
         FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
         int slotX = builder.addSlot(FrameSlotKind.Object, "x", null);
         int slotY = builder.addSlot(FrameSlotKind.Object, "y", null);
         FrameDescriptor fd = builder.build();
 
         // Create [1, 2]
-        MezzeNode arrayNode = ArrayLiteralNode.create(new MezzeNode[]{
+        MezzeNode seqNode = SeqLiteralNode.create(new MezzeNode[]{
                 new IntLiteralNode(1),
                 new IntLiteralNode(2)
         });
 
-        MatchBranchNode branch = MatchBranchNode.arrayPattern(
+        MatchBranchNode branch = MatchBranchNode.seqPattern(
                 new int[]{slotX, slotY}, -1, false, new IntLiteralNode(100)
         );
 
-        MatchNode matchNode = new MatchNode(arrayNode, new MatchBranchNode[]{branch}, -1);
+        MatchNode matchNode = new MatchNode(seqNode, new MatchBranchNode[]{branch}, -1);
 
         MezzeRootNode root = new MezzeRootNode(null, fd, matchNode, "test-perf", 0, 0, new int[0]);
         CallTarget target = root.getCallTarget();
@@ -235,7 +236,7 @@ public class ArrayPatternMatchTest {
         }
         long elapsed = System.nanoTime() - start;
 
-        System.out.printf("Array pattern match: %d iterations in %d ms (%.2f ns/op)%n",
+        System.out.printf("Seq pattern match: %d iterations in %d ms (%.2f ns/op)%n",
                 iterations, elapsed / 1_000_000, (double) elapsed / iterations);
 
         // Verify still works

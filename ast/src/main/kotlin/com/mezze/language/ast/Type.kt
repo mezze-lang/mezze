@@ -167,9 +167,9 @@ sealed interface MezzeType {
     @Serializable
     object OrderingType : MezzeType
 
-    // Array types (for arrays [] syntax)
+    // Seq types (for [] syntax)
     @Serializable
-    data class ArrayType(val elementType: MezzeType) : MezzeType
+    data class SeqType(val elementType: MezzeType) : MezzeType
 
     // Function types
     @Serializable
@@ -405,7 +405,7 @@ data class TypeScheme(
             is MezzeType.SortedSetType -> MezzeType.SortedSetType(
                 applySubstitutionToType(type.elementType, substitution)
             )
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 applySubstitutionToType(type.elementType, substitution)
             )
             is MezzeType.SuspendedType -> MezzeType.SuspendedType(

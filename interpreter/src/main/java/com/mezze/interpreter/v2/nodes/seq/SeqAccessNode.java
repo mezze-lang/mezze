@@ -1,4 +1,4 @@
-package com.mezze.interpreter.v2.nodes.array;
+package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeSeq;
@@ -17,10 +17,10 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
  *
  * Type-specialized for MezzeSeq (Vavr Vector) and MezzeList (Vavr List).
  */
-@NodeChild("arrayNode")
+@NodeChild("seqNode")
 @NodeChild("indexNode")
 @NodeInfo(shortName = "seq-get")
-public abstract class ArrayAccessNode extends MezzeNode {
+public abstract class SeqAccessNode extends MezzeNode {
 
     /**
      * MezzeSeq (Vavr Vector) access - O(log32 n) ≈ O(1)
@@ -98,9 +98,9 @@ public abstract class ArrayAccessNode extends MezzeNode {
     }
 
     /**
-     * Create an array access node.
+     * Create a seq access node.
      */
-    public static ArrayAccessNode create(MezzeNode arrayNode, MezzeNode indexNode) {
-        return ArrayAccessNodeGen.create(arrayNode, indexNode);
+    public static SeqAccessNode create(MezzeNode seqNode, MezzeNode indexNode) {
+        return SeqAccessNodeGen.create(seqNode, indexNode);
     }
 }

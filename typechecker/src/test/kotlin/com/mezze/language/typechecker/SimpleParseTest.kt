@@ -20,7 +20,7 @@ let test2 = take {n = n - 1, xs = tail}
 
         // Test 3: Full function
         val code3 = """
-use std::collections::array
+use std::collections::seq
 
 let take = {n: Int, xs} ->
     match xs is
@@ -28,7 +28,7 @@ let take = {n: Int, xs} ->
       [head, ...tail] ->
         if n <= 0
         then []
-        else array::of {x = head, xs = take {n = n - 1, xs = tail}}
+        else seq::of {x = head, xs = take {n = n - 1, xs = tail}}
 
 let result = take {n = 2, xs = [1, 2, 3, 4, 5]}
         """.trim()
@@ -40,7 +40,7 @@ let foo = bar {x = 1, y = baz {a = 2, b = 3}}
 
         // Test 5: With parentheses
         val code5 = """
-use std::collections::array
+use std::collections::seq
 
 let take = {n: Int, xs} ->
     match xs is
@@ -48,7 +48,7 @@ let take = {n: Int, xs} ->
       [head, ...tail] ->
         if n <= 0
         then []
-        else array::of {x = head, xs = (take {n = n - 1, xs = tail})}
+        else seq::of {x = head, xs = (take {n = n - 1, xs = tail})}
 
 let result = take {n = 2, xs = [1, 2, 3, 4, 5]}
         """.trim()
@@ -61,7 +61,7 @@ let foo = bar {x = 1, y = baz {a = n - 1, b = 3}}
         // Test 7: Inside match expression
         val code7 = """
 let foo = match xs is
-  [head, ...tail] -> array::of {x = head, xs = bar {n = n - 1, y = tail}}
+  [head, ...tail] -> seq::of {x = head, xs = bar {n = n - 1, y = tail}}
         """.trim()
 
         // Test 8: With if-then-else
@@ -70,7 +70,7 @@ let foo = match xs is
   [head, ...tail] ->
     if n <= 0
     then []
-    else array::of {x = head, xs = bar {n = n - 1, y = tail}}
+    else seq::of {x = head, xs = bar {n = n - 1, y = tail}}
         """.trim()
 
         // Test 9: With multiple match cases
@@ -80,7 +80,7 @@ let foo = match xs is
   [head, ...tail] ->
     if n <= 0
     then []
-    else array::of {x = head, xs = bar {n = n - 1, y = tail}}
+    else seq::of {x = head, xs = bar {n = n - 1, y = tail}}
         """.trim()
 
         // Test 10: Wrapped in lambda
@@ -91,7 +91,7 @@ let foo = {n: Int, xs} ->
     [head, ...tail] ->
       if n <= 0
       then []
-      else array::of {x = head, xs = bar {n = n - 1, y = tail}}
+      else seq::of {x = head, xs = bar {n = n - 1, y = tail}}
         """.trim()
 
         // Test 11: With let binding to extract nested call
@@ -104,7 +104,7 @@ let foo = {n: Int, xs} ->
       then []
       else
         let rest = bar {n = n - 1, y = tail}
-        array::of {x = head, xs = rest}
+        seq::of {x = head, xs = rest}
         """.trim()
 
         // Test 12: With parentheses around function call
@@ -117,7 +117,7 @@ let foo = {n: Int, xs} ->
       then []
       else
         let rest = (bar {n = n - 1, y = tail})
-        array::of {x = head, xs = rest}
+        seq::of {x = head, xs = rest}
         """.trim()
 
         // Test 13: Minimal failing case

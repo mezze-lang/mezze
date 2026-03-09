@@ -39,7 +39,7 @@ object CoopTypes {
         // __native_coop_race: { ps: [Promise 'a], cont: Continuation } -> 'a
         context["__native_coop_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType),
+                "ps" to MezzeType.SeqType(promiseType),
                 "cont" to contType
             )),
             MezzeType.VarType(TypeVar("a"))
@@ -48,10 +48,10 @@ object CoopTypes {
         // __native_coop_all: { ps: [Promise 'a], cont: Continuation } -> ['a]
         context["__native_coop_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType),
+                "ps" to MezzeType.SeqType(promiseType),
                 "cont" to contType
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
         )
 
         // __native_coop_timeout: { ms: Int, p: Promise 'a, cont: Continuation } -> Option 'a
@@ -132,20 +132,20 @@ object CoopTypes {
         // __native_coop_map: {xs: ['a], f: {x: 'a} -> 'b, cont: Continuation} -> ['b]
         context["__native_coop_map"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.VarType(TypeVar("b"))
                 ),
                 "cont" to contType
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("b")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("b")))
         )
 
         // __native_coop_for_each: {xs: ['a], f: {x: 'a} -> {}, cont: Continuation} -> {}
         context["__native_coop_for_each"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.RecordType(emptyMap())
@@ -158,14 +158,14 @@ object CoopTypes {
         // __native_coop_filter: {xs: ['a], f: {x: 'a} -> Bool, cont: Continuation} -> ['a]
         context["__native_coop_filter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ArrayType(MezzeType.VarType(TypeVar("a"))),
+                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.BoolType
                 ),
                 "cont" to contType
             )),
-            MezzeType.ArrayType(MezzeType.VarType(TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
         )
 
         // === Error Handling ===
@@ -173,7 +173,7 @@ object CoopTypes {
         // __native_coop_any: {ps: [Promise 'a], cont: Continuation} -> 'a
         context["__native_coop_any"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType),
+                "ps" to MezzeType.SeqType(promiseType),
                 "cont" to contType
             )),
             MezzeType.VarType(TypeVar("a"))
@@ -187,10 +187,10 @@ object CoopTypes {
         ))
         context["__native_coop_settle"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.ArrayType(promiseType),
+                "ps" to MezzeType.SeqType(promiseType),
                 "cont" to contType
             )),
-            MezzeType.ArrayType(resultType)
+            MezzeType.SeqType(resultType)
         )
 
         // === Structured Concurrency Scopes ===

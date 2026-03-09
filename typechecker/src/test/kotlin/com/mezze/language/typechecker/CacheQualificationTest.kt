@@ -32,8 +32,8 @@ class CacheQualificationTest {
     @DisplayName("Modules should be cached with qualified names")
     fun testModuleCachingWithQualification() {
         val source = """
-            use std::collections::array::{of}
-            use std::collections::list::{from_array}
+            use std::collections::seq::{of}
+            use std::collections::list::{from_seq}
 
             let arr = of { x = 1, xs = of { x = 2, xs = [] } }
             arr

@@ -104,7 +104,7 @@ object AbilityImplementationChecker {
             (type is MezzeType.ListType &&
                 hasBuiltInImplementation(AstAbilities.EQ, type.elementType, typeDeclarations, expandTypeApplication)) ||
             // Derive Eq for arrays if element type has Eq
-            (type is MezzeType.ArrayType &&
+            (type is MezzeType.SeqType &&
                 hasBuiltInImplementation(AstAbilities.EQ, type.elementType, typeDeclarations, expandTypeApplication))
     }
 
@@ -132,7 +132,7 @@ object AbilityImplementationChecker {
             (type is MezzeType.ListType &&
                 hasBuiltInImplementation(AstAbilities.ORD, type.elementType, typeDeclarations, expandTypeApplication)) ||
             // Derive Ord for arrays if element type has Ord
-            (type is MezzeType.ArrayType &&
+            (type is MezzeType.SeqType &&
                 hasBuiltInImplementation(AstAbilities.ORD, type.elementType, typeDeclarations, expandTypeApplication))
     }
 }

@@ -493,13 +493,13 @@ class HashStabilityTest {
     }
 
     @Test
-    fun `array literal hashes correctly`() {
-        val arr1 = ArrayLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(3)))
-        val arr2 = ArrayLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(3)))
-        val arr3 = ArrayLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(4)))
+    fun `seq literal hashes correctly`() {
+        val seq1 = SeqLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(3)))
+        val seq2 = SeqLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(3)))
+        val seq3 = SeqLiteral.fromExpressions(listOf(IntLiteral(1), IntLiteral(2), IntLiteral(4)))
 
-        assertEquals(ASTHasher.hashExpression(arr1), ASTHasher.hashExpression(arr2))
-        assertNotEquals(ASTHasher.hashExpression(arr1), ASTHasher.hashExpression(arr3))
+        assertEquals(ASTHasher.hashExpression(seq1), ASTHasher.hashExpression(seq2))
+        assertNotEquals(ASTHasher.hashExpression(seq1), ASTHasher.hashExpression(seq3))
     }
 
     @Test

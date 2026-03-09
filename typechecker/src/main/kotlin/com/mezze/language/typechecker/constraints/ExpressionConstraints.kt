@@ -73,7 +73,7 @@ class ExpressionConstraintGenerator {
             is BooleanLiteral -> generateBooleanLiteral(expr, context)
             is FractionLiteral -> generateFractionLiteral(expr, context)
             is StringLiteral -> generateStringLiteral(expr, context)
-            is ArrayLiteral -> generateArrayLiteral(expr, context)
+            is SeqLiteral -> generateSeqLiteral(expr, context)
 
             // Variables - lookup in context
             is Identifier -> generateIdentifier(expr, context)
@@ -82,8 +82,8 @@ class ExpressionConstraintGenerator {
             // Parenthesized expression - just delegate to inner
             is ParenthesizedExpression -> generate(expr.expression, context)
 
-            // Arrays
-            is ArrayAccess -> generateArrayAccess(expr, context)
+            // Seqs
+            is SeqAccess -> generateSeqAccess(expr, context)
 
             // Records
             is RecordLiteral -> generateRecordLiteral(expr, context)
@@ -203,14 +203,14 @@ class ExpressionConstraintGenerator {
         )
     }
 
-    private fun generateArrayLiteral(expr: ArrayLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateSeqLiteral(expr: SeqLiteral, context: ConstraintContext): ConstraintResult {
         if (expr.elements.isEmpty()) {
-            // Empty array: [element] where element is fresh type variable
+            // Empty seq: [element] where element is fresh type variable
             val elementType = MezzeType.VarType(TypeVar.fresh())
-            return ConstraintResult.simple(MezzeType.ArrayType(elementType))
+            return ConstraintResult.simple(MezzeType.SeqType(elementType))
         }
 
-        // Non-empty array: all elements must have same type
+        // Non-empty seq: all elements must have same type
         // Handle both regular elements and spread elements
         val elementType = MezzeType.VarType(TypeVar.fresh())
         val constraints = mutableListOf<Constraint>()
@@ -222,7 +222,7 @@ class ExpressionConstraintGenerator {
         var elementIndex = 0
         for (element in expr.elements) {
             when (element) {
-                is ArrayRegularElement -> {
+                is SeqRegularElement -> {
                     val result = generate(element.expression, context)
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
@@ -234,28 +234,28 @@ class ExpressionConstraintGenerator {
                         Constraint.Equality(
                             left = result.type,
                             right = elementType,
-                            context = "Array elements must have same type",
+                            context = "Seq elements must have same type",
                             sourceLocation = element.expression.sourceLocation,
-                            errorContext = ErrorContext.ArrayElement(elementIndex)
+                            errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
                     elementIndex++
                 }
-                is ArraySpreadElement -> {
+                is SeqSpreadElement -> {
                     val result = generate(element.expression, context)
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
                     abilityConstraints.addAll(result.abilityConstraints)
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
-                    // Spread element must be an array with matching element type
+                    // Spread element must be a seq with matching element type
                     constraints.add(
                         Constraint.Equality(
                             left = result.type,
-                            right = MezzeType.ArrayType(elementType),
-                            context = "Spread element must be an array",
+                            right = MezzeType.SeqType(elementType),
+                            context = "Spread element must be a seq",
                             sourceLocation = element.expression.sourceLocation,
-                            errorContext = ErrorContext.ArrayElement(elementIndex)
+                            errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
                     elementIndex++
@@ -264,7 +264,7 @@ class ExpressionConstraintGenerator {
         }
 
         return ConstraintResult(
-            type = MezzeType.ArrayType(elementType),
+            type = MezzeType.SeqType(elementType),
             constraints = constraints,
             effects = effects,
             abilityConstraints = abilityConstraints,
@@ -444,29 +444,29 @@ class ExpressionConstraintGenerator {
     }
 
     // ========================================================================
-    // ARRAYS
+    // SEQS
     // ========================================================================
 
-    private fun generateArrayAccess(expr: ArrayAccess, context: ConstraintContext): ConstraintResult {
-        // array[index]
-        // array must be Array<T>, index must be Int, result is T
+    private fun generateSeqAccess(expr: SeqAccess, context: ConstraintContext): ConstraintResult {
+        // seq[index]
+        // seq must be Seq<T>, index must be Int, result is T
 
-        val arrayResult = generate(expr.array, context)
+        val seqResult = generate(expr.seq, context)
         val indexResult = generate(expr.index, context)
 
         val elementType = MezzeType.VarType(TypeVar.fresh())
 
         val constraints = mutableListOf<Constraint>()
-        constraints.addAll(arrayResult.constraints)
+        constraints.addAll(seqResult.constraints)
         constraints.addAll(indexResult.constraints)
 
-        // array must be Array<elementType>
+        // seq must be Seq<elementType>
         constraints.add(
             Constraint.Equality(
-                left = arrayResult.type,
-                right = MezzeType.ArrayType(elementType),
-                context = "Array access requires array type",
-                sourceLocation = expr.array.sourceLocation
+                left = seqResult.type,
+                right = MezzeType.SeqType(elementType),
+                context = "Seq access requires seq type",
+                sourceLocation = expr.seq.sourceLocation
             )
         )
 
@@ -475,7 +475,7 @@ class ExpressionConstraintGenerator {
             Constraint.Equality(
                 left = indexResult.type,
                 right = MezzeType.IntType,
-                context = "Array index must be Int",
+                context = "Seq index must be Int",
                 sourceLocation = expr.index.sourceLocation
             )
         )
@@ -483,8 +483,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = elementType,
             constraints = constraints,
-            undefinedVariables = arrayResult.undefinedVariables + indexResult.undefinedVariables,
-            referencedBindings = arrayResult.referencedBindings + indexResult.referencedBindings
+            undefinedVariables = seqResult.undefinedVariables + indexResult.undefinedVariables,
+            referencedBindings = seqResult.referencedBindings + indexResult.referencedBindings
         )
     }
 
@@ -1327,7 +1327,7 @@ class ExpressionConstraintGenerator {
             original is MezzeType.ListType && instantiated is MezzeType.ListType -> {
                 buildTypeVarMappingHelper(original.elementType, instantiated.elementType, mapping)
             }
-            original is MezzeType.ArrayType && instantiated is MezzeType.ArrayType -> {
+            original is MezzeType.SeqType && instantiated is MezzeType.SeqType -> {
                 buildTypeVarMappingHelper(original.elementType, instantiated.elementType, mapping)
             }
             // Add more cases as needed...
@@ -1448,7 +1448,7 @@ class ExpressionConstraintGenerator {
                 },
                 rowVar = type.rowVar
             )
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
             )
             is MezzeType.ListType -> MezzeType.ListType(
@@ -1588,7 +1588,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.VariantType -> {
                 type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet()
             }
-            is MezzeType.ArrayType -> getFreeTypeVariables(type.elementType)
+            is MezzeType.SeqType -> getFreeTypeVariables(type.elementType)
             is MezzeType.ListType -> getFreeTypeVariables(type.elementType)
             is MezzeType.SetType -> getFreeTypeVariables(type.elementType)
             is MezzeType.SortedMapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
@@ -1631,7 +1631,7 @@ class ExpressionConstraintGenerator {
                 },
                 rowVar = type.rowVar
             )
-            is MezzeType.ArrayType -> MezzeType.ArrayType(
+            is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)
             )
             is MezzeType.ListType -> MezzeType.ListType(
@@ -1684,7 +1684,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.VariantType -> {
                 type.constructors.values.filterNotNull().flatMap { extractTypeVariables(it) }
             }
-            is MezzeType.ArrayType -> extractTypeVariables(type.elementType)
+            is MezzeType.SeqType -> extractTypeVariables(type.elementType)
             is MezzeType.ListType -> extractTypeVariables(type.elementType)
             is MezzeType.SetType -> extractTypeVariables(type.elementType)
             is MezzeType.SortedMapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
@@ -1798,8 +1798,8 @@ class ExpressionConstraintGenerator {
                             typeMatchesAnnotationBidirectional(argType, argAnnotation)
                         }
                     }
-                    is MezzeType.ArrayType -> {
-                        annotation.constructor == "Array" &&
+                    is MezzeType.SeqType -> {
+                        annotation.constructor == "Seq" &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
                     }
@@ -1841,8 +1841,8 @@ class ExpressionConstraintGenerator {
                     }
                 }
             }
-            is ArrayTypeAnnotation -> {
-                constraintType is MezzeType.ArrayType &&
+            is SeqTypeAnnotation -> {
+                constraintType is MezzeType.SeqType &&
                 typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.elementType)
             }
             is FunctionTypeAnnotation -> {
@@ -1889,7 +1889,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.BytesType -> implTypeName == "Bytes"
             is MezzeType.ByteBufferType -> implTypeName == "ByteBuffer"
             is MezzeType.TypeApplication -> implTypeName == constraintType.constructor || implTypeName.startsWith("${constraintType.constructor}_")
-            is MezzeType.ArrayType -> implTypeName.startsWith("Array")
+            is MezzeType.SeqType -> implTypeName.startsWith("Seq")
             is MezzeType.ListType -> implTypeName.startsWith("List")
             is MezzeType.SetType -> implTypeName.startsWith("Set")
             is MezzeType.MapType -> implTypeName.startsWith("Map")
@@ -3513,7 +3513,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.RecordType,
             is MezzeType.VariantType,
             is MezzeType.TypeApplication,
-            is MezzeType.ArrayType,
+            is MezzeType.SeqType,
             is MezzeType.ListType,
             is MezzeType.SetType,
             is MezzeType.SortedSetType,
@@ -3545,7 +3545,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.RecordType,
             is MezzeType.VariantType,
             is MezzeType.TypeApplication,
-            is MezzeType.ArrayType,
+            is MezzeType.SeqType,
             is MezzeType.ListType,
             is MezzeType.SetType,
             is MezzeType.SortedSetType,
@@ -3931,8 +3931,8 @@ class ExpressionConstraintGenerator {
                     }
                 )
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(
                     elementType = convertFieldType(annotation.elementType)
                 )
             }

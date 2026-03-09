@@ -251,10 +251,10 @@ class OptionInterpreterTest {
     fun `to_list converts Some to singleton`() {
         val code = """
             use std::option
-            use std::collections::array
+            use std::collections::seq
             let opt: (Option Int) = Some { val = 42 }
             let arr = option::to_list { opt = opt }
-            array::length { xs = arr }
+            seq::length { xs = arr }
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -264,10 +264,10 @@ class OptionInterpreterTest {
     fun `to_list converts None to empty`() {
         val code = """
             use std::option
-            use std::collections::array
+            use std::collections::seq
             let opt: (Option Int) = None
             let arr = option::to_list { opt = opt }
-            array::length { xs = arr }
+            seq::length { xs = arr }
         """
         val result = eval(code)
         assertEquals(0L, result)

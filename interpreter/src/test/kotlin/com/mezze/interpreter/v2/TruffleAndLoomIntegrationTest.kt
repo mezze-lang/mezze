@@ -1,5 +1,6 @@
 package com.mezze.interpreter.v2
 
+import com.mezze.interpreter.v2.values.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -26,7 +27,7 @@ class TruffleAndLoomIntegrationTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val setupCode = """
-        use std::collections::array
+        use std::collections::seq
 
         newtype Promise 'a = Promise __NativePromise
 
@@ -94,15 +95,15 @@ class TruffleAndLoomIntegrationTest {
                 let double = {x} -> x * 2
                 let data = [1, 2, 3, 4, 5]
 
-                let promise = spawn {f = {} -> array::map {f = double, xs = data}}
+                let promise = spawn {f = {} -> seq::map {f = double, xs = data}}
                 await {p =promise}
 
             test {}
         """
-        val result = eval(code) as Array<*>
-        assertEquals(5, result.size)
-        assertEquals(2L, result[0])
-        assertEquals(10L, result[4])
+        val result = eval(code) as MezzeSeq
+        assertEquals(5, result.size())
+        assertEquals(2L, result.get(0))
+        assertEquals(10L, result.get(4))
     }
 
     // =============================================================================
@@ -297,7 +298,7 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let process = {data} ->
-                array::fold {xs = data, init = 0, f = {acc, x} -> acc + x}
+                seq::fold {xs = data, init = 0, f = {acc, x} -> acc + x}
 
             let test = {} -> do
                 let data1 = [1, 2, 3]
@@ -382,9 +383,9 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let pipeline: {data: [Int]} -> Int = {data} -> do
-                let promises = data |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
-                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                let promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             pipeline {data = [1, 2, 3, 4, 5]}
         """
@@ -399,11 +400,11 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let map_phase: {data: [Int]} -> [Int] = {data} -> do
-                let promises = data |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
-                promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                let promises = data |> seq::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
+                promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
             let reduce_phase: {data: [Int]} -> Int = {data} ->
-                data |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                data |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             let test = {} -> do
                 let data = [1, 2, 3, 4, 5]
@@ -501,13 +502,13 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let items = [Red, Blue {val = 10}, Blue {val = 20}]
 
-                let promises = items |> array::map {xs = @, f = {x} ->
+                let promises = items |> seq::map {xs = @, f = {x} ->
                     spawn {f = {} -> processItem {item = x}}
                 }
 
-                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                let results = promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             test {}
         """
@@ -600,17 +601,17 @@ class TruffleAndLoomIntegrationTest {
             }
 
             let processInParallel = {items} -> do
-                let promises = items |> array::map {xs = @, f = {x} ->
+                let promises = items |> seq::map {xs = @, f = {x} ->
                     spawn {f = {} ->
                         perform Calculator in Math.square {x = x}
                     }}
 
-                promises |> array::map {xs = @, f = {x} -> await {p =x}}
+                promises |> seq::map {xs = @, f = {x} -> await {p =x}}
 
             let test = {} -> do
                 let data = [1, 2, 3, 4, 5]
                 let results = processInParallel {items = data}
-                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
+                results |> seq::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             test {}
         """

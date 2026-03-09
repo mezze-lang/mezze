@@ -362,9 +362,8 @@ class ModuleResolver(
         "std::types::string",        // String type operations (now built-in)
         "std::types::boolean",       // Boolean type operations (now built-in)
         "std::types::nat",           // Natural number operations (now built-in)
-        "std::types::frac",          // Fraction operations (now built-in)
-        "std::collections::arraylist" // ArrayList operations (no stdlib file, fully built-in as array.mz)
-        // NOTE: std::collections::map and std::collections::set are NOT skipped - they have stdlib wrapper files
+        "std::types::frac"           // Fraction operations (now built-in)
+        // NOTE: std::collections::seq, std::collections::map and std::collections::set are NOT skipped - they have stdlib files
     )
     
     /**
@@ -863,8 +862,8 @@ class ModuleResolver(
                 }
                 MezzeType.RecordType(fields)
             }
-            is ArrayTypeAnnotation -> {
-                MezzeType.ArrayType(convertTypeAnnotation(annotation.elementType))
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(convertTypeAnnotation(annotation.elementType))
             }
             else -> {
                 MezzeType.VarType(TypeVar.fresh())
@@ -1009,11 +1008,11 @@ class ModuleResolver(
      * it should resolve to the module's own `add` function, not one from another module.
      *
      * @param program The parsed program AST
-     * @param modulePath The module path (e.g., "std::collections::array")
+     * @param modulePath The module path (e.g., "std::collections::seq")
      * @return A transformed program with qualified variable names
      */
     private fun qualifyModuleVariables(program: Program, modulePath: String): Program {
-        // Convert module path to qualified prefix (e.g., "std::collections::array" -> "std__collections__array")
+        // Convert module path to qualified prefix (e.g., "std::collections::seq" -> "std__collections__array")
         val qualifiedPrefix = modulePath.replace("::", "__") + "__"
 
         // Collect all variable names defined in this module (excluding imports)
@@ -1105,11 +1104,11 @@ class ModuleResolver(
                     )
                 }
             )
-            is ArrayLiteral -> expr.copy(
+            is SeqLiteral -> expr.copy(
                 elements = expr.elements.map { element ->
                     when (element) {
-                        is ArrayRegularElement -> ArrayRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
-                        is ArraySpreadElement -> ArraySpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is SeqRegularElement -> SeqRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is SeqSpreadElement -> SeqSpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
                     }
                 }
             )

@@ -103,7 +103,7 @@ object FilesystemTypes {
         context["__native_fs_list_directory"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
             resultType(
-                MezzeType.ArrayType(MezzeType.StringType),
+                MezzeType.SeqType(MezzeType.StringType),
                 MezzeType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )
@@ -175,7 +175,7 @@ object FilesystemTypes {
         context["__native_memfs_list_directory"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
             resultType(
-                MezzeType.ArrayType(MezzeType.StringType),
+                MezzeType.SeqType(MezzeType.StringType),
                 MezzeType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )
