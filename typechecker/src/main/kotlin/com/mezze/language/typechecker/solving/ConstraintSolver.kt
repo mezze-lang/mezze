@@ -3077,26 +3077,35 @@ class ConstraintSolver(
             // - PATTERN CONTEXT: Create open variant for row polymorphism
             //   Patterns may need to unify with other patterns via row variables
 
-            // BOTH PATTERN AND EXPRESSION CONTEXT: Create an open variant
-            // This allows:
-            // 1. Row polymorphism in patterns
-            // 2. Merging of variants from if-then-else branches (Success | Failure -> MyResult)
-            // 3. The global type lookup in Unification handles expanding type aliases (LogLevel)
-            val newRowVar = RowVar.fresh()
-            val newVariant = MezzeType.VariantType(
-                constructors = mapOf(constructorName to expectedPayloadType),
-                rowVar = newRowVar  // Open for row polymorphism and merging
-            )
-
-            // PATTERN CONTEXT: Track the row var so it can be closed later
-            // Pattern-created variants should be closed unless there's a wildcard (MustBeOpen)
             if (isPatternContext) {
-                patternBasedRowVars.add(newRowVar)
-            }
+                // PATTERN CONTEXT: Create an open variant for row polymorphism
+                // Patterns may need to unify with other patterns via row variables
+                val newRowVar = RowVar.fresh()
+                val newVariant = MezzeType.VariantType(
+                    constructors = mapOf(constructorName to expectedPayloadType),
+                    rowVar = newRowVar  // Open for row polymorphism
+                )
 
-            return ConstraintResult.Success(
-                Substitution.single(variantType.variable, newVariant)
-            )
+                // Track the row var so it can be closed later
+                // Pattern-created variants should be closed unless there's a wildcard (MustBeOpen)
+                patternBasedRowVars.add(newRowVar)
+
+                return ConstraintResult.Success(
+                    Substitution.single(variantType.variable, newVariant)
+                )
+            } else {
+                // EXPRESSION CONTEXT: Create a CLOSED variant
+                // A bare constructor in an expression is a specific value, not a row-polymorphic type
+                // e.g., `MathError {code = "x", message = "y"}` should be `| MathError {...} |` (closed)
+                val newVariant = MezzeType.VariantType(
+                    constructors = mapOf(constructorName to expectedPayloadType),
+                    rowVar = null  // Closed - expression context creates a specific value
+                )
+
+                return ConstraintResult.Success(
+                    Substitution.single(variantType.variable, newVariant)
+                )
+            }
         }
 
         // Special handling for BoolType - allows pattern matching with True/False

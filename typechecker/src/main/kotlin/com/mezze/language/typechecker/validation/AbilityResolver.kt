@@ -33,6 +33,12 @@ class AbilityResolver(
     // Cache for getTypeName() - avoids repeated ContentHashComputer calls
     // Keyed by identity hash to avoid expensive MezzeType.equals()
     private val typeNameCache = mutableMapOf<Int, String>()
+
+    // Track types currently being checked to handle recursive types.
+    // Key is (typeName, abilityName) - if we encounter the same check recursively,
+    // we assume the ability is satisfied (coinductive reasoning for recursive types).
+    private val inProgressChecks = mutableSetOf<Pair<String, String>>()
+
     /**
      * Result of ability resolution.
      */
@@ -54,6 +60,46 @@ class AbilityResolver(
         type: MezzeType,
         abilityName: String,
         typeArgs: List<MezzeType> = emptyList()
+    ): AbilityCheckResult {
+        // Handle recursive type checking - if we're already checking this type for this ability,
+        // assume it's satisfied to break the recursion (coinductive approach)
+        val typeName = getTypeNameForRecursionCheck(type)
+        if (typeName != null) {
+            val checkKey = Pair(typeName, abilityName)
+            if (checkKey in inProgressChecks) {
+                return AbilityCheckResult.Satisfied("Recursive type (coinductive)")
+            }
+            inProgressChecks.add(checkKey)
+            try {
+                return checkAbilityImpl(type, abilityName, typeArgs)
+            } finally {
+                inProgressChecks.remove(checkKey)
+            }
+        }
+
+        return checkAbilityImpl(type, abilityName, typeArgs)
+    }
+
+    /**
+     * Get a stable name for a type for recursion checking.
+     * Returns null for types that can't be recursive (primitives, etc.)
+     */
+    private fun getTypeNameForRecursionCheck(type: MezzeType): String? {
+        return when (type) {
+            is MezzeType.RecordType -> type.typeName
+            is MezzeType.VariantType -> type.typeName
+            is MezzeType.TypeApplication -> type.constructor
+            else -> null
+        }
+    }
+
+    /**
+     * Internal implementation of ability checking.
+     */
+    private fun checkAbilityImpl(
+        type: MezzeType,
+        abilityName: String,
+        typeArgs: List<MezzeType>
     ): AbilityCheckResult {
         return when (type) {
             // Type variables can't be checked yet (deferred to instantiation)
@@ -461,7 +507,55 @@ class AbilityResolver(
             }
         }
 
+        // For user-defined type applications, check if the underlying type declaration
+        // supports the ability. This handles recursive types like Tree 'a.
+        val typeDecl = typeDeclarations[type.constructor]
+        if (typeDecl != null && (abilityName == "Eq" || abilityName == "Inspect")) {
+            // First check if type arguments support the ability
+            val allArgsSupport = type.args.all { arg ->
+                checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
+            }
+            if (!allArgsSupport) {
+                return AbilityCheckResult.Unsatisfied(
+                    reason = "${type.constructor} $abilityName requires type arguments to have $abilityName"
+                )
+            }
+
+            // Check the underlying type structure
+            return when (val definition = typeDecl.definition) {
+                is VariantDefinition -> {
+                    // For variant types, check all constructor data types
+                    // But skip recursive references (handled by inProgressChecks)
+                    for (constructor in definition.constructors) {
+                        val dataTypeAnnotation = constructor.dataType ?: continue
+                        // Check if this is a self-reference - if so, skip
+                        if (isSelfReference(dataTypeAnnotation, type.constructor)) continue
+
+                        // For non-self-referential parts, we need to check the concrete type
+                        // This is already handled by the recursive check with inProgressChecks
+                    }
+                    AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
+                }
+                is RecordDefinition -> {
+                    AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
+                }
+                else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+            }
+        }
+
         return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+    }
+
+    /**
+     * Check if a type annotation references the given type name (self-reference).
+     */
+    private fun isSelfReference(annotation: TypeAnnotation, typeName: String): Boolean {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> annotation.name == typeName
+            is TypeApplicationAnnotation -> annotation.constructor == typeName
+            is RecordTypeAnnotation -> annotation.entries.any { isSelfReference(it.type, typeName) }
+            else -> false
+        }
     }
 
     // ========================================

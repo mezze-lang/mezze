@@ -2158,10 +2158,19 @@ class ExpressionConstraintGenerator {
         // Create function type with effects from body
         // CRITICAL: If the body has effects, effect instances, or performed effects, add them to the FunctionType
         // Include effectInstances in the EffectRow for effect-polymorphic signatures
-        val effectRow = if (bodyResult.effects.isNotEmpty() || bodyResult.effectInstances.isNotEmpty() || bodyResult.performed) {
+        //
+        // IMPORTANT: Effect instances from different branches (if-then-else, match) may have the same
+        // effect name but different associated types. For example:
+        //   - Branch 1: Exception with 'error = MathError
+        //   - Branch 2: Exception with 'error = FakeError
+        // These need to be MERGED by unifying their associated types, producing:
+        //   - Exception with 'error = | MathError, FakeError |
+        val (mergedEffectInstances, effectMergeConstraints) = mergeEffectInstances(bodyResult.effectInstances)
+
+        val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() || bodyResult.performed) {
             MezzeType.EffectRow(
                 effects = bodyResult.effects,
-                effectInstances = bodyResult.effectInstances,
+                effectInstances = mergedEffectInstances,
                 rowVar = null,
                 performed = bodyResult.performed
             )
@@ -2278,7 +2287,7 @@ class ExpressionConstraintGenerator {
         // WARNINGS: Propagate pattern warnings and unused variables from body
         return ConstraintResult(
             type = functionType,
-            constraints = bodyResult.constraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints,
+            constraints = bodyResult.constraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
             abilityConstraints = bodyResult.abilityConstraints,
             undefinedVariables = bodyResult.undefinedVariables,
             tailCalls = bodyResult.tailCalls,
@@ -2287,6 +2296,144 @@ class ExpressionConstraintGenerator {
             patternWarnings = bodyResult.patternWarnings,
             referencedBindings = bodyResult.referencedBindings
         )
+    }
+
+    /**
+     * Merge effect instances that have the same effect name.
+     *
+     * When an if-then-else or match expression has branches that throw different error types
+     * for the same effect (e.g., Exception), we need to:
+     * 1. Group effect instances by name
+     * 2. For instances with the same name, directly merge their associated types (especially variants)
+     * 3. Return a single merged instance per effect name
+     *
+     * Example:
+     *   Branch 1: Exception with 'error = | MathError {...} |
+     *   Branch 2: Exception with 'error = | FakeError {...} |
+     *
+     * After merging:
+     *   Exception with 'error = | MathError {...}, FakeError {...} |
+     *
+     * For variant types, we directly merge constructors from all branches.
+     * For non-variant types, we generate equality constraints.
+     */
+    private fun mergeEffectInstances(instances: Set<MezzeType.EffectInstance>): Pair<Set<MezzeType.EffectInstance>, List<Constraint>> {
+        if (instances.isEmpty()) {
+            return Pair(emptySet(), emptyList())
+        }
+
+        // Group instances by effect name
+        val groupedByName = instances.groupBy { it.name }
+
+        val mergedInstances = mutableSetOf<MezzeType.EffectInstance>()
+        val constraints = mutableListOf<Constraint>()
+
+        for ((effectName, instancesForEffect) in groupedByName) {
+            if (instancesForEffect.size == 1) {
+                // Only one instance for this effect - no merging needed
+                mergedInstances.add(instancesForEffect.first())
+            } else {
+                // Multiple instances with same effect name - need to merge their associated types
+                // Collect all unique associated type keys
+                val allKeys = instancesForEffect.flatMap { it.associatedTypes.keys }.toSet()
+
+                val mergedAssocTypes = mutableMapOf<String, MezzeType>()
+                for (key in allKeys) {
+                    // Collect all types for this key from all instances
+                    val typesForKey = instancesForEffect.mapNotNull { it.associatedTypes[key] }
+
+                    if (typesForKey.isEmpty()) {
+                        // No types for this key (shouldn't happen but handle gracefully)
+                        continue
+                    } else if (typesForKey.size == 1) {
+                        // Only one instance has this key
+                        mergedAssocTypes[key] = typesForKey.first()
+                    } else {
+                        // Multiple instances have this key - try to merge them directly
+                        val mergedType = mergeAssociatedTypes(typesForKey, constraints)
+                        mergedAssocTypes[key] = mergedType
+                    }
+                }
+
+                mergedInstances.add(MezzeType.EffectInstance(effectName, mergedAssocTypes))
+            }
+        }
+
+        return Pair(mergedInstances, constraints)
+    }
+
+    /**
+     * Merge multiple types into a single type.
+     *
+     * For variant types, this directly merges constructors from all types.
+     * For other types, this creates a fresh type variable and generates equality constraints.
+     */
+    private fun mergeAssociatedTypes(types: List<MezzeType>, constraints: MutableList<Constraint>): MezzeType {
+        // Check if all types are variant types - if so, we can merge them directly
+        val variantTypes = types.filterIsInstance<MezzeType.VariantType>()
+
+        if (variantTypes.size == types.size && variantTypes.isNotEmpty()) {
+            // All types are variants - merge their constructors directly
+            val mergedConstructors = mutableMapOf<String, MezzeType?>()
+
+            for (variant in variantTypes) {
+                for ((constructorName, payloadType) in variant.constructors) {
+                    val existingPayload = mergedConstructors[constructorName]
+                    if (existingPayload == null && constructorName !in mergedConstructors) {
+                        // New constructor - add it
+                        mergedConstructors[constructorName] = payloadType
+                    } else if (payloadType != null && existingPayload != null) {
+                        // Constructor exists with payload in both - need to unify payloads
+                        // Generate a constraint for the payload types
+                        val mergedPayloadVar = MezzeType.VarType(TypeVar.fresh())
+                        constraints.add(
+                            Constraint.Equality(
+                                left = existingPayload,
+                                right = mergedPayloadVar,
+                                context = "Merging variant constructor '$constructorName' payload"
+                            )
+                        )
+                        constraints.add(
+                            Constraint.Equality(
+                                left = payloadType,
+                                right = mergedPayloadVar,
+                                context = "Merging variant constructor '$constructorName' payload"
+                            )
+                        )
+                        mergedConstructors[constructorName] = mergedPayloadVar
+                    }
+                    // If constructor exists but payload types differ (one null, one not), keep the non-null one
+                    else if (payloadType != null && existingPayload == null) {
+                        mergedConstructors[constructorName] = payloadType
+                    }
+                    // If existing has payload and new doesn't, keep existing
+                }
+            }
+
+            // Create a closed variant with all merged constructors
+            return MezzeType.VariantType(
+                constructors = mergedConstructors,
+                rowVar = null  // Closed variant
+            )
+        }
+
+        // Not all variants - fall back to type variable with constraints
+        // CRITICAL: Set isMatchCaseContext = true so that the constraint solver
+        // will merge the variants instead of just unifying them. Without this,
+        // when $tv1 = | MathError | and $tv2 = | FakeError | are unified through
+        // the merged type var, the solver won't merge the constructors.
+        val mergedTypeVar = MezzeType.VarType(TypeVar.fresh())
+        for (typeForKey in types) {
+            constraints.add(
+                Constraint.Equality(
+                    left = typeForKey,
+                    right = mergedTypeVar,
+                    context = "Merging effect associated types from branches",
+                    isMatchCaseContext = true  // Enable variant merging
+                )
+            )
+        }
+        return mergedTypeVar
     }
 
     private fun generateFunctionCall(expr: FunctionCall, context: ConstraintContext): ConstraintResult {
@@ -2455,8 +2602,8 @@ class ExpressionConstraintGenerator {
         // Check if the function type has effects (concrete or polymorphic)
         if (functionType is MezzeType.FunctionType) {
             val effectRow = functionType.effects
-            // Handle effects if: has concrete effects OR has a row variable (polymorphic <...>) OR is performed
-            if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
+            // Handle effects if: has concrete effects OR effect instances OR has a row variable (polymorphic <...>) OR is performed
+            if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
                 val constraints = mutableListOf<Constraint>()
                 constraints.addAll(functionResult.constraints)
                 constraints.addAll(argumentResult.constraints)
@@ -2484,6 +2631,10 @@ class ExpressionConstraintGenerator {
                 // CRITICAL FIX: Propagate effects from the function type to ConstraintResult.effects
                 // This allows generatePerform to track which effects are used by the expression
                 val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
+                // CRITICAL FIX: Also propagate effectInstances from the function type!
+                // This is needed so that when a function calls another function with associated effect types
+                // (like Exception with 'error), those effect instances are properly propagated and merged.
+                val propagatedEffectInstances = effectRow.effectInstances + functionResult.effectInstances + argumentResult.effectInstances
                 // Propagate performed flag from function type and sub-results
                 val propagatedPerformed = effectRow.performed || functionResult.performed || argumentResult.performed
 
@@ -2493,7 +2644,7 @@ class ExpressionConstraintGenerator {
 
                 // If the function has unhandled effects (suspended) or performed effects,
                 // wrap in SuspendedType. This is important for top-level validation to detect <*>.
-                val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.rowVar != null
+                val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null
                 val hasPerformedEffects = effectRow.performed
                 val resultType = if (hasUnhandledEffects || hasPerformedEffects) {
                     // Calling an effectful function produces a SuspendedType
@@ -2511,7 +2662,7 @@ class ExpressionConstraintGenerator {
                     type = resultType,
                     constraints = constraints,
                     effects = propagatedEffects,  // Propagate effects from function type
-                    effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
+                    effectInstances = propagatedEffectInstances,  // Propagate effect instances from function type too!
                     performed = propagatedPerformed,  // Propagate performed flag
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                     usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
@@ -2615,12 +2766,28 @@ class ExpressionConstraintGenerator {
         )
 
         // Both branches must have same type
+        // Use a fresh type variable as the result type so variant constructors from different
+        // branches can be merged through unification (same pattern as match expressions).
+        // Without this, the then-branch's concrete type would become the result type,
+        // and variants like `if flag then Red else Blue` would only show `| Red |` instead of `| Red, Blue |`.
+        val resultType = MezzeType.VarType(TypeVar.fresh())
+
         constraints.add(
             Constraint.Equality(
                 left = thenResult.type,
-                right = elseResult.type,
-                context = "If branches must have same type",
-                sourceLocation = expr.sourceLocation
+                right = resultType,
+                context = "If then-branch type",
+                sourceLocation = expr.thenBranch.sourceLocation,
+                isMatchCaseContext = true  // Enable variant merging (if-then-else is just match on Bool)
+            )
+        )
+        constraints.add(
+            Constraint.Equality(
+                left = elseResult.type,
+                right = resultType,
+                context = "If else-branch type",
+                sourceLocation = expr.elseBranch.sourceLocation,
+                isMatchCaseContext = true  // Enable variant merging
             )
         )
 
@@ -2637,7 +2804,7 @@ class ExpressionConstraintGenerator {
         val tailCalls = conditionResult.tailCalls + thenResult.tailCalls + elseResult.tailCalls
 
         return ConstraintResult(
-            type = thenResult.type,
+            type = resultType,  // Use fresh type variable for proper variant merging
             constraints = constraints,
             effects = effects,
             effectInstances = effectInstances,
@@ -3788,10 +3955,51 @@ class ExpressionConstraintGenerator {
             instantiatedOperationType to emptyList()
         }
 
+        // Create EffectInstance with associated types bound from the argument
+        // For Exception.throw { error = FakeError {...} }, we need to bind 'error to FakeError
+        val effectDecl = context.effectDeclarations[effectName]
+        // DEBUG:
+        println("DEBUG generateEffectCall: effectName=$effectName, effectDecl=$effectDecl, keys=${context.effectDeclarations.keys}")
+        DebugLogger.debug(Category.Effects) { "generateEffectCall: creating effectInstance, effectDecl=$effectDecl, assocTypes=${effectDecl?.associatedTypes}, opType=$instantiatedOperationType" }
+        val effectInstance = if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty() && instantiatedOperationType is MezzeType.FunctionType) {
+            // Extract associated type bindings from the argument
+            // The parameter type tells us which fields map to which associated types
+            val paramType = instantiatedOperationType.paramType
+            val associatedTypeBindings = mutableMapOf<String, MezzeType>()
+
+            DebugLogger.debug(Category.Effects) { "generateEffectCall: paramType=$paramType, argResult.type=${argResult.type}" }
+            if (paramType is MezzeType.RecordType && argResult.type is MezzeType.RecordType) {
+                val argRecordType = argResult.type as MezzeType.RecordType
+                for (assocTypeName in effectDecl.associatedTypes) {
+                    val normalizedName = assocTypeName.removePrefix("'")
+                    // The associated type is bound to the field with the same name in the argument
+                    val fieldType = argRecordType.fields[normalizedName]
+                    DebugLogger.debug(Category.Effects) { "generateEffectCall: assocTypeName=$assocTypeName, normalizedName=$normalizedName, fieldType=$fieldType" }
+                    if (fieldType != null) {
+                        associatedTypeBindings[normalizedName] = fieldType
+                    }
+                }
+            }
+
+            if (associatedTypeBindings.isNotEmpty()) {
+                DebugLogger.debug(Category.Effects) { "generateEffectCall: creating EffectInstance($effectName, $associatedTypeBindings)" }
+                MezzeType.EffectInstance(effectName, associatedTypeBindings)
+            } else {
+                DebugLogger.debug(Category.Effects) { "generateEffectCall: no associatedTypeBindings, effectInstance=null" }
+                null
+            }
+        } else {
+            DebugLogger.debug(Category.Effects) { "generateEffectCall: skipping effectInstance creation" }
+            null
+        }
+
+        val effectInstances = if (effectInstance != null) setOf(effectInstance) else emptySet<MezzeType.EffectInstance>()
+
         return ConstraintResult(
             type = resultType,
             constraints = argResult.constraints + additionalConstraints,
             effects = setOf(effectName),
+            effectInstances = effectInstances + argResult.effectInstances,  // Include effect instances!
             undefinedVariables = argResult.undefinedVariables
         )
     }

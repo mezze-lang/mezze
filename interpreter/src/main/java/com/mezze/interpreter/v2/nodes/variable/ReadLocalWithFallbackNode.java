@@ -2,10 +2,12 @@ package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
@@ -44,6 +46,10 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     // Sentinel for "looked up but not found" case (avoids repeated lookups)
     private static final Object NOT_FOUND_SENTINEL = new Object();
 
+    // For forcing MezzeSuspended values
+    @Child
+    private IndirectCallNode callNode;
+
     public ReadLocalWithFallbackNode(int slot, String variableName) {
         this(slot, variableName, null);
     }
@@ -60,11 +66,49 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
         Object value = frame.getValue(slot);
 
         if (value != null) {
-            return value;
+            return maybeForce(value);
         }
 
         // Frame slot is null - fall back to global lookup
-        return lookupGlobal();
+        Object globalValue = lookupGlobal();
+        return maybeForce(globalValue);
+    }
+
+    /**
+     * If the value is a MezzeSuspended and there are handlers in scope, force it.
+     * This implements the lazy effect semantics where suspended computations
+     * are evaluated when they're used within a perform block.
+     */
+    private Object maybeForce(Object value) {
+        if (value instanceof MezzeSuspended suspended) {
+            return forceSuspended(suspended);
+        }
+        return value;
+    }
+
+    @TruffleBoundary
+    private Object forceSuspended(MezzeSuspended suspended) {
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            // No context - return suspended as-is
+            return suspended;
+        }
+
+        // Check if there are any handlers in scope
+        if (!context.hasHandlers()) {
+            // No handlers - return suspended as-is
+            return suspended;
+        }
+
+        // Force the suspended computation with current handlers
+        if (callNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            callNode = insert(IndirectCallNode.create());
+        }
+
+        return suspended.executeWith(context.getCurrentHandlers(), context, callNode);
     }
 
     private Object lookupGlobal() {

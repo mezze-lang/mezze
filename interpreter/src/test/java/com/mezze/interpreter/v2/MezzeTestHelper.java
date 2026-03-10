@@ -10,6 +10,8 @@ import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.Source;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
@@ -219,5 +221,66 @@ public final class MezzeTestHelper {
         if (result == MezzeUnit.INSTANCE) return true;
         if (result instanceof MezzeRecord r && r.getFieldCount() == 0) return true;
         return false;
+    }
+
+    // ========================
+    // Output capture helpers
+    // ========================
+
+    /**
+     * Result of running with output capture.
+     */
+    public record RunResult(Object value, String output) {}
+
+    /**
+     * Execute a Mezze program and capture stdout.
+     * Returns both the result value and the captured output.
+     */
+    public static RunResult runWithOutput(String sourceCode) {
+        return runWithOutput(sourceCode, null);
+    }
+
+    /**
+     * Execute a Mezze program and capture stdout with custom project root.
+     */
+    public static RunResult runWithOutput(String sourceCode, Path projectRoot) {
+        Path root = projectRoot != null
+            ? projectRoot
+            : Paths.get(System.getProperty("mezze.project.root", "."));
+
+        String sourcePath = root.resolve("__test__.mz").toString();
+
+        // Clear module cache for clean state
+        ModuleResolver.clearCache();
+        MezzeLanguage.clearLastResult();
+
+        // Capture stdout
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintStream captureStream = new PrintStream(baos);
+        PrintStream originalOut = System.out;
+
+        Context context = Context.newBuilder(MezzeLanguage.ID)
+                .engine(sharedEngine)
+                .allowAllAccess(true)
+                .allowCreateThread(true)
+                .out(captureStream)
+                .build();
+
+        try {
+            System.setOut(captureStream);
+
+            Source source = Source.newBuilder(MezzeLanguage.ID, sourceCode, sourcePath)
+                .buildLiteral();
+
+            context.eval(source);
+
+            Object result = MezzeLanguage.getLastExecutionResult();
+            String output = baos.toString();
+
+            return new RunResult(result, output);
+        } finally {
+            System.setOut(originalOut);
+            context.close(true);
+        }
     }
 }

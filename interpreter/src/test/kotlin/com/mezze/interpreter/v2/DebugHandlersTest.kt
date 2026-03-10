@@ -2,8 +2,7 @@ package com.mezze.interpreter.v2
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import kotlin.test.assertTrue
-import com.mezze.interpreter.v2.values.MezzeVariant
+import kotlin.test.assertEquals
 
 /**
  * Tests for debug handlers with nested function calls and continuations.
@@ -20,34 +19,34 @@ class DebugHandlersTest {
 
     @Test
     fun testNestedFunctionCalls() {
+        // Test nested function calls with effect handlers
+        // Direct continuation usage outside perform is an anti-pattern
         val source = """
-            use std::control::continuation
-
-            # Test what happens when calling an imported function that uses continuation
-            let cont = continuation::new {}
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             let inner = { x } -> do
-                # Extract the suspended value from a continuation
-                let extracted = cont.extract_suspended { suspended = x }
-                extracted
+                # Inner function that may throw
+                if x < 0 then Exception.throw {error = "negative"} else x * 2
 
             let outer = { x } -> do
-                # Call inner, which needs to extract suspended values
-                inner { x = x }
+                # Call inner, which may throw
+                let result = inner { x = x }
+                result + 10
 
-            # Now test it - create a suspended value
-            let gen = {} -> do
-                cont.suspend_with { value = 42 }
+            # Test nested calls through exception handler
+            let test = {} -> do
+                let result = perform ExceptionToResult in Ok {val = outer { x = 5 }}
+                match result is
+                    Ok {val} -> val
+                    Err {error} -> 0 - 1  # Return -1 on error
 
-            let g = gen {}
-
-            # Call outer (which calls inner) to extract the suspended value
-            outer { x = g }
+            test {}
         """.trimIndent()
 
         val result = eval(source)
         println("Result: $result")
         println("Result class: ${result::class.simpleName}")
-        assertTrue(result is MezzeVariant)
+        // Should be 20 (5 * 2 + 10 = 20)
+        assertEquals(20L, result)
     }
 }

@@ -3,6 +3,7 @@ package com.mezze.interpreter.v2.nodes.effect;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.ImplSignature;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
 import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.v2.values.MezzeList;
@@ -314,9 +315,16 @@ public final class HandleNode extends MezzeNode {
         Object result = null;
         Object forkedResults = null;
 
+        Object suspendedValue = null;  // For ContinuationSuspendedException
+
         try {
             // Execute the body with the handler (and scope if scoped effect) installed
             result = bodyNode.execute(frame);
+        } catch (ContinuationSuspendedException e) {
+            // Continuation was suspended via suspend_with - extract the suspended value
+            // This is how continuation-based effects (Exception, Return, etc.) escape
+            // to the perform boundary without being wrapped by intermediate expressions
+            suspendedValue = e.getSuspendedValue();
         } catch (ForkedExecutionException e) {
             // Fork completed - capture results (MezzeSeq), run finalize_scope, then return values
             forkedResults = e.values;
@@ -383,6 +391,13 @@ public final class HandleNode extends MezzeNode {
         // If fork completed successfully, return the forked results
         if (forkedResults != null) {
             return forkedResults;
+        }
+
+        // If continuation was suspended, return the suspended value directly
+        // This is how continuation-based effects (Exception, Return, etc.) work:
+        // the handler calls suspend_with {value = ...} and we return that value
+        if (suspendedValue != null) {
+            return suspendedValue;
         }
 
         return processResult(result);

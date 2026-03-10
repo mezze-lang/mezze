@@ -168,7 +168,21 @@
       "Bash(LC_ALL=C sed:*)",
       "Bash(do sed -i '' 's/__native_arraylist_/__native_seq_/g' \"$f\")",
       "Bash(do cat \"$f\")",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(/Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze exec:*)",
+      "Bash(/Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze check:*)",
+      "Bash(timeout 3 /Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze lsp:*)",
+      "Bash(mezze:*)",
+      "Bash(mez --help:*)",
+      "Bash(timeout 5 /Users/shriyans/.mezze/bin/mez:*)",
+      "Bash(mez check:*)",
+      "Bash(timeout 10:*)",
+      "Bash(hash -r)",
+      "Bash(md5:*)",
+      "Bash(xattr:*)",
+      "Bash(codesign:*)",
+      "Bash(./scripts/install.sh:*)",
+      "Bash(~/.mezze/bin/mez fmt:*)"
     ],
     "deny": [],
     "ask": []

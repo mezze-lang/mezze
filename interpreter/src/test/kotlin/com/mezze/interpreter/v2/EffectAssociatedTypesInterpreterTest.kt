@@ -109,8 +109,11 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> [1, 2, 3]
             }
 
-            let xs = perform ListState in State.get {}
-            seq::length { xs = xs }
+            let main = {} -> do
+                let xs = perform ListState in State.get {}
+                seq::length { xs = xs }
+
+            main {}
         """.trimIndent()
 
         assertEquals(3L, eval(code))
@@ -129,10 +132,13 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> [1, 2, 3]
             }
 
-            let xs = perform ListState in State.get {}
-            match seq::get { xs = xs, i = 0 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform ListState in State.get {}
+                match seq::get { xs = xs, i = 0 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(1L, eval(code))
@@ -151,10 +157,13 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> [1, 2, 3]
             }
 
-            let xs = perform ListState in State.get {}
-            match seq::get { xs = xs, i = 1 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform ListState in State.get {}
+                match seq::get { xs = xs, i = 1 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(2L, eval(code))
@@ -173,10 +182,13 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> [1, 2, 3]
             }
 
-            let xs = perform ListState in State.get {}
-            match seq::get { xs = xs, i = 2 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform ListState in State.get {}
+                match seq::get { xs = xs, i = 2 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(3L, eval(code))
@@ -409,8 +421,11 @@ class EffectAssociatedTypesInterpreterTest {
                 getAll = {} -> [10, 20, 30]
             }
 
-            let xs = perform IntCollection in Collection.getAll {}
-            seq::length { xs = xs }
+            let main = {} -> do
+                let xs = perform IntCollection in Collection.getAll {}
+                seq::length { xs = xs }
+
+            main {}
         """.trimIndent()
 
         assertEquals(3L, eval(code))
@@ -429,10 +444,13 @@ class EffectAssociatedTypesInterpreterTest {
                 getAll = {} -> [10, 20, 30]
             }
 
-            let xs = perform IntCollection in Collection.getAll {}
-            match seq::get { xs = xs, i = 0 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform IntCollection in Collection.getAll {}
+                match seq::get { xs = xs, i = 0 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(10L, eval(code))
@@ -451,10 +469,13 @@ class EffectAssociatedTypesInterpreterTest {
                 getAll = {} -> [10, 20, 30]
             }
 
-            let xs = perform IntCollection in Collection.getAll {}
-            match seq::get { xs = xs, i = 1 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform IntCollection in Collection.getAll {}
+                match seq::get { xs = xs, i = 1 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(20L, eval(code))
@@ -473,10 +494,13 @@ class EffectAssociatedTypesInterpreterTest {
                 getAll = {} -> [10, 20, 30]
             }
 
-            let xs = perform IntCollection in Collection.getAll {}
-            match seq::get { xs = xs, i = 2 } is
-                Some { val } -> val
-                None -> -1
+            let main = {} -> do
+                let xs = perform IntCollection in Collection.getAll {}
+                match seq::get { xs = xs, i = 2 } is
+                    Some { val } -> val
+                    None -> -1
+
+            main {}
         """.trimIndent()
 
         assertEquals(30L, eval(code))
@@ -614,9 +638,12 @@ class EffectAssociatedTypesInterpreterTest {
                 fail = {error} -> error
             }
 
-            let successVal = perform IntStringResult in Outcome.succeed { value = 42 }
-            let failVal = perform IntStringResult in Outcome.fail { error = "oops" }
-            { success = successVal, failure = failVal }
+            let main = {} -> do
+                let successVal = perform IntStringResult in Outcome.succeed { value = 42 }
+                let failVal = perform IntStringResult in Outcome.fail { error = "oops" }
+                { success = successVal, failure = failVal }
+
+            main {}
         """.trimIndent()
 
         val result = eval(code) as MezzeRecord
@@ -639,10 +666,13 @@ class EffectAssociatedTypesInterpreterTest {
                 getThird = {} -> True
             }
 
-            let a = perform IntStringBoolTriple in Triple.getFirst {}
-            let b = perform IntStringBoolTriple in Triple.getSecond {}
-            let c = perform IntStringBoolTriple in Triple.getThird {}
-            { first = a, second = b, third = c }
+            let main = {} -> do
+                let a = perform IntStringBoolTriple in Triple.getFirst {}
+                let b = perform IntStringBoolTriple in Triple.getSecond {}
+                let c = perform IntStringBoolTriple in Triple.getThird {}
+                { first = a, second = b, third = c }
+
+            main {}
         """.trimIndent()
 
         val result = eval(code) as MezzeRecord
@@ -689,9 +719,12 @@ class EffectAssociatedTypesInterpreterTest {
                 fail = {error} -> error
             }
 
-            let s = perform StringIntResult in Outcome.succeed { value = "success" }
-            let e = perform StringIntResult in Outcome.fail { error = 404 }
-            { success = s, error = e }
+            let main = {} -> do
+                let s = perform StringIntResult in Outcome.succeed { value = "success" }
+                let e = perform StringIntResult in Outcome.fail { error = 404 }
+                { success = s, error = e }
+
+            main {}
         """.trimIndent()
 
         val result = eval(code) as MezzeRecord
@@ -712,9 +745,12 @@ class EffectAssociatedTypesInterpreterTest {
                 fail = {error} -> error
             }
 
-            let num = perform ComplexResult in Outcome.succeed { value = 42 }
-            let err = perform ComplexResult in Outcome.fail { error = {code = 500, message = "error"} }
-            { num = num, err = err }
+            let main = {} -> do
+                let num = perform ComplexResult in Outcome.succeed { value = 42 }
+                let err = perform ComplexResult in Outcome.fail { error = {code = 500, message = "error"} }
+                { num = num, err = err }
+
+            main {}
         """.trimIndent()
 
         val result = eval(code) as MezzeRecord
@@ -774,9 +810,12 @@ class EffectAssociatedTypesInterpreterTest {
                 getError = {} -> defaultError
             }
 
-            let s = perform ConfigurableState {initialState = 100, defaultError = "none"} in State.get {}
-            let e = perform ConfigurableState {initialState = 100, defaultError = "error"} in State.getError {}
-            { state = s, error = e }
+            let main = {} -> do
+                let s = perform ConfigurableState {initialState = 100, defaultError = "none"} in State.get {}
+                let e = perform ConfigurableState {initialState = 100, defaultError = "error"} in State.getError {}
+                { state = s, error = e }
+
+            main {}
         """.trimIndent()
 
         val result = eval(code) as MezzeRecord

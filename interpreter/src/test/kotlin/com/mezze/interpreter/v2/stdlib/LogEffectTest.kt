@@ -228,4 +228,166 @@ class LogEffectTest {
         """)
         assertEquals("custom", result)
     }
+
+    // ==========================================================================
+    // Output format tests - verify actual console output
+    // ==========================================================================
+
+    @Test
+    fun `test info output format with newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, info}
+
+            let main = {} -> perform Console in do
+                info { msg = "Hello World" }
+                {}
+            main {}
+        """)
+        assertEquals("[INFO] Hello World\n", runResult.output())
+    }
+
+    @Test
+    fun `test error output format with newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, error}
+
+            let main = {} -> perform Console in do
+                error { msg = "Something went wrong" }
+                {}
+            main {}
+        """)
+        assertEquals("[ERROR] Something went wrong\n", runResult.output())
+    }
+
+    @Test
+    fun `test warn output format with newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, warn}
+
+            let main = {} -> perform Console in do
+                warn { msg = "Be careful" }
+                {}
+            main {}
+        """)
+        assertEquals("[WARN] Be careful\n", runResult.output())
+    }
+
+    @Test
+    fun `test debug output format with newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, debug}
+
+            let main = {} -> perform Console in do
+                debug { msg = "Debug info" }
+                {}
+            main {}
+        """)
+        assertEquals("[DEBUG] Debug info\n", runResult.output())
+    }
+
+    @Test
+    fun `test trace output format with newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, trace}
+
+            let main = {} -> perform Console in do
+                trace { msg = "Trace data" }
+                {}
+            main {}
+        """)
+        assertEquals("[TRACE] Trace data\n", runResult.output())
+    }
+
+    @Test
+    fun `test print has no prefix and no newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, print}
+
+            let main = {} -> perform Console in do
+                print { msg = "no prefix no newline" }
+                {}
+            main {}
+        """)
+        assertEquals("no prefix no newline", runResult.output())
+    }
+
+    @Test
+    fun `test println has no prefix but has newline`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, println}
+
+            let main = {} -> perform Console in do
+                println { msg = "no prefix with newline" }
+                {}
+            main {}
+        """)
+        assertEquals("no prefix with newline\n", runResult.output())
+    }
+
+    @Test
+    fun `test multiple log calls produce multiple lines`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, info, debug, warn}
+
+            let main = {} -> perform Console in do
+                info { msg = "Line 1" }
+                debug { msg = "Line 2" }
+                warn { msg = "Line 3" }
+                {}
+            main {}
+        """)
+        assertEquals("[INFO] Line 1\n[DEBUG] Line 2\n[WARN] Line 3\n", runResult.output())
+    }
+
+    @Test
+    fun `test print and println interleaved`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Console, print, println}
+
+            let main = {} -> perform Console in do
+                print { msg = "Hello " }
+                print { msg = "World" }
+                println { msg = "!" }
+                println { msg = "Done" }
+                {}
+            main {}
+        """)
+        assertEquals("Hello World!\nDone\n", runResult.output())
+    }
+
+    // ==========================================================================
+    // Custom handler tests
+    // ==========================================================================
+
+    @Test
+    fun `test ConsoleWith custom formatter`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Log, ConsoleWith}
+
+            let my_formatter = {level, msg} -> match level is
+                Info -> ">> $(msg) <<"
+                _ -> msg
+
+            let main = {} -> perform ConsoleWith {formatter = my_formatter} in do
+                Log.log { level = Info, msg = "Custom formatted" }
+                {}
+            main {}
+        """)
+        assertEquals(">> Custom formatted <<", runResult.output())
+    }
+
+    @Test
+    fun `test nested perform with different log handlers`() {
+        val runResult = MezzeTestHelper.runWithOutput("""
+            use std::effects::log::{Log, Console, QuietConsole, info}
+
+            let main = {} -> do
+                perform Console in info { msg = "Outer" }
+                perform QuietConsole in info { msg = "This is silent" }
+                perform Console in info { msg = "Back to console" }
+                {}
+            main {}
+        """)
+        assertEquals("[INFO] Outer\n[INFO] Back to console\n", runResult.output())
+    }
 }

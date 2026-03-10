@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -89,4 +90,26 @@ public abstract class WriteLocalNode extends MezzeNode {
     public static WriteLocalNode createObject(MezzeNode valueNode, int slot) {
         return create(valueNode, slot, KIND_OBJECT);
     }
+
+    /**
+     * Override execute to catch ContinuationSuspendedException.
+     * When an effect is performed without a handler, we catch the exception
+     * and store the suspended value in the variable slot.
+     */
+    @Override
+    public Object execute(VirtualFrame frame) {
+        try {
+            return executeGeneric(frame);
+        } catch (ContinuationSuspendedException e) {
+            // Effect was performed without a handler - store the suspended value
+            Object suspendedValue = e.getSuspendedValue();
+            frame.setObject(getSlot(), suspendedValue);
+            return suspendedValue;
+        }
+    }
+
+    /**
+     * Execute the specialization - implemented by generated code.
+     */
+    protected abstract Object executeGeneric(VirtualFrame frame);
 }

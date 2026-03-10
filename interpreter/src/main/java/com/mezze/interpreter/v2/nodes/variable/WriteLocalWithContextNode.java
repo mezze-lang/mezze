@@ -1,8 +1,10 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -71,7 +73,13 @@ public final class WriteLocalWithContextNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        Object value = valueNode.execute(frame);
+        Object value;
+        try {
+            value = valueNode.execute(frame);
+        } catch (ContinuationSuspendedException e) {
+            // Effect was performed without a handler - extract the suspended value
+            value = e.getSuspendedValue();
+        }
 
         // Write to frame slot with correct type (fast path)
         // Switch order matches ReadLocalNode: 0=Long, 1=Double, 2=Boolean, 3=Object
@@ -97,10 +105,12 @@ public final class WriteLocalWithContextNode extends MezzeNode {
             defineGlobalOnce(value);
         }
 
-        // Return MezzeUnit for suspended continuations to prevent early return in BlockNode
-        // This allows suspended continuations to be stored in variables without triggering
+        // Return MezzeUnit for suspended values to prevent early return in BlockNode
+        // This allows suspended computations to be stored in variables without triggering
         // BlockNode's early return mechanism.
-        if (value instanceof MezzeContinuationSuspended) {
+        // - MezzeContinuationSuspended: from suspend_with (e.g., Exception.throw inside handler)
+        // - MezzeSuspended: from effect calls without handler (lazy effects)
+        if (value instanceof MezzeContinuationSuspended || value instanceof MezzeSuspended) {
             return MezzeUnit.INSTANCE;
         }
         return value;

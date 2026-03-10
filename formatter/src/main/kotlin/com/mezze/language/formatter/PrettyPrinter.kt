@@ -392,45 +392,25 @@ class PrettyPrinter {
             }
         }
 
-        // Treat impl body like a record - single line if short enough
-        val singleLine = calculateImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
-
-        if (singleLine && decl.operations.isNotEmpty()) {
-            append(" where { ")
+        // impl bodies always go multi-line with where { on its own conceptual line
+        append(" where {")
+        newLine()
+        indent {
             decl.operations.forEachIndexed { index, op ->
-                if (index > 0) append(", ")
+                printIndent()
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-            }
-            append(" }")
-        } else {
-            append(" where {")
-            newLine()
-            indent {
-                decl.operations.forEachIndexed { index, op ->
-                    printIndent()
-                    append(op.name)
-                    append(" = ")
-                    printExpression(op.implementation)
-                    // Trailing comma in multi-line (like records)
-                    if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
-                        append(",")
-                    }
-                    newLine()
+                // Trailing comma in multi-line (like records)
+                if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                    append(",")
                 }
+                newLine()
             }
-            printIndent()
-            append("}")
         }
+        printIndent()
+        append("}")
         newLine()
-    }
-
-    private fun calculateImplOperationsWidth(operations: List<PerformerOperation>): Int {
-        // "where {" + operations + "}"
-        return 8 + operations.sumOf { op ->
-            op.name.length + 3 + estimateExprWidth(op.implementation) + 2  // "name = expr, "
-        }
     }
 
     private fun printImplAbilityDeclaration(decl: ImplAbilityDeclaration) {
@@ -463,45 +443,25 @@ class PrettyPrinter {
             }
         }
 
-        // Treat impl body like a record - single line if short enough
-        val singleLine = calculateAbilityImplOperationsWidth(decl.operations) <= config.RECORD_SINGLE_LINE_THRESHOLD
-
-        if (singleLine && decl.operations.isNotEmpty()) {
-            append(" where { ")
+        // impl bodies always go multi-line with where { on its own conceptual line
+        append(" where {")
+        newLine()
+        indent {
             decl.operations.forEachIndexed { index, op ->
-                if (index > 0) append(", ")
+                printIndent()
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-            }
-            append(" }")
-        } else {
-            append(" where {")
-            newLine()
-            indent {
-                decl.operations.forEachIndexed { index, op ->
-                    printIndent()
-                    append(op.name)
-                    append(" = ")
-                    printExpression(op.implementation)
-                    // Trailing comma in multi-line (like records)
-                    if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
-                        append(",")
-                    }
-                    newLine()
+                // Trailing comma in multi-line (like records)
+                if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                    append(",")
                 }
+                newLine()
             }
-            printIndent()
-            append("}")
         }
+        printIndent()
+        append("}")
         newLine()
-    }
-
-    private fun calculateAbilityImplOperationsWidth(operations: List<ImplAbilityOperation>): Int {
-        // "where {" + operations + "}"
-        return 8 + operations.sumOf { op ->
-            op.name.length + 3 + estimateExprWidth(op.implementation) + 2  // "name = expr, "
-        }
     }
 
     // =========================================================================
@@ -988,6 +948,7 @@ class PrettyPrinter {
     private fun printDoExpression(expr: DoExpression) {
         append("do")
         newLine()
+        // Indent body by one level from current indent (not from where 'do' appears on the line)
         indent {
             for (stmt in expr.statements) {
                 printIndent()
@@ -1348,10 +1309,9 @@ class PrettyPrinter {
 
     private fun printIndent() {
         repeat(indentLevel) {
-            output.append(config.INDENT_CHAR)
+            output.append(config.INDENT_STRING)
         }
-        // Each tab counts as TAB_WIDTH for column tracking
-        currentColumn = indentLevel * config.TAB_WIDTH
+        currentColumn = indentLevel * config.INDENT_WIDTH
     }
 
     private inline fun indent(block: () -> Unit) {

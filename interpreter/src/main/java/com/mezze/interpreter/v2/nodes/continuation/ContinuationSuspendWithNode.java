@@ -69,8 +69,13 @@ public final class ContinuationSuspendWithNode extends MezzeNode {
         // Create a continuation that, when resumed, returns the resume value
         MezzeContinuation continuation = createResumableContinuation(delim.getId());
 
-        // Return suspended continuation
-        return new MezzeContinuationSuspended(value, continuation);
+        MezzeContinuationSuspended suspended = new MezzeContinuationSuspended(value, continuation);
+
+        // Always throw to escape to the delimiter boundary.
+        // This ensures the suspended value isn't wrapped by intermediate expressions.
+        // The delimiter boundary (HandleNode or direct continuation usage) catches this
+        // and extracts the suspended value.
+        throw new ContinuationSuspendedException(suspended);
     }
 
     /**

@@ -7,11 +7,11 @@ package com.mezze.language.formatter
  * non-configurable (like gofmt). These constants exist for internal tuning only.
  */
 object FormatterConfig {
-    /** Character used for indentation (tab) */
-    const val INDENT_CHAR = '\t'
+    /** String used for indentation (2 spaces) */
+    const val INDENT_STRING = "  "
 
-    /** Tab width for line length calculation (not actual rendering) */
-    const val TAB_WIDTH = 2
+    /** Indent width for line length calculation */
+    const val INDENT_WIDTH = 2
 
     /** Maximum line length before breaking */
     const val MAX_LINE_LENGTH = 100

@@ -281,6 +281,14 @@ public final class MezzeContext {
     }
 
     /**
+     * Check if there are any handlers on the stack.
+     */
+    @TruffleBoundary
+    public boolean hasHandlers() {
+        return !handlerStack.get().isEmpty();
+    }
+
+    /**
      * Check if a handler is currently available for the given effect.
      */
     @TruffleBoundary

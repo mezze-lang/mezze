@@ -73,9 +73,11 @@ class BuiltinEffectsTest {
             }
 
             # This should work with proper parameter extraction
-            let result = perform TestHandler in TestEffect.multiParam {first = "Hello", second = 42, third = 3.14}
+            let main = {} -> do
+                let result = perform TestHandler in TestEffect.multiParam {first = "Hello", second = 42, third = 3.14}
+                result
 
-            result
+            main {}
         """.trimIndent()
 
         // This test verifies that our parameter extraction improvement works

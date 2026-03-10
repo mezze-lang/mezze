@@ -25,7 +25,24 @@ class AnnotationTypeCheckingTest {
         val program = parseAndTypeCheck(code)
         val actualType = getVariableType(program, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
-        assertEquals(expectedType, prettyPrintType(actualType))
+        assertEquals(normalizeVariantOrder(expectedType), normalizeVariantOrder(prettyPrintType(actualType)))
+    }
+
+    /**
+     * Normalize variant type strings so that constructor order doesn't affect comparison.
+     * Variant types are unordered sets, so | A, B | equals | B, A |.
+     */
+    private fun normalizeVariantOrder(typeStr: String): String {
+        // Find variant blocks like "| A, B, C |" and sort their constructors
+        val variantPattern = Regex("""\|\s*([^|]+)\s*\|""")
+        return variantPattern.replace(typeStr) { match ->
+            val constructors = match.groupValues[1]
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .sorted()
+            "| ${constructors.joinToString(", ")} |"
+        }
     }
 
     private fun assertTypeChecks(code: String) {

@@ -105,7 +105,8 @@ echo ""
 echo -e "Installing to ${GREEN}$MEZZE_BIN${NC}..."
 mkdir -p "$MEZZE_BIN"
 
-# Copy the native binary
+# Copy the native binary (remove first to avoid OS caching issues with overwritten executables)
+rm -f "$MEZZE_BIN/mez"
 cp "$NATIVE_BINARY" "$MEZZE_BIN/mez"
 chmod +x "$MEZZE_BIN/mez"
 

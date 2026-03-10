@@ -384,7 +384,7 @@ class FormatterTest {
                 None -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome { val } -> val\n\tNone -> 0\n", output)
+        assertEquals("let x = match y is\n  Some { val } -> val\n  None -> 0\n", output)
     }
 
     @Test
@@ -395,7 +395,7 @@ class FormatterTest {
                 _ -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome { val } if val > 0 -> val\n\t_ -> 0\n", output)
+        assertEquals("let x = match y is\n  Some { val } if val > 0 -> val\n  _ -> 0\n", output)
     }
 
     @Test
@@ -406,7 +406,7 @@ class FormatterTest {
                 _ -> 0
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = match y is\n\tSome { val } | Ok { val } -> val\n\t_ -> 0\n", output)
+        assertEquals("let x = match y is\n  Some { val } | Ok { val } -> val\n  _ -> 0\n", output)
     }
 
     // =========================================================================
@@ -422,7 +422,7 @@ class FormatterTest {
                 a + b
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = do\n\tlet a = 1\n\tlet b = 2\n\ta + b\n", output)
+        assertEquals("let x = do\n  let a = 1\n  let b = 2\n  a + b\n", output)
     }
 
     @Test
@@ -435,7 +435,7 @@ class FormatterTest {
                 a + 1
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("let x = do\n\tlet a = do\n\t\tlet b = 1\n\t\tb + 1\n\ta + 1\n", output)
+        assertEquals("let x = do\n  let a = do\n    let b = 1\n    b + 1\n  a + 1\n", output)
     }
 
     // =========================================================================
@@ -500,7 +500,7 @@ class FormatterTest {
             }
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("effect Log where {\n\tlog: { msg: String } -> {} <Log>\n}\n", output)
+        assertEquals("effect Log where {\n  log: { msg: String } -> {} <Log>\n}\n", output)
     }
 
     @Test
@@ -513,7 +513,7 @@ class FormatterTest {
         """.trimIndent()
         val output = formatter.format(input)
         // Each operation on its own line, comma after all but last
-        assertEquals("effect Console where {\n\tprint: { msg: String } -> {} <Console>,\n\tread: {} -> String <Console>\n}\n", output)
+        assertEquals("effect Console where {\n  print: { msg: String } -> {} <Console>,\n  read: {} -> String <Console>\n}\n", output)
     }
 
     // =========================================================================
@@ -753,7 +753,7 @@ class FormatterTest {
         val input = "let x = {very_long_field_name_one = 1, very_long_field_name_two = 2, very_long_field_name_three = 3}"
         val output = formatter.format(input)
         // Should break to multiple lines
-        assertTrue(output.contains("\n\t"))
+        assertTrue(output.contains("\n  "))
         assertTrue(output.contains("very_long_field_name_one = 1"))
     }
 
@@ -762,7 +762,7 @@ class FormatterTest {
         val input = "let x = [very_long_element_name_one, very_long_element_name_two, very_long_element_name_three]"
         val output = formatter.format(input)
         // Should break to multiple lines
-        assertTrue(output.contains("\n\t"))
+        assertTrue(output.contains("\n  "))
     }
 
     @Test
