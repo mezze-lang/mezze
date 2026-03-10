@@ -955,4 +955,97 @@ class EffectParserTest {
         assertEquals(listOf("Log"), effectRow.effects)
         assertEquals(2, effectRow.effectAnnotations.size)
     }
+
+    // ========================================================================
+    // QUALIFIED EFFECT NAME IN IMPL DECLARATION TESTS
+    // ========================================================================
+
+    @Test
+    fun testImplWithQualifiedEffectName() {
+        val source = """
+            impl log::Log for ConsoleLogger {} where {
+                log = {level, msg} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val implDecl = program.items[0] as ImplDeclaration
+        assertEquals("log::Log", implDecl.effectName)
+        assertEquals("ConsoleLogger", implDecl.performerName)
+        assertEquals(1, implDecl.operations.size)
+        assertEquals("log", implDecl.operations[0].name)
+    }
+
+    @Test
+    fun testImplWithDeeplyQualifiedEffectName() {
+        val source = """
+            impl std::effects::log::Log for FileLogger {} where {
+                log = {level, msg} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val implDecl = program.items[0] as ImplDeclaration
+        assertEquals("std::effects::log::Log", implDecl.effectName)
+        assertEquals("FileLogger", implDecl.performerName)
+    }
+
+    @Test
+    fun testImplWithQualifiedEffectNameAndParams() {
+        val source = """
+            impl effects::State for Counter {initial: Int} where {
+                get = {} -> 0,
+                put = {value} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val implDecl = program.items[0] as ImplDeclaration
+        assertEquals("effects::State", implDecl.effectName)
+        assertEquals("Counter", implDecl.performerName)
+        assertEquals(1, implDecl.performerParams.size)
+        assertEquals("initial", implDecl.performerParams[0].name)
+        assertEquals(2, implDecl.operations.size)
+    }
+
+    @Test
+    fun testImplWithQualifiedEffectNameAndHaving() {
+        val source = """
+            impl effects::State for ListState having 'state = [Int] where {
+                get = {} -> [],
+                put = {value} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val implDecl = program.items[0] as ImplDeclaration
+        assertEquals("effects::State", implDecl.effectName)
+        assertEquals("ListState", implDecl.performerName)
+        assertNotNull(implDecl.associatedTypeBinding)
+        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+    }
+
+    @Test
+    fun testImplWithUnqualifiedEffectNameStillWorks() {
+        val source = """
+            impl Log for SimpleLogger {} where {
+                log = {level, msg} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val implDecl = program.items[0] as ImplDeclaration
+        assertEquals("Log", implDecl.effectName)
+        assertEquals("SimpleLogger", implDecl.performerName)
+    }
 }

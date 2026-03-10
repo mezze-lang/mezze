@@ -699,11 +699,34 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
         return when (implToken) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
-                val effectName = identifierParser(stream1)
 
-                when (effectName) {
+                // Parse effect name - can be qualified (e.g., log::Log)
+                val firstIdent = identifierParser(stream1)
+
+                when (firstIdent) {
                     is ParseResult.Success -> {
-                        val stream2 = skipNewlines(effectName.remaining)
+                        // Build qualified name by consuming ::identifier sequences
+                        val segments = mutableListOf(firstIdent.value.text)
+                        var currentStream = firstIdent.remaining
+
+                        while (true) {
+                            val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                            if (doubleColon is ParseResult.Success) {
+                                val nextIdent = identifierParser(doubleColon.remaining)
+                                when (nextIdent) {
+                                    is ParseResult.Success -> {
+                                        segments.add(nextIdent.value.text)
+                                        currentStream = nextIdent.remaining
+                                    }
+                                    is ParseResult.Failure -> break
+                                }
+                            } else {
+                                break
+                            }
+                        }
+
+                        val effectName = segments.joinToString("::")
+                        val stream2 = skipNewlines(currentStream)
                         val forToken = tok(TokenType.FOR)(stream2)
 
                         when (forToken) {
@@ -725,7 +748,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                         val stream5 = skipNewlines(streamAfterParams)
 
                                         // Parse optional 'having' clause with associated type bindings
-                                        val bindingsResult = parseAssociatedTypeBindings(stream5, effectName.value.text, "impl")
+                                        val bindingsResult = parseAssociatedTypeBindings(stream5, effectName, "impl")
                                         val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
                                             is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
                                             is ParseResult.Failure -> return bindingsResult
@@ -798,7 +821,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                             is ParseResult.Success -> {
                                                                 ParseResult.Success(
                                                                     ImplDeclaration(
-                                                                        effectName = effectName.value.text,
+                                                                        effectName = effectName,
                                                                         performerName = performerName.value.text,
                                                                         performerParams = performerParams,
                                                                         associatedTypeBindings = associatedTypeBindings,
@@ -824,7 +847,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                             is ParseResult.Failure -> forToken
                         }
                     }
-                    is ParseResult.Failure -> effectName
+                    is ParseResult.Failure -> firstIdent
                 }
             }
             is ParseResult.Failure -> implToken

@@ -506,7 +506,15 @@ class SubstitutionApplier(
         // Apply substitution to the record type
         val updatedInferredType = substitution.apply(performerRecordType)
 
+        // Resolve the effect name to the canonical name from the EffectDeclaration.
+        // The implDecl.effectName may be qualified (e.g., "log::Log") due to import syntax,
+        // but we want the actual effect name (e.g., "Log") from the declaration.
+        // Note: We only do direct lookup (no fallback search) to respect import scoping.
+        val effectDecl = effectDeclarations[implDecl.effectName]
+        val resolvedEffectName = effectDecl?.name ?: implDecl.effectName
+
         return implDecl.copy(
+            effectName = resolvedEffectName,
             operations = updatedOperations,
             inferredType = updatedInferredType
         )

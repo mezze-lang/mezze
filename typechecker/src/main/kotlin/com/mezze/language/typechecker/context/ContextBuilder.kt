@@ -84,12 +84,25 @@ class ContextBuilder {
 
         val abilityImplDecls = program.items.filterIsInstance<ImplAbilityDeclaration>()
 
+        // Merge local and imported effect declarations for lookups
+        val allEffectDecls = effectDecls + importedEffects
+
         // Build performer to effect mapping
         // CRITICAL: Merge imported impls with local impls
+        // Resolve effect names through the effect declarations to get canonical names.
+        // The impl.effectName may be qualified (e.g., "log::Log") but we want the
+        // actual effect name (e.g., "Log") from the EffectDeclaration.
+        // Note: We only do direct lookup (no fallback search) to respect import scoping.
+        // Validation in ConstraintGenerator will catch invalid effect names.
         val localMapping = implDecls.associate { impl ->
-            impl.performerName to impl.effectName
+            val effectDecl = allEffectDecls[impl.effectName]
+            val effectName = effectDecl?.name ?: impl.effectName
+            impl.performerName to effectName
         }
-        val importedMapping = importedImpls.mapValues { (_, impl) -> impl.effectName }
+        val importedMapping = importedImpls.mapValues { (_, impl) ->
+            val effectDecl = allEffectDecls[impl.effectName]
+            effectDecl?.name ?: impl.effectName
+        }
         val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
 
         // Build context with bindings for declarations
@@ -113,10 +126,8 @@ class ContextBuilder {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
-        // Merge local and imported effect declarations for performer lookup
-        val allEffectDecls = effectDecls + importedEffects
-
         // Add effect performers (impl blocks) to context
+        // (allEffectDecls was defined earlier for performer-to-effect mapping)
         // Include both local AND imported impls so their PerformerTypeInfo is available
         for (implDecl in implDecls) {
             ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)

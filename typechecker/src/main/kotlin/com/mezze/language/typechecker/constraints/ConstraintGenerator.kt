@@ -1218,9 +1218,18 @@ class ConstraintGenerator(
      * - Throw TypeCheckError if types don't match
      */
     private fun validateEffectImplementation(impl: ImplDeclaration, context: TypingContext) {
-        // Find the effect declaration
+        // Find the effect declaration by looking up with the exact name used in the impl.
+        // The effectDeclarations map contains:
+        // - Local effects keyed by their name (e.g., "MyEffect")
+        // - Imported effects keyed by their import name (e.g., "log::Log" for module imports,
+        //   or "Log" for selective imports like `use std::effects::log::{ Log }`)
+        // We don't search by EffectDeclaration.name because that would bypass import scoping.
         val effectDeclaration = effectDeclarations[impl.effectName]
-            ?: return  // Effect not found - will be caught elsewhere
+            ?: throw com.mezze.language.typechecker.TypeCheckError(
+                "Effect '${impl.effectName}' is not defined or not imported. " +
+                "Use 'use module::{ EffectName }' for selective import or 'impl module::EffectName for ...' with module import.",
+                impl.sourceLocation
+            )
 
         // Build substitution map: 'state -> Int, etc. (associated type bindings)
         val associatedTypeSubstitution = impl.associatedTypeBindings.mapKeys { (key, _) ->

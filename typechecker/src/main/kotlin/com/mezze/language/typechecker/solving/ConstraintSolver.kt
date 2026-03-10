@@ -2695,6 +2695,18 @@ class ConstraintSolver(
         val constructorName = constraint.constructorName
         val expectedPayloadType = constraint.payloadType
 
+        // If variant type is a SuspendedType, unwrap it and solve on the inner value type
+        // This handles cases like: if cond then throw {error} else Ok {val = x}
+        // where the if-then-else unifies to SuspendedType(VariantType([Ok, Err]), <Exception>)
+        // and we need to check that Ok is a valid constructor for the inner variant type.
+        if (variantType is MezzeType.SuspendedType) {
+            return solveHasConstructor(
+                constraint.copy(variantType = variantType.valueType),
+                currentSubst,
+                originalConstraint ?: constraint
+            )
+        }
+
         // If variant type is a TypeApplication, expand it first
         // This handles non-parametric types like Color (TypeApplication("Color", []))
         // and parametric types like Option Int (TypeApplication("Option", [IntType]))

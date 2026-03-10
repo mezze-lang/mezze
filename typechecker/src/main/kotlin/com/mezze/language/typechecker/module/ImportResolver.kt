@@ -397,8 +397,9 @@ class ImportResolver(
                     if (abilityDecl != null) {
                         // Store under the qualified name for lookup
                         abilities[localName] = abilityDecl
-                        // Also store under original name for unqualified lookup
-                        abilities[export.originalName] = abilityDecl
+                        // NOTE: Do NOT store under original name for unqualified lookup!
+                        // Module imports are always qualified - only selective imports bring
+                        // items into unqualified scope.
                     }
 
                     // Also add as a binding for name resolution
@@ -418,8 +419,9 @@ class ImportResolver(
                     if (effectDecl != null) {
                         // Store under the qualified name for lookup
                         effects[localName] = effectDecl
-                        // Also store under original name for unqualified lookup
-                        effects[export.originalName] = effectDecl
+                        // NOTE: Do NOT store under original name for unqualified lookup!
+                        // Module imports are always qualified - only selective imports bring
+                        // items into unqualified scope.
                     }
 
                     // Also add as a binding for name resolution

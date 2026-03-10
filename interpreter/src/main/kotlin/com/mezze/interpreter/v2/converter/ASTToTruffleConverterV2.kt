@@ -224,6 +224,7 @@ class ASTToTruffleConverterV2(
         val contentHash = impl.contentHash
             ?: throw RuntimeException("Content hash required for effect handler: ${impl.effectName}/${impl.performerName}")
 
+        // Effect name is already normalized by the typechecker (e.g., "log::Log" -> "Log")
         handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
 
         val hashSlot = getOrCreateSlot(contentHash)
@@ -269,6 +270,7 @@ class ASTToTruffleConverterV2(
         val contentHash = impl.contentHash
             ?: throw RuntimeException("Content hash required for parameterized effect handler")
 
+        // Effect name is already normalized by the typechecker
         handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
 
         val implParamNames = impl.performerParams.map { it.name }

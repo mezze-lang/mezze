@@ -21,6 +21,7 @@ import com.mezze.interpreter.v2.nodes.MezzeRootNode
 import com.mezze.interpreter.v2.nodes.function.FunctionDefinitionNode
 import com.mezze.interpreter.v2.nodes.function.MezzeFunctionRootNode
 import com.mezze.interpreter.v2.values.MezzeFunction
+import com.mezze.interpreter.v2.values.MezzeSuspended
 
 /**
  * Node that binds an imported value from a use declaration.
@@ -813,11 +814,17 @@ class DynamicHandleNode(
 
     /**
      * Process the result:
+     * - For MezzeSuspended (lazy effects), execute with our handlers
      * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
      * - For Exception effect, wrap successful results in Ok variant
      */
     @TruffleBoundary
     private fun processResult(result: Any): Any {
+        // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
+        if (result is MezzeSuspended) {
+            return processSuspended(result)
+        }
+
         // Handle suspended continuations (for early return/exception)
         if (result is MezzeContinuationSuspended) {
             // Exception and Return effects use suspend_with to return early
@@ -833,6 +840,45 @@ class DynamicHandleNode(
         }
 
         return result
+    }
+
+    /**
+     * Process a MezzeSuspended result by executing it with our handlers.
+     */
+    @TruffleBoundary
+    private fun processSuspended(suspended: MezzeSuspended): Any {
+        val context = MezzeContext.get(this)
+
+        // Build handler map from our effect names
+        val handlers = mutableMapOf<String, Any>()
+
+        // Prefer content hash lookup (O(1), collision-free)
+        for (hash in contentHashes) {
+            val handler = context.lookupGlobal(hash)
+            if (handler != null) {
+                handlers[hash] = handler
+                // Also map effect names to this handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+                break
+            }
+        }
+
+        // Fall back to name-based lookup if content hash not available
+        if (handlers.isEmpty()) {
+            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
+            if (handler != null) {
+                handlers[handlerName] = handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+            }
+        }
+
+        // Execute the suspended computation with our handlers
+        val callNode = com.oracle.truffle.api.nodes.IndirectCallNode.create()
+        return suspended.executeWith(handlers, context, callNode)
     }
 
     @TruffleBoundary
@@ -947,11 +993,17 @@ class ParameterizedHandleNode(
 
     /**
      * Process the result:
+     * - For MezzeSuspended (lazy effects), execute with our handlers
      * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
      * - For Exception effect, wrap successful results in Ok variant
      */
     @TruffleBoundary
     private fun processResult(result: Any): Any {
+        // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
+        if (result is MezzeSuspended) {
+            return processSuspended(result)
+        }
+
         // Handle suspended continuations (for early return/exception)
         if (result is MezzeContinuationSuspended) {
             // Exception and Return effects use suspend_with to return early
@@ -967,6 +1019,44 @@ class ParameterizedHandleNode(
         }
 
         return result
+    }
+
+    /**
+     * Process a MezzeSuspended result by executing it with our handlers.
+     */
+    @TruffleBoundary
+    private fun processSuspended(suspended: MezzeSuspended): Any {
+        val context = MezzeContext.get(this)
+
+        // Build handler map from our effect names
+        val handlers = mutableMapOf<String, Any>()
+
+        // Prefer content hash lookup (O(1), collision-free)
+        for (hash in contentHashes) {
+            val handler = context.lookupGlobal(hash)
+            if (handler != null) {
+                handlers[hash] = handler
+                // Also map effect names to this handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+                break
+            }
+        }
+
+        // Fall back to name-based lookup if content hash not available
+        if (handlers.isEmpty()) {
+            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
+            if (handler != null) {
+                handlers[handlerName] = handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+            }
+        }
+
+        // Execute the suspended computation with our handlers
+        return suspended.executeWith(handlers, context, callNode)
     }
 
     @TruffleBoundary
@@ -1240,6 +1330,11 @@ class ParameterizedScopedHandleNode(
 
     @TruffleBoundary
     private fun processResult(result: Any): Any {
+        // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
+        if (result is MezzeSuspended) {
+            return processSuspendedScoped(result)
+        }
+
         if (result is MezzeContinuationSuspended) {
             if (effectNames.contains("Exception") || effectNames.contains("Return")) {
                 return result.suspendedValue
@@ -1252,6 +1347,44 @@ class ParameterizedScopedHandleNode(
         }
 
         return result
+    }
+
+    /**
+     * Process a MezzeSuspended result by executing it with our handlers.
+     */
+    @TruffleBoundary
+    private fun processSuspendedScoped(suspended: MezzeSuspended): Any {
+        val context = MezzeContext.get(this)
+
+        // Build handler map from our effect names
+        val handlers = mutableMapOf<String, Any>()
+
+        // Prefer content hash lookup (O(1), collision-free)
+        for (hash in contentHashes) {
+            val handler = context.lookupGlobal(hash)
+            if (handler != null) {
+                handlers[hash] = handler
+                // Also map effect names to this handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+                break
+            }
+        }
+
+        // Fall back to name-based lookup if content hash not available
+        if (handlers.isEmpty()) {
+            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
+            if (handler != null) {
+                handlers[handlerName] = handler
+                for (effectName in effectNames) {
+                    handlers[effectName] = handler
+                }
+            }
+        }
+
+        // Execute the suspended computation with our handlers
+        return suspended.executeWith(handlers, context, callNode)
     }
 
     @TruffleBoundary
