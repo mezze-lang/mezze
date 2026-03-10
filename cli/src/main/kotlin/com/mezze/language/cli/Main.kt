@@ -910,7 +910,7 @@ private fun prettyPrintExpression(expr: Expression): String {
         is FloatLiteral -> expr.value.toString()
         is StringLiteral -> "\"${expr.value}\""
         is BooleanLiteral -> expr.value.toString()
-        is Identifier -> expr.name
+        is Identifier -> expr.toBindingKey().toKeyString()
         is LambdaExpression -> {
             val params = when (val p = expr.parameters) {
                 is TypedParameters -> "typed_params" // Simplified

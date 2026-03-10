@@ -174,7 +174,7 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
             // Track this call if it has type substitutions
             val func = expr.function
             val functionName = when (func) {
-                is Identifier -> func.name
+                is Identifier -> func.localName
                 else -> null
             }
             val contentHash = when (func) {

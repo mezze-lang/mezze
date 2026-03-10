@@ -340,12 +340,13 @@ class ImportResolver(
         val module = loader.getModule(modulePath)
 
         for ((name, export) in exports) {
-            // Determine the local name (use alias if provided)
-            val localName = if (isQualified && alias != null) {
-                "$alias::$name"
+            // Determine the local name using BindingKey (use alias if provided for qualified imports)
+            val bindingKey = if (isQualified && alias != null) {
+                BindingKey.qualified(alias, name)
             } else {
-                name
+                BindingKey.unqualified(name)
             }
+            val localName = bindingKey.toKeyString()
 
             // Add to appropriate category
             when (export.type) {
@@ -460,7 +461,16 @@ class ImportResolver(
         // O(1) via index instead of O(N) filterIsInstance scans
         if (module != null) {
             // Use index for O(1) access to all impl declarations (effect handlers)
-            impls.putAll(module.index.implsByPerformer)
+            // For module imports (isQualified=true), also add under qualified names
+            // so that `perform log::Console` resolves correctly
+            for ((performerName, impl) in module.index.implsByPerformer) {
+                impls[performerName] = impl
+                if (isQualified && alias != null) {
+                    // Use BindingKey for qualified performer lookup
+                    val qualifiedKey = BindingKey.qualified(alias, performerName)
+                    impls[qualifiedKey.toKeyString()] = impl
+                }
+            }
 
             // Use index for O(1) access to all ability implementations - already keyed by hash
             abilityImpls.putAll(module.index.abilityImplsByHash)
@@ -580,7 +590,7 @@ class ImportResolver(
                     for (abilityImpl in abilityImplsList) {
                         val implKey = abilityImpl.contentHash
                             ?: throw IllegalStateException(
-                                "Content hash not computed for imported impl: ${abilityImpl.abilityName} ${abilityImpl.targetTypes}"
+                                "Content hash not computed for imported impl: ${abilityImpl.ability.localName} ${abilityImpl.targetTypes}"
                             )
                         abilityImpls[implKey] = abilityImpl
                     }

@@ -547,7 +547,7 @@ class StringInterpolationPatternTest {
 
             // Check the body uses the renamed variable
             val body = renamedMatch.cases[0].expression as Identifier
-            assertEquals("#0", body.name)
+            assertEquals("#0", body.localName)
         }
 
         @Test

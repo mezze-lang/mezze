@@ -226,7 +226,7 @@ object CodebasePopulator {
         codebase.putDefinition(StoredDefinition(
             hash = hash,
             kind = DefinitionKind.EFFECT_IMPL,
-            name = "${decl.effectName}::${decl.performerName}",
+            name = "${decl.effect.localName}::${decl.performerName}",
             modulePath = modulePath,
             visibility = visibility,
             astBlob = CodebaseSerialization.serializeImplDeclaration(decl)
@@ -248,7 +248,7 @@ object CodebasePopulator {
 
         // Create a name that includes ability and types for uniqueness
         val typeNames = decl.targetTypes.joinToString(",") { printTypeAnnotation(it) }
-        val implName = "${decl.abilityName}::[$typeNames]"
+        val implName = "${decl.ability.localName}::[$typeNames]"
 
         codebase.putDefinition(StoredDefinition(
             hash = hash,

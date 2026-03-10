@@ -700,32 +700,13 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
 
-                // Parse effect name - can be qualified (e.g., log::Log)
-                val firstIdent = identifierParser(stream1)
+                // Parse effect reference - can be qualified (e.g., log::Log)
+                val effectRefResult = parseQualifiedRef(stream1)
 
-                when (firstIdent) {
+                when (effectRefResult) {
                     is ParseResult.Success -> {
-                        // Build qualified name by consuming ::identifier sequences
-                        val segments = mutableListOf(firstIdent.value.text)
-                        var currentStream = firstIdent.remaining
-
-                        while (true) {
-                            val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
-                            if (doubleColon is ParseResult.Success) {
-                                val nextIdent = identifierParser(doubleColon.remaining)
-                                when (nextIdent) {
-                                    is ParseResult.Success -> {
-                                        segments.add(nextIdent.value.text)
-                                        currentStream = nextIdent.remaining
-                                    }
-                                    is ParseResult.Failure -> break
-                                }
-                            } else {
-                                break
-                            }
-                        }
-
-                        val effectName = segments.joinToString("::")
+                        val effectRef = effectRefResult.value
+                        val currentStream = effectRefResult.remaining
                         val stream2 = skipNewlines(currentStream)
                         val forToken = tok(TokenType.FOR)(stream2)
 
@@ -748,7 +729,13 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                         val stream5 = skipNewlines(streamAfterParams)
 
                                         // Parse optional 'having' clause with associated type bindings
-                                        val bindingsResult = parseAssociatedTypeBindings(stream5, effectName, "impl")
+                                        // Use effect local name for error messages
+                                        val effectNameForErrors = if (effectRef.isQualified) {
+                                            "${effectRef.qualifier!!.fullPath}::${effectRef.localName}"
+                                        } else {
+                                            effectRef.localName
+                                        }
+                                        val bindingsResult = parseAssociatedTypeBindings(stream5, effectNameForErrors, "impl")
                                         val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
                                             is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
                                             is ParseResult.Failure -> return bindingsResult
@@ -821,7 +808,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                             is ParseResult.Success -> {
                                                                 ParseResult.Success(
                                                                     ImplDeclaration(
-                                                                        effectName = effectName,
+                                                                        effect = effectRef,
                                                                         performerName = performerName.value.text,
                                                                         performerParams = performerParams,
                                                                         associatedTypeBindings = associatedTypeBindings,
@@ -847,7 +834,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                             is ParseResult.Failure -> forToken
                         }
                     }
-                    is ParseResult.Failure -> firstIdent
+                    is ParseResult.Failure -> effectRefResult
                 }
             }
             is ParseResult.Failure -> implToken
@@ -1305,34 +1292,13 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
 
-                // Parse ability name, possibly qualified (e.g., codec::EncodeFormat)
-                val firstIdent = identifierParser(stream1)
+                // Parse ability reference, possibly qualified (e.g., codec::EncodeFormat)
+                val abilityRefResult = parseQualifiedRef(stream1)
 
-                when (firstIdent) {
+                when (abilityRefResult) {
                     is ParseResult.Success -> {
-                        // Check for qualified path (module::Ability)
-                        var pathStream = firstIdent.remaining
-                        val pathSegments = mutableListOf(firstIdent.value.text)
-
-                        while (true) {
-                            val doubleColon = tok(TokenType.DOUBLE_COLON)(pathStream)
-                            if (doubleColon is ParseResult.Success) {
-                                val nextIdent = identifierParser(doubleColon.remaining)
-                                if (nextIdent is ParseResult.Success) {
-                                    pathSegments.add(nextIdent.value.text)
-                                    pathStream = nextIdent.remaining
-                                } else {
-                                    break
-                                }
-                            } else {
-                                break
-                            }
-                        }
-
-                        val abilityModulePath = if (pathSegments.size > 1) pathSegments.dropLast(1) else emptyList()
-                        val abilityName = pathSegments.last()
-
-                        val stream2 = skipNewlines(pathStream)
+                        val abilityRef = abilityRefResult.value
+                        val stream2 = skipNewlines(abilityRefResult.remaining)
 
                         // Parse target types (one or more)
                         // Use simpleTypeArgument to avoid type applications consuming multiple types
@@ -1368,7 +1334,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                 val stream3 = skipNewlines(currentStream)
 
                                 // Parse optional 'having' clause with associated type bindings
-                                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityName, "impl")
+                                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityRef.localName, "impl")
                                 val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
                                     is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
                                     is ParseResult.Failure -> return bindingsResult
@@ -1441,12 +1407,11 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                                 when (rbrace) {
                                                     is ParseResult.Success -> ParseResult.Success(
                                                         ImplAbilityDeclaration(
-                                                            abilityName,
-                                                            abilityModulePath,
-                                                            targetTypes,
-                                                            emptyList(),  // forallVars - deferred for later
-                                                            associatedTypeBindings,
-                                                            operations,
+                                                            ability = abilityRef,
+                                                            targetTypes = targetTypes,
+                                                            forallVars = emptyList(),  // forallVars - deferred for later
+                                                            associatedTypeBindings = associatedTypeBindings,
+                                                            operations = operations,
                                                             inferredType = null,
                                                             sourceLocation = implToken.value.toSourceLocation()
                                                         ),
@@ -1464,7 +1429,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                             is ParseResult.Failure -> firstType
                         }
                     }
-                    is ParseResult.Failure -> firstIdent
+                    is ParseResult.Failure -> abilityRefResult
                 }
             }
             is ParseResult.Failure -> implToken

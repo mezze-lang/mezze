@@ -25,7 +25,7 @@ class ScopedEffectDetectionTest {
 
     private fun makeImpl(vararg operationNames: String): ImplDeclaration {
         return ImplDeclaration(
-            effectName = "TestEffect",
+            effect = QualifiedRef(localName = "TestEffect", qualifier = null),
             performerName = "TestPerformer",
             operations = operationNames.map { makeOperation(it) }
         )

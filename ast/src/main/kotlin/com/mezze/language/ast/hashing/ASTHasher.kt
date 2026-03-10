@@ -178,7 +178,13 @@ object ASTHasher {
 
             is Identifier -> {
                 builder.append(byteArrayOf(HashTags.IDENTIFIER))
-                builder.append(expr.name)
+                // Hash the structured identifier data, not the reconstructed string
+                builder.append(expr.localName)
+                if (expr.qualifier != null) {
+                    for (segment in expr.qualifier.segments) {
+                        builder.append(segment)
+                    }
+                }
             }
 
             is PlaceholderExpression -> {
@@ -287,15 +293,22 @@ object ASTHasher {
                 builder.append(byteArrayOf(HashTags.PERFORM))
                 hashExpressionInto(expr.expression, builder)
                 builder.appendList(expr.handlers) { handler ->
-                    append(handler.name)
+                    // Hash the QualifiedRef - include both qualifier and localName
+                    append(handler.performer.localName)
+                    handler.performer.qualifier?.let { q ->
+                        appendList(q.segments) { append(it) }
+                    }
                     appendNullable(handler.parameters) { hashExpressionInto(it, this) }
                 }
             }
 
             is EffectCallExpression -> {
                 builder.append(byteArrayOf(HashTags.PERFORM))
-                builder.append(expr.effectName)
-                builder.append(expr.operationName)
+                // Hash the operation reference (localName + qualifier segments)
+                builder.append(expr.operation.localName)
+                expr.operation.qualifier?.let { q ->
+                    builder.appendList(q.segments) { append(it) }
+                }
                 hashExpressionInto(expr.arguments, builder)
             }
 
@@ -631,7 +644,11 @@ object ASTHasher {
     private fun hashNormalizedImplDeclaration(decl: ImplDeclaration): MezzeHash {
         val builder = MezzeHashBuilder()
         builder.append(byteArrayOf(HashTags.IMPL_DECLARATION))
-        builder.append(decl.effectName)
+        // Hash the effect reference (localName + qualifier segments)
+        builder.append(decl.effect.localName)
+        decl.effect.qualifier?.let { q ->
+            builder.appendList(q.segments) { append(it) }
+        }
         builder.append(decl.performerName)
         // Sort params by name
         val sortedParams = decl.performerParams.sortedBy { it.name }
@@ -687,8 +704,11 @@ object ASTHasher {
     private fun hashNormalizedImplAbilityDeclaration(decl: ImplAbilityDeclaration): MezzeHash {
         val builder = MezzeHashBuilder()
         builder.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
-        builder.appendList(decl.abilityModulePath) { append(it) }
-        builder.append(decl.abilityName)
+        // Hash the ability reference (localName + qualifier segments)
+        builder.append(decl.ability.localName)
+        decl.ability.qualifier?.let { q ->
+            builder.appendList(q.segments) { append(it) }
+        }
         builder.appendList(decl.targetTypes) { hashTypeAnnotationInto(it, this) }
         builder.appendList(decl.forallVars) { append(it) }
         // Sort bindings by key

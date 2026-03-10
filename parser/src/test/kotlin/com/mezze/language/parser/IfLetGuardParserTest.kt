@@ -49,7 +49,7 @@ class IfLetGuardParserTest {
 
         // Body should reference v
         assertTrue(firstCase.expression is Identifier)
-        assertEquals("v", (firstCase.expression as Identifier).name)
+        assertEquals("v", (firstCase.expression as Identifier).localName)
     }
 
     @Test
@@ -125,7 +125,7 @@ class IfLetGuardParserTest {
 
         assertEquals(1, firstCase.ifLetBindings.size)
         assertTrue(firstCase.ifLetBindings[0].expression is Identifier)
-        assertEquals("maybeValue", (firstCase.ifLetBindings[0].expression as Identifier).name)
+        assertEquals("maybeValue", (firstCase.ifLetBindings[0].expression as Identifier).localName)
     }
 
     @Test

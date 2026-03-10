@@ -59,13 +59,34 @@ public final class TailCallLoopNode extends MezzeNode {
         this.parameterNames = parameterNames;
     }
 
+    // The CallTarget for the current function - used to detect self-recursive vs cross-function tail calls
+    // Lazily initialized on first tail call
+    @CompilationFinal
+    private com.oracle.truffle.api.CallTarget selfCallTarget;
+
     @Override
     public Object execute(VirtualFrame frame) {
+        // Lazily initialize self CallTarget from the root node
+        if (selfCallTarget == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            com.oracle.truffle.api.nodes.RootNode rootNode = getRootNode();
+            if (rootNode != null) {
+                selfCallTarget = rootNode.getCallTarget();
+            }
+        }
+
         while (loopProfile.profile(true)) {
             try {
                 return bodyNode.execute(frame);
             } catch (TailCallException e) {
-                rebindArguments(frame, e.getArguments());
+                // Check if this is a self-recursive tail call or a call to a different function
+                if (e.getCallTarget() == selfCallTarget) {
+                    // Self-recursive tail call: rebind arguments and continue loop
+                    rebindArguments(frame, e.getArguments());
+                } else {
+                    // Tail call to different function: actually call it and return the result
+                    return e.getCallTarget().call(e.getArguments());
+                }
             }
         }
         throw new IllegalStateException("Unreachable");

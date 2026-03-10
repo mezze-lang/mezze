@@ -242,7 +242,11 @@ sealed interface UsePath
  */
 @Serializable
 data class ModulePath(val segments: List<String>) : UsePath {
-    /** Full qualified path string (e.g., "std::collections::seq") */
+    /**
+     * Full qualified path string (e.g., "std::collections::seq").
+     * Use for display/error messages and module loader API calls.
+     * For programmatic path operations, prefer using segments directly.
+     */
     val fullPath: String get() = segments.joinToString("::")
 
     /** Short name - last segment (e.g., "array" from "std::collections::seq") */
@@ -257,7 +261,11 @@ data class ModulePath(val segments: List<String>) : UsePath {
     } else null
 
     companion object {
-        /** Parse a path string into ModulePath */
+        /**
+         * Parse a path string into ModulePath.
+         * This is the ONLY place that should parse :: from strings (except the parser).
+         * Used for legacy API compatibility and reading from configuration.
+         */
         fun parse(path: String): ModulePath = ModulePath(path.split("::"))
 
         /** Empty module path */
@@ -286,3 +294,161 @@ data class ImportItem(
     val alias: String? = null,
     val contentHash: String? = null
 )
+
+// ============================================================================
+// QUALIFIED REFERENCES
+// ============================================================================
+
+/**
+ * A binding key for looking up imported items.
+ *
+ * This replaces the old pattern of using `"$alias::$name"` string concatenation.
+ * The key consists of a qualifier (module alias or path) and a local name.
+ *
+ * ## Design Principle
+ *
+ * Binding keys should be compared structurally, not as strings.
+ * The `toKeyString()` method produces a stable string key for map lookups,
+ * but the `::` in that string is an implementation detail of the key format.
+ *
+ * ## Examples
+ *
+ * ```kotlin
+ * // Qualified key for "log::info"
+ * val key1 = BindingKey(qualifier = "log", localName = "info")
+ *
+ * // Unqualified key for "info"
+ * val key2 = BindingKey.unqualified("info")
+ * ```
+ */
+@Serializable
+data class BindingKey(
+    /** The qualifier (module alias or short name) */
+    val qualifier: String?,
+    /** The local name of the item */
+    val localName: String
+) {
+    /**
+     * Produce a stable string key for map lookups.
+     * Note: The `::` in this string is an implementation detail, not user-facing syntax.
+     */
+    fun toKeyString(): String = if (qualifier != null && qualifier.isNotEmpty()) {
+        "$qualifier::$localName"
+    } else {
+        localName
+    }
+
+    companion object {
+        /**
+         * Create an unqualified binding key.
+         */
+        fun unqualified(name: String): BindingKey = BindingKey(qualifier = null, localName = name)
+
+        /**
+         * Create a qualified binding key.
+         */
+        fun qualified(qualifier: String, name: String): BindingKey = BindingKey(qualifier = qualifier, localName = name)
+
+        /**
+         * Create a binding key from a QualifiedRef.
+         */
+        fun fromQualifiedRef(ref: QualifiedRef): BindingKey = BindingKey(
+            qualifier = ref.qualifier?.shortName,
+            localName = ref.localName
+        )
+    }
+}
+
+/**
+ * A qualified reference to a named item (effect, ability, performer, etc.).
+ *
+ * This is the canonical way to represent references that may be qualified
+ * with a module path (e.g., `log::Console` or just `Console`).
+ *
+ * ## Design Principle
+ *
+ * The `::` syntax is a parsing concern only. After parsing, all qualified
+ * references are represented as structured `QualifiedRef` objects. No code
+ * outside the parser should construct or parse `::` strings.
+ *
+ * ## Resolution Flow
+ *
+ * 1. Parser produces QualifiedRef(qualifier=["log"], localName="Console")
+ * 2. Import resolver resolves qualifier to find the module
+ * 3. TypeChecker looks up localName in the module's exports
+ * 4. TypeChecker populates resolvedContentHash
+ * 5. Interpreter uses resolvedContentHash for O(1) lookup
+ *
+ * ## Examples
+ *
+ * ```mezze
+ * use std::effects::log
+ *
+ * # Qualified reference - qualifier=["log"], localName="Console"
+ * perform log::Console in log::info {msg = "hello"}
+ *
+ * # Unqualified reference - qualifier=null, localName="Console"
+ * use std::effects::log::{Console}
+ * perform Console in info {msg = "hello"}
+ * ```
+ */
+@Serializable
+data class QualifiedRef(
+    /** The local name of the referenced item (e.g., "Console" in "log::Console") */
+    val localName: String,
+
+    /** Module qualifier if this is a qualified reference (e.g., ModulePath(["log"])) */
+    val qualifier: ModulePath? = null,
+
+    /**
+     * Content hash of the resolved item (populated by typechecker).
+     * Used for O(1) content-addressed lookups at runtime.
+     */
+    val resolvedContentHash: String? = null,
+
+    /** Source location for error reporting */
+    val sourceLocation: SourceLocation? = null
+) {
+    /** Whether this is a qualified reference (e.g., log::Console vs just Console) */
+    val isQualified: Boolean get() = qualifier != null && qualifier.segments.isNotEmpty()
+
+    /**
+     * Create a copy with the resolved content hash populated.
+     * Used by the typechecker after resolving the reference.
+     */
+    fun withResolvedHash(hash: String): QualifiedRef = copy(resolvedContentHash = hash)
+
+    /**
+     * Create a binding key for looking up this reference.
+     * Uses the last segment of the qualifier (short name) as the key qualifier.
+     */
+    fun toBindingKey(): BindingKey = BindingKey.fromQualifiedRef(this)
+
+    companion object {
+        /**
+         * Create an unqualified reference (local name only).
+         */
+        fun local(name: String, sourceLocation: SourceLocation? = null): QualifiedRef =
+            QualifiedRef(localName = name, sourceLocation = sourceLocation)
+
+        /**
+         * Create a qualified reference with a single-segment qualifier.
+         */
+        fun qualified(qualifier: String, localName: String, sourceLocation: SourceLocation? = null): QualifiedRef =
+            QualifiedRef(
+                localName = localName,
+                qualifier = ModulePath(listOf(qualifier)),
+                sourceLocation = sourceLocation
+            )
+
+        /**
+         * Create a qualified reference with a multi-segment qualifier.
+         */
+        fun qualified(qualifierSegments: List<String>, localName: String, sourceLocation: SourceLocation? = null): QualifiedRef =
+            QualifiedRef(
+                localName = localName,
+                qualifier = if (qualifierSegments.isNotEmpty()) ModulePath(qualifierSegments) else null,
+                sourceLocation = sourceLocation
+            )
+    }
+}

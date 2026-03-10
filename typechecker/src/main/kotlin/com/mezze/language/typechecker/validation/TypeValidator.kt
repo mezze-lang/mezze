@@ -185,7 +185,7 @@ class TypeValidator(
 
                 is ImplDeclaration -> {
                     // Find corresponding effect declaration using O(1) map lookup
-                    val effectDecl = effectDeclarations[item.effectName]
+                    val effectDecl = effectDeclarations[item.effect.localName]
 
                     if (effectDecl != null) {
                         val implErrors = effectValidator.validateEffectImpl(item, effectDecl)
@@ -2486,7 +2486,7 @@ class TypeValidator(
 
         // Validate each handler
         for (handler in expr.handlers) {
-            val handlerName = handler.name
+            val handlerName = handler.performer.localName
             val implDecl = implDeclarations[handlerName]
 
             if (implDecl == null) {
@@ -2494,7 +2494,7 @@ class TypeValidator(
                 continue
             }
 
-            val effectName = implDecl.effectName
+            val effectName = implDecl.effect.localName
 
             // Check if handler has associated type bindings
             if (implDecl.associatedTypeBindings.isEmpty()) {
@@ -2555,8 +2555,8 @@ class TypeValidator(
         fun traverse(e: Expression) {
             when (e) {
                 is EffectCallExpression -> {
-                    val effectName = e.effectName
-                    val operationName = e.operationName
+                    val effectName = e.operation.qualifier?.fullPath ?: ""
+                    val operationName = e.operation.localName
 
                     // Check if this effect has associated types
                     val effectDecl = effectDeclarations[effectName]
@@ -2578,7 +2578,7 @@ class TypeValidator(
                         val operationName = memberAccess.member
 
                         val effectName = when (val receiver = memberAccess.receiver) {
-                            is Identifier -> receiver.name
+                            is Identifier -> receiver.localName
                             is VariantConstruction -> receiver.constructor
                             else -> null
                         }
@@ -2600,7 +2600,7 @@ class TypeValidator(
 
                     // If the function being called is an Identifier, look up its definition and traverse the body
                     if (e.function is Identifier) {
-                        val funcName = (e.function as Identifier).name
+                        val funcName = (e.function as Identifier).localName
                         if (!visitedFunctions.contains(funcName)) {
                             val funcDef = functionDefinitions[funcName]
                             if (funcDef != null) {

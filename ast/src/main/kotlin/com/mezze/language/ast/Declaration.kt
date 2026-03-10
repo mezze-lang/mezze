@@ -253,7 +253,7 @@ data class EffectOperation(
 
 @Serializable
 data class ImplDeclaration(
-    val effectName: String,
+    val effect: QualifiedRef,
     val performerName: String,
     val performerParams: List<PerformerParameter> = emptyList(), // For parameterized performers like FileLogger {path: String}
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'state = Int, 'error = String'
@@ -261,11 +261,7 @@ data class ImplDeclaration(
     val inferredType: MezzeType? = null,           // From typechecker
     val sourceLocation: SourceLocation? = null,   // For error reporting
     val contentHash: String? = null               // Content-addressable hash
-) : ProgramItem {
-    // Backward compatibility
-    val associatedTypeBinding: Pair<String, TypeAnnotation>?
-        get() = associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
-}
+) : ProgramItem
 
 @Serializable
 data class PerformerParameter(
@@ -352,8 +348,7 @@ data class AbilityOperation(
 
 @Serializable
 data class ImplAbilityDeclaration(
-    val abilityName: String,
-    val abilityModulePath: List<String> = emptyList(), // Module path for qualified ability names like codec::EncodeFormat
+    val ability: QualifiedRef,
     val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
     val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
@@ -361,14 +356,7 @@ data class ImplAbilityDeclaration(
     val inferredType: MezzeType? = null,           // From typechecker
     val sourceLocation: SourceLocation? = null,   // For error reporting
     val contentHash: String? = null               // Content-addressable hash
-) : ProgramItem {
-    // Full qualified ability name
-    val qualifiedAbilityName: String
-        get() = if (abilityModulePath.isEmpty()) abilityName else "${abilityModulePath.joinToString("::")}::$abilityName"
-    // Backward compatibility
-    val associatedTypeBinding: Pair<String, TypeAnnotation>?
-        get() = associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
-}
+) : ProgramItem
 
 @Serializable
 data class ImplAbilityOperation(

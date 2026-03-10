@@ -146,11 +146,11 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<Expression>
                         is ParseResult.Success -> {
                             val expr = result.value
                             when {
-                                expr is Identifier && expr.name.firstOrNull()?.isUpperCase() == true -> {
+                                expr is Identifier && expr.localName.firstOrNull()?.isUpperCase() == true -> {
                                     // Variant construction: Some {val = 42}
                                     ParseResult.Success(
                                         VariantConstruction(
-                                            constructor = expr.name,
+                                            constructor = expr.localName,
                                             value = args.value,
                                             sourceLocation = expr.sourceLocation
                                         ),
@@ -741,6 +741,62 @@ internal val MezzeParser.ifExpression: Parser<Expression>
 
 // ===== PERFORM EXPRESSION =====
 
+/**
+ * Parse a qualified identifier for handler names in perform expressions.
+ * Supports both simple names (Console) and qualified names (log::Console).
+ * Returns the fully qualified name as a string (e.g., "log::Console").
+ */
+/**
+ * Parses a qualified reference like "module::Name" or just "Name".
+ * Returns a QualifiedRef with structured qualifier and localName.
+ *
+ * Examples:
+ * - "Console" -> QualifiedRef(localName="Console", qualifier=null)
+ * - "log::Console" -> QualifiedRef(localName="Console", qualifier=ModulePath(["log"]))
+ * - "std::effects::log::Console" -> QualifiedRef(localName="Console", qualifier=ModulePath(["std", "effects", "log"]))
+ */
+internal fun MezzeParser.parseQualifiedRef(stream: TokenStream): ParseResult<QualifiedRef> {
+    val startLocation = stream.current()?.let { tokenLocation(it, currentFile) }
+    val firstId = identifierParser(stream)
+    return when (firstId) {
+        is ParseResult.Success -> {
+            val segments = mutableListOf(firstId.value.text)
+            var currentStream = firstId.remaining
+
+            // Consume ::identifier sequences to build qualified name
+            while (true) {
+                val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                if (doubleColon is ParseResult.Success) {
+                    val nextId = identifierParser(doubleColon.remaining)
+                    when (nextId) {
+                        is ParseResult.Success -> {
+                            segments.add(nextId.value.text)
+                            currentStream = nextId.remaining
+                        }
+                        is ParseResult.Failure -> break
+                    }
+                } else {
+                    break
+                }
+            }
+
+            // Last segment is the localName, previous segments form the qualifier
+            val localName = segments.last()
+            val qualifierSegments = segments.dropLast(1)
+            val qualifier = if (qualifierSegments.isEmpty()) null else ModulePath(qualifierSegments)
+
+            val ref = QualifiedRef(
+                localName = localName,
+                qualifier = qualifier,
+                resolvedContentHash = null,
+                sourceLocation = startLocation
+            )
+            ParseResult.Success(ref, currentStream)
+        }
+        is ParseResult.Failure -> firstId
+    }
+}
+
 internal val MezzeParser.performExpression: Parser<Expression>
     get() = { stream ->
         // Parse two forms:
@@ -752,11 +808,12 @@ internal val MezzeParser.performExpression: Parser<Expression>
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(performToken.remaining)
 
-                // Parse first identifier
-                val firstId = identifierParser(stream1)
-                when (firstId) {
+                // Parse first handler/operation reference (can be qualified, e.g., log::Console)
+                val firstRef = parseQualifiedRef(stream1)
+                when (firstRef) {
                     is ParseResult.Success -> {
-                        val stream2 = skipNewlines(firstId.remaining)
+                        val firstQualifiedRef = firstRef.value
+                        val stream2 = skipNewlines(firstRef.remaining)
 
                         // Try to parse optional parameters for first handler
                         val firstParamsResult = recordLiteral(stream2)
@@ -771,7 +828,7 @@ internal val MezzeParser.performExpression: Parser<Expression>
                         if (nextToken?.type == TokenType.COMMA || nextToken?.type == TokenType.IN) {
                             // Form 2: perform Handler1, Handler2 in expression
                             val handlers = mutableListOf<PerformHandler>()
-                            handlers.add(PerformHandler(firstId.value.text, firstParams))
+                            handlers.add(PerformHandler(firstQualifiedRef, firstParams))
                             var currentStream = streamAfterParams
 
                             // Parse remaining handlers if there are commas
@@ -780,11 +837,12 @@ internal val MezzeParser.performExpression: Parser<Expression>
                                 val commaToken = tok(TokenType.COMMA)(currentStream)
                                 when (commaToken) {
                                     is ParseResult.Success -> {
-                                        val stream3 = skipNewlines(commaToken.remaining)
-                                        val handlerName = identifierParser(stream3)
-                                        when (handlerName) {
+                                        val streamAfterComma = skipNewlines(commaToken.remaining)
+                                        val handlerRefResult = parseQualifiedRef(streamAfterComma)
+                                        when (handlerRefResult) {
                                             is ParseResult.Success -> {
-                                                val stream4 = skipNewlines(handlerName.remaining)
+                                                val handlerRef = handlerRefResult.value
+                                                val stream4 = skipNewlines(handlerRefResult.remaining)
 
                                                 // Check for optional params
                                                 val paramsResult = recordLiteral(stream4)
@@ -793,10 +851,10 @@ internal val MezzeParser.performExpression: Parser<Expression>
                                                     is ParseResult.Failure -> Pair(null, stream4)
                                                 }
 
-                                                handlers.add(PerformHandler(handlerName.value.text, params))
+                                                handlers.add(PerformHandler(handlerRef, params))
                                                 currentStream = skipNewlines(stream5)
                                             }
-                                            is ParseResult.Failure -> errorResult = handlerName
+                                            is ParseResult.Failure -> errorResult = handlerRefResult
                                         }
                                     }
                                     is ParseResult.Failure -> break
@@ -825,17 +883,22 @@ internal val MezzeParser.performExpression: Parser<Expression>
                             }
                         } else {
                             // Form 1: perform operation {args} - simple effect call
+                            // The qualified ref is the operation (e.g., info or Log::info)
                             val argsResult = recordLiteral(stream2)
                             when (argsResult) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    EffectCallExpression("", firstId.value.text, argsResult.value as RecordLiteral, sourceLocation = performLocation),
+                                    EffectCallExpression(
+                                        operation = firstQualifiedRef,
+                                        arguments = argsResult.value as RecordLiteral,
+                                        sourceLocation = performLocation
+                                    ),
                                     argsResult.remaining
                                 )
                                 is ParseResult.Failure -> argsResult
                             }
                         }
                     }
-                    is ParseResult.Failure -> firstId
+                    is ParseResult.Failure -> firstRef
                 }
             }
             is ParseResult.Failure -> performToken
@@ -1470,7 +1533,7 @@ internal val MezzeParser.logicalAndExpression: Parser<Expression>
 internal fun MezzeParser.desugarPipe(pipeValue: Expression, target: Expression): Expression {
         return when (target) {
             // @ is parsed as Identifier("@") - replace with piped value
-            is Identifier -> if (target.name == "@") pipeValue else target
+            is Identifier -> if (target.localName == "@") pipeValue else target
 
             // Recurse into function calls
             is FunctionCall -> target.copy(
@@ -1831,11 +1894,11 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                                 // Check if the function is an uppercase identifier (variant constructor)
                                 val expr = result.value
                                 when {
-                                    expr is Identifier && expr.name.firstOrNull()?.isUpperCase() == true -> {
+                                    expr is Identifier && expr.localName.firstOrNull()?.isUpperCase() == true -> {
                                         // This is a variant construction: Some {val = 42}
                                         ParseResult.Success(
                                             VariantConstruction(
-                                                constructor = expr.name,
+                                                constructor = expr.localName,
                                                 value = args.value,
                                                 sourceLocation = expr.sourceLocation  // Use identifier's location
                                             ),
@@ -1889,10 +1952,10 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                     // Mezze uses {} for function calls, not ()
                     val funcExpr = result.value
                     val funcName = when (funcExpr) {
-                        is Identifier -> funcExpr.name
+                        is Identifier -> funcExpr.localName
                         is MemberAccess -> {
                             val receiverName = when (val receiver = funcExpr.receiver) {
-                                is Identifier -> receiver.name
+                                is Identifier -> receiver.localName
                                 is VariantConstruction -> receiver.constructor
                                 else -> "..."
                             }
@@ -1929,10 +1992,10 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                             val isRecordLiteral = lookAheadForRecordLiteral(checkStream)
                             if (!isLambda && !isRecordLiteral) {
                                 val funcName = when (funcExpr) {
-                                    is Identifier -> funcExpr.name
+                                    is Identifier -> funcExpr.localName
                                     is MemberAccess -> {
                                         val receiverName = when (val receiver = funcExpr.receiver) {
-                                            is Identifier -> receiver.name
+                                            is Identifier -> receiver.localName
                                             else -> "..."
                                         }
                                         "$receiverName.${funcExpr.member}"
@@ -1960,7 +2023,7 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                     // skip this check as the identifier is likely a separate statement
                     val funcExpr = result.value
                     if (funcExpr is Identifier) {
-                        val funcName = funcExpr.name
+                        val funcName = funcExpr.localName
                         val argName = token.text
                         // Throw exception directly to ensure the error message is shown
                         throw createParseException(
@@ -1990,12 +2053,12 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                     val funcExpr = result.value
                     if (funcExpr is Identifier || funcExpr is MemberAccess || funcExpr is VariantConstruction) {
                         val funcName = when (funcExpr) {
-                            is Identifier -> funcExpr.name
+                            is Identifier -> funcExpr.localName
                             is VariantConstruction -> funcExpr.constructor
                             is MemberAccess -> {
                                 // Extract clean name for member access like Parse.decode
                                 val receiverName = when (val receiver = funcExpr.receiver) {
-                                    is Identifier -> receiver.name
+                                    is Identifier -> receiver.localName
                                     is VariantConstruction -> receiver.constructor
                                     else -> "..."
                                 }

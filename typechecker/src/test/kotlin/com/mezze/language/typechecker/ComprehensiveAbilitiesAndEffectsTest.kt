@@ -52,7 +52,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         // Verify implementation is processed  
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
-        assertEquals("Show", implDecl.abilityName)
+        assertEquals("Show", implDecl.ability.localName)
 
         // Verify the displayValue binding has correct type
         val displayValueBinding = typedProgram.items.find { 

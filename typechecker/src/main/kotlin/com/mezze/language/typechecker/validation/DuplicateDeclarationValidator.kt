@@ -402,11 +402,11 @@ object DuplicateDeclarationValidator {
         for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
             // Create a key from ability name + target type names
             val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
-            val key = "${impl.abilityName}_${targetTypeNames.joinToString("_")}"
+            val key = "${impl.ability.localName}_${targetTypeNames.joinToString("_")}"
 
             if (abilityImplKeys.contains(key)) {
                 throw TypeCheckError(
-                    "Duplicate ability implementation: '${impl.abilityName}' is already implemented " +
+                    "Duplicate ability implementation: '${impl.ability.localName}' is already implemented " +
                     "for type(s) ${targetTypeNames.joinToString(", ")}",
                     impl.sourceLocation
                 )

@@ -182,7 +182,10 @@
       "Bash(xattr:*)",
       "Bash(codesign:*)",
       "Bash(./scripts/install.sh:*)",
-      "Bash(~/.mezze/bin/mez fmt:*)"
+      "Bash(~/.mezze/bin/mez fmt:*)",
+      "Bash(pkill:*)",
+      "WebFetch(domain:exp10it.io)",
+      "WebFetch(domain:arxiv.org)"
     ],
     "deny": [],
     "ask": []

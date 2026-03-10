@@ -61,7 +61,7 @@ class BasicAbilitiesTest {
         // Verify implementation is processed  
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
-        assertEquals("Show", implDecl.abilityName)
+        assertEquals("Show", implDecl.ability.localName)
         assertEquals(1, implDecl.targetTypes.size)
         assertEquals(1, implDecl.operations.size)
     }
@@ -147,7 +147,7 @@ class BasicAbilitiesTest {
         // Verify implementation is processed
         val implDecl = typedProgram.items.find { it is ImplDeclaration } as ImplDeclaration?
         assertNotNull(implDecl)
-        assertEquals("Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
         assertEquals("ConsoleLogger", implDecl.performerName)
         assertEquals(1, implDecl.operations.size)
     }

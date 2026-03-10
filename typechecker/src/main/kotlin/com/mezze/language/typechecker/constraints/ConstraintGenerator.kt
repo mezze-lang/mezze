@@ -627,7 +627,7 @@ class ConstraintGenerator(
     ): ConstraintResult {
         DebugLogger.debug(Category.ConstraintGenerator) {
             val exprInfo = if (binding.expression is Identifier) {
-                " Identifier='${(binding.expression as Identifier).name}'"
+                " Identifier='${(binding.expression as Identifier).localName}'"
             } else ""
             "generateLetBinding: binding=${binding.variableName} expr=${binding.expression.javaClass.simpleName}$exprInfo"
         }
@@ -1094,10 +1094,11 @@ class ConstraintGenerator(
     private fun validateAbilityImplementation(impl: ImplAbilityDeclaration, context: TypingContext) {
         // Find the ability declaration
         // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
-        val abilityDeclaration = abilityDeclarations[impl.abilityName]
-            ?: abilityDeclarations[impl.qualifiedAbilityName]
+        val qualifiedAbilityName = impl.ability.qualifier?.let { "${it.fullPath}::${impl.ability.localName}" } ?: impl.ability.localName
+        val abilityDeclaration = abilityDeclarations[impl.ability.localName]
+            ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw com.mezze.language.typechecker.TypeCheckError(
-                "Ability '${impl.qualifiedAbilityName}' not found - cannot validate implementation"
+                "Ability '${qualifiedAbilityName}' not found - cannot validate implementation"
             )
 
         // Build substitution map: 'a -> Int, etc. (type parameters from target types)
@@ -1160,7 +1161,7 @@ class ConstraintGenerator(
                 if (bodyResult.undefinedVariables.isNotEmpty()) {
                     val undefinedVar = bodyResult.undefinedVariables.first()
                     throw com.mezze.language.typechecker.TypeCheckError(
-                        "Type error in ability '${impl.abilityName}' operation '${implOp.name}' implementation: " +
+                        "Type error in ability '${impl.ability.localName}' operation '${implOp.name}' implementation: " +
                         "Undefined variable '${undefinedVar.name}'"
                     )
                 }
@@ -1172,7 +1173,7 @@ class ConstraintGenerator(
                 when (solveResult) {
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
                         throw com.mezze.language.typechecker.TypeCheckError(
-                            "Type error in ability '${impl.abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
+                            "Type error in ability '${impl.ability.localName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
                         )
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
@@ -1192,7 +1193,7 @@ class ConstraintGenerator(
                                 val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
                                 val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Method '${implOp.name}' in impl ${impl.abilityName} returns wrong type: " +
+                                    "Method '${implOp.name}' in impl ${impl.ability.localName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }
@@ -1224,9 +1225,11 @@ class ConstraintGenerator(
         // - Imported effects keyed by their import name (e.g., "log::Log" for module imports,
         //   or "Log" for selective imports like `use std::effects::log::{ Log }`)
         // We don't search by EffectDeclaration.name because that would bypass import scoping.
-        val effectDeclaration = effectDeclarations[impl.effectName]
+        val effectLookupKey = impl.effect.toBindingKey().toKeyString()
+        val effectDeclaration = effectDeclarations[effectLookupKey]
+            ?: effectDeclarations[impl.effect.localName]  // Fallback to local name for selective imports
             ?: throw com.mezze.language.typechecker.TypeCheckError(
-                "Effect '${impl.effectName}' is not defined or not imported. " +
+                "Effect '${effectLookupKey}' is not defined or not imported. " +
                 "Use 'use module::{ EffectName }' for selective import or 'impl module::EffectName for ...' with module import.",
                 impl.sourceLocation
             )
@@ -1317,7 +1320,7 @@ class ConstraintGenerator(
 
                 // Track effects from initialize_scope - they propagate to the perform site
                 // Effects run at the START of perform, before the body
-                val initEffects = bodyResult.effects - impl.effectName
+                val initEffects = bodyResult.effects - impl.effect.localName
                 if (initEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + initEffects
@@ -1375,7 +1378,7 @@ class ConstraintGenerator(
 
                 // Track effects from finalize_scope - they propagate to the perform site
                 // Effects run at the END of perform, in a finally block (even if body fails)
-                val finalizeEffects = bodyResult.effects - impl.effectName
+                val finalizeEffects = bodyResult.effects - impl.effect.localName
                 if (finalizeEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + finalizeEffects
@@ -1428,7 +1431,7 @@ class ConstraintGenerator(
                     val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedParamType)
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong parameter type: " +
-                        "expected $expectedTypeStr (from effect '${impl.effectName}'), " +
+                        "expected $expectedTypeStr (from effect '${impl.effect.localName}'), " +
                         "but impl declares $implTypeStr. " +
                         "Parameter names and types must match exactly.",
                         implOp.implementation.sourceLocation
@@ -1453,7 +1456,7 @@ class ConstraintGenerator(
                     val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong return type: " +
-                        "expected $expectedTypeStr (from effect '${impl.effectName}'), " +
+                        "expected $expectedTypeStr (from effect '${impl.effect.localName}'), " +
                         "but impl declares $implTypeStr.",
                         implOp.implementation.sourceLocation
                     )
@@ -1466,12 +1469,12 @@ class ConstraintGenerator(
             // but  impl Log for Console where { info: { msg: String } -> {} <IO> = ... } is OK (transformed)
             // and  impl Log for Console where { info: { msg: String } -> {} = ... } is OK (handled/removed)
             val implEffects = implOp.effects
-            if (implEffects != null && impl.effectName in implEffects.effects) {
+            if (implEffects != null && impl.effect.localName in implEffects.effects) {
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Effect impl '${impl.performerName}' operation '${implOp.name}' cannot require " +
-                    "the same effect '${impl.effectName}' it is implementing. " +
+                    "the same effect '${impl.effect.localName}' it is implementing. " +
                     "The impl should handle the effect, not propagate it. " +
-                    "Either remove '${impl.effectName}' from the effect annotation or transform it to a different effect.",
+                    "Either remove '${impl.effect.localName}' from the effect annotation or transform it to a different effect.",
                     implOp.implementation.sourceLocation
                 )
             }
@@ -1539,7 +1542,7 @@ class ConstraintGenerator(
                 // need to be propagated so that perform expressions know what additional
                 // effects are introduced by this performer.
                 // Exclude the effect being implemented (impl handles it, doesn't add it)
-                val bodyEffects = bodyResult.effects - impl.effectName
+                val bodyEffects = bodyResult.effects - impl.effect.localName
                 if (bodyEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
@@ -1620,7 +1623,7 @@ class ConstraintGenerator(
                                 val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
                                 val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Operation '${implOp.name}' in impl ${impl.effectName} returns wrong type: " +
+                                    "Operation '${implOp.name}' in impl ${impl.effect.localName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }

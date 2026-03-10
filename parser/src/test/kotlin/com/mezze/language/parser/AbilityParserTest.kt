@@ -62,7 +62,7 @@ class AbilityParserTest {
         assertEquals(1, program.items.size)
 
         val impl = program.items[0] as ImplAbilityDeclaration
-        assertEquals("Encoder", impl.abilityName)
+        assertEquals("Encoder", impl.ability.localName)
         assertEquals(1, impl.targetTypes.size)
         assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals(1, impl.operations.size)
@@ -85,7 +85,7 @@ class AbilityParserTest {
         val program = parser.parse(source)
         val impl = program.items[0] as ImplAbilityDeclaration
 
-        assertEquals("Show", impl.abilityName)
+        assertEquals("Show", impl.ability.localName)
         assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals(2, impl.operations.size)
 
@@ -112,7 +112,7 @@ class AbilityParserTest {
         assertEquals("Encoder", ability.name)
 
         val impl = program.items[1] as ImplAbilityDeclaration
-        assertEquals("Encoder", impl.abilityName)
+        assertEquals("Encoder", impl.ability.localName)
         assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
     }
 
@@ -140,7 +140,7 @@ class AbilityParserTest {
         assertEquals("deserialize", ability.operations[1].name)
 
         val impl = program.items[1] as ImplAbilityDeclaration
-        assertEquals("Serializer", impl.abilityName)
+        assertEquals("Serializer", impl.ability.localName)
         assertEquals(2, impl.operations.size)
     }
 
@@ -176,7 +176,7 @@ class AbilityParserTest {
         assertEquals(1, program.items.size)
 
         val impl = program.items[0] as ImplAbilityDeclaration
-        assertEquals("KVStore", impl.abilityName)
+        assertEquals("KVStore", impl.ability.localName)
         assertEquals(2, impl.targetTypes.size)
         assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals("Int", (impl.targetTypes[1] as IdentifierTypeAnnotation).name)

@@ -34,7 +34,7 @@ class EffectConstraintGenerator {
     ): Set<String> {
         return when (expr) {
             // Effect operations directly use effects
-            is EffectCallExpression -> setOf(expr.effectName)
+            is EffectCallExpression -> setOf(expr.operation.qualifier?.fullPath ?: "")
 
             // Perform expressions use effects from inner expression
             is PerformExpression -> generateFromPerform(expr, context)
@@ -63,7 +63,7 @@ class EffectConstraintGenerator {
         val innerEffects = generateFromExpression(expr.expression, context)
 
         // Effects being handled
-        val handledEffects = expr.handlers.map { it.name }.toSet()
+        val handledEffects = expr.handlers.map { it.performer.localName }.toSet()
 
         // Unhandled effects propagate up
         return innerEffects - handledEffects

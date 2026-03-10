@@ -2261,7 +2261,7 @@ class ConstraintSolver(
             if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 // Look for generated Decode impls for this format using STRUCTURAL matching
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    impl.abilityName == "Decode" &&
+                    impl.ability.localName == "Decode" &&
                     impl.targetTypes.size >= 2 &&
                     typeMatchesAnnotation(formatType, impl.targetTypes[0])
                 }
@@ -2542,6 +2542,17 @@ class ConstraintSolver(
         val recordType = constraint.recordType
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
+
+        // If record type is a SuspendedType, unwrap it and solve on the inner value type
+        // This handles cases like: (effectFn {}).fieldName
+        // where effectFn returns SuspendedType(RecordType, effects)
+        // and we need to check that fieldName exists on the inner RecordType.
+        if (recordType is MezzeType.SuspendedType) {
+            return solveHasField(
+                constraint.copy(recordType = recordType.valueType),
+                currentSubst
+            )
+        }
 
         // If record type is a TypeApplication (e.g., Person), expand it first
         if (recordType is MezzeType.TypeApplication) {

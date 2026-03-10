@@ -165,7 +165,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         
         // Handle both Identifier and VariantConstruction cases
         val receiverName = when (memberAccess.receiver) {
-            is Identifier -> (memberAccess.receiver as Identifier).name
+            is Identifier -> (memberAccess.receiver as Identifier).localName
             is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
             else -> fail("Expected receiver to be Identifier or VariantConstruction, got ${memberAccess.receiver::class.simpleName}")
         }

@@ -18,7 +18,7 @@ class EffectParserTest {
         val performExpr = topLevel.expression as PerformExpression
 
         assertEquals(1, performExpr.handlers.size)
-        assertEquals("Console", performExpr.handlers[0].name)
+        assertEquals("Console", performExpr.handlers[0].performer.localName)
         assertNull(performExpr.handlers[0].parameters)
 
         // Check the expression being performed
@@ -29,7 +29,7 @@ class EffectParserTest {
         val memberAccess = funcCall.function as MemberAccess
         // Handle both Identifier and VariantConstruction cases
         val receiverName = when (memberAccess.receiver) {
-            is Identifier -> (memberAccess.receiver as Identifier).name
+            is Identifier -> (memberAccess.receiver as Identifier).localName
             is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
             else -> fail("Expected receiver to be Identifier or VariantConstruction, got ${memberAccess.receiver::class.simpleName}")
         }
@@ -48,9 +48,9 @@ class EffectParserTest {
         val performExpr = topLevel.expression as PerformExpression
 
         assertEquals(3, performExpr.handlers.size)
-        assertEquals("Console", performExpr.handlers[0].name)
-        assertEquals("MathRandom", performExpr.handlers[1].name)
-        assertEquals("FileSystem", performExpr.handlers[2].name)
+        assertEquals("Console", performExpr.handlers[0].performer.localName)
+        assertEquals("MathRandom", performExpr.handlers[1].performer.localName)
+        assertEquals("FileSystem", performExpr.handlers[2].performer.localName)
     }
 
     @Test
@@ -64,7 +64,7 @@ class EffectParserTest {
         val performExpr = topLevel.expression as PerformExpression
 
         assertEquals(1, performExpr.handlers.size)
-        assertEquals("FileLogger", performExpr.handlers[0].name)
+        assertEquals("FileLogger", performExpr.handlers[0].performer.localName)
         assertNotNull(performExpr.handlers[0].parameters)
 
         val params = performExpr.handlers[0].parameters!!
@@ -91,11 +91,11 @@ class EffectParserTest {
         assertEquals(3, performExpr.handlers.size)
 
         // First handler: Console (no parameters)
-        assertEquals("Console", performExpr.handlers[0].name)
+        assertEquals("Console", performExpr.handlers[0].performer.localName)
         assertNull(performExpr.handlers[0].parameters)
 
         // Second handler: FileLogger with parameters
-        assertEquals("FileLogger", performExpr.handlers[1].name)
+        assertEquals("FileLogger", performExpr.handlers[1].performer.localName)
         assertNotNull(performExpr.handlers[1].parameters)
         val fileLoggerParams = performExpr.handlers[1].parameters!!
         assertEquals(1, fileLoggerParams.entries.size)
@@ -104,13 +104,13 @@ class EffectParserTest {
         assertEquals("/var/log/app.log", (fileLoggerEntry.value as StringLiteral).value)
 
         // Third handler: SystemRandom (no parameters)
-        assertEquals("SystemRandom", performExpr.handlers[2].name)
+        assertEquals("SystemRandom", performExpr.handlers[2].performer.localName)
         assertNull(performExpr.handlers[2].parameters)
 
         // Expression should be a function call
         assertTrue(performExpr.expression is FunctionCall)
         val functionCall = performExpr.expression as FunctionCall
-        assertEquals("someFunction", (functionCall.function as Identifier).name)
+        assertEquals("someFunction", (functionCall.function as Identifier).localName)
     }
 
     @Test
@@ -205,9 +205,9 @@ class EffectParserTest {
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
-        assertEquals("Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
         assertEquals("ConsoleLogger", implDecl.performerName)
-        assertNull(implDecl.associatedTypeBinding)
+        assertTrue(implDecl.associatedTypeBindings.entries.isEmpty())
         assertEquals(1, implDecl.operations.size)
     }
 
@@ -229,12 +229,13 @@ class EffectParserTest {
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
-        assertEquals("State", implDecl.effectName)
+        assertEquals("State", implDecl.effect.localName)
         assertEquals("Counter", implDecl.performerName)
-        assertNotNull(implDecl.associatedTypeBinding)
-        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+        val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
+        assertNotNull(associatedTypeBinding)
+        assertEquals("'state", associatedTypeBinding!!.first)
 
-        val typeAnnotation = implDecl.associatedTypeBinding!!.second
+        val typeAnnotation = associatedTypeBinding.second
         assertTrue(typeAnnotation is IdentifierTypeAnnotation)
         assertEquals("Int", (typeAnnotation as IdentifierTypeAnnotation).name)
 
@@ -259,12 +260,13 @@ class EffectParserTest {
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
-        assertEquals("State", implDecl.effectName)
+        assertEquals("State", implDecl.effect.localName)
         assertEquals("ListState", implDecl.performerName)
-        assertNotNull(implDecl.associatedTypeBinding)
-        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+        val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
+        assertNotNull(associatedTypeBinding)
+        assertEquals("'state", associatedTypeBinding!!.first)
 
-        val typeAnnotation = implDecl.associatedTypeBinding!!.second
+        val typeAnnotation = associatedTypeBinding.second
         assertTrue(typeAnnotation is TypeApplicationAnnotation)
         val typeApp = typeAnnotation as TypeApplicationAnnotation
         assertEquals("List", typeApp.constructor)
@@ -972,7 +974,8 @@ class EffectParserTest {
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
-        assertEquals("log::Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
+        assertEquals("log", implDecl.effect.qualifier?.fullPath)
         assertEquals("ConsoleLogger", implDecl.performerName)
         assertEquals(1, implDecl.operations.size)
         assertEquals("log", implDecl.operations[0].name)
@@ -990,7 +993,8 @@ class EffectParserTest {
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
-        assertEquals("std::effects::log::Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
+        assertEquals("std::effects::log", implDecl.effect.qualifier?.fullPath)
         assertEquals("FileLogger", implDecl.performerName)
     }
 
@@ -1007,7 +1011,8 @@ class EffectParserTest {
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
-        assertEquals("effects::State", implDecl.effectName)
+        assertEquals("State", implDecl.effect.localName)
+        assertEquals("effects", implDecl.effect.qualifier?.fullPath)
         assertEquals("Counter", implDecl.performerName)
         assertEquals(1, implDecl.performerParams.size)
         assertEquals("initial", implDecl.performerParams[0].name)
@@ -1027,10 +1032,12 @@ class EffectParserTest {
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
-        assertEquals("effects::State", implDecl.effectName)
+        assertEquals("State", implDecl.effect.localName)
+        assertEquals("effects", implDecl.effect.qualifier?.fullPath)
         assertEquals("ListState", implDecl.performerName)
-        assertNotNull(implDecl.associatedTypeBinding)
-        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+        val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
+        assertNotNull(associatedTypeBinding)
+        assertEquals("'state", associatedTypeBinding!!.first)
     }
 
     @Test
@@ -1045,7 +1052,7 @@ class EffectParserTest {
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
-        assertEquals("Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
         assertEquals("SimpleLogger", implDecl.performerName)
     }
 }

@@ -278,15 +278,16 @@ class ExpressionConstraintGenerator {
     // ========================================================================
 
     private fun generateIdentifier(expr: Identifier, context: ConstraintContext): ConstraintResult {
-        if (expr.name == "Show") {
-            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${expr.name}'" }
+        val lookupKey = expr.toBindingKey().toKeyString()
+        if (expr.localName == "Show") {
+            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${lookupKey}'" }
         }
 
         // Look up variable in typing context
-        return when (val result = context.typingContext.lookup(expr.name)) {
+        return when (val result = context.typingContext.lookup(lookupKey)) {
             is TypingContext.LookupResult.Found -> {
-                if (expr.name == "Show") {
-                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${expr.name}' in context!" }
+                if (expr.localName == "Show") {
+                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${lookupKey}' in context!" }
                 }
                 when (val binding = result.binding) {
                     is TypingContext.Binding.Monomorphic -> {
@@ -295,20 +296,20 @@ class ExpressionConstraintGenerator {
                         // This allows perform expressions to know what effects need handling
                         val type = binding.type
                         // Track reference for dependency graph (module-qualified if from another module)
-                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, expr.name)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKey)
                         when (type) {
                             is MezzeType.SuspendedType -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
                                 effects = type.effects.effects,  // Propagate effects from SuspendedType
                                 effectInstances = type.effects.effectInstances,  // Propagate effect instances for associated type bindings
-                                usedVariables = setOf(expr.name),  // Track variable usage
+                                usedVariables = setOf(lookupKey),  // Track variable usage
                                 referencedBindings = setOf(referencedBinding)
                             )
                             else -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
-                                usedVariables = setOf(expr.name),  // Track variable usage
+                                usedVariables = setOf(lookupKey),  // Track variable usage
                                 referencedBindings = setOf(referencedBinding)
                             )
                         }
@@ -325,7 +326,7 @@ class ExpressionConstraintGenerator {
                                 typeVar = freshConstraint.typeVar,
                                 abilityName = freshConstraint.abilityName,
                                 typeArgs = freshConstraint.typeArgs,
-                                context = "Polymorphic instantiation of '${expr.name}'",
+                                context = "Polymorphic instantiation of '${lookupKey}'",
                                 sourceLocation = expr.sourceLocation
                             )
                         }
@@ -342,7 +343,7 @@ class ExpressionConstraintGenerator {
                         }
 
                         // Track reference for dependency graph (module-qualified if from another module)
-                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, expr.name)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKey)
 
                         ConstraintResult(
                             type = type,
@@ -350,7 +351,7 @@ class ExpressionConstraintGenerator {
                             effects = effects,
                             effectInstances = effectInstances,  // Propagate effect instances for associated type bindings
                             abilityConstraints = abilityConstraints,
-                            usedVariables = setOf(expr.name),  // Track variable usage
+                            usedVariables = setOf(lookupKey),  // Track variable usage
                             referencedBindings = setOf(referencedBinding)
                         )
                     }
@@ -363,12 +364,12 @@ class ExpressionConstraintGenerator {
                 // CRITICAL: Check if this is an ability or effect being used as a value
                 // Abilities and effects start with uppercase but should NOT be treated as variant constructors
                 // They should be marked as undefined variables so validation can catch them
-                val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(expr.name)
-                val isUserDefinedAbility = expr.name in context.abilityNames
-                val isEffect = expr.name in context.effectNames
+                val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(lookupKey)
+                val isUserDefinedAbility = lookupKey in context.abilityNames
+                val isEffect = lookupKey in context.effectNames
 
-                if (expr.name == "Show") {
-                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${expr.name}'") {
+                if (expr.localName == "Show") {
+                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${lookupKey}'") {
                         listOf(
                             "isBuiltInAbility: $isBuiltInAbility",
                             "isUserDefinedAbility: $isUserDefinedAbility",
@@ -388,7 +389,7 @@ class ExpressionConstraintGenerator {
                         constraints = emptyList(),
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
-                                name = expr.name,
+                                name = lookupKey,
                                 sourceLocation = expr.sourceLocation,
                                 qualifier = expr.qualifier,
                                 isQualified = expr.isQualified
@@ -425,7 +426,7 @@ class ExpressionConstraintGenerator {
                         constraints = emptyList(),
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
-                                name = expr.name,
+                                name = lookupKey,
                                 sourceLocation = expr.sourceLocation,
                                 qualifier = expr.qualifier,
                                 isQualified = expr.isQualified
@@ -715,7 +716,7 @@ class ExpressionConstraintGenerator {
 
         // Get receiver name (works for both Identifier and VariantConstruction)
         val receiverName = when (expr.receiver) {
-            is Identifier -> (expr.receiver as Identifier).name
+            is Identifier -> (expr.receiver as Identifier).localName
             is VariantConstruction -> (expr.receiver as VariantConstruction).constructor
             else -> null
         }
@@ -838,7 +839,7 @@ class ExpressionConstraintGenerator {
         // First, determine if we should validate field existence
         val shouldValidate = if (expr.receiver is Identifier) {
             // For identifiers, only validate if bound to a record literal
-            val receiverName = (expr.receiver as Identifier).name
+            val receiverName = (expr.receiver as Identifier).toBindingKey().toKeyString()
             receiverName in context.recordLiteralBindings
         } else if (expr.receiver is MemberAccess) {
             // For nested access, validate if the receiver type is a known RecordType
@@ -1125,9 +1126,9 @@ class ExpressionConstraintGenerator {
 
             // Try each handler in the perform context
             for (handler in performContext.handlers) {
-                val handlerEffectName = context.performerToEffect[handler.name]
+                val handlerEffectName = context.performerToEffect[handler.performer.localName]
                 if (handlerEffectName == effectName) {
-                    performerName = handler.name
+                    performerName = handler.performer.localName
                     break
                 }
             }
@@ -2456,14 +2457,14 @@ class ExpressionConstraintGenerator {
             if (hasSpreadEntries && !hasExplicitFields) {
                 // Get the function name for error message
                 val functionName = when (expr.function) {
-                    is Identifier -> (expr.function as Identifier).name
+                    is Identifier -> (expr.function as Identifier).localName
                     else -> "function"
                 }
 
                 // Get the spread variable name for error message
                 val spreadEntry = recordLiteral.entries.filterIsInstance<RecordSpreadEntry>().first()
                 val spreadVarName = when (spreadEntry.expression) {
-                    is Identifier -> (spreadEntry.expression as Identifier).name
+                    is Identifier -> (spreadEntry.expression as Identifier).localName
                     else -> "record"
                 }
 
@@ -2493,11 +2494,14 @@ class ExpressionConstraintGenerator {
         // TCO: Detect self-recursive tail calls
         // A call is a self-recursive tail call if:
         // 1. We're in tail position
-        // 2. The function being called is an identifier matching the enclosing function name
+        // 2. The function being called is an UNQUALIFIED identifier matching the enclosing function name
+        // Note: Must check for unqualified (no qualifier) to avoid false positives like
+        // `let length = {xs} -> seq::length {xs}` where seq::length != length
         val isSelfTailCall = context.inTailPosition &&
             context.enclosingFunctionName != null &&
             expr.function is Identifier &&
-            (expr.function as Identifier).name == context.enclosingFunctionName
+            (expr.function as Identifier).qualifier == null &&
+            (expr.function as Identifier).localName == context.enclosingFunctionName
 
         // Track tail call location if detected
         val tailCallLocation = if (isSelfTailCall) expr.sourceLocation else null
@@ -2520,7 +2524,7 @@ class ExpressionConstraintGenerator {
                 if (extraFields.isNotEmpty() && funcParamType.rowVar == null) {
                     // Get function name for error message
                     val functionName = when (expr.function) {
-                        is Identifier -> (expr.function as Identifier).name
+                        is Identifier -> (expr.function as Identifier).localName
                         else -> "function"
                     }
                     throw TypeCheckError(
@@ -2611,7 +2615,7 @@ class ExpressionConstraintGenerator {
                 // Argument must match parameter type
                 // Extract function name for better error messages
                 val functionName = when (expr.function) {
-                    is Identifier -> (expr.function as Identifier).name
+                    is Identifier -> (expr.function as Identifier).localName
                     else -> null
                 }
                 constraints.add(
@@ -2686,7 +2690,7 @@ class ExpressionConstraintGenerator {
         // The function's actual type must match a function that takes our argument type
         // Extract function name for better error messages
         val functionName = when (expr.function) {
-            is Identifier -> (expr.function as Identifier).name
+            is Identifier -> (expr.function as Identifier).localName
             else -> null
         }
         constraints.add(
@@ -3327,15 +3331,16 @@ class ExpressionConstraintGenerator {
         // so we check context as a fallback. If not found in either, throw an error.
         val handlerEffects = mutableListOf<Pair<String, String>>()
         for (handler in expr.handlers) {
-            val effectName = context.performerToEffect[handler.name]
+            val handlerName = handler.performer.localName
+            val effectName = context.performerToEffect[handlerName]
             if (effectName != null) {
-                handlerEffects.add(handler.name to effectName)
+                handlerEffects.add(handlerName to effectName)
             } else {
                 // Handler not in performerToEffect - check if it exists in context
                 // Performers can be imported from modules where they might not be tracked
                 // Check using dedicated performer map
-                val handlerLookup = context.typingContext.lookup(handler.name)
-                val performerInfos = context.typingContext.getPerformerTypeInfosByName(handler.name)
+                val handlerLookup = context.typingContext.lookup(handlerName)
+                val performerInfos = context.typingContext.getPerformerTypeInfosByName(handlerName)
 
                 if (handlerLookup is TypingContext.LookupResult.Found || performerInfos.isNotEmpty()) {
                     // Performer exists in context (imported), allow it but we can't track effect
@@ -3343,7 +3348,7 @@ class ExpressionConstraintGenerator {
                 } else {
                     // Not in performerToEffect and not in context - truly unknown
                     throw TypeCheckError(
-                        message = "Unknown performer '${handler.name}'. Performer has not been defined with 'impl Effect for ${handler.name}'.",
+                        message = "Unknown performer '${handlerName}'. Performer has not been defined with 'impl Effect for ${handlerName}'.",
                         expression = expr,
                         errorType = ErrorType.UNDEFINED_VARIABLE
                     )
@@ -3456,7 +3461,7 @@ class ExpressionConstraintGenerator {
 
         DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform") {
             listOf(
-                "handlers: ${expr.handlers.map { it.name }}",
+                "handlers: ${expr.handlers.map { it.performer.localName }}",
                 "performerToEffect map: ${context.performerToEffect}",
                 "performerAddedEffects map: ${context.performerAddedEffects}",
                 "handledEffects: $handledEffects",
@@ -3484,7 +3489,7 @@ class ExpressionConstraintGenerator {
 
         for (handler in expr.handlers) {
             // Look up the performer's type info
-            val performerInfos = context.typingContext.getPerformerTypeInfosByName(handler.name)
+            val performerInfos = context.typingContext.getPerformerTypeInfosByName(handler.performer.localName)
             val performerInfo = performerInfos.firstOrNull() ?: continue
 
             // Type handler parameters if present
@@ -3562,7 +3567,7 @@ class ExpressionConstraintGenerator {
 
                 DebugLogger.debugSection(Category.ExpressionConstraints, "suspension type inference") {
                     listOf(
-                        "handler: ${handler.name}",
+                        "handler: ${handler.performer.localName}",
                         "effectName: $effectName",
                         "effectInstance: $effectInstance",
                         "suspensionType: $suspensionType",
@@ -3585,7 +3590,7 @@ class ExpressionConstraintGenerator {
                     Constraint.Equality(
                         left = performResultType,
                         right = resolvedSuspensionType,
-                        context = "perform body must return the same type that handler '${handler.name}' produces (e.g., wrap with Ok/Some)",
+                        context = "perform body must return the same type that handler '${handler.performer.localName}' produces (e.g., wrap with Ok/Some)",
                         sourceLocation = expr.sourceLocation
                     )
                 )
@@ -3850,8 +3855,8 @@ class ExpressionConstraintGenerator {
         // EffectCallExpression represents effect operation calls like Effect.operation(args)
         // The effectName and operationName are already parsed out
 
-        val effectName = expr.effectName
-        val operationName = expr.operationName
+        val effectName = expr.operation.qualifier?.fullPath ?: ""
+        val operationName = expr.operation.localName
 
         // Look up effect type from context using dedicated map
         val effectType = context.typingContext.getEffectOperationType(effectName)
@@ -3888,14 +3893,14 @@ class ExpressionConstraintGenerator {
         val performContext = context.performContext
         DebugLogger.debug(Category.Effects) { "generateEffectCall: effectName=$effectName, operationName=$operationName, performContext=${performContext != null}, isFunctionType=${instantiatedOperationType is MezzeType.FunctionType}" }
         if (performContext != null && instantiatedOperationType is MezzeType.FunctionType) {
-            DebugLogger.debug(Category.Effects) { "generateEffectCall: handlers=${performContext.handlers.map { it.name }}, performerToEffect=${context.performerToEffect}" }
+            DebugLogger.debug(Category.Effects) { "generateEffectCall: handlers=${performContext.handlers.map { it.performer.localName }}, performerToEffect=${context.performerToEffect}" }
             // Find which performer is handling this effect
             var performerName: String? = null
             for (handler in performContext.handlers) {
-                val handlerEffectName = context.performerToEffect[handler.name]
-                DebugLogger.debug(Category.Effects) { "generateEffectCall: handler=${handler.name}, handlerEffectName=$handlerEffectName" }
+                val handlerEffectName = context.performerToEffect[handler.performer.localName]
+                DebugLogger.debug(Category.Effects) { "generateEffectCall: handler=${handler.performer.localName}, handlerEffectName=$handlerEffectName" }
                 if (handlerEffectName == effectName) {
-                    performerName = handler.name
+                    performerName = handler.performer.localName
                     break
                 }
             }
@@ -3934,7 +3939,7 @@ class ExpressionConstraintGenerator {
         }
 
         // Instantiate with fresh vars if we didn't already (no performer substitution happened)
-        if (performContext == null || performContext.handlers.none { context.performerToEffect[it.name] == effectName }) {
+        if (performContext == null || performContext.handlers.none { context.performerToEffect[it.performer.localName] == effectName }) {
             instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
         }
 
@@ -4171,7 +4176,7 @@ class ExpressionConstraintGenerator {
      */
     private fun isRecordLiteralAccess(expr: Expression, context: ConstraintContext): Boolean {
         return when (expr) {
-            is Identifier -> expr.name in context.recordLiteralBindings
+            is Identifier -> expr.toBindingKey().toKeyString() in context.recordLiteralBindings
             is MemberAccess -> isRecordLiteralAccess(expr.receiver, context)
             else -> false
         }
@@ -4211,7 +4216,7 @@ class ExpressionConstraintGenerator {
                     else -> "{${fieldNames.take(3).joinToString(", ")}, ...}"
                 }
             }
-            is Identifier -> expr.name
+            is Identifier -> expr.localName
             else -> null
         }
     }

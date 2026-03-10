@@ -22,7 +22,7 @@ class FunctionCallTest {
 
             val call = letBinding.expression as FunctionCall
             val func = call.function as Identifier
-            assertEquals("f", func.name)
+            assertEquals("f", func.localName)
 
             val args = call.arguments as RecordLiteral
             assertEquals(1, args.entries.size)
@@ -42,7 +42,7 @@ class FunctionCallTest {
             val letBinding = program.items[0] as LetBinding
             val call = letBinding.expression as FunctionCall
             val func = call.function as Identifier
-            assertEquals("add", func.name)
+            assertEquals("add", func.localName)
 
             val args = call.arguments as RecordLiteral
             assertEquals(2, args.entries.size)
@@ -62,7 +62,7 @@ class FunctionCallTest {
             val letBinding = program.items[0] as LetBinding
             val memberAccess = letBinding.expression as MemberAccess
             val receiver = memberAccess.receiver as Identifier
-            assertEquals("obj", receiver.name)
+            assertEquals("obj", receiver.localName)
             assertEquals("field", memberAccess.member)
 
             println("✅ Member access parsed successfully!")
@@ -88,7 +88,7 @@ class FunctionCallTest {
             assertEquals("x", access1.member)
 
             val obj = access1.receiver as Identifier
-            assertEquals("obj", obj.name)
+            assertEquals("obj", obj.localName)
 
             println("✅ Chained member access parsed successfully!")
         }
@@ -109,7 +109,7 @@ class FunctionCallTest {
             assertEquals("method", memberAccess.member)
 
             val obj = memberAccess.receiver as Identifier
-            assertEquals("obj", obj.name)
+            assertEquals("obj", obj.localName)
 
             println("✅ Function call on member access parsed successfully!")
         }
@@ -131,7 +131,7 @@ class FunctionCallTest {
 
             val innerCall = fieldEntry.value as FunctionCall
             val innerFunc = innerCall.function as Identifier
-            assertEquals("g", innerFunc.name)
+            assertEquals("g", innerFunc.localName)
 
             println("✅ Nested function calls parsed successfully!")
         }
@@ -150,7 +150,7 @@ class FunctionCallTest {
             val letBinding = program.items[0] as LetBinding
             val outerCall = letBinding.expression as FunctionCall
             val outerFunc = outerCall.function as Identifier
-            assertEquals("concat", outerFunc.name)
+            assertEquals("concat", outerFunc.localName)
 
             val args = outerCall.arguments as RecordLiteral
             assertEquals(1, args.entries.size)
@@ -160,7 +160,7 @@ class FunctionCallTest {
 
             val innerCall = fieldEntry.value as FunctionCall
             val innerFunc = innerCall.function as Identifier
-            assertEquals("map", innerFunc.name)
+            assertEquals("map", innerFunc.localName)
 
             val innerArgs = innerCall.arguments as RecordLiteral
             assertEquals(2, innerArgs.entries.size)

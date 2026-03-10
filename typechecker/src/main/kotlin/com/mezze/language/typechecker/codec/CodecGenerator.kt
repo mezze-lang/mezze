@@ -2061,7 +2061,7 @@ class CodecGenerator {
         val encodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            abilityName = "Encode",
+            ability = QualifiedRef.local("Encode"),
             targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
@@ -2084,7 +2084,7 @@ class CodecGenerator {
         val decodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            abilityName = "Decode",
+            ability = QualifiedRef.local("Decode"),
             targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
@@ -2795,7 +2795,7 @@ class CodecGenerator {
 
     private fun createStreamEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
-            abilityName = "StreamEncode",
+            ability = QualifiedRef.local("StreamEncode"),
             targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
@@ -2810,7 +2810,7 @@ class CodecGenerator {
 
     private fun createStreamDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
-            abilityName = "StreamDecode",
+            ability = QualifiedRef.local("StreamDecode"),
             targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(

@@ -86,7 +86,9 @@ class InternalBindingRenamer {
 
         // Identifiers - rename if internal binding
         is Identifier -> {
-            val renamed = env[expr.name]
+            // Only rename unqualified identifiers (qualified ones are external references)
+            val lookupKey = expr.toBindingKey().toKeyString()
+            val renamed = env[lookupKey]
             if (renamed != null) {
                 expr.copy(localName = renamed, qualifier = null)  // Renamed binding is now unqualified
             } else {
@@ -165,8 +167,8 @@ class InternalBindingRenamer {
             expression = renameExpr(expr.expression),
             handlers = expr.handlers.map { handler ->
                 PerformHandler(
-                    handler.name,
-                    handler.parameters?.let { renameExpr(it) as RecordLiteral }
+                    performer = handler.performer,  // QualifiedRef doesn't need renaming
+                    parameters = handler.parameters?.let { renameExpr(it) as RecordLiteral }
                 )
             }
         )

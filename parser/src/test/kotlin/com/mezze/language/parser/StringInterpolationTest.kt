@@ -32,7 +32,7 @@ class StringInterpolationTest {
         // Second part: expression (name)
         val part1 = stringLit.parts!![1] as ExpressionPart
         assertTrue(part1.expression is Identifier)
-        assertEquals("name", (part1.expression as Identifier).name)
+        assertEquals("name", (part1.expression as Identifier).localName)
 
         // Third part: "!"
         val part2 = stringLit.parts!![2] as StringPart
@@ -52,19 +52,19 @@ class StringInterpolationTest {
 
         // Check expression parts
         val expr1 = (stringLit.parts!![0] as ExpressionPart).expression as Identifier
-        assertEquals("a", expr1.name)
+        assertEquals("a", expr1.localName)
 
         val strPart1 = stringLit.parts!![1] as StringPart
         assertEquals(" + ", strPart1.value)
 
         val expr2 = (stringLit.parts!![2] as ExpressionPart).expression as Identifier
-        assertEquals("b", expr2.name)
+        assertEquals("b", expr2.localName)
 
         val strPart2 = stringLit.parts!![3] as StringPart
         assertEquals(" = ", strPart2.value)
 
         val expr3 = (stringLit.parts!![4] as ExpressionPart).expression as Identifier
-        assertEquals("result", expr3.name)
+        assertEquals("result", expr3.localName)
     }
 
     @Test

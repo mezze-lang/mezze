@@ -141,11 +141,11 @@ class ContinuationDetector {
      */
     private fun isContinuationPrimitive(funcExpr: Expression): Boolean {
         return when (funcExpr) {
-            is Identifier -> funcExpr.name in continuationPrimitives
+            is Identifier -> funcExpr.localName in continuationPrimitives
             is MemberAccess -> {
                 // Handle qualified calls like Continuation.capture
                 funcExpr.member in setOf("capture", "suspend", "suspend_with") &&
-                    (funcExpr.receiver as? Identifier)?.name == "Continuation"
+                    (funcExpr.receiver as? Identifier)?.localName == "Continuation"
             }
             else -> false
         }

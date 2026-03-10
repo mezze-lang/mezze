@@ -1281,7 +1281,7 @@ class TypeChecker(
         // These are needed for ability method dispatch (e.g., EncodeFormat.encode_int)
         for ((implKey, implDecl) in importContext.importedAbilityImpls) {
             val implInfo = TypingContext.AbilityImplInfo(
-                abilityName = implDecl.abilityName,
+                abilityName = implDecl.ability.localName,
                 targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
                 targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
                 associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings

@@ -176,7 +176,7 @@ class DevCommand {
                     val expr = item.expression
                     expr is FunctionCall &&
                     expr.function is Identifier &&
-                    (expr.function as Identifier).name == "main"
+                    (expr.function as Identifier).localName == "main"
                 }
                 else -> false
             }

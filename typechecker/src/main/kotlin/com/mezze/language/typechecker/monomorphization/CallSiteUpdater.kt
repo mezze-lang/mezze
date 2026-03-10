@@ -162,7 +162,7 @@ class CallSiteUpdater(
     private fun updateFunctionCall(expr: FunctionCall): FunctionCall {
         // Get the function name (if it's a direct identifier)
         val functionName = when (val func = expr.function) {
-            is Identifier -> func.name
+            is Identifier -> func.localName
             else -> null
         }
 

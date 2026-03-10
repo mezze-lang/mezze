@@ -227,7 +227,7 @@ object ASTNormalizer {
     )
 
     private fun normalizePerformHandler(handler: PerformHandler): PerformHandler = PerformHandler(
-        name = handler.name,
+        performer = handler.performer,  // QualifiedRef doesn't need normalization
         parameters = handler.parameters?.let { normalizeExpression(it) as RecordLiteral }
     )
 
@@ -342,7 +342,7 @@ object ASTNormalizer {
      * Normalize an ImplDeclaration (effect handler) for hashing.
      */
     fun normalizeImplDeclaration(decl: ImplDeclaration): ImplDeclaration = ImplDeclaration(
-        effectName = decl.effectName,
+        effect = decl.effect,  // QualifiedRef doesn't need normalization - it's structural
         performerName = decl.performerName,
         performerParams = decl.performerParams,
         associatedTypeBindings = decl.associatedTypeBindings,
@@ -377,8 +377,7 @@ object ASTNormalizer {
      * Normalize an ImplAbilityDeclaration for hashing.
      */
     fun normalizeImplAbilityDeclaration(decl: ImplAbilityDeclaration): ImplAbilityDeclaration = ImplAbilityDeclaration(
-        abilityName = decl.abilityName,
-        abilityModulePath = decl.abilityModulePath,
+        ability = decl.ability,  // QualifiedRef doesn't need normalization - it's structural
         targetTypes = decl.targetTypes,
         forallVars = decl.forallVars,
         associatedTypeBindings = decl.associatedTypeBindings,

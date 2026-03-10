@@ -124,7 +124,7 @@ class SubstitutionApplier(
 
         // Also add to mutableAbilityImpls so nested calls can find it
         // Use content hash as the key (same key format as TypingContext)
-        val abilityName = impl.abilityName
+        val abilityName = impl.ability.localName
         val targetTypes = impl.targetTypes.map { com.mezze.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
         val contentHashKey = hash.toFullHexString()
 
@@ -510,11 +510,14 @@ class SubstitutionApplier(
         // The implDecl.effectName may be qualified (e.g., "log::Log") due to import syntax,
         // but we want the actual effect name (e.g., "Log") from the declaration.
         // Note: We only do direct lookup (no fallback search) to respect import scoping.
-        val effectDecl = effectDeclarations[implDecl.effectName]
-        val resolvedEffectName = effectDecl?.name ?: implDecl.effectName
+        val effectDecl = effectDeclarations[implDecl.effect.localName]
+        val resolvedEffectName = effectDecl?.name ?: implDecl.effect.localName
+
+        // Create a new QualifiedRef with the resolved name (dropping any qualifier)
+        val resolvedEffect = QualifiedRef(localName = resolvedEffectName, qualifier = null)
 
         return implDecl.copy(
-            effectName = resolvedEffectName,
+            effect = resolvedEffect,
             operations = updatedOperations,
             inferredType = updatedInferredType
         )
@@ -721,14 +724,14 @@ class SubstitutionApplier(
     private fun applyToIdentifier(expr: Identifier): Identifier {
         // CRITICAL FIX: Look up identifier type from context, like OldTypeChecker does
         // This allows identifiers in nested expressions (like lambda bodies) to get their types
-        val contextType = identifierContext[expr.name]
+        val contextType = identifierContext[expr.toBindingKey().toKeyString()]
         val updatedType = if (contextType != null) {
             substitution.apply(contextType)
         } else {
             expr.inferredType?.let { substitution.apply(it) }
         }
         // Look up content hash for identifier (from imports or local declarations)
-        val contentHash = identifierContentHashes[expr.name]
+        val contentHash = identifierContentHashes[expr.toBindingKey().toKeyString()]
         return expr.copy(
             inferredType = updatedType,
             resolvedContentHash = contentHash
@@ -807,7 +810,7 @@ class SubstitutionApplier(
         // If no type yet and this is an ability method access, compute it
         if (updatedType == null) {
             val abilityName = when (val receiver = expr.receiver) {
-                is Identifier -> receiver.name
+                is Identifier -> receiver.localName
                 is VariantConstruction -> receiver.constructor
                 else -> null
             }
@@ -1115,7 +1118,7 @@ class SubstitutionApplier(
         // LET-POLYMORPHISM: If function is a polymorphic identifier with ability constraints,
         // resolve abilities based on the argument types
         if (resolvedAbilities.isEmpty() && updatedFunction is Identifier) {
-            val funcName = updatedFunction.name
+            val funcName = updatedFunction.toBindingKey().toKeyString()
             val polymorphicType = polymorphicFunctionTypes[funcName]
             if (polymorphicType != null && polymorphicType.abilityConstraints.isNotEmpty()) {
                 resolvedAbilities = resolvePolymorphicAbilities(polymorphicType, updatedArguments)
@@ -1134,7 +1137,7 @@ class SubstitutionApplier(
         // Get content hash for cross-module function references
         // This allows the interpreter to lookup by hash instead of string
         val functionContentHash = when (val func = expr.function) {
-            is Identifier -> identifierContentHashes[func.name]
+            is Identifier -> identifierContentHashes[func.toBindingKey().toKeyString()]
             else -> null
         }
 
@@ -1164,7 +1167,7 @@ class SubstitutionApplier(
 
         // Get the ability name from the receiver
         val abilityName = when (val receiver = memberAccess.receiver) {
-            is Identifier -> receiver.name
+            is Identifier -> receiver.localName
             is VariantConstruction -> receiver.constructor
             else -> return resolvedAbilities
         }
@@ -2129,7 +2132,7 @@ class SubstitutionApplier(
 
         // Map each handler name to the effect it handles
         val handledEffects = expr.handlers.mapNotNull { handler ->
-            performerToEffect[handler.name]
+            performerToEffect[handler.performer.localName]
         }.toSet()
 
         // CRITICAL: Use the pre-set inferredType if available (from constraint solving)
@@ -2156,7 +2159,7 @@ class SubstitutionApplier(
         // Build resolvedHandlers map for O(1) runtime dispatch
         // Maps effect name -> ResolvedEffectHandler with content hash
         val resolvedHandlers = expr.handlers.mapNotNull { handler ->
-            val performerName = handler.name
+            val performerName = handler.performer.localName
             val effectName = performerToEffect[performerName] ?: return@mapNotNull null
             val implDecl = implDeclarations[performerName] ?: return@mapNotNull null
             val implHash = implDecl.contentHash ?: return@mapNotNull null

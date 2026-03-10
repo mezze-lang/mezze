@@ -58,9 +58,10 @@ class ModuleQualifier {
         modulePath: String,
         definedNames: Set<String>
     ): Program {
-        // Convert module path to qualified prefix
+        // Convert module path to qualified prefix using structured path
         // Example: "std::collections::seq" -> "std__collections__array__"
-        val prefix = modulePath.replace("::", "__") + "__"
+        val pathSegments = ModulePath.parse(modulePath).segments
+        val prefix = pathSegments.joinToString("__") + "__"
 
         // Transform all program items
         val qualifiedItems = program.items.map { item ->

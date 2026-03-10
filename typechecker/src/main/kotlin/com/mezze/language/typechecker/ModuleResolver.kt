@@ -63,8 +63,8 @@ data class ProgramIndex(
                 abilityDeclarations = abilityDecls.associateBy { it.name },
                 effectDeclarations = effectDecls.associateBy { it.name },
                 implsByPerformer = implDecls.associateBy { it.performerName },
-                implsByEffect = implDecls.groupBy { it.effectName },
-                abilityImplsByAbility = abilityImplDecls.groupBy { it.abilityName },
+                implsByEffect = implDecls.groupBy { it.effect.localName },
+                abilityImplsByAbility = abilityImplDecls.groupBy { it.ability.localName },
                 abilityImplsByHash = abilityImplDecls.mapNotNull { impl ->
                     impl.contentHash?.let { hash -> hash to impl }
                 }.toMap(),
@@ -567,7 +567,7 @@ class ModuleResolver(
      * Resolve a module file path from module name
      */
     private fun resolveModuleFile(modulePath: String): Path? {
-        val segments = modulePath.split("::")
+        val segments = ModulePath.parse(modulePath).segments
 
         // Special handling for std:: modules - always look in stdlib directory
         if (segments.isNotEmpty() && segments[0] == "std") {
@@ -681,7 +681,7 @@ class ModuleResolver(
      * Get possible search paths for error reporting
      */
     private fun getSearchPaths(modulePath: String): List<String> {
-        val segments = modulePath.split("::")
+        val segments = ModulePath.parse(modulePath).segments
         
         // Special paths for std:: modules
         if (segments.isNotEmpty() && segments[0] == "std") {
@@ -858,12 +858,14 @@ class ModuleResolver(
     }
     
     /**
-     * Convert UsePath to string representation
+     * Convert UsePath to string representation for module loading.
+     * Note: This uses `::` as the path separator, which is an internal convention
+     * for the module loader API. User-facing code uses structured ModulePath.
      */
     private fun pathToString(path: UsePath): String {
         return when (path) {
-            is ModulePath -> path.segments.joinToString("::")
-            is SelectivePath -> path.module.joinToString("::")
+            is ModulePath -> path.fullPath
+            is SelectivePath -> ModulePath(path.module).fullPath
         }
     }
     
@@ -935,23 +937,16 @@ class ModuleResolver(
      * - `app::internal::deep::nested` can only be accessed by modules under `app::`
      */
     fun canAccessInternal(fromModule: String, toModule: String): Boolean {
-        // Check for internal or private folder markers in the module path
-        val internalMarkers = listOf("::internal::", "::private::", "::internal", "::private")
+        // Parse module paths into structured segments
+        val toSegments = ModulePath.parse(toModule).segments
+        val internalMarkers = setOf("internal", "private")
 
-        // Find the first internal/private marker in the path
-        var markerIndex = -1
-        var markerLength = 0
-        for (marker in internalMarkers) {
-            val idx = toModule.indexOf(marker)
-            if (idx >= 0 && (markerIndex < 0 || idx < markerIndex)) {
-                markerIndex = idx
-                markerLength = marker.length
-            }
-        }
+        // Find the first internal/private segment in the path
+        val markerIndex = toSegments.indexOfFirst { it in internalMarkers }
 
-        // Also check if the module path STARTS with internal/ or private/
+        // Check if the module path STARTS with internal/ or private/
         // This handles top-level internal modules
-        if (toModule.startsWith("internal::") || toModule.startsWith("private::")) {
+        if (toSegments.isNotEmpty() && toSegments[0] in internalMarkers) {
             // Top-level internal modules cannot be accessed from outside
             return false
         }
@@ -961,17 +956,21 @@ class ModuleResolver(
         }
 
         // Extract the parent module path (everything before the internal/private marker)
-        val parentModule = toModule.substring(0, markerIndex)
+        val parentSegments = toSegments.take(markerIndex)
+        val parentModule = parentSegments.joinToString("::")
 
         // Empty fromModule means a top-level script, which CANNOT access internal modules
         if (fromModule.isEmpty()) {
             return false
         }
 
+        // Parse the from module to compare structurally
+        val fromSegments = ModulePath.parse(fromModule).segments
+
         // Allow access if the fromModule is within the same parent hierarchy
         // e.g., "math::ops" can access "math::internal::helpers"
         // e.g., "math::internal::other" can access "math::internal::helpers"
-        return fromModule.startsWith("$parentModule::") || fromModule == parentModule
+        return fromSegments.take(parentSegments.size) == parentSegments
     }
     
     /**
@@ -1036,7 +1035,7 @@ class ModuleResolver(
     private fun checkIdentifiersInExpression(expr: Expression, indent: String) {
         when (expr) {
             is Identifier -> {
-                DebugLogger.debug(Category.ModuleResolver) { "${indent}Identifier: '${expr.name}'" }
+                DebugLogger.debug(Category.ModuleResolver) { "${indent}Identifier: '${expr.toBindingKey().toKeyString()}'" }
             }
             is FunctionCall -> {
                 DebugLogger.debug(Category.ModuleResolver) { "${indent}FunctionCall:" }
@@ -1062,8 +1061,10 @@ class ModuleResolver(
      * @return A transformed program with qualified variable names
      */
     private fun qualifyModuleVariables(program: Program, modulePath: String): Program {
-        // Convert module path to qualified prefix (e.g., "std::collections::seq" -> "std__collections__array")
-        val qualifiedPrefix = modulePath.replace("::", "__") + "__"
+        // Convert module path to qualified prefix using structured path
+        // e.g., "std::collections::seq" -> "std__collections__seq__"
+        val pathSegments = ModulePath.parse(modulePath).segments
+        val qualifiedPrefix = pathSegments.joinToString("__") + "__"
 
         // Collect all variable names defined in this module (excluding imports)
         val moduleDefinedNames = program.items.mapNotNull { item ->

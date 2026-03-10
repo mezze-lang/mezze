@@ -266,10 +266,10 @@ class ContinuationTransformer {
      */
     private fun isSuspensionPrimitive(funcExpr: Expression): Boolean {
         return when (funcExpr) {
-            is Identifier -> funcExpr.name in suspensionPrimitives
+            is Identifier -> funcExpr.localName in suspensionPrimitives
             is MemberAccess -> {
                 funcExpr.member in setOf("suspend", "suspend_with") &&
-                    (funcExpr.receiver as? Identifier)?.name == "Continuation"
+                    (funcExpr.receiver as? Identifier)?.localName == "Continuation"
             }
             else -> false
         }
@@ -322,7 +322,7 @@ class ContinuationTransformer {
             is FunctionCall -> {
                 // Check if this is a suspend_with call
                 val funcName = when (val func = expr.function) {
-                    is Identifier -> func.name
+                    is Identifier -> func.localName
                     is MemberAccess -> func.member
                     else -> null
                 }
@@ -488,7 +488,7 @@ class ContinuationTransformer {
 
     private fun collectUsedVariablesRecursive(expr: Expression, collector: MutableSet<String>) {
         when (expr) {
-            is Identifier -> collector.add(expr.name)
+            is Identifier -> collector.add(expr.localName)
             is FunctionCall -> {
                 collectUsedVariablesRecursive(expr.function, collector)
                 collectUsedVariablesRecursive(expr.arguments, collector)

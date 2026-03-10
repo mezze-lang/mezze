@@ -245,15 +245,17 @@ data class Identifier(
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression {
-    /** Full name including qualifier (for backwards compatibility) */
-    val name: String get() = if (qualifier != null && qualifier.segments.isNotEmpty()) {
-        "${qualifier.fullPath}::$localName"
-    } else {
-        localName
-    }
-
     /** Whether this is a qualified reference (e.g., bytes::from_string) */
     val isQualified: Boolean get() = qualifier != null && qualifier.segments.isNotEmpty()
+
+    /**
+     * Create a binding key for looking up this identifier.
+     * Uses the last segment of the qualifier (short name) as the key qualifier.
+     */
+    fun toBindingKey(): BindingKey = BindingKey(
+        qualifier = qualifier?.shortName,
+        localName = localName
+    )
 
     companion object {
         /** Create an Identifier from a full name string (for backwards compatibility) */
@@ -606,16 +608,24 @@ data class PerformExpression(
     val resolvedHandlers: Map<String, ResolvedEffectHandler> = emptyMap()
 ) : Expression
 
+/**
+ * Handler specification in a perform expression.
+ *
+ * Example: `perform log::Console {config = myConfig} in ...`
+ * - performer: QualifiedRef(localName="Console", qualifier=["log"])
+ * - parameters: RecordLiteral({config = myConfig})
+ */
 @Serializable
 data class PerformHandler(
-    val name: String,
+    /** The performer/handler reference (may be qualified like log::Console) */
+    val performer: QualifiedRef,
+    /** Optional parameters to configure the handler */
     val parameters: RecordLiteral? = null
 )
 
 @Serializable
 data class EffectCallExpression(
-    val effectName: String,
-    val operationName: String,
+    val operation: QualifiedRef,
     val arguments: Expression,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null

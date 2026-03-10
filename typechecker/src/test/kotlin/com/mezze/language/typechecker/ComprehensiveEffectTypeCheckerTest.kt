@@ -72,7 +72,7 @@ class ComprehensiveEffectTypeCheckerTest {
         val implDecl = checkedProgram.items[1] as ImplDeclaration
 
         assertEquals("Log", effectDecl.name)
-        assertEquals("Log", implDecl.effectName)
+        assertEquals("Log", implDecl.effect.localName)
         assertEquals("Console", implDecl.performerName)
 
         // Check that impl operation matches effect operation
@@ -105,7 +105,7 @@ class ComprehensiveEffectTypeCheckerTest {
 
         val performExpr = (checkedProgram.items[2] as TopLevelExpression).expression as PerformExpression
         assertEquals(1, performExpr.handlers.size)
-        assertEquals("Console", performExpr.handlers[0].name)
+        assertEquals("Console", performExpr.handlers[0].performer.localName)
 
         // The performed expression should be a function call
         assertTrue(performExpr.expression is FunctionCall)
@@ -152,7 +152,7 @@ class ComprehensiveEffectTypeCheckerTest {
         val memberAccess = funcCall.function as MemberAccess
         // Handle both Identifier and VariantConstruction cases
         val receiverName = when (memberAccess.receiver) {
-            is Identifier -> (memberAccess.receiver as Identifier).name
+            is Identifier -> (memberAccess.receiver as Identifier).localName
             is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
             else -> fail("Expected receiver to be Identifier or VariantConstruction, got ${memberAccess.receiver::class.simpleName}")
         }
@@ -204,8 +204,8 @@ class ComprehensiveEffectTypeCheckerTest {
         // Check impl declarations
         val logImpl = checkedProgram.items[2] as ImplDeclaration
         val randomImpl = checkedProgram.items[3] as ImplDeclaration
-        assertEquals("Log", logImpl.effectName)
-        assertEquals("Random", randomImpl.effectName)
+        assertEquals("Log", logImpl.effect.localName)
+        assertEquals("Random", randomImpl.effect.localName)
 
         // Check let binding
         val letBinding = checkedProgram.items[4] as LetBinding
@@ -216,7 +216,7 @@ class ComprehensiveEffectTypeCheckerTest {
         val finalExpr = checkedProgram.items[5] as TopLevelExpression
         assertTrue(finalExpr.expression is Identifier)
         val identifier = finalExpr.expression as Identifier
-        assertEquals("gameLogic", identifier.name)
+        assertEquals("gameLogic", identifier.localName)
     }
 
     @Test

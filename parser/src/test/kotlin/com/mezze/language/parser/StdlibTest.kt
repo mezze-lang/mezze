@@ -147,7 +147,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
             assertEquals(1, program.items.size)
 
             val impl = program.items[0] as ImplDeclaration
-            assertEquals("Log", impl.effectName)
+            assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
 
             println("✅ Simple impl declaration parsed successfully!")
@@ -177,7 +177,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
             assertEquals(1, program.items.size)
 
             val impl = program.items[0] as ImplDeclaration
-            assertEquals("Log", impl.effectName)
+            assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
             assertEquals(1, impl.operations.size)
 
@@ -202,7 +202,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
             assertEquals(1, program.items.size)
 
             val impl = program.items[0] as ImplDeclaration
-            assertEquals("Log", impl.effectName)
+            assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
             assertEquals(1, impl.operations.size)
 
@@ -232,7 +232,7 @@ impl Log for Console where {
             assertEquals(1, program.items.size)
 
             val impl = program.items[0] as ImplDeclaration
-            assertEquals("Log", impl.effectName)
+            assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
             assertEquals(emptyList<PerformerParameter>(), impl.performerParams)
             assertEquals(2, impl.operations.size)
@@ -262,7 +262,7 @@ impl Random for SeededRandom { seed: Int } where {
             assertEquals(1, program.items.size)
 
             val impl = program.items[0] as ImplDeclaration
-            assertEquals("Random", impl.effectName)
+            assertEquals("Random", impl.effect.localName)
             assertEquals("SeededRandom", impl.performerName)
             assertEquals(1, impl.performerParams.size)
 

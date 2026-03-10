@@ -367,7 +367,11 @@ class PrettyPrinter {
 
     private fun printImplDeclaration(decl: ImplDeclaration) {
         append("impl ")
-        append(decl.effectName)
+        if (decl.effect.qualifier != null) {
+            append(decl.effect.qualifier!!.fullPath)
+            append("::")
+        }
+        append(decl.effect.localName)
         append(" for ")
         append(decl.performerName)
 
@@ -401,8 +405,8 @@ class PrettyPrinter {
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-                // Trailing comma in multi-line (like records)
-                if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                // Trailing comma like records: always between items, plus trailing if multiple
+                if (decl.operations.size > 1 || index < decl.operations.size - 1) {
                     append(",")
                 }
                 newLine()
@@ -422,11 +426,11 @@ class PrettyPrinter {
             append(". ")
         }
 
-        if (decl.abilityModulePath.isNotEmpty()) {
-            append(decl.abilityModulePath.joinToString("::"))
+        if (decl.ability.qualifier != null) {
+            append(decl.ability.qualifier!!.fullPath)
             append("::")
         }
-        append(decl.abilityName)
+        append(decl.ability.localName)
         append(" ")
         decl.targetTypes.forEachIndexed { index, type ->
             if (index > 0) append(" ")
@@ -452,8 +456,8 @@ class PrettyPrinter {
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-                // Trailing comma in multi-line (like records)
-                if (config.TRAILING_COMMA_IN_MULTILINE || index < decl.operations.size - 1) {
+                // Trailing comma like records: always between items, plus trailing if multiple
+                if (decl.operations.size > 1 || index < decl.operations.size - 1) {
                     append(",")
                 }
                 newLine()
@@ -570,7 +574,7 @@ class PrettyPrinter {
 
     private fun printIdentifier(expr: Identifier) {
         if (expr.isQualified) {
-            append(expr.name)
+            append(expr.toBindingKey().toKeyString())
         } else {
             append(expr.localName)
         }
@@ -984,7 +988,11 @@ class PrettyPrinter {
         if (expr.handlers.isNotEmpty()) {
             expr.handlers.forEachIndexed { index, handler ->
                 if (index > 0) append(", ")
-                append(handler.name)
+                if (handler.performer.qualifier != null) {
+                    append(handler.performer.qualifier!!.fullPath)
+                    append("::")
+                }
+                append(handler.performer.localName)
                 handler.parameters?.let {
                     append(" ")
                     printRecordLiteral(it)
@@ -996,9 +1004,11 @@ class PrettyPrinter {
     }
 
     private fun printEffectCallExpression(expr: EffectCallExpression) {
-        append(expr.effectName)
-        append("::")
-        append(expr.operationName)
+        if (expr.operation.qualifier != null) {
+            append(expr.operation.qualifier!!.fullPath)
+            append("::")
+        }
+        append(expr.operation.localName)
         append(" ")
         printExpression(expr.arguments)
     }
@@ -1428,7 +1438,7 @@ class PrettyPrinter {
             is FloatLiteral -> formatFloat(expr.value).length
             is StringLiteral -> expr.value.length + 2
             is BooleanLiteral -> if (expr.value) 4 else 5
-            is Identifier -> expr.name.length
+            is Identifier -> expr.toBindingKey().toKeyString().length
             is RecordLiteral -> calculateRecordLiteralWidth(expr)
             is SeqLiteral -> calculateSeqLiteralWidth(expr)
             else -> 20

@@ -222,10 +222,10 @@ class ASTToTruffleConverterV2(
         )
 
         val contentHash = impl.contentHash
-            ?: throw RuntimeException("Content hash required for effect handler: ${impl.effectName}/${impl.performerName}")
+            ?: throw RuntimeException("Content hash required for effect handler: ${impl.effect.localName}/${impl.performerName}")
 
         // Effect name is already normalized by the typechecker (e.g., "log::Log" -> "Log")
-        handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
+        handlerToEffectMapping[impl.performerName] = impl.effect.localName to contentHash
 
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
@@ -262,7 +262,7 @@ class ASTToTruffleConverterV2(
             performerSlot = performerSlot,
             contentHash = contentHash,
             performerName = impl.performerName,
-            effectName = impl.effectName
+            effectName = impl.effect.localName
         )
     }
 
@@ -271,7 +271,7 @@ class ASTToTruffleConverterV2(
             ?: throw RuntimeException("Content hash required for parameterized effect handler")
 
         // Effect name is already normalized by the typechecker
-        handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
+        handlerToEffectMapping[impl.performerName] = impl.effect.localName to contentHash
 
         val implParamNames = impl.performerParams.map { it.name }
 
@@ -470,7 +470,7 @@ class ASTToTruffleConverterV2(
             performerSlot = performerSlot,
             contentHash = contentHash,
             performerName = impl.performerName,
-            effectName = impl.effectName
+            effectName = impl.effect.localName
         )
     }
 
@@ -489,7 +489,7 @@ class ASTToTruffleConverterV2(
         )
 
         val contentHash = impl.contentHash
-            ?: throw RuntimeException("Content hash required for ability implementation: ${impl.abilityName}")
+            ?: throw RuntimeException("Content hash required for ability implementation: ${impl.ability.localName}")
 
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
@@ -498,7 +498,7 @@ class ASTToTruffleConverterV2(
             recordChild = recordNode,
             hashSlot = hashSlot,
             contentHash = contentHash,
-            abilityName = impl.abilityName
+            abilityName = impl.ability.localName
         )
     }
 
@@ -636,7 +636,8 @@ class ASTToTruffleConverterV2(
     }
 
     private fun convertIdentifier(identifier: Identifier): MezzeNode {
-        if (identifier.name == "__state_machine_input__") {
+        val lookupKey = identifier.toBindingKey().toKeyString()
+        if (lookupKey == "__state_machine_input__") {
             val slot = getOrCreateSlot("__state_machine_input__")
             return ReadLocalNode.createObject(slot)
         }
@@ -644,14 +645,14 @@ class ASTToTruffleConverterV2(
         // Content hash from typechecker indicates cross-module reference
         val contentHash = identifier.resolvedContentHash
 
-        val info = variableInfo[identifier.name]
+        val info = variableInfo[lookupKey]
         if (info != null) {
             // Closure variables need fallback lookup for recursive function support.
             // When a function captures itself, the closure value may be null at capture time,
             // but the function will be in the global context (written by WriteLocalWithContextNode).
             // Pass contentHash when available for efficient lookup.
             if (info.isClosure) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+                return ReadLocalWithFallbackNode.create(info.slot, lookupKey, contentHash)
             }
 
             // Top-level (module-level) variables need fallback lookup because they may be
@@ -659,31 +660,31 @@ class ASTToTruffleConverterV2(
             // where the frame slot would be null.
             // Pass contentHash when available for efficient lookup.
             if (info.isTopLevel) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+                return ReadLocalWithFallbackNode.create(info.slot, lookupKey, contentHash)
             }
 
             // Cross-module references have content hash - use strict content hash lookup
             if (contentHash != null) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+                return ReadLocalWithFallbackNode.create(info.slot, lookupKey, contentHash)
             }
 
             // Variables that need fallback (created from outer scope reference)
             if (info.needsFallback) {
-                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+                return ReadLocalWithFallbackNode.create(info.slot, lookupKey, contentHash)
             }
 
             return ReadLocalNode(info.slot, info.kind)
         }
 
-        if (isBuiltinFunction(identifier.name)) {
-            return GlobalLookupNode(identifier.name)
+        if (isBuiltinFunction(lookupKey)) {
+            return GlobalLookupNode(lookupKey)
         }
 
         val abilityNames = listOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot")
-        if (identifier.name in abilityNames) {
+        if (lookupKey in abilityNames) {
             return RuntimeErrorNode(
-                "Undefined variable '${identifier.name}' at runtime. " +
-                "Note: '${identifier.name}' is a builtin ability name."
+                "Undefined variable '${lookupKey}' at runtime. " +
+                "Note: '${lookupKey}' is a builtin ability name."
             )
         }
 
@@ -693,8 +694,8 @@ class ASTToTruffleConverterV2(
         // 1. Module-level functions referenced from function bodies
         // 2. Module-level constants referenced from function bodies
         // 3. Any other outer-scope references
-        val slot = getOrCreateSlotWithFallback(identifier.name)
-        return ReadLocalWithFallbackNode.create(slot, identifier.name, contentHash)
+        val slot = getOrCreateSlotWithFallback(lookupKey)
+        return ReadLocalWithFallbackNode.create(slot, lookupKey, contentHash)
     }
 
     private fun isBuiltinFunction(name: String): Boolean {
@@ -1130,7 +1131,7 @@ class ASTToTruffleConverterV2(
     private fun convertFunctionCall(funcCall: FunctionCall): MezzeNode {
         // Check for native functions FIRST (continuation and console)
         if (funcCall.function is Identifier) {
-            val funcName = (funcCall.function as Identifier).name
+            val funcName = (funcCall.function as Identifier).localName
             val nativeNode = convertNativeFunctionCall(funcName, funcCall.arguments)
             if (nativeNode != null) {
                 return nativeNode
@@ -1153,7 +1154,7 @@ class ASTToTruffleConverterV2(
             val memberAccess = funcCall.function as MemberAccess
             val receiver = memberAccess.receiver
             val receiverName = when (receiver) {
-                is Identifier -> receiver.name
+                is Identifier -> receiver.localName
                 is VariantConstruction -> receiver.constructor
                 else -> null
             }
@@ -1704,7 +1705,7 @@ class ASTToTruffleConverterV2(
 
         fun visit(e: Expression) {
             when (e) {
-                is Identifier -> variables.add(e.name)
+                is Identifier -> variables.add(e.toBindingKey().toKeyString())
                 is IntLiteral, is NatLiteral, is FloatLiteral, is FractionLiteral,
                 is BooleanLiteral -> Unit
                 is StringLiteral -> {
@@ -1774,7 +1775,7 @@ class ASTToTruffleConverterV2(
                 }
                 is MemberAccess -> {
                     if (e.receiver is Identifier) {
-                        val receiverName = (e.receiver as Identifier).name
+                        val receiverName = (e.receiver as Identifier).localName
                         val builtinAbilities = listOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
                             "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot")
                         if (receiverName !in builtinAbilities) {
@@ -1996,10 +1997,10 @@ class ASTToTruffleConverterV2(
         resolvedHandlers: Map<String, ResolvedEffectHandler>,
         bodyNode: MezzeNode
     ): MezzeNode {
-        val mapping = handlerToEffectMapping[handler.name]
+        val mapping = handlerToEffectMapping[handler.performer.localName]
 
         // Also check resolved handlers from typechecker for cross-module impls
-        val resolvedInfo = resolvedHandlers.values.find { it.performerName == handler.name }
+        val resolvedInfo = resolvedHandlers.values.find { it.performerName == handler.performer.localName }
 
         // Check for parameterized impl (has parameters)
         if (handler.parameters != null) {
@@ -2012,7 +2013,7 @@ class ASTToTruffleConverterV2(
                 val scopedInfo = scopedEffectInfo[contentHash]
                 if (scopedInfo != null && scopedInfo.isScopedEffect) {
                     return ParameterizedScopedHandleNode(
-                        handler.name,
+                        handler.performer.localName,
                         arrayOf(effectName),
                         arrayOf(contentHash),
                         parametersNode,
@@ -2024,7 +2025,7 @@ class ASTToTruffleConverterV2(
                 }
 
                 return ParameterizedHandleNode(
-                    handler.name,
+                    handler.performer.localName,
                     arrayOf(effectName),
                     arrayOf(contentHash),
                     parametersNode,
@@ -2033,12 +2034,12 @@ class ASTToTruffleConverterV2(
             }
 
             // Use resolved info from typechecker for cross-module impls
-            val effectName = resolvedInfo?.effectName ?: handler.name
+            val effectName = resolvedInfo?.effectName ?: handler.performer.localName
             val contentHash = resolvedInfo?.implDeclarationHash ?: ""
 
             // Check if resolved info indicates a scoped parameterized effect (for stdlib imports)
             if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
-                val scopeSlot = getOrCreateSlot("__scope_${contentHash.ifEmpty { handler.name }}__")
+                val scopeSlot = getOrCreateSlot("__scope_${contentHash.ifEmpty { handler.performer.localName }}__")
 
                 // initialize_scope and finalize_scope are lambdas: {} -> ...
                 // We need to invoke them with {} as argument
@@ -2054,7 +2055,7 @@ class ASTToTruffleConverterV2(
                 }
 
                 return ParameterizedScopedHandleNode(
-                    handler.name,
+                    handler.performer.localName,
                     arrayOf(effectName),
                     if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
                     parametersNode,
@@ -2066,7 +2067,7 @@ class ASTToTruffleConverterV2(
             }
 
             return ParameterizedHandleNode(
-                handler.name,
+                handler.performer.localName,
                 arrayOf(effectName),
                 if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
                 parametersNode,
@@ -2086,7 +2087,7 @@ class ASTToTruffleConverterV2(
                     localSlot ?: -1,
                     contentHash,
                     arrayOf(effectName),
-                    handler.name,
+                    handler.performer.localName,
                     bodyNode,
                     scopedInfo.scopeSlot,
                     scopedInfo.initializeScopeNode,
@@ -2098,18 +2099,18 @@ class ASTToTruffleConverterV2(
                 localSlot ?: -1,
                 contentHash,
                 arrayOf(effectName),
-                handler.name,
+                handler.performer.localName,
                 bodyNode
             )
         }
 
         // Use resolved info from typechecker for cross-module impls
-        val effectName = resolvedInfo?.effectName ?: handler.name
+        val effectName = resolvedInfo?.effectName ?: handler.performer.localName
         val contentHash = resolvedInfo?.implDeclarationHash
 
         // Check if resolved info indicates a scoped effect (for stdlib imports)
         if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
-            val scopeSlot = getOrCreateSlot("__scope_${contentHash ?: handler.name}__")
+            val scopeSlot = getOrCreateSlot("__scope_${contentHash ?: handler.performer.localName}__")
 
             // initialize_scope and finalize_scope are lambdas: {} -> ...
             // We need to invoke them with {} as argument
@@ -2129,7 +2130,7 @@ class ASTToTruffleConverterV2(
                 -1,  // No local slot for cross-module impls
                 contentHash ?: "",
                 arrayOf(effectName),
-                handler.name,
+                handler.performer.localName,
                 bodyNode,
                 scopeSlot,
                 initNode,
@@ -2138,7 +2139,7 @@ class ASTToTruffleConverterV2(
         }
 
         return DynamicHandleNode(
-            handler.name,
+            handler.performer.localName,
             arrayOf(effectName),
             if (contentHash != null) arrayOf(contentHash) else emptyArray(),
             bodyNode

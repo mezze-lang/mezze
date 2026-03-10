@@ -88,7 +88,7 @@ class DebugTest {
     warn = {msg} -> {}
 }"""
         val output = formatter.format(input)
-        // Multi-line with trailing comma (like records)
+        // Trailing comma when multiple operations (like records)
         val expected = """impl Log for ConsoleLogger where {
   info = { msg } -> {},
   warn = { msg } -> {},
@@ -104,7 +104,7 @@ class DebugTest {
     put = {value} -> {}
 }"""
         val output = formatter.format(input)
-        // Multi-line with trailing comma (like records)
+        // Trailing comma when multiple operations (like records)
         val expected = """impl State for Counter having 'state = Int where {
   get = {} -> 0,
   put = { value } -> {},
@@ -115,13 +115,13 @@ class DebugTest {
 
     @Test
     fun `format effect impl single-line`() {
-        // impl bodies always go multi-line
+        // impl bodies always go multi-line, but single operation = no trailing comma
         val input = """impl Random for SeededRandom { seed: Int } where {
     random = {} -> 42
 }"""
         val output = formatter.format(input)
         val expected = """impl Random for SeededRandom { seed: Int } where {
-  random = {} -> 42,
+  random = {} -> 42
 }
 """
         assertEquals(expected, output)
@@ -129,13 +129,13 @@ class DebugTest {
 
     @Test
     fun `format ability impl single-line`() {
-        // impl bodies always go multi-line
+        // impl bodies always go multi-line, but single operation = no trailing comma
         val input = """impl Eq Int where {
     eq = {left, right} -> left == right
 }"""
         val output = formatter.format(input)
         val expected = """impl Eq Int where {
-  eq = { left, right } -> left == right,
+  eq = { left, right } -> left == right
 }
 """
         assertEquals(expected, output)

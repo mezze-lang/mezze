@@ -95,13 +95,13 @@ class ContextBuilder {
         // Note: We only do direct lookup (no fallback search) to respect import scoping.
         // Validation in ConstraintGenerator will catch invalid effect names.
         val localMapping = implDecls.associate { impl ->
-            val effectDecl = allEffectDecls[impl.effectName]
-            val effectName = effectDecl?.name ?: impl.effectName
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            val effectName = effectDecl?.name ?: impl.effect.localName
             impl.performerName to effectName
         }
         val importedMapping = importedImpls.mapValues { (_, impl) ->
-            val effectDecl = allEffectDecls[impl.effectName]
-            effectDecl?.name ?: impl.effectName
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            effectDecl?.name ?: impl.effect.localName
         }
         val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
 
@@ -588,7 +588,7 @@ class ContextBuilder {
         effectDecls: Map<String, EffectDeclaration>
     ): TypingContext {
         // Get the effect declaration to check associated types
-        val effectDecl = effectDecls[implDecl.effectName] ?: return ctx
+        val effectDecl = effectDecls[implDecl.effect.localName] ?: return ctx
 
         // If the effect has associated types, store the performer's bindings
         if (effectDecl.associatedTypes.isNotEmpty()) {
@@ -638,7 +638,7 @@ class ContextBuilder {
 
             val performerInfo = TypingContext.PerformerTypeInfo(
                 performerName = implDecl.performerName,
-                effectName = implDecl.effectName,
+                effectName = implDecl.effect.localName,
                 associatedTypes = performerType,
                 performerFields = performerFieldsType,
                 suspensionType = suspensionType,
@@ -667,7 +667,7 @@ class ContextBuilder {
 
             val performerInfo = TypingContext.PerformerTypeInfo(
                 performerName = implDecl.performerName,
-                effectName = implDecl.effectName,
+                effectName = implDecl.effect.localName,
                 associatedTypes = MezzeType.RecordType(emptyMap()),  // No associated types
                 performerFields = performerFieldsType,
                 suspensionType = suspensionType,
@@ -694,13 +694,13 @@ class ContextBuilder {
         // Content hashes are computed in Phase 0.5 before ContextBuilder runs
         val implKey = implDecl.contentHash
             ?: throw IllegalStateException(
-                "Content hash not computed for impl: ${implDecl.abilityName} ${implDecl.targetTypes}. " +
+                "Content hash not computed for impl: ${implDecl.ability.localName} ${implDecl.targetTypes}. " +
                 "Ensure computeDeclarationHashes was called before ContextBuilder."
             )
 
         // Create impl info
         val implInfo = TypingContext.AbilityImplInfo(
-            abilityName = implDecl.abilityName,
+            abilityName = implDecl.ability.localName,
             targetTypes = targetTypeNames,
             targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
             associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings like 'item = Int

@@ -50,8 +50,8 @@ class QualifiedAbilityImplTest {
         // Find the impl
         val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(impl)
-        assertEquals("Printable", impl!!.abilityName)
-        assertTrue(impl.abilityModulePath.isEmpty())  // No module path in this case
+        assertEquals("Printable", impl!!.ability.localName)
+        assertTrue((impl.ability.qualifier?.segments ?: emptyList()).isEmpty())  // No module path in this case
     }
 
     @Test
@@ -93,9 +93,9 @@ class QualifiedAbilityImplTest {
         // Verify parsing produced correct AST
         val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(impl)
-        assertEquals("Serializable", impl!!.abilityName)
-        assertEquals(listOf("serializer"), impl.abilityModulePath)
-        assertEquals("serializer::Serializable", impl.qualifiedAbilityName)
+        assertEquals("Serializable", impl!!.ability.localName)
+        assertEquals(listOf("serializer"), impl.ability.qualifier?.segments ?: emptyList<String>())
+        assertEquals("serializer::Serializable", "${impl.ability.qualifier?.fullPath}::${impl.ability.localName}")
 
         // Type check should succeed
         val typeCheckerWithRoot = TypeChecker()
@@ -143,9 +143,9 @@ class QualifiedAbilityImplTest {
         // Verify parsing
         val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(impl)
-        assertEquals("Encoder", impl!!.abilityName)
-        assertEquals(listOf("codec"), impl.abilityModulePath)
-        assertEquals("codec::Encoder", impl.qualifiedAbilityName)
+        assertEquals("Encoder", impl!!.ability.localName)
+        assertEquals(listOf("codec"), impl.ability.qualifier?.segments ?: emptyList<String>())
+        assertEquals("codec::Encoder", "${impl.ability.qualifier?.fullPath}::${impl.ability.localName}")
 
         // Type check
         val typeCheckerWithRoot = TypeChecker()

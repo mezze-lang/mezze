@@ -172,7 +172,7 @@ class ContentAddressableHashingE2ETest {
 
         // Find ability impl
         val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .find { it.abilityName == "Describable" }
+            .find { it.ability.localName == "Describable" }
 
         assertNotNull(impl, "Should find Describable impl")
         assertNotNull(impl!!.contentHash, "Ability impl should have contentHash")
@@ -252,7 +252,7 @@ class ContentAddressableHashingE2ETest {
 
         // Find effect handler impl
         val impl = result.program.items.filterIsInstance<ImplDeclaration>()
-            .find { it.effectName == "Log" }
+            .find { it.effect.localName == "Log" }
 
         assertNotNull(impl, "Should find Log effect handler")
         assertNotNull(impl!!.contentHash, "Effect handler should have contentHash")
@@ -383,7 +383,7 @@ class ContentAddressableHashingE2ETest {
 
         // Verify each impl has a different content hash
         val impls = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .filter { it.abilityName == "Stringify" }
+            .filter { it.ability.localName == "Stringify" }
 
         assertEquals(2, impls.size, "Should have 2 Stringify impls")
 
@@ -559,7 +559,7 @@ class ContentAddressableHashingE2ETest {
 
         // Get the impl's content hash
         val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .find { it.abilityName == "Negate" }
+            .find { it.ability.localName == "Negate" }
         assertNotNull(impl)
         val implHash = impl!!.contentHash
         assertNotNull(implHash)

@@ -119,11 +119,11 @@ class EffectValidator(
         val errors = mutableListOf<ValidationError>()
 
         // Get effects being handled
-        val handledEffects = expression.handlers.map { it.name }.toSet()
+        val handledEffects = expression.handlers.map { it.performer.localName }.toSet()
 
         // Check if all handlers correspond to actual effects used
         for (handler in expression.handlers) {
-            if (handler.name !in expressionEffects) {
+            if (handler.performer.localName !in expressionEffects) {
                 // Warning: handler provided but effect not used
                 // This is not an error, just inefficient
             }
@@ -270,9 +270,9 @@ class EffectValidator(
                 ValidationError.TypeMismatch(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
-                    context = "Effect '${implDecl.effectName}' declares associated types [$typesList] " +
+                    context = "Effect '${implDecl.effect.localName}' declares associated types [$typesList] " +
                             "but implementation '${implDecl.performerName}' does not provide bindings. " +
-                            "Use: impl ${implDecl.effectName} for ${implDecl.performerName} having ${effectAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
+                            "Use: impl ${implDecl.effect.localName} for ${implDecl.performerName} having ${effectAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
                     sourceLocation = null
                 )
             )
@@ -285,7 +285,7 @@ class EffectValidator(
                 ValidationError.TypeMismatch(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
-                    context = "Effect '${implDecl.effectName}' declares associated types ${effectAssociatedTypes.joinToString(", ")} " +
+                    context = "Effect '${implDecl.effect.localName}' declares associated types ${effectAssociatedTypes.joinToString(", ")} " +
                             "but implementation '${implDecl.performerName}' is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                             "All associated types must be bound in the implementation.",
                     sourceLocation = null
@@ -306,7 +306,7 @@ class EffectValidator(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
                     context = "Implementation '${implDecl.performerName}' provides bindings for ${extraBindings.joinToString(", ")} " +
-                            "but effect '${implDecl.effectName}' $declaredPart. " +
+                            "but effect '${implDecl.effect.localName}' $declaredPart. " +
                             "Remove the extra bindings or add them to the effect declaration.",
                     sourceLocation = null
                 )
@@ -328,7 +328,7 @@ class EffectValidator(
                 ValidationError.TypeMismatch(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
-                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effectName}' " +
+                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "is missing required ${if (missingOps.size == 1) "operation" else "operations"}: $missing. " +
                             "Add: $example = {args} -> ...",
                     sourceLocation = null
@@ -346,7 +346,7 @@ class EffectValidator(
                 ValidationError.TypeMismatch(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
-                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effectName}' " +
+                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "has extra ${if (extraOps.size == 1) "operation" else "operations"} not in effect: $extra. " +
                             "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the effect declaration.",
                     sourceLocation = null
