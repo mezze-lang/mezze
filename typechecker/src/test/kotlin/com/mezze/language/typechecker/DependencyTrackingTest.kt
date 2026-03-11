@@ -182,9 +182,9 @@ class DependencyTrackingTest {
         assertEquals(hashBar, registry.getHash("std::list", "map"))
         assertNull(registry.getHash(null, "unknown"))
 
-        // Qualified name lookup
-        assertEquals(hashFoo, registry.getHash("foo"))
-        assertEquals(hashBar, registry.getHash("std::list::map"))
+        // Qualified name lookup using structured API
+        assertEquals(hashFoo, registry.getHash(null, "foo"))
+        assertEquals(hashBar, registry.getHash("std::list", "map"))
     }
 
     @Test

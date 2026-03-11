@@ -154,18 +154,17 @@ class ImportResolver(
         isPublic: Boolean,
         sourceLocation: com.mezze.language.ast.SourceLocation? = null
     ): ProcessResult {
-        val modulePath = path.segments.joinToString("::")
-
-        // Check for internal module access
-        // Top-level imports (fromModule = "") cannot access internal modules
-        if (!loader.getResolver().canAccessInternal("", modulePath)) {
+        // Check for internal module access using structured path
+        // Top-level imports (fromModule = null) cannot access internal modules
+        if (!loader.getResolver().canAccessInternal(null, path)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", modulePath, sourceLocation))
+                listOf(ModuleError.InternalModuleAccess("", path.fullPath, sourceLocation))
             )
         }
 
-        // Load the module
-        val loadResult = loader.loadModule(modulePath)
+        // Load the module using structured path
+        val loadResult = loader.loadModule(path)
+        val modulePath = path.fullPath  // Keep string for error messages
 
         return when (loadResult) {
             is ModuleLoadResult.Success -> {
@@ -229,18 +228,20 @@ class ImportResolver(
         isPublic: Boolean,
         sourceLocation: com.mezze.language.ast.SourceLocation? = null
     ): ProcessResult {
-        val modulePath = path.module.joinToString("::")
+        // Convert to structured ModulePath
+        val structuredPath = ModulePath(path.module)
 
-        // Check for internal module access
-        // Top-level imports (fromModule = "") cannot access internal modules
-        if (!loader.getResolver().canAccessInternal("", modulePath)) {
+        // Check for internal module access using structured path
+        // Top-level imports (fromModule = null) cannot access internal modules
+        if (!loader.getResolver().canAccessInternal(null, structuredPath)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", modulePath, sourceLocation))
+                listOf(ModuleError.InternalModuleAccess("", structuredPath.fullPath, sourceLocation))
             )
         }
 
-        // Load the module
-        val loadResult = loader.loadModule(modulePath)
+        // Load the module using structured path
+        val loadResult = loader.loadModule(structuredPath)
+        val modulePath = structuredPath.fullPath  // Keep string for error messages
 
         return when (loadResult) {
             is ModuleLoadResult.Success -> {

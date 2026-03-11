@@ -128,29 +128,6 @@ class NameRegistry {
     }
 
     /**
-     * Get the hash for a qualified name string (e.g., "std::list::map").
-     *
-     * @deprecated Use getHash(BindingKey) or getHash(Identifier) instead.
-     *             String parsing loses information and is fragile.
-     * @param qualifiedName The full qualified name
-     * @return The content hash, or null if not found
-     */
-    @Deprecated(
-        message = "Use getHash(BindingKey) or getHash(Identifier) with structured data",
-        replaceWith = ReplaceWith("getHash(identifier)")
-    )
-    fun getHash(qualifiedName: String): MezzeHash? {
-        val parts = qualifiedName.split("::")
-        return if (parts.size == 1) {
-            getHash(null, parts[0])
-        } else {
-            val modulePath = parts.dropLast(1).joinToString("::")
-            val name = parts.last()
-            getHash(modulePath, name)
-        }
-    }
-
-    /**
      * Get all names that refer to a given hash.
      *
      * @param hash The content hash

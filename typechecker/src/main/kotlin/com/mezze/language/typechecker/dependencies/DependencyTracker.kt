@@ -91,29 +91,6 @@ class DependencyTracker {
     }
 
     /**
-     * Record a reference by qualified name (e.g., "std::list::map").
-     *
-     * @deprecated Use recordIdentifierReference with a structured Identifier instead.
-     *             String parsing loses information and is fragile.
-     */
-    @Deprecated(
-        message = "Use recordIdentifierReference with structured Identifier",
-        replaceWith = ReplaceWith("recordIdentifierReference(identifier)")
-    )
-    fun recordQualifiedReference(qualifiedName: String) {
-        val parts = qualifiedName.split("::")
-        if (parts.size == 1) {
-            // Simple name, no module path
-            recordReference(parts[0], null)
-        } else {
-            // Module path + name
-            val modulePath = parts.dropLast(1).joinToString("::")
-            val name = parts.last()
-            recordReference(name, modulePath)
-        }
-    }
-
-    /**
      * Finish tracking the current binding.
      */
     fun finishTracking() {

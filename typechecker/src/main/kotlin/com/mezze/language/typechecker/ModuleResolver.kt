@@ -100,7 +100,7 @@ data class ProgramIndex(
 /**
  * Represents a loaded module with its exports
  *
- * @property name The module path (e.g., "std::int")
+ * @property path The module path as structured ModulePath
  * @property filePath The file system path to the source file
  * @property program The parsed and type-checked program
  * @property exports Map of exported items (functions, types, etc.)
@@ -109,14 +109,17 @@ data class ProgramIndex(
  * @property index Pre-computed index for O(1) declaration lookups
  */
 data class Module(
-    val name: String,
+    val path: ModulePath,
     val filePath: String,
     val program: Program,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
     val sourceHash: String? = null,
     val index: ProgramIndex = ProgramIndex.EMPTY
-)
+) {
+    /** Legacy accessor for module name as string. Use path.fullPath instead. */
+    val name: String get() = path.fullPath
+}
 
 /**
  * Represents an exported item from a module
@@ -471,9 +474,25 @@ class ModuleResolver(
     }
 
     /**
-     * Resolve and load a module by its path
+     * Resolve and load a module by its structured path.
+     * This is the primary API - accepts ModulePath directly.
+     */
+    fun resolveModule(path: ModulePath, fromModule: ModulePath? = null): Module {
+        return resolveModuleInternal(path.fullPath, fromModule?.fullPath)
+    }
+
+    /**
+     * Resolve and load a module by its path string.
+     * Prefer resolveModule(ModulePath) for structured paths.
      */
     fun resolveModule(modulePath: String, fromModule: String? = null): Module {
+        return resolveModuleInternal(modulePath, fromModule)
+    }
+
+    /**
+     * Internal implementation of module resolution.
+     */
+    private fun resolveModuleInternal(modulePath: String, fromModule: String? = null): Module {
         // Skip core type modules - they are now built-in
         if (modulePath in coreTypeModules) {
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
@@ -547,8 +566,9 @@ class ModuleResolver(
                 val programIndex = ProgramIndex.build(typedProgram)
 
                 // Create module representation with source hash for cache validation
+                val structuredPath = ModulePath.parse(modulePath)
                 val module = Module(
-                    name = modulePath,
+                    path = structuredPath,
                     filePath = filePath.toString(),
                     program = typedProgram,
                     exports = extractExports(typedProgram, modulePath),
@@ -578,7 +598,7 @@ class ModuleResolver(
      */
     private fun createEmptyModule(modulePath: String, reason: String): Module {
         return Module(
-            name = modulePath,
+            path = ModulePath.parse(modulePath),
             filePath = "built-in",
             program = Program(emptyList()),
             exports = emptyMap(),
@@ -602,10 +622,17 @@ class ModuleResolver(
     }
 
     /**
-     * Resolve a module file path from module name
+     * Resolve a module file path from module path string.
      */
     private fun resolveModuleFile(modulePath: String): Path? {
-        val segments = ModulePath.parse(modulePath).segments
+        return resolveModuleFile(ModulePath.parse(modulePath))
+    }
+
+    /**
+     * Resolve a module file path from structured ModulePath.
+     */
+    private fun resolveModuleFile(path: ModulePath): Path? {
+        val segments = path.segments
 
         // Special handling for std:: modules - always look in stdlib directory
         if (segments.isNotEmpty() && segments[0] == "std") {
@@ -719,7 +746,14 @@ class ModuleResolver(
      * Get possible search paths for error reporting
      */
     private fun getSearchPaths(modulePath: String): List<String> {
-        val segments = ModulePath.parse(modulePath).segments
+        return getSearchPaths(ModulePath.parse(modulePath))
+    }
+
+    /**
+     * Get possible search paths for error reporting (structured path version)
+     */
+    private fun getSearchPaths(path: ModulePath): List<String> {
+        val segments = path.segments
         
         // Special paths for std:: modules
         if (segments.isNotEmpty() && segments[0] == "std") {
@@ -1028,16 +1062,24 @@ class ModuleResolver(
      * Convention (Gleam-inspired):
      * - `internal/` and `private/` folders are internal by default
      * - Internal modules can only be accessed by modules in the same parent hierarchy
-     * - This is recursive: `foo::internal::bar` can only be accessed by modules under `foo::`
+     * - This is recursive: foo/internal/bar can only be accessed by modules under foo/
      *
      * Examples:
-     * - `math::internal::helpers` can only be accessed by modules under `math::`
-     * - `mylib::private::utils` can only be accessed by modules under `mylib::`
-     * - `app::internal::deep::nested` can only be accessed by modules under `app::`
+     * - math/internal/helpers can only be accessed by modules under math/
+     * - mylib/private/utils can only be accessed by modules under mylib/
+     * - app/internal/deep/nested can only be accessed by modules under app/
      */
     fun canAccessInternal(fromModule: String, toModule: String): Boolean {
-        // Parse module paths into structured segments
-        val toSegments = ModulePath.parse(toModule).segments
+        val from = if (fromModule.isEmpty()) null else ModulePath.parse(fromModule)
+        val to = ModulePath.parse(toModule)
+        return canAccessInternal(from, to)
+    }
+
+    /**
+     * Check if a module can access internal/private modules of another module (structured version).
+     */
+    fun canAccessInternal(fromModule: ModulePath?, toModule: ModulePath): Boolean {
+        val toSegments = toModule.segments
         val internalMarkers = setOf("internal", "private")
 
         // Find the first internal/private segment in the path
@@ -1056,19 +1098,17 @@ class ModuleResolver(
 
         // Extract the parent module path (everything before the internal/private marker)
         val parentSegments = toSegments.take(markerIndex)
-        val parentModule = parentSegments.joinToString("::")
 
-        // Empty fromModule means a top-level script, which CANNOT access internal modules
-        if (fromModule.isEmpty()) {
+        // Null fromModule means a top-level script, which CANNOT access internal modules
+        if (fromModule == null) {
             return false
         }
 
-        // Parse the from module to compare structurally
-        val fromSegments = ModulePath.parse(fromModule).segments
+        val fromSegments = fromModule.segments
 
         // Allow access if the fromModule is within the same parent hierarchy
-        // e.g., "math::ops" can access "math::internal::helpers"
-        // e.g., "math::internal::other" can access "math::internal::helpers"
+        // e.g., "math/ops" can access "math/internal/helpers"
+        // e.g., "math/internal/other" can access "math/internal/helpers"
         return fromSegments.take(parentSegments.size) == parentSegments
     }
     
@@ -1117,7 +1157,7 @@ class ModuleResolver(
             // Note: sourceHash will be null here since we don't have access to the source
             // This path is typically used when type-checking imported modules
             Module(
-                name = modulePath,
+                path = ModulePath.parse(modulePath),
                 filePath = "", // Will be updated if needed
                 program = typedProgram,
                 exports = extractExports(typedProgram, modulePath, typeContext),

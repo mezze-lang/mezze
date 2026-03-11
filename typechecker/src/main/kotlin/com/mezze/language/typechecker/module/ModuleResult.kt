@@ -51,13 +51,17 @@ sealed class ModuleLoadResult {
  * A module that has been loaded and parsed (but not yet type-checked).
  */
 data class LoadedModule(
-    val modulePath: String,           // Module path (e.g., "std::collections::seq")
+    val path: ModulePath,              // Structured module path
     val filePath: String,              // Physical file path
     val program: Program,              // Parsed AST
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
-    val dependencies: List<String>,     // Module dependencies (module paths)
-    val index: ProgramIndex = ProgramIndex.EMPTY  // Pre-computed index for O(1) declaration lookups
-)
+    val dependencies: List<ModulePath>, // Module dependencies as structured paths
+    val index: ProgramIndex = ProgramIndex.EMPTY,  // Pre-computed index for O(1) declaration lookups
+    val sourceHash: String? = null      // Content hash of source for cache validation
+) {
+    /** Legacy accessor for module path as string. Use path.fullPath instead. */
+    val modulePath: String get() = path.fullPath
+}
 
 /**
  * An exported item from a module.

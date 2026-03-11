@@ -259,30 +259,6 @@ data class Identifier(
         localName = localName
     )
 
-    companion object {
-        /**
-         * Create an Identifier from a full name string (for backwards compatibility).
-         *
-         * @deprecated Prefer constructing Identifier directly with localName and qualifier.
-         *             String parsing loses information and is fragile.
-         */
-        @Deprecated(
-            message = "Use Identifier constructor with localName and qualifier instead",
-            replaceWith = ReplaceWith("Identifier(localName = name, qualifier = null, sourceLocation = sourceLocation)")
-        )
-        fun fromName(name: String, sourceLocation: SourceLocation? = null): Identifier {
-            return if (name.contains("::")) {
-                val parts = name.split("::")
-                Identifier(
-                    localName = parts.last(),
-                    qualifier = ModulePath(parts.dropLast(1)),
-                    sourceLocation = sourceLocation
-                )
-            } else {
-                Identifier(localName = name, sourceLocation = sourceLocation)
-            }
-        }
-    }
 }
 
 // Temporary placeholder for pipe operator desugaring - should never appear in final AST

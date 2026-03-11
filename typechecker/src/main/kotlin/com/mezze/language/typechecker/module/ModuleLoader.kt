@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.module
 
+import com.mezze.language.ast.ModulePath
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.Module as ResolverModule
 import com.mezze.language.typechecker.ModuleError as ResolverModuleError
@@ -40,18 +41,18 @@ class ModuleLoader(
     private val resolver: ModuleResolver
 ) {
     /**
-     * Load a module by its path.
+     * Load a module by its structured path.
      *
      * This loads and parses the module, but does NOT type-check it yet.
      * Type-checking is done by ModuleTypeChecker.
      *
-     * @param modulePath Module path (e.g., "std::collections::seq")
+     * @param path Structured ModulePath
      * @return ModuleLoadResult (Success or Failure)
      */
-    fun loadModule(modulePath: String): ModuleLoadResult {
+    fun loadModule(path: ModulePath): ModuleLoadResult {
         return try {
             // Use existing ModuleResolver to load the module
-            val resolverModule = resolver.resolveModule(modulePath)
+            val resolverModule = resolver.resolveModule(path)
 
             // Convert to our LoadedModule type
             val loadedModule = convertResolverModule(resolverModule)
@@ -66,11 +67,22 @@ class ModuleLoader(
         } catch (e: Exception) {
             // Catch unexpected errors
             val moduleError = ModuleError.ParseError(
-                modulePath = modulePath,
+                modulePath = path.fullPath,
                 error = "Unexpected error: ${e.message ?: "Unknown error"}"
             )
             ModuleLoadResult.Failure(listOf(moduleError))
         }
+    }
+
+    /**
+     * Load a module by its path string.
+     * Prefer loadModule(ModulePath) for structured paths.
+     *
+     * @param modulePath Module path string (e.g., "std::collections::seq")
+     * @return ModuleLoadResult (Success or Failure)
+     */
+    fun loadModule(modulePath: String): ModuleLoadResult {
+        return loadModule(ModulePath.parse(modulePath))
     }
 
     /**
@@ -107,41 +119,41 @@ class ModuleLoader(
      * @param module The module whose dependencies to load
      * @return Map of module path -> LoadedModule
      */
-    fun loadDependencies(module: LoadedModule): Map<String, LoadedModule> {
-        val loaded = mutableMapOf<String, LoadedModule>()
-        val toLoad = mutableListOf<String>()
+    fun loadDependencies(module: LoadedModule): Map<ModulePath, LoadedModule> {
+        val loaded = mutableMapOf<ModulePath, LoadedModule>()
+        val toLoad = mutableListOf<ModulePath>()
 
         // Start with direct dependencies
         toLoad.addAll(module.dependencies)
 
         // Track loading to detect cycles
-        val loading = mutableSetOf<String>()
+        val loading = mutableSetOf<ModulePath>()
 
         while (toLoad.isNotEmpty()) {
-            val modulePath = toLoad.removeAt(0)
+            val path = toLoad.removeAt(0)
 
             // Skip if already loaded
-            if (loaded.containsKey(modulePath)) {
+            if (loaded.containsKey(path)) {
                 continue
             }
 
             // Check for circular dependency
-            if (loading.contains(modulePath)) {
+            if (loading.contains(path)) {
                 throw ModuleError.CircularDependency(
-                    loading.toList() + modulePath
+                    loading.map { it.fullPath } + path.fullPath
                 )
             }
 
             // Mark as loading
-            loading.add(modulePath)
+            loading.add(path)
 
-            // Load the module
-            val result = loadModule(modulePath)
+            // Load the module using structured path
+            val result = loadModule(path)
 
             when (result) {
                 is ModuleLoadResult.Success -> {
                     val dependency = result.module
-                    loaded[modulePath] = dependency
+                    loaded[path] = dependency
 
                     // Add transitive dependencies
                     toLoad.addAll(dependency.dependencies.filter { !loaded.containsKey(it) })
@@ -153,25 +165,22 @@ class ModuleLoader(
             }
 
             // Done loading this module
-            loading.remove(modulePath)
+            loading.remove(path)
         }
 
         return loaded
     }
 
     /**
-     * Load a module and all its dependencies.
+     * Load a module and all its dependencies (structured path version).
      *
-     * This is a convenience method that loads a module
-     * and all its transitive dependencies in one call.
-     *
-     * @param modulePath Module path to load
-     * @return Map of all loaded modules (including the requested module)
+     * @param path Structured ModulePath to load
+     * @return ModuleLoadResult (Success or Failure)
      */
-    fun loadModuleWithDependencies(modulePath: String): ModuleLoadResult {
+    fun loadModuleWithDependencies(path: ModulePath): ModuleLoadResult {
         return try {
             // Load the root module
-            val rootResult = loadModule(modulePath)
+            val rootResult = loadModule(path)
 
             when (rootResult) {
                 is ModuleLoadResult.Success -> {
@@ -194,12 +203,23 @@ class ModuleLoader(
             ModuleLoadResult.Failure(
                 listOf(
                     ModuleError.ParseError(
-                        modulePath,
+                        path.fullPath,
                         "Failed to load dependencies: ${e.message}"
                     )
                 )
             )
         }
+    }
+
+    /**
+     * Load a module and all its dependencies (string path version).
+     * Prefer loadModuleWithDependencies(ModulePath) for structured paths.
+     *
+     * @param modulePath Module path string to load
+     * @return ModuleLoadResult (Success or Failure)
+     */
+    fun loadModuleWithDependencies(modulePath: String): ModuleLoadResult {
+        return loadModuleWithDependencies(ModulePath.parse(modulePath))
     }
 
     // ========================================================================
@@ -211,11 +231,11 @@ class ModuleLoader(
      */
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
         return LoadedModule(
-            modulePath = resolverModule.name,
+            path = resolverModule.path,
             filePath = resolverModule.filePath,
             program = resolverModule.program,
             exports = resolverModule.exports.mapValues { (_, exportedItem) ->
-ExportedItem(
+                ExportedItem(
                     name = exportedItem.name,
                     type = convertExportType(exportedItem.type),
                     mezzeType = exportedItem.mezzeType,
@@ -224,8 +244,9 @@ ExportedItem(
                     contentHash = exportedItem.contentHash  // Already non-null from ModuleResolver
                 )
             },
-            dependencies = resolverModule.dependencies.map { it.modulePath },
-            index = resolverModule.index
+            dependencies = resolverModule.dependencies.map { ModulePath.parse(it.modulePath) },
+            index = resolverModule.index,
+            sourceHash = resolverModule.sourceHash
         )
     }
 
