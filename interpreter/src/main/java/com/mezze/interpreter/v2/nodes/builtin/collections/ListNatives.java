@@ -1130,24 +1130,24 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static SetNatives.MezzeSet toSet(MezzeList list) {
+    public static MezzeSet toSet(MezzeList list) {
         return SetNatives.fromList(list);
     }
 
     @TruffleBoundary
-    public static DequeNatives.MezzeDeque toDeque(MezzeList list) {
+    public static MezzeDeque toDeque(MezzeList list) {
         return DequeNatives.fromList(list);
     }
 
     @TruffleBoundary
-    public static SortedSetNatives.MezzeSortedSet toSortedSet(MezzeList list) {
+    public static MezzeSortedSet toSortedSet(MezzeList list) {
         return SortedSetNatives.fromList(list);
     }
 
     @TruffleBoundary
-    public static MapNatives.MezzeMap toMap(MezzeList list) {
+    public static MezzeMap toMap(MezzeList list) {
         // Expects list of {key, value} records
-        MapNatives.MezzeMap result = MapNatives.empty();
+        MezzeMap result = MapNatives.empty();
         for (int i = 0; i < list.size(); i++) {
             Object elem = list.get(i);
             if (elem instanceof MezzeRecord rec) {
@@ -1164,9 +1164,9 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static SortedMapNatives.MezzeSortedMap toSortedMap(MezzeList list) {
+    public static MezzeSortedMap toSortedMap(MezzeList list) {
         // Expects list of {key, value} records
-        SortedMapNatives.MezzeSortedMap result = SortedMapNatives.empty();
+        MezzeSortedMap result = SortedMapNatives.empty();
         for (int i = 0; i < list.size(); i++) {
             Object elem = list.get(i);
             if (elem instanceof MezzeRecord rec) {
@@ -1188,28 +1188,28 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList fromSet(SetNatives.MezzeSet set) {
+    public static MezzeList fromSet(MezzeSet set) {
         return SetNatives.toList(set);
     }
 
     @TruffleBoundary
-    public static MezzeList fromDeque(DequeNatives.MezzeDeque deque) {
+    public static MezzeList fromDeque(MezzeDeque deque) {
         return DequeNatives.toList(deque);
     }
 
     @TruffleBoundary
-    public static MezzeList fromSortedSet(SortedSetNatives.MezzeSortedSet set) {
+    public static MezzeList fromSortedSet(MezzeSortedSet set) {
         return SortedSetNatives.toList(set);
     }
 
     @TruffleBoundary
-    public static MezzeList fromMap(MapNatives.MezzeMap map) {
+    public static MezzeList fromMap(MezzeMap map) {
         // Returns list of {key, value} records
         return MapNatives.entries(map);
     }
 
     @TruffleBoundary
-    public static MezzeList fromSortedMap(SortedMapNatives.MezzeSortedMap map) {
+    public static MezzeList fromSortedMap(MezzeSortedMap map) {
         // Returns list of {key, value} records (in sorted key order)
         return SortedMapNatives.entries(map);
     }

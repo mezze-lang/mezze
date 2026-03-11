@@ -8,7 +8,6 @@ import com.mezze.interpreter.v2.nodes.builtin.io.*;
 import com.mezze.interpreter.v2.nodes.builtin.primitives.*;
 import com.mezze.interpreter.v2.nodes.continuation.ContinuationAbortedException;
 import com.mezze.interpreter.v2.nodes.continuation.DelimiterStack;
-import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -2025,27 +2024,27 @@ public final class NativeDispatch extends MezzeNode {
         throw new RuntimeException("Expected MezzeRecord for field '" + name + "'");
     }
 
-    private static SetNatives.MezzeSet getSet(MezzeRecord r, String name) {
+    private static MezzeSet getSet(MezzeRecord r, String name) {
         Object val = getField(r, name);
-        if (val instanceof SetNatives.MezzeSet set) return set;
+        if (val instanceof MezzeSet set) return set;
         throw new RuntimeException("Expected MezzeSet for field '" + name + "'");
     }
 
-    private static SortedSetNatives.MezzeSortedSet getSortedSet(MezzeRecord r, String name) {
+    private static MezzeSortedSet getSortedSet(MezzeRecord r, String name) {
         Object val = getField(r, name);
-        if (val instanceof SortedSetNatives.MezzeSortedSet set) return set;
+        if (val instanceof MezzeSortedSet set) return set;
         throw new RuntimeException("Expected MezzeSortedSet for field '" + name + "'");
     }
 
-    private static MapNatives.MezzeMap getMap(MezzeRecord r, String name) {
+    private static MezzeMap getMap(MezzeRecord r, String name) {
         Object val = getField(r, name);
-        if (val instanceof MapNatives.MezzeMap map) return map;
+        if (val instanceof MezzeMap map) return map;
         throw new RuntimeException("Expected MezzeMap for field '" + name + "'");
     }
 
-    private static SortedMapNatives.MezzeSortedMap getSortedMap(MezzeRecord r, String name) {
+    private static MezzeSortedMap getSortedMap(MezzeRecord r, String name) {
         Object val = getField(r, name);
-        if (val instanceof SortedMapNatives.MezzeSortedMap map) return map;
+        if (val instanceof MezzeSortedMap map) return map;
         throw new RuntimeException("Expected MezzeSortedMap for field '" + name + "'");
     }
 
@@ -2058,9 +2057,9 @@ public final class NativeDispatch extends MezzeNode {
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
 
-    private static DequeNatives.MezzeDeque getDeque(MezzeRecord r, String name) {
+    private static MezzeDeque getDeque(MezzeRecord r, String name) {
         Object val = getField(r, name);
-        if (val instanceof DequeNatives.MezzeDeque deque) return deque;
+        if (val instanceof MezzeDeque deque) return deque;
         throw new RuntimeException("Expected MezzeDeque for field '" + name + "'");
     }
 
@@ -2430,6 +2429,19 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_coop_any", (r, c) -> AsyncNatives.coopAny(r));
         HANDLERS.put("__native_coop_settle", (r, c) -> AsyncNatives.coopSettle(r));
         HANDLERS.put("__native_coop_scoped", (r, c) -> AsyncNatives.coopScoped(r, c));
+
+        // === Cooperative Scheduler - real continuation-based coop async ===
+        HANDLERS.put("__native_scheduler_new", (r, c) -> SchedulerNatives.schedulerNew());
+        HANDLERS.put("__native_scheduler_spawn", (r, c) -> SchedulerNatives.schedulerSpawn(r, c));
+        HANDLERS.put("__native_scheduler_await", (r, c) -> SchedulerNatives.schedulerAwait(r, c));
+        HANDLERS.put("__native_scheduler_drain", (r, c) -> SchedulerNatives.schedulerDrain(r, c));
+        HANDLERS.put("__native_scheduler_is_done", (r, c) -> SchedulerNatives.schedulerIsDone(r));
+        HANDLERS.put("__native_scheduler_pending_count", (r, c) -> SchedulerNatives.schedulerPendingCount(r));
+        HANDLERS.put("__native_scheduler_race", (r, c) -> SchedulerNatives.schedulerRace(r, c));
+        HANDLERS.put("__native_scheduler_all", (r, c) -> SchedulerNatives.schedulerAll(r, c));
+        HANDLERS.put("__native_scheduler_sleep", (r, c) -> SchedulerNatives.schedulerSleep(r, c));
+        HANDLERS.put("__native_scheduler_serialize", (r, c) -> SchedulerNatives.schedulerSerialize(r));
+        HANDLERS.put("__native_scheduler_deserialize", (r, c) -> SchedulerNatives.schedulerDeserialize(r));
 
         // === Adaptive Async - intelligent strategy selection ===
         // Adaptive handlers need node context for Truffle thread creation
@@ -2838,34 +2850,6 @@ public final class NativeDispatch extends MezzeNode {
             throw new RuntimeException("__native_continuation_resume expects 'cont' field as function or continuation");
         });
 
-        // __native_continuation_fork - Multi-shot continuation resume
-        HANDLERS.put("__native_continuation_fork", (r, c) -> {
-            Object contObj = getField(r, "cont");
-            Object valuesObj = getField(r, "values");
-
-            MezzeList values;
-            if (valuesObj instanceof MezzeSeq seq) {
-                values = MezzeList.fromArray(seq.toJavaArray());
-            } else if (valuesObj instanceof MezzeList ml) {
-                values = ml;
-            } else if (valuesObj instanceof Object[] arr) {
-                values = MezzeList.fromArray(arr);
-            } else {
-                throw new RuntimeException("__native_continuation_fork expects 'values' field as array, got: " +
-                    (valuesObj != null ? valuesObj.getClass().getSimpleName() : "null"));
-            }
-
-            if (values.size() == 0) {
-                throw new ContinuationAbortedException("Cannot fork with empty values array");
-            }
-
-            if (DelimiterStack.isInsideFork()) {
-                throw new ForkedExecutionException(contObj, values);
-            }
-
-            return executeFork(contObj, values);
-        });
-
         // __native_continuation_abort - Aborts current continuation
         HANDLERS.put("__native_continuation_abort", (r, c) -> {
             Object delimObj = getField(r, "delim");
@@ -2951,56 +2935,4 @@ public final class NativeDispatch extends MezzeNode {
         }
     }
 
-    // Execute fork operation
-    @TruffleBoundary
-    private static MezzeSeq executeFork(Object cont, MezzeList values) {
-        java.util.List<Object> results = new java.util.ArrayList<>();
-        boolean wasInsideFork = DelimiterStack.isInsideFork();
-
-        for (int i = 0; i < values.size(); i++) {
-            Object value = values.get(i);
-
-            try {
-                DelimiterStack.setInsideFork(true);
-                Object result = resumeContinuation(cont, value);
-                results.add(result);
-            } catch (ForkedExecutionException e) {
-                // e.values is MezzeList for nested forks (input values)
-                MezzeSeq nestedResults = executeFork(e.continuation, (MezzeList) e.values);
-                for (int j = 0; j < nestedResults.size(); j++) {
-                    results.add(nestedResults.get(j));
-                }
-            } catch (ContinuationAbortedException e) {
-                // This path aborted - skip it
-            } finally {
-                DelimiterStack.setInsideFork(wasInsideFork);
-            }
-        }
-
-        return MezzeSeq.fromArray(results.toArray());
-    }
-
-    // Resume a continuation with a value
-    @TruffleBoundary
-    private static Object resumeContinuation(Object cont, Object value) {
-        MezzeRecord valueRecord = MezzeRecord.fromFields(
-            new String[]{"value"},
-            new Object[]{value}
-        );
-
-        if (cont instanceof MezzeFunction func) {
-            Object[] closureValues = func.getClosureValues();
-            int closureLen = closureValues.length;
-            Object[] callArgs = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
-            callArgs[closureLen] = valueRecord;
-            return func.getCallTarget().call(callArgs);
-        }
-
-        if (cont instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation c) {
-            return c.resume(valueRecord);
-        }
-
-        throw new RuntimeException("Invalid continuation type: " + cont.getClass().getName());
-    }
 }

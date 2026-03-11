@@ -1508,28 +1508,28 @@ public final class SeqNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSeq fromSet(SetNatives.MezzeSet set) {
-        return MezzeSeq.fromArray(set.toArray());
+    public static MezzeSeq fromSet(MezzeSet set) {
+        return SetNatives.toSeq(set);
     }
 
     @TruffleBoundary
-    public static MezzeSeq fromDeque(DequeNatives.MezzeDeque deque) {
-        return MezzeSeq.fromArray(deque.toArray());
+    public static MezzeSeq fromDeque(MezzeDeque deque) {
+        return DequeNatives.toSeq(deque);
     }
 
     @TruffleBoundary
-    public static MezzeSeq fromSortedSet(SortedSetNatives.MezzeSortedSet set) {
-        return MezzeSeq.fromArray(set.toArray());
+    public static MezzeSeq fromSortedSet(MezzeSortedSet set) {
+        return SortedSetNatives.toSeq(set);
     }
 
     @TruffleBoundary
-    public static MezzeSeq fromMap(MapNatives.MezzeMap map) {
-        return MezzeSeq.fromArray(map.entries());
+    public static MezzeSeq fromMap(MezzeMap map) {
+        return MapNatives.toSeq(map);
     }
 
     @TruffleBoundary
-    public static MezzeSeq fromSortedMap(SortedMapNatives.MezzeSortedMap map) {
-        return MezzeSeq.fromArray(map.entries());
+    public static MezzeSeq fromSortedMap(MezzeSortedMap map) {
+        return SortedMapNatives.toSeq(map);
     }
 
     // ==================== Additional Comparison Operations ====================

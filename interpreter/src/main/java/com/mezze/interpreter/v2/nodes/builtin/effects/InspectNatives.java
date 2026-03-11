@@ -106,38 +106,34 @@ public final class InspectNatives {
         }
 
         // Maps
-        if (value instanceof MapNatives.MezzeMap map) {
+        if (value instanceof MezzeMap map) {
             if (map.isEmpty()) {
                 return "{}";
             }
             StringBuilder sb = new StringBuilder("{ ");
-            Object[] keys = map.keys();
-            for (int i = 0; i < keys.length; i++) {
-                if (i > 0) sb.append(", ");
-                Object k = keys[i];
-                Object v = MapNatives.get(map, k);
-                // get returns a variant, extract the value
-                if (v instanceof MezzeVariant opt && opt.isSome()) {
-                    v = ((MezzeRecord) opt.getPayloadValue()).getField(0);
-                }
-                sb.append(valueToString(k))
+            boolean first = true;
+            for (com.mezze.datastructures.map.MezzeMap.Entry entry : map.getDelegate()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(valueToString(entry.key()))
                   .append(" = ")
-                  .append(valueToString(v));
+                  .append(valueToString(entry.value()));
             }
             sb.append(" }");
             return sb.toString();
         }
 
         // Sets
-        if (value instanceof SetNatives.MezzeSet set) {
+        if (value instanceof MezzeSet set) {
             if (set.isEmpty()) {
                 return "{}";
             }
             StringBuilder sb = new StringBuilder("{");
-            MezzeList elems = SetNatives.toList(set);
-            for (int i = 0; i < elems.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(valueToString(elems.get(i)));
+            boolean first = true;
+            for (Object elem : set) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(valueToString(elem));
             }
             sb.append("}");
             return sb.toString();
@@ -155,50 +151,47 @@ public final class InspectNatives {
         }
 
         // Sorted Sets
-        if (value instanceof SortedSetNatives.MezzeSortedSet sortedSet) {
+        if (value instanceof MezzeSortedSet sortedSet) {
             if (sortedSet.isEmpty()) {
                 return "SortedSet{}";
             }
             StringBuilder sb = new StringBuilder("SortedSet{");
-            MezzeList elems = SortedSetNatives.toList(sortedSet);
-            for (int i = 0; i < elems.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(valueToString(elems.get(i)));
+            boolean first = true;
+            for (Object elem : sortedSet) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(valueToString(elem));
             }
             sb.append("}");
             return sb.toString();
         }
 
         // Sorted Maps
-        if (value instanceof SortedMapNatives.MezzeSortedMap sortedMap) {
+        if (value instanceof MezzeSortedMap sortedMap) {
             if (sortedMap.isEmpty()) {
                 return "SortedMap{}";
             }
             StringBuilder sb = new StringBuilder("SortedMap{ ");
-            MezzeList keysList = SortedMapNatives.keys(sortedMap);
-            for (int i = 0; i < keysList.size(); i++) {
-                if (i > 0) sb.append(", ");
-                Object k = keysList.get(i);
-                Object v = SortedMapNatives.get(sortedMap, k);
-                // get returns a variant, extract the value
-                if (v instanceof MezzeVariant opt && opt.isSome()) {
-                    v = ((MezzeRecord) opt.getPayloadValue()).getField(0);
-                }
-                sb.append(valueToString(k))
+            boolean first = true;
+            for (java.util.Map.Entry<Object, Object> entry : sortedMap.toJavaMap().entrySet()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(valueToString(entry.getKey()))
                   .append(" = ")
-                  .append(valueToString(v));
+                  .append(valueToString(entry.getValue()));
             }
             sb.append(" }");
             return sb.toString();
         }
 
         // Deques
-        if (value instanceof DequeNatives.MezzeDeque deque) {
+        if (value instanceof MezzeDeque deque) {
             StringBuilder sb = new StringBuilder("Deque[");
-            MezzeList list = DequeNatives.toList(deque);
-            for (int i = 0; i < list.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(valueToString(list.get(i)));
+            boolean first = true;
+            for (Object elem : deque) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(valueToString(elem));
             }
             sb.append("]");
             return sb.toString();

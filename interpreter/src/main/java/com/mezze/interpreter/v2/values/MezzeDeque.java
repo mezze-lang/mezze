@@ -26,9 +26,6 @@ import java.util.Objects;
 @ExportLibrary(InteropLibrary.class)
 public final class MezzeDeque implements TruffleObject, Iterable<Object> {
 
-    // Singleton empty deque
-    private static final MezzeDeque EMPTY = new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.empty());
-
     // Datastructures MezzeDeque backing store
     private final com.mezze.datastructures.deque.MezzeDeque<Object> delegate;
 
@@ -38,8 +35,13 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
 
     // ===== FACTORY METHODS =====
 
+    /**
+     * Returns a new empty deque.
+     * Note: We cannot use a singleton because the underlying datastructures deque
+     * uses copy-on-write with buffer mutation when owned=true.
+     */
     public static MezzeDeque empty() {
-        return EMPTY;
+        return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.empty());
     }
 
     public static MezzeDeque of(Object element) {
@@ -56,7 +58,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
 
     @TruffleBoundary
     public static MezzeDeque of(Object... elements) {
-        if (elements.length == 0) return EMPTY;
+        if (elements.length == 0) return empty();
         return new MezzeDeque(com.mezze.datastructures.deque.MezzeDeque.of(elements));
     }
 
@@ -121,7 +123,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     public Object[] popFront() {
         if (delegate.isEmpty()) return null;
         com.mezze.datastructures.deque.MezzeDeque.PopResult<Object> result = delegate.popFront();
-        MezzeDeque newDeque = result.rest().isEmpty() ? EMPTY : new MezzeDeque(result.rest());
+        MezzeDeque newDeque = result.rest().isEmpty() ? empty() : new MezzeDeque(result.rest());
         return new Object[]{result.element(), newDeque};
     }
 
@@ -160,7 +162,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     public Object[] popBack() {
         if (delegate.isEmpty()) return null;
         com.mezze.datastructures.deque.MezzeDeque.PopResult<Object> result = delegate.popBack();
-        MezzeDeque newDeque = result.rest().isEmpty() ? EMPTY : new MezzeDeque(result.rest());
+        MezzeDeque newDeque = result.rest().isEmpty() ? empty() : new MezzeDeque(result.rest());
         return new Object[]{newDeque, result.element()};
     }
 
@@ -188,7 +190,7 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     @TruffleBoundary
     public MezzeDeque take(int n) {
         // Build a new deque with first n elements
-        if (n <= 0 || delegate.isEmpty()) return EMPTY;
+        if (n <= 0 || delegate.isEmpty()) return empty();
         com.mezze.datastructures.deque.MezzeDeque<Object> result = com.mezze.datastructures.deque.MezzeDeque.empty();
         int count = 0;
         for (Object elem : delegate) {
@@ -205,12 +207,12 @@ public final class MezzeDeque implements TruffleObject, Iterable<Object> {
     @TruffleBoundary
     public MezzeDeque drop(int n) {
         if (n <= 0) return this;
-        if (n >= delegate.size()) return EMPTY;
+        if (n >= delegate.size()) return empty();
         com.mezze.datastructures.deque.MezzeDeque<Object> result = delegate;
         for (int i = 0; i < n && !result.isEmpty(); i++) {
             result = result.popFront().rest();
         }
-        return result.isEmpty() ? EMPTY : new MezzeDeque(result);
+        return result.isEmpty() ? empty() : new MezzeDeque(result);
     }
 
     // ===== CONVERSION =====
