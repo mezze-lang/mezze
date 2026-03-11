@@ -199,9 +199,9 @@ class ConstraintGenerator(
                             // Pass contentHash for simple bindings (single variable pattern)
                             val bindingHash = if (item.isSimpleBinding) item.contentHash else null
                             currentContext = currentContext.extendAll(
-                                patternResult.bindings.mapValues { (_, type) ->
-                                    TypingContext.Binding.Monomorphic(type, contentHash = bindingHash)
-                                }
+                                patternResult.bindings.map { (name, type) ->
+                                    BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type, contentHash = bindingHash)
+                                }.toMap()
                             )
                             continue
                         }
@@ -374,14 +374,17 @@ class ConstraintGenerator(
 
                             // GENERALIZATION: Check if bindings should be polymorphic
                             // Convert pattern bindings to context bindings with generalization
-                            val contextBindings = solvedBindingsWithEffects.mapValues { (name, solvedType) ->
+                            // Note: pattern bindings are local (unqualified) names
+                            val contextBindings = solvedBindingsWithEffects.map { (name, solvedType) ->
+                                val bindingKey = BindingKey.unqualified(name)
+                                bindingKey to run {
                                 // Collect free type variables in the solved type
                                 val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(solvedType)
 
                                 // Get free type variables from current context
                                 // CRITICAL: Exclude the binding being generalized from context vars calculation
                                 // This prevents the placeholder's type vars from blocking generalization
-                                val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(name))
+                                val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
 
                                 // Quantify variables that don't appear in context
                                 val quantifiableVars = freeVars - contextVars
@@ -524,7 +527,7 @@ class ConstraintGenerator(
                                     val bindingHash = if (item.isSimpleBinding) item.contentHash else null
                                     TypingContext.Binding.Monomorphic(solvedType, contentHash = bindingHash)
                                 }
-                            }
+                            }}.toMap()
 
                             // Update context with final inferred types (replacing placeholders)
                             // Polymorphic bindings will be instantiated at use sites
@@ -772,15 +775,15 @@ class ConstraintGenerator(
      * Helper: Get all free type variables from context bindings.
      * Used for let-polymorphism to determine which variables to quantify.
      *
-     * @param excludeBindings Names of bindings to exclude (e.g., the binding being generalized)
+     * @param excludeBindings BindingKeys of bindings to exclude (e.g., the binding being generalized)
      *                        This is CRITICAL for recursive functions - when generalizing `singleton`,
      *                        we should NOT include `singleton`'s placeholder type in the context vars.
      */
-    private fun getContextFreeVars(context: TypingContext, excludeBindings: Set<String> = emptySet()): Set<TypeVar> {
+    private fun getContextFreeVars(context: TypingContext, excludeBindings: Set<BindingKey> = emptySet()): Set<TypeVar> {
         val freeVars = mutableSetOf<TypeVar>()
-        for ((name, binding) in context.getAllBindings()) {
+        for ((key, binding) in context.getAllBindings()) {
             // Skip bindings that should be excluded (like the binding being generalized)
-            if (name in excludeBindings) continue
+            if (key in excludeBindings) continue
 
             when (binding) {
                 is TypingContext.Binding.Monomorphic -> {

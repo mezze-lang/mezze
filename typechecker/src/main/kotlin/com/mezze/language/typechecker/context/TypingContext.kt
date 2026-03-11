@@ -16,7 +16,7 @@ import com.mezze.language.ast.*
  * - O(1) ability lookup: secondary index by ability name
  */
 data class TypingContext(
-    private val bindings: Map<String, Binding>,
+    private val bindings: Map<BindingKey, Binding>,
     private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
     private val abilityImplsByName: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash]
     // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
@@ -33,7 +33,10 @@ data class TypingContext(
      */
     sealed class LookupResult {
         data class Found(val binding: Binding) : LookupResult()
-        data class NotFound(val name: String) : LookupResult()
+        data class NotFound(val key: BindingKey) : LookupResult() {
+            /** Display name for error messages */
+            val displayName: String get() = if (key.qualifier != null) "${key.qualifier}.${key.localName}" else key.localName
+        }
     }
 
     /**
@@ -93,45 +96,75 @@ data class TypingContext(
     )
 
     /**
-     * Look up a variable in this context or parent contexts.
+     * Look up a variable in this context or parent contexts using a BindingKey.
      * Returns sealed type - no nulls, exhaustive when required!
      */
-    fun lookup(name: String): LookupResult {
+    fun lookup(key: BindingKey): LookupResult {
         // Check local bindings first
-        val localBinding = bindings[name]
+        val localBinding = bindings[key]
         return when {
             localBinding != null -> LookupResult.Found(localBinding)
-            parent != null -> parent.lookup(name)
-            else -> LookupResult.NotFound(name)
+            parent != null -> parent.lookup(key)
+            else -> LookupResult.NotFound(key)
         }
     }
 
     /**
-     * Extend context with a new binding.
+     * Look up by simple name (unqualified).
+     * Convenience method for local variable lookups.
+     */
+    fun lookup(name: String): LookupResult = lookup(BindingKey.unqualified(name))
+
+    /**
+     * Extend context with a new binding using a BindingKey.
      * Returns NEW context, does not mutate!
      */
-    fun extend(name: String, binding: Binding): TypingContext {
-        return copy(bindings = bindings + (name to binding))
+    fun extend(key: BindingKey, binding: Binding): TypingContext {
+        return copy(bindings = bindings + (key to binding))
     }
 
     /**
-     * Extend context with a monomorphic binding (common case)
+     * Extend context with a new binding by simple name (unqualified).
+     * Convenience method for local variable bindings.
+     */
+    fun extend(name: String, binding: Binding): TypingContext {
+        return extend(BindingKey.unqualified(name), binding)
+    }
+
+    /**
+     * Extend context with a monomorphic binding using a BindingKey.
+     */
+    fun extendMono(key: BindingKey, type: MezzeType, sourceModule: String? = null, contentHash: String? = null): TypingContext {
+        return extend(key, Binding.Monomorphic(type, sourceModule, contentHash))
+    }
+
+    /**
+     * Extend context with a monomorphic binding by simple name (unqualified).
+     * Convenience method for local variable bindings.
      */
     fun extendMono(name: String, type: MezzeType, sourceModule: String? = null, contentHash: String? = null): TypingContext {
-        return extend(name, Binding.Monomorphic(type, sourceModule, contentHash))
+        return extendMono(BindingKey.unqualified(name), type, sourceModule, contentHash)
     }
 
     /**
-     * Extend context with a polymorphic binding
+     * Extend context with a polymorphic binding using a BindingKey.
+     */
+    fun extendPoly(key: BindingKey, scheme: TypeScheme, sourceModule: String? = null, contentHash: String? = null): TypingContext {
+        return extend(key, Binding.Polymorphic(scheme, sourceModule, contentHash))
+    }
+
+    /**
+     * Extend context with a polymorphic binding by simple name (unqualified).
+     * Convenience method for local variable bindings.
      */
     fun extendPoly(name: String, scheme: TypeScheme, sourceModule: String? = null, contentHash: String? = null): TypingContext {
-        return extend(name, Binding.Polymorphic(scheme, sourceModule, contentHash))
+        return extendPoly(BindingKey.unqualified(name), scheme, sourceModule, contentHash)
     }
 
     /**
-     * Extend context with multiple bindings at once
+     * Extend context with multiple bindings at once using BindingKeys.
      */
-    fun extendAll(newBindings: Map<String, Binding>): TypingContext {
+    fun extendAll(newBindings: Map<BindingKey, Binding>): TypingContext {
         return copy(bindings = bindings + newBindings)
     }
 
@@ -292,44 +325,63 @@ data class TypingContext(
     }
 
     /**
-     * Check if a variable is bound locally (not in parent)
+     * Check if a binding key is bound locally (not in parent)
      */
-    fun hasLocal(name: String): Boolean = bindings.containsKey(name)
+    fun hasLocal(key: BindingKey): Boolean = bindings.containsKey(key)
 
     /**
-     * Get all local bindings (for debugging/error messages)
+     * Check if a simple name is bound locally (unqualified lookup)
      */
-    fun localNames(): Set<String> = bindings.keys
+    fun hasLocal(name: String): Boolean = hasLocal(BindingKey.unqualified(name))
 
     /**
-     * Get all bindings including parent contexts (for debugging)
+     * Get all local binding keys (for debugging/error messages)
      */
-    fun allNames(): Set<String> {
-        val parentNames = parent?.allNames() ?: emptySet()
-        return bindings.keys + parentNames
+    fun localKeys(): Set<BindingKey> = bindings.keys
+
+    /**
+     * Get all local binding display names (for debugging/error messages)
+     */
+    fun localNames(): Set<String> = bindings.keys.map {
+        if (it.qualifier != null) "${it.qualifier}.${it.localName}" else it.localName
+    }.toSet()
+
+    /**
+     * Get all binding keys including parent contexts (for debugging)
+     */
+    fun allKeys(): Set<BindingKey> {
+        val parentKeys = parent?.allKeys() ?: emptySet()
+        return bindings.keys + parentKeys
     }
+
+    /**
+     * Get all binding names including parent contexts (for debugging)
+     */
+    fun allNames(): Set<String> = allKeys().map {
+        if (it.qualifier != null) "${it.qualifier}.${it.localName}" else it.localName
+    }.toSet()
 
     /**
      * Get all bindings including parent contexts (for error messages with suggestions)
      */
-    fun getAllBindings(): Map<String, Binding> {
+    fun getAllBindings(): Map<BindingKey, Binding> {
         val parentBindings = parent?.getAllBindings() ?: emptyMap()
         return parentBindings + bindings  // Local bindings override parent bindings
     }
 
     /**
      * Get content hashes for all bindings (for identifier resolution).
-     * Returns a map of binding name to content hash (only for bindings that have hashes).
+     * Returns a map of binding key to content hash (only for bindings that have hashes).
      */
-    fun getContentHashes(): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-        for ((name, binding) in getAllBindings()) {
+    fun getContentHashes(): Map<BindingKey, String> {
+        val result = mutableMapOf<BindingKey, String>()
+        for ((key, binding) in getAllBindings()) {
             val hash = when (binding) {
                 is Binding.Monomorphic -> binding.contentHash
                 is Binding.Polymorphic -> binding.contentHash
             }
             if (hash != null) {
-                result[name] = hash
+                result[key] = hash
             }
         }
         return result
@@ -351,13 +403,26 @@ data class TypingContext(
         )
 
         /**
-         * Create context from map (for testing)
+         * Create context from map with BindingKeys.
          */
-        fun from(bindings: Map<String, MezzeType>): TypingContext {
+        fun fromBindingKeys(bindings: Map<BindingKey, MezzeType>): TypingContext {
             return TypingContext(
                 bindings = bindings.mapValues { (_, type) ->
                     Binding.Monomorphic(type)
                 },
+                abilityImpls = emptyMap(),
+                abilityImplsByName = emptyMap()
+            )
+        }
+
+        /**
+         * Create context from map with simple names (for testing - unqualified bindings only).
+         */
+        fun from(bindings: Map<String, MezzeType>): TypingContext {
+            return TypingContext(
+                bindings = bindings.map { (name, type) ->
+                    BindingKey.unqualified(name) to Binding.Monomorphic(type)
+                }.toMap(),
                 abilityImpls = emptyMap(),
                 abilityImplsByName = emptyMap()
             )

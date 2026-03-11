@@ -135,10 +135,12 @@ class ModuleTypeChecker(
         // Types with free type variables are registered as polymorphic
         // so they get instantiated with fresh type variables on each use
         for ((name, binding) in importContext.importedBindings) {
+            // Parse the name to handle qualified names like "buffer::empty"
+            val bindingKey = BindingKey.parse(name)
             val freeVars = collectFreeTypeVars(binding.type)
             if (freeVars.isEmpty()) {
                 // Monomorphic type - use directly
-                context = context.extendMono(name, binding.type, binding.modulePath, binding.contentHash)
+                context = context.extendMono(bindingKey, binding.type, binding.modulePath, binding.contentHash)
             } else {
                 // Polymorphic type - wrap in TypeScheme for fresh instantiation
                 val scheme = TypeScheme(
@@ -146,7 +148,7 @@ class ModuleTypeChecker(
                     constraints = emptyList(),
                     type = binding.type
                 )
-                context = context.extendPoly(name, scheme, binding.modulePath, binding.contentHash)
+                context = context.extendPoly(bindingKey, scheme, binding.modulePath, binding.contentHash)
             }
         }
 

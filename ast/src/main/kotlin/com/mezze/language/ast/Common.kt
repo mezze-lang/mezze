@@ -356,6 +356,28 @@ data class BindingKey(
             qualifier = ref.qualifier?.shortName,
             localName = ref.localName
         )
+
+        /**
+         * Parse a string that may contain `::` into a BindingKey.
+         *
+         * Examples:
+         * - "foo" -> BindingKey(null, "foo")
+         * - "int::to_string" -> BindingKey("int", "to_string")
+         * - "std::collections::seq::empty" -> BindingKey("std::collections::seq", "empty")
+         *
+         * Note: This is for internal use to convert legacy string keys.
+         * New code should construct BindingKey directly with structured data.
+         */
+        fun parse(keyString: String): BindingKey {
+            val lastSeparator = keyString.lastIndexOf("::")
+            return if (lastSeparator == -1) {
+                unqualified(keyString)
+            } else {
+                val qualifier = keyString.substring(0, lastSeparator)
+                val localName = keyString.substring(lastSeparator + 2)
+                qualified(qualifier, localName)
+            }
+        }
     }
 }
 

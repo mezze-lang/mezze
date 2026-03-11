@@ -278,16 +278,17 @@ class ExpressionConstraintGenerator {
     // ========================================================================
 
     private fun generateIdentifier(expr: Identifier, context: ConstraintContext): ConstraintResult {
-        val lookupKey = expr.toBindingKey().toKeyString()
+        val lookupKey = expr.toBindingKey()
+        val lookupKeyString = lookupKey.toKeyString()  // For usedVariables, DefinitionRef, etc.
         if (expr.localName == "Show") {
-            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${lookupKey}'" }
+            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${lookupKeyString}'" }
         }
 
         // Look up variable in typing context
         return when (val result = context.typingContext.lookup(lookupKey)) {
             is TypingContext.LookupResult.Found -> {
                 if (expr.localName == "Show") {
-                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${lookupKey}' in context!" }
+                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${lookupKeyString}' in context!" }
                 }
                 when (val binding = result.binding) {
                     is TypingContext.Binding.Monomorphic -> {
@@ -296,20 +297,20 @@ class ExpressionConstraintGenerator {
                         // This allows perform expressions to know what effects need handling
                         val type = binding.type
                         // Track reference for dependency graph (module-qualified if from another module)
-                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKey)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
                         when (type) {
                             is MezzeType.SuspendedType -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
                                 effects = type.effects.effects,  // Propagate effects from SuspendedType
                                 effectInstances = type.effects.effectInstances,  // Propagate effect instances for associated type bindings
-                                usedVariables = setOf(lookupKey),  // Track variable usage
+                                usedVariables = setOf(lookupKeyString),  // Track variable usage
                                 referencedBindings = setOf(referencedBinding)
                             )
                             else -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
-                                usedVariables = setOf(lookupKey),  // Track variable usage
+                                usedVariables = setOf(lookupKeyString),  // Track variable usage
                                 referencedBindings = setOf(referencedBinding)
                             )
                         }
@@ -326,7 +327,7 @@ class ExpressionConstraintGenerator {
                                 typeVar = freshConstraint.typeVar,
                                 abilityName = freshConstraint.abilityName,
                                 typeArgs = freshConstraint.typeArgs,
-                                context = "Polymorphic instantiation of '${lookupKey}'",
+                                context = "Polymorphic instantiation of '${lookupKeyString}'",
                                 sourceLocation = expr.sourceLocation
                             )
                         }
@@ -343,7 +344,7 @@ class ExpressionConstraintGenerator {
                         }
 
                         // Track reference for dependency graph (module-qualified if from another module)
-                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKey)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
 
                         ConstraintResult(
                             type = type,
@@ -351,7 +352,7 @@ class ExpressionConstraintGenerator {
                             effects = effects,
                             effectInstances = effectInstances,  // Propagate effect instances for associated type bindings
                             abilityConstraints = abilityConstraints,
-                            usedVariables = setOf(lookupKey),  // Track variable usage
+                            usedVariables = setOf(lookupKeyString),  // Track variable usage
                             referencedBindings = setOf(referencedBinding)
                         )
                     }
@@ -364,12 +365,12 @@ class ExpressionConstraintGenerator {
                 // CRITICAL: Check if this is an ability or effect being used as a value
                 // Abilities and effects start with uppercase but should NOT be treated as variant constructors
                 // They should be marked as undefined variables so validation can catch them
-                val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(lookupKey)
-                val isUserDefinedAbility = lookupKey in context.abilityNames
-                val isEffect = lookupKey in context.effectNames
+                val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(lookupKeyString)
+                val isUserDefinedAbility = lookupKeyString in context.abilityNames
+                val isEffect = lookupKeyString in context.effectNames
 
                 if (expr.localName == "Show") {
-                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${lookupKey}'") {
+                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${lookupKeyString}'") {
                         listOf(
                             "isBuiltInAbility: $isBuiltInAbility",
                             "isUserDefinedAbility: $isUserDefinedAbility",
@@ -389,7 +390,7 @@ class ExpressionConstraintGenerator {
                         constraints = emptyList(),
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
-                                name = lookupKey,
+                                name = lookupKeyString,
                                 sourceLocation = expr.sourceLocation,
                                 qualifier = expr.qualifier,
                                 isQualified = expr.isQualified
@@ -426,7 +427,7 @@ class ExpressionConstraintGenerator {
                         constraints = emptyList(),
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
-                                name = lookupKey,
+                                name = lookupKeyString,
                                 sourceLocation = expr.sourceLocation,
                                 qualifier = expr.qualifier,
                                 isQualified = expr.isQualified
@@ -3218,14 +3219,14 @@ class ExpressionConstraintGenerator {
                             type = annotatedType
                         )
 
-                        patternResult.bindings.mapValues { (_, _) ->
-                            TypingContext.Binding.Polymorphic(scheme)
-                        }
+                        patternResult.bindings.map { (name, _) ->
+                            BindingKey.unqualified(name) to TypingContext.Binding.Polymorphic(scheme)
+                        }.toMap()
                     } else {
                         // Regular monomorphic binding
-                        patternResult.bindings.mapValues { (_, type) ->
-                            TypingContext.Binding.Monomorphic(type)
-                        }
+                        patternResult.bindings.map { (name, type) ->
+                            BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type)
+                        }.toMap()
                     }
 
                     val extendedTypingContext = typingContext.extendAll(contextBindings)

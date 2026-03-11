@@ -69,7 +69,10 @@ class TypeValidator(
                 for (undefinedVar in result.undefinedVariables) {
                     // Get similar variable names from context for suggestions
                     val allVariables = context.getAllBindings()
-                    val similarNames = findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                    val candidateNames = allVariables.keys.map { key ->
+                        if (key.qualifier != null) "${key.qualifier}.${key.localName}" else key.localName
+                    }
+                    val similarNames = findSimilarNames(undefinedVar.name, candidateNames)
 
                     errors.add(
                         ValidationError.VariableNotInScope(

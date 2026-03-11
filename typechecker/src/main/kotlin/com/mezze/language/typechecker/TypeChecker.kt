@@ -349,7 +349,8 @@ class TypeChecker(
                     if (privateItemMessage != null) {
                         privateItemMessage
                     } else {
-                        val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                        val candidateNames = allVariables.keys.map { key -> key.toKeyString() }
+                        val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
                         buildString {
                             append("Undefined variable or function: ${undefinedVar.name}")
                             if (similarNames.isNotEmpty()) {
@@ -802,7 +803,8 @@ class TypeChecker(
                 } else {
                     val validator = TypeValidator(context, allTypeDeclarations, allEffectDeclarations, buildResult.implDeclarations)
                     val allVariables = context.getAllBindings()
-                    val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                    val candidateNames = allVariables.keys.map { key -> key.toKeyString() }
+                    val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
                     buildString {
                         append("Undefined variable or function: ${undefinedVar.name}")
                         if (similarNames.isNotEmpty()) {
@@ -1235,10 +1237,12 @@ class TypeChecker(
         // Types with free type variables are registered as polymorphic
         // so they get instantiated with fresh type variables on each use
         for ((name, binding) in importContext.importedBindings) {
+            // Parse the name to handle qualified names like "buffer::empty"
+            val bindingKey = BindingKey.parse(name)
             val freeVars = collectFreeTypeVars(binding.type)
             if (freeVars.isEmpty()) {
                 // Monomorphic type - use directly
-                context = context.extendMono(name, binding.type, binding.modulePath, binding.contentHash)
+                context = context.extendMono(bindingKey, binding.type, binding.modulePath, binding.contentHash)
             } else {
                 // Polymorphic type - wrap in TypeScheme for fresh instantiation
                 val scheme = TypeScheme(
@@ -1246,7 +1250,7 @@ class TypeChecker(
                     constraints = emptyList(),
                     type = binding.type
                 )
-                context = context.extendPoly(name, scheme, binding.modulePath, binding.contentHash)
+                context = context.extendPoly(bindingKey, scheme, binding.modulePath, binding.contentHash)
             }
         }
 
@@ -1721,10 +1725,12 @@ class TypeChecker(
             // so they get instantiated with fresh type variables on each use
             var context = TypingContext.empty
             for ((name, type) in nativeFunctions) {
+                // Parse the name to handle qualified names like "int::to_string"
+                val bindingKey = BindingKey.parse(name)
                 val freeVars = collectFreeTypeVars(type)
                 if (freeVars.isEmpty()) {
                     // Monomorphic type - use directly
-                    context = context.extendMono(name, type)
+                    context = context.extendMono(bindingKey, type)
                 } else {
                     // Polymorphic type - wrap in TypeScheme for fresh instantiation
                     val scheme = TypeScheme(
@@ -1732,7 +1738,7 @@ class TypeChecker(
                         constraints = emptyList(),
                         type = type
                     )
-                    context = context.extendPoly(name, scheme)
+                    context = context.extendPoly(bindingKey, scheme)
                 }
             }
 
