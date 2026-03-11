@@ -541,6 +541,10 @@ class ImportResolver(
                     if (typeDecl != null) {
                         types[localName] = typeDecl
                     }
+                    // Note: Types are NOT added to bindings because they don't have runtime values.
+                    // Type imports are compile-time only (used by typechecker, not interpreter).
+                    // If we added them to bindings, the interpreter would try to look up a
+                    // non-existent value by content hash.
                 }
                 ExportedItemType.ABILITY -> {
                     // O(1) lookup via module index
@@ -552,6 +556,8 @@ class ImportResolver(
                             abilitiesByHash[hash] = abilityDecl
                         }
                     }
+                    // Note: Abilities are NOT added to bindings because they don't have runtime values.
+                    // Ability imports are compile-time only (used by typechecker, not interpreter).
                 }
                 ExportedItemType.EFFECT -> {
                     // O(1) lookup via module index
@@ -563,6 +569,8 @@ class ImportResolver(
                             effectsByHash[hash] = effectDecl
                         }
                     }
+                    // Note: Effects are NOT added to bindings because they don't have runtime values.
+                    // Effect imports are compile-time only (used by typechecker, not interpreter).
                 }
             }
         }

@@ -186,12 +186,21 @@ class ASTToTruffleConverterV2(
     private fun convertUseDeclaration(useDecl: UseDeclaration): MezzeNode {
         return when (val usePath = useDecl.path) {
             is SelectivePath -> {
-                val bindingNodes = usePath.items.map { importItem ->
-                    val importedName = importItem.name
-                    val localName = importItem.alias ?: importedName
-                    val slot = getOrCreateSlot(localName)
-                    // Pass structured module segments - no string building needed
-                    UseBindingNode(slot, usePath.module, importedName, localName, importItem.contentHash)
+                val bindingNodes = usePath.items.mapNotNull { importItem ->
+                    // Only create binding nodes for value imports (functions, constructors)
+                    // Type/Ability/Effect imports are compile-time only - no runtime binding needed
+                    if (!importItem.needsRuntimeBinding) {
+                        null
+                    } else {
+                        val contentHash = importItem.contentHash
+                            ?: throw IllegalStateException(
+                                "Value import '${importItem.name}' missing content hash. " +
+                                "This indicates a bug in the typechecker - content hash should be populated during import resolution."
+                            )
+                        val localName = importItem.alias ?: importItem.name
+                        val slot = getOrCreateSlot(localName)
+                        UseBindingNode(slot, localName, contentHash)
+                    }
                 }
                 if (bindingNodes.isEmpty()) {
                     UnitLiteralNode()

@@ -24,21 +24,17 @@ import com.mezze.interpreter.v2.values.MezzeSuspended
 
 /**
  * Node that binds an imported value from a use declaration.
- * Uses content hash for O(1) lookup when available, falls back to qualified name.
+ * Uses content hash for O(1) lookup - content hash is REQUIRED.
  *
  * @param slot Frame slot to bind the value to
- * @param moduleSegments Structured module path segments (e.g., ["std", "collections", "seq"])
- * @param importedName Name of the item being imported
  * @param localName Local binding name (may differ from importedName if aliased)
- * @param contentHash Content hash for O(1) lookup (populated by typechecker)
+ * @param contentHash Content hash for O(1) lookup (populated by typechecker, REQUIRED)
  */
 @NodeInfo(shortName = "use-binding")
 class UseBindingNode(
     private val slot: Int,
-    private val moduleSegments: List<String>,
-    private val importedName: String,
     private val localName: String,
-    private val contentHash: String? = null
+    private val contentHash: String
 ) : MezzeNode() {
 
     @CompilationFinal
@@ -63,36 +59,19 @@ class UseBindingNode(
     private fun lookupImport(): Any {
         val context = MezzeContext.get(this)
 
-        // Prefer content hash lookup (O(1), collision-free)
-        if (contentHash != null) {
-            val value = context.lookupGlobal(contentHash)
-            if (value != null) {
-                // Cache the value for subsequent calls
-                cachedValue = value
-                initialized = true
-                return value
-            }
+        // Content hash lookup (O(1), collision-free)
+        val value = context.lookupGlobal(contentHash)
+        if (value != null) {
+            cachedValue = value
+            initialized = true
+            return value
         }
 
-        // Fall back to qualified name lookup (build string only when needed)
-        val qualifiedName = buildQualifiedName()
-        val value = context.lookupGlobal(qualifiedName) ?: MezzeUnit.INSTANCE
-        cachedValue = value
-        initialized = true
-        return value
-    }
-
-    /**
-     * Build qualified name string for fallback lookup.
-     * Only called when content hash lookup fails.
-     */
-    @TruffleBoundary
-    private fun buildQualifiedName(): String {
-        return if (moduleSegments.isEmpty()) {
-            importedName
-        } else {
-            moduleSegments.joinToString("::") + "::" + importedName
-        }
+        // Content hash should always resolve - this is a bug if we get here
+        throw IllegalStateException(
+            "Import lookup failed: content hash '$contentHash' not found for '$localName'. " +
+            "This indicates a bug in the typechecker - content hash should always be registered."
+        )
     }
 }
 

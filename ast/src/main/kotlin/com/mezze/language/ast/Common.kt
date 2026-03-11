@@ -284,16 +284,36 @@ data class SelectivePath(
 ) : UsePath
 
 /**
+ * Kind of imported item - determines whether the import needs runtime binding.
+ */
+@Serializable
+enum class ImportItemKind {
+    /** Value imports (functions, constructors) need runtime binding */
+    VALUE,
+    /** Type imports are compile-time only, no runtime binding needed */
+    TYPE,
+    /** Ability imports are compile-time only, no runtime binding needed */
+    ABILITY,
+    /** Effect imports are compile-time only, no runtime binding needed */
+    EFFECT
+}
+
+/**
  * Individual item in a selective import.
  * The contentHash is populated by the typechecker during import resolution,
  * enabling O(1) content-addressed lookups instead of name-based lookups.
+ * The kind field indicates whether this import needs runtime binding.
  */
 @Serializable
 data class ImportItem(
     val name: String,
     val alias: String? = null,
-    val contentHash: String? = null
-)
+    val contentHash: String? = null,
+    val kind: ImportItemKind = ImportItemKind.VALUE  // Default to VALUE for backward compatibility
+) {
+    /** Returns true if this import requires a runtime binding (value lookup) */
+    val needsRuntimeBinding: Boolean get() = kind == ImportItemKind.VALUE
+}
 
 // ============================================================================
 // QUALIFIED REFERENCES

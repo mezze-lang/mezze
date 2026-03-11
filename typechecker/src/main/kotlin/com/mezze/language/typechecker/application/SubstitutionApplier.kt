@@ -249,8 +249,8 @@ class SubstitutionApplier(
             is AbilityDeclaration -> applyToAbilityDeclaration(item)
             is ImplAbilityDeclaration -> applyToImplAbilityDeclaration(item)
             is TopLevelExpression -> applyToTopLevelExpression(item)
-            is UseDeclaration -> item  // No types to update
-            is PubUseDeclaration -> item  // No types to update
+            is UseDeclaration -> applyToUseDeclaration(item)
+            is PubUseDeclaration -> applyToPubUseDeclaration(item)
         }
     }
 
@@ -579,6 +579,91 @@ class SubstitutionApplier(
         return topLevel.copy(
             expression = updatedExpression
         )
+    }
+
+    /**
+     * Apply substitution to a use declaration.
+     *
+     * Updates ImportItem.contentHash for selective imports.
+     * The content hash enables O(1) content-addressed lookups in the interpreter.
+     */
+    private fun applyToUseDeclaration(useDecl: UseDeclaration): UseDeclaration {
+        val updatedPath = applyToUsePath(useDecl.path)
+        return if (updatedPath !== useDecl.path) {
+            useDecl.copy(path = updatedPath)
+        } else {
+            useDecl
+        }
+    }
+
+    /**
+     * Apply substitution to a pub use declaration.
+     *
+     * Updates ImportItem.contentHash for selective imports.
+     */
+    private fun applyToPubUseDeclaration(pubUseDecl: PubUseDeclaration): PubUseDeclaration {
+        val updatedPath = applyToUsePath(pubUseDecl.path)
+        return if (updatedPath !== pubUseDecl.path) {
+            pubUseDecl.copy(path = updatedPath)
+        } else {
+            pubUseDecl
+        }
+    }
+
+    /**
+     * Apply substitution to a use path.
+     *
+     * For SelectivePath, updates each ImportItem with:
+     * - contentHash: resolved content hash for value imports
+     * - kind: the type of import (VALUE, TYPE, ABILITY, EFFECT)
+     *
+     * This information is used by the interpreter to:
+     * - Skip non-value imports (they don't need runtime binding)
+     * - Look up value imports by content hash
+     */
+    private fun applyToUsePath(path: UsePath): UsePath {
+        return when (path) {
+            is SelectivePath -> {
+                val updatedItems = path.items.map { item ->
+                    // Look up the content hash by the local name (alias or original name)
+                    val localName = item.alias ?: item.name
+                    val bindingKey = BindingKey(qualifier = null, localName = localName)
+                    val contentHash = identifierContentHashes[bindingKey]
+
+                    // Determine the kind of import
+                    val kind = when {
+                        // Check if it's a type import (TYPE declarations don't have content hashes in bindings)
+                        typeDeclarations.containsKey(localName) -> ImportItemKind.TYPE
+                        // Check if it's an ability import
+                        abilityDeclarations.containsKey(localName) -> ImportItemKind.ABILITY
+                        // Check if it's an effect import
+                        effectDeclarations.containsKey(localName) -> ImportItemKind.EFFECT
+                        // Otherwise it's a value import (function, constructor)
+                        else -> ImportItemKind.VALUE
+                    }
+
+                    // Update the item if contentHash or kind changed
+                    val needsUpdate = (contentHash != null && contentHash != item.contentHash) ||
+                                      kind != item.kind
+                    if (needsUpdate) {
+                        item.copy(
+                            contentHash = contentHash ?: item.contentHash,
+                            kind = kind
+                        )
+                    } else {
+                        item
+                    }
+                }
+
+                // Only create new SelectivePath if items changed
+                if (updatedItems.zip(path.items).any { (new, old) -> new !== old }) {
+                    SelectivePath(module = path.module, items = updatedItems)
+                } else {
+                    path
+                }
+            }
+            is ModulePath -> path  // No content hashes needed for module-level imports
+        }
     }
 
     /**
