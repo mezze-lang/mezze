@@ -5,7 +5,6 @@ import com.mezze.interpreter.v2.values.MezzeUnit
 import com.mezze.interpreter.v2.values.MezzeRecord
 import com.mezze.interpreter.v2.values.MezzeList
 import com.mezze.interpreter.v2.values.MezzeVariant
-import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.interpreter.v2.runtime.MezzeContext
@@ -26,11 +25,18 @@ import com.mezze.interpreter.v2.values.MezzeSuspended
 /**
  * Node that binds an imported value from a use declaration.
  * Uses content hash for O(1) lookup when available, falls back to qualified name.
+ *
+ * @param slot Frame slot to bind the value to
+ * @param moduleSegments Structured module path segments (e.g., ["std", "collections", "seq"])
+ * @param importedName Name of the item being imported
+ * @param localName Local binding name (may differ from importedName if aliased)
+ * @param contentHash Content hash for O(1) lookup (populated by typechecker)
  */
 @NodeInfo(shortName = "use-binding")
 class UseBindingNode(
     private val slot: Int,
-    private val qualifiedName: String,
+    private val moduleSegments: List<String>,
+    private val importedName: String,
     private val localName: String,
     private val contentHash: String? = null
 ) : MezzeNode() {
@@ -68,11 +74,25 @@ class UseBindingNode(
             }
         }
 
-        // Fall back to qualified name lookup
+        // Fall back to qualified name lookup (build string only when needed)
+        val qualifiedName = buildQualifiedName()
         val value = context.lookupGlobal(qualifiedName) ?: MezzeUnit.INSTANCE
         cachedValue = value
         initialized = true
         return value
+    }
+
+    /**
+     * Build qualified name string for fallback lookup.
+     * Only called when content hash lookup fails.
+     */
+    @TruffleBoundary
+    private fun buildQualifiedName(): String {
+        return if (moduleSegments.isEmpty()) {
+            importedName
+        } else {
+            moduleSegments.joinToString("::") + "::" + importedName
+        }
     }
 }
 
@@ -952,9 +972,6 @@ class ParameterizedHandleNode(
         try {
             val result = bodyChild.execute(frame)
             return processResult(result)
-        } catch (e: ForkedExecutionException) {
-            // Fork completed - return the forked values as the result
-            return e.values
         } finally {
             // LAZY EFFECTS: Pop handlers from stack
             if (handler != null) {

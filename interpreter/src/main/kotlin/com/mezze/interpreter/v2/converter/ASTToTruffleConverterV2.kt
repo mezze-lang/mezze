@@ -186,13 +186,12 @@ class ASTToTruffleConverterV2(
     private fun convertUseDeclaration(useDecl: UseDeclaration): MezzeNode {
         return when (val usePath = useDecl.path) {
             is SelectivePath -> {
-                val modulePath = usePath.module.joinToString("::")
                 val bindingNodes = usePath.items.map { importItem ->
                     val importedName = importItem.name
                     val localName = importItem.alias ?: importedName
                     val slot = getOrCreateSlot(localName)
-                    val qualifiedImportName = "$modulePath::$importedName"
-                    UseBindingNode(slot, qualifiedImportName, localName, importItem.contentHash)
+                    // Pass structured module segments - no string building needed
+                    UseBindingNode(slot, usePath.module, importedName, localName, importItem.contentHash)
                 }
                 if (bindingNodes.isEmpty()) {
                     UnitLiteralNode()
@@ -2355,7 +2354,6 @@ class ASTToTruffleConverterV2(
             "__native_continuation_suspend" -> ContinuationSuspendNode.create()
             "__native_continuation_suspend_with" -> ContinuationSuspendWithNode.create(convertExpression(args))
             "__native_continuation_resume" -> ContinuationResumeNode.create(convertExpression(args))
-            "__native_continuation_fork" -> ContinuationForkNode.create(convertExpression(args))
             "__native_continuation_abort" -> ContinuationAbortNode.create(convertExpression(args))
             "__native_continuation_extract_suspended" -> ContinuationExtractSuspendedNode.create(convertExpression(args))
             "__native_continuation_deactivate" -> ContinuationDeactivateNode.create(convertExpression(args))
