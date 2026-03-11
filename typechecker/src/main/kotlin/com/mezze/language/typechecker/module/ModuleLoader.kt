@@ -215,13 +215,13 @@ class ModuleLoader(
             filePath = resolverModule.filePath,
             program = resolverModule.program,
             exports = resolverModule.exports.mapValues { (_, exportedItem) ->
-                ExportedItem(
+ExportedItem(
                     name = exportedItem.name,
                     type = convertExportType(exportedItem.type),
                     mezzeType = exportedItem.mezzeType,
                     originalName = exportedItem.originalName,
                     visibility = exportedItem.visibility,
-                    contentHash = exportedItem.contentHash
+                    contentHash = exportedItem.contentHash  // Already non-null from ModuleResolver
                 )
             },
             dependencies = resolverModule.dependencies.map { it.modulePath },

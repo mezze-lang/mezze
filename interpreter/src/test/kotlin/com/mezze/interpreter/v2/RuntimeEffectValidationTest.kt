@@ -46,9 +46,13 @@ class RuntimeEffectValidationTest {
         assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
         val suspended = result as MezzeSuspended
 
-        // Should have Log as unhandled effect
-        assertTrue(suspended.unhandledEffects.contains("Log"),
-            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
+        // Should have exactly one unhandled effect (identified by content hash)
+        assertEquals(1, suspended.unhandledEffects.size,
+            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
+        // Verify it's a valid content hash (128 hex characters for SHA3-512)
+        val effectHash = suspended.unhandledEffects.first()
+        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+            "Unhandled effect should be a content hash but was $effectHash")
     }
 
     @Test
@@ -109,9 +113,14 @@ class RuntimeEffectValidationTest {
         assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
         val suspended = result as MezzeSuspended
 
-        // Should have at least one unhandled effect
-        assertTrue(suspended.unhandledEffects.contains("Log") || suspended.unhandledEffects.contains("Random"),
-            "Unhandled effects should contain Log or Random but was ${suspended.unhandledEffects}")
+        // Should have at least one unhandled effect (identified by content hash)
+        assertTrue(suspended.unhandledEffects.isNotEmpty(),
+            "Should have at least one unhandled effect but was empty")
+        // Verify all are valid content hashes
+        suspended.unhandledEffects.forEach { hash ->
+            assertTrue(hash.length == 128 && hash.all { it in '0'..'9' || it in 'a'..'f' },
+                "Unhandled effect should be a content hash but was $hash")
+        }
     }
 
     @Test
@@ -148,11 +157,13 @@ class RuntimeEffectValidationTest {
         assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
         val suspended = result as MezzeSuspended
 
-        // Should have Random as the remaining unhandled effect
-        assertTrue(suspended.unhandledEffects.contains("Random"),
-            "Unhandled effects should contain Random but was ${suspended.unhandledEffects}")
-        assertFalse(suspended.unhandledEffects.contains("Log"),
-            "Log should be handled, unhandled effects: ${suspended.unhandledEffects}")
+        // Should have exactly one unhandled effect (Random's content hash - Log was handled)
+        assertEquals(1, suspended.unhandledEffects.size,
+            "Should have exactly one unhandled effect (Random) but was ${suspended.unhandledEffects}")
+        // Verify it's a valid content hash
+        val effectHash = suspended.unhandledEffects.first()
+        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+            "Unhandled effect should be a content hash but was $effectHash")
     }
 
     @Test
@@ -228,9 +239,12 @@ class RuntimeEffectValidationTest {
         assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
         val suspended = result as MezzeSuspended
 
-        // Should have Log as unhandled effect
-        assertTrue(suspended.unhandledEffects.contains("Log"),
-            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
+        // Should have exactly one unhandled effect (identified by content hash)
+        assertEquals(1, suspended.unhandledEffects.size,
+            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
+        val effectHash = suspended.unhandledEffects.first()
+        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+            "Unhandled effect should be a content hash but was $effectHash")
     }
 
     @Test
@@ -259,8 +273,11 @@ class RuntimeEffectValidationTest {
         assertTrue(result is MezzeSuspended, "Result should be MezzeSuspended but was ${result::class.simpleName}")
         val suspended = result as MezzeSuspended
 
-        // Should have Log as unhandled effect
-        assertTrue(suspended.unhandledEffects.contains("Log"),
-            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
+        // Should have exactly one unhandled effect (identified by content hash)
+        assertEquals(1, suspended.unhandledEffects.size,
+            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
+        val effectHash = suspended.unhandledEffects.first()
+        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+            "Unhandled effect should be a content hash but was $effectHash")
     }
 }

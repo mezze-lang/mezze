@@ -163,8 +163,9 @@ class SubstitutionApplier(
         }
 
         // Check effects
-        if (effectDeclarations.containsKey(name)) {
-            return ConstructorResolution.EffectReference(name)
+        val effectDecl = effectDeclarations[name]
+        if (effectDecl != null) {
+            return ConstructorResolution.EffectReference(name, effectDecl.contentHash)
         }
 
         // Check handlers (performers) - reverse lookup from performerToEffect
@@ -514,7 +515,13 @@ class SubstitutionApplier(
         val resolvedEffectName = effectDecl?.name ?: implDecl.effect.localName
 
         // Create a new QualifiedRef with the resolved name (dropping any qualifier)
-        val resolvedEffect = QualifiedRef(localName = resolvedEffectName, qualifier = null)
+        // IMPORTANT: Preserve resolvedContentHash from the original effect reference
+        // (set by ContentHashComputer in Phase 0.5)
+        val resolvedEffect = QualifiedRef(
+            localName = resolvedEffectName,
+            qualifier = null,
+            resolvedContentHash = implDecl.effect.resolvedContentHash
+        )
 
         return implDecl.copy(
             effect = resolvedEffect,
@@ -1680,8 +1687,7 @@ class SubstitutionApplier(
             is QualifiedTypeAnnotation -> {
                 when (type) {
                     is MezzeType.TypeApplication -> {
-                        val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                        type.constructor == qualifiedName &&
+                        type.constructor == annotation.qualifiedName &&
                         type.args.size == annotation.args.size &&
                         type.args.zip(annotation.args).all { (argType, argAnnotation) ->
                             typeMatchesAnnotation(argType, argAnnotation)
@@ -2164,6 +2170,12 @@ class SubstitutionApplier(
             val implDecl = implDeclarations[performerName] ?: return@mapNotNull null
             val implHash = implDecl.contentHash ?: return@mapNotNull null
 
+            // Get the effect's content hash for operation lookups
+            // Primary: Use effectDeclarations (for explicitly imported effects)
+            // Fallback: Use implDecl.effect.resolvedContentHash (for implicitly imported effects via handler)
+            val effectDecl = effectDeclarations[effectName]
+            val effectHash = effectDecl?.contentHash ?: implDecl.effect.resolvedContentHash
+
             // Detect scoped effect info
             val scopedInfo = detectScopedEffectMembers(implDecl)
 
@@ -2171,6 +2183,7 @@ class SubstitutionApplier(
                 effectName = effectName,
                 performerName = performerName,
                 implDeclarationHash = implHash,
+                effectDeclarationHash = effectHash,
                 isScopedEffect = scopedInfo.isScopedEffect,
                 initializeScopeExpr = scopedInfo.initializeScope?.implementation,
                 finalizeScopeExpr = scopedInfo.finalizeScope?.implementation
@@ -2340,9 +2353,8 @@ class SubstitutionApplier(
                 MezzeType.VarType(TypeVar.fresh())
             }
             is QualifiedTypeAnnotation -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
                 MezzeType.TypeApplication(
-                    constructor = qualifiedName,
+                    constructor = annotation.qualifiedName,
                     args = annotation.args.map { convertTypeAnnotation(it) }
                 )
             }

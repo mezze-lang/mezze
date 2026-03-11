@@ -38,8 +38,13 @@ data class IdentifierTypeAnnotation(
 data class QualifiedTypeAnnotation(
     val modulePath: List<String>,
     val typeName: String,
-    val args: List<TypeAnnotation> = emptyList()
-) : TypeAnnotation
+    val args: List<TypeAnnotation> = emptyList(),
+    /** Content hash of the referenced type (set during resolution, null before) */
+    val resolvedContentHash: String? = null
+) : TypeAnnotation {
+    /** Get the qualified name as a string (for backwards compatibility and error messages) */
+    val qualifiedName: String get() = (modulePath + typeName).joinToString("::")
+}
 
 @Serializable
 data class TypeApplicationAnnotation(
@@ -261,14 +266,13 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
         is QualifiedTypeAnnotation -> {
             // Qualified type like codec::Entry String Json
             // Create a TypeApplication with the fully qualified name
-            val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
             if (annotation.args.isNotEmpty()) {
                 MezzeType.TypeApplication(
-                    qualifiedName,
+                    annotation.qualifiedName,
                     annotation.args.map { convertTypeAnnotation(it) }
                 )
             } else {
-                MezzeType.VarType(TypeVar(qualifiedName))
+                MezzeType.VarType(TypeVar(annotation.qualifiedName))
             }
         }
         else -> {

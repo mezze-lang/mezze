@@ -1856,8 +1856,7 @@ class ExpressionConstraintGenerator {
             is QualifiedTypeAnnotation -> {
                 when (constraintType) {
                     is MezzeType.TypeApplication -> {
-                        val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                        constraintType.constructor == qualifiedName &&
+                        constraintType.constructor == annotation.qualifiedName &&
                         constraintType.args.size == annotation.args.size &&
                         constraintType.args.zip(annotation.args).all { (argType, argAnnotation) ->
                             typeMatchesAnnotationBidirectional(argType, argAnnotation)
@@ -4155,9 +4154,8 @@ class ExpressionConstraintGenerator {
                 MezzeType.EffectRow(annotation.effects.toSet())
             }
             is QualifiedTypeAnnotation -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
                 MezzeType.TypeApplication(
-                    constructor = qualifiedName,
+                    constructor = annotation.qualifiedName,
                     args = annotation.args.map { convertFieldType(it) }
                 )
             }

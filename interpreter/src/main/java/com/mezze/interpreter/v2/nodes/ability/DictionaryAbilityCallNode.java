@@ -84,15 +84,19 @@ public final class DictionaryAbilityCallNode extends MezzeNode {
         int opIndex = cachedOperationIndex;
         if (opIndex < 0) {
             opIndex = impl.getFieldIndex(operationName);
-            if (opIndex >= 0) {
+            if (opIndex < 0) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                cachedOperationIndex = opIndex;
+                throw new RuntimeException(
+                    "Ability " + abilityName + " implementation does not have operation: " + operationName
+                );
             }
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            cachedOperationIndex = opIndex;
         }
 
         Object opValue;
         try {
-            opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
+            opValue = impl.getField(opIndex);
         } catch (Exception e) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new RuntimeException(

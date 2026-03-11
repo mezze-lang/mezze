@@ -42,6 +42,10 @@ public class MezzeThunk implements TruffleObject {
     @CompilationFinal
     private final String operationName;
 
+    /** Content hash for effect lookup (preferred over effectName when available) */
+    @CompilationFinal
+    private final String effectContentHash;
+
     /**
      * Create a thunk for a regular function call.
      */
@@ -50,6 +54,7 @@ public class MezzeThunk implements TruffleObject {
         this.arguments = arguments;
         this.effectName = null;
         this.operationName = null;
+        this.effectContentHash = null;
     }
 
     /**
@@ -61,6 +66,19 @@ public class MezzeThunk implements TruffleObject {
         this.arguments = arguments;
         this.effectName = effectName;
         this.operationName = operationName;
+        this.effectContentHash = null;
+    }
+
+    /**
+     * Create a thunk for a deferred effect operation with content hash.
+     * The content hash enables O(1) collision-free handler lookup.
+     */
+    public MezzeThunk(String effectName, String operationName, Object arguments, String effectContentHash) {
+        this.function = null;
+        this.arguments = arguments;
+        this.effectName = effectName;
+        this.operationName = operationName;
+        this.effectContentHash = effectContentHash;
     }
 
     /**
@@ -71,6 +89,7 @@ public class MezzeThunk implements TruffleObject {
         this.arguments = null;
         this.effectName = null;
         this.operationName = null;
+        this.effectContentHash = null;
     }
 
     public MezzeFunction getFunction() {
@@ -87,6 +106,11 @@ public class MezzeThunk implements TruffleObject {
 
     public String getOperationName() {
         return operationName;
+    }
+
+    /** Get the content hash for effect lookup (may be null) */
+    public String getEffectContentHash() {
+        return effectContentHash;
     }
 
     public boolean isDeferredEffectCall() {

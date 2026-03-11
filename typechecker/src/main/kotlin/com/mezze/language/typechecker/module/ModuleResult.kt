@@ -70,7 +70,7 @@ data class ExportedItem(
     val mezzeType: MezzeType,          // Type of the item
     val originalName: String,          // Original name in module (before aliasing)
     val visibility: Visibility = Visibility.PUBLIC,
-    val contentHash: String? = null    // Content hash hex string for content-addressed lookup
+    val contentHash: String            // Content hash hex string for content-addressed lookup (REQUIRED)
 )
 
 /**
@@ -218,12 +218,15 @@ sealed class ImportResolutionResult {
  * ready to be merged with the current module's TypingContext.
  */
 data class ModuleImportContext(
-    val importedBindings: Map<String, ImportedBinding>,      // Imported functions/values
-    val importedTypes: Map<String, TypeDeclaration>,         // Imported type declarations
-    val importedAbilities: Map<String, AbilityDeclaration>,  // Imported abilities
-    val importedEffects: Map<String, EffectDeclaration>,     // Imported effects
-    val importedImpls: Map<String, ImplDeclaration>,         // Imported effect implementations (handlers)
-    val importedAbilityImpls: Map<String, ImplAbilityDeclaration>  // Imported ability implementations
+    val importedBindings: Map<String, ImportedBinding>,      // Imported functions/values (keyed by name)
+    val importedTypes: Map<String, TypeDeclaration>,         // Imported type declarations (keyed by name)
+    val importedAbilities: Map<String, AbilityDeclaration>,  // Imported abilities (keyed by name)
+    val importedEffects: Map<String, EffectDeclaration>,     // Imported effects (keyed by name)
+    val importedImpls: Map<String, ImplDeclaration>,         // Imported effect implementations (keyed by name)
+    val importedAbilityImpls: Map<String, ImplAbilityDeclaration>,  // Imported ability implementations (keyed by name)
+    // Content-hash indexed maps for O(1) lookup without string parsing
+    val effectsByHash: Map<String, EffectDeclaration> = emptyMap(),    // Effects keyed by content hash
+    val abilitiesByHash: Map<String, AbilityDeclaration> = emptyMap()  // Abilities keyed by content hash
 ) {
     companion object {
         /**
@@ -236,7 +239,9 @@ data class ModuleImportContext(
                 importedAbilities = emptyMap(),
                 importedEffects = emptyMap(),
                 importedImpls = emptyMap(),
-                importedAbilityImpls = emptyMap()
+                importedAbilityImpls = emptyMap(),
+                effectsByHash = emptyMap(),
+                abilitiesByHash = emptyMap()
             )
         }
     }
@@ -251,7 +256,9 @@ data class ModuleImportContext(
             importedAbilities = importedAbilities + other.importedAbilities,
             importedEffects = importedEffects + other.importedEffects,
             importedImpls = importedImpls + other.importedImpls,
-            importedAbilityImpls = importedAbilityImpls + other.importedAbilityImpls
+            importedAbilityImpls = importedAbilityImpls + other.importedAbilityImpls,
+            effectsByHash = effectsByHash + other.effectsByHash,
+            abilitiesByHash = abilitiesByHash + other.abilitiesByHash
         )
     }
 
@@ -266,6 +273,18 @@ data class ModuleImportContext(
                importedImpls.isEmpty() &&
                importedAbilityImpls.isEmpty()
     }
+
+    /**
+     * Look up an effect by its content hash.
+     * This is the preferred lookup method - O(1) with no string parsing.
+     */
+    fun getEffectByHash(contentHash: String): EffectDeclaration? = effectsByHash[contentHash]
+
+    /**
+     * Look up an ability by its content hash.
+     * This is the preferred lookup method - O(1) with no string parsing.
+     */
+    fun getAbilityByHash(contentHash: String): AbilityDeclaration? = abilitiesByHash[contentHash]
 }
 
 /**
@@ -278,7 +297,7 @@ data class ImportedBinding(
     val type: MezzeType,               // Type of the binding
     val isQualified: Boolean = false,  // true for qualified imports (module::name)
     val sourceLocation: SourceLocation? = null,
-    val contentHash: String? = null    // Content hash hex string for content-addressed lookup
+    val contentHash: String            // Content hash hex string for content-addressed lookup (REQUIRED)
 )
 
 // ============================================================================

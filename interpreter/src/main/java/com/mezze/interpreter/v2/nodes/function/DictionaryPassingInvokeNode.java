@@ -241,15 +241,18 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
             int opIndex = cachedOperationIndices[i];
             if (opIndex < 0) {
                 opIndex = impl.getFieldIndex(req.operationName);
-                if (opIndex >= 0) {
-                    cachedOperationIndices[i] = opIndex;
+                if (opIndex < 0) {
+                    throw new RuntimeException(
+                        "Ability implementation " + req.abilityName +
+                        " does not have operation: " + req.operationName);
                 }
+                cachedOperationIndices[i] = opIndex;
             }
 
             // Extract the operation function
             Object opValue;
             try {
-                opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(req.operationName);
+                opValue = impl.getField(opIndex);
             } catch (Exception e) {
                 throw new RuntimeException(
                     "Ability implementation " + req.abilityName +

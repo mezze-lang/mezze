@@ -46,6 +46,16 @@ import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.scope.ScopedEffectConstants
 
 /**
+ * Holds effect handler mapping info: effectName, implContentHash, effectContentHash (nullable).
+ * The effectContentHash is used to register handlers under both impl hash and effect hash.
+ */
+data class HandlerMappingInfo(
+    val effectName: String,
+    val implContentHash: String,
+    val effectContentHash: String?  // null if effect hash not available
+)
+
+/**
  * Converts Mezze AST to optimized Truffle V2 nodes.
  *
  * Design principles:
@@ -56,7 +66,7 @@ import com.mezze.language.typechecker.scope.ScopedEffectConstants
  */
 class ASTToTruffleConverterV2(
     private val context: MezzeContext? = null,
-    parentHandlerMapping: Map<String, Pair<String, String>>? = null,
+    parentHandlerMapping: Map<String, HandlerMappingInfo>? = null,
     private val parentVariableSlots: Map<String, Int>? = null,
     parentScopedEffectInfo: Map<String, ScopedImplInfo>? = null
 ) {
@@ -80,7 +90,7 @@ class ASTToTruffleConverterV2(
 
     private val variableInfo = mutableMapOf<String, SlotInfo>()
 
-    private val handlerToEffectMapping = mutableMapOf<String, Pair<String, String>>().apply {
+    private val handlerToEffectMapping = mutableMapOf<String, HandlerMappingInfo>().apply {
         parentHandlerMapping?.let { putAll(it) }
     }
 
@@ -224,8 +234,15 @@ class ASTToTruffleConverterV2(
         val contentHash = impl.contentHash
             ?: throw RuntimeException("Content hash required for effect handler: ${impl.effect.localName}/${impl.performerName}")
 
+        // Get the effect's content hash from the effect reference (set by ContentHashComputer)
+        val effectHash = impl.effect.resolvedContentHash
+
         // Effect name is already normalized by the typechecker (e.g., "log::Log" -> "Log")
-        handlerToEffectMapping[impl.performerName] = impl.effect.localName to contentHash
+        handlerToEffectMapping[impl.performerName] = HandlerMappingInfo(
+            effectName = impl.effect.localName,
+            implContentHash = contentHash,
+            effectContentHash = effectHash
+        )
 
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
@@ -260,9 +277,10 @@ class ASTToTruffleConverterV2(
             recordChild = recordNode,
             hashSlot = hashSlot,
             performerSlot = performerSlot,
-            contentHash = contentHash,
+            implContentHash = contentHash,
             performerName = impl.performerName,
-            effectName = impl.effect.localName
+            effectName = impl.effect.localName,
+            effectContentHash = effectHash  // Pass effect hash for O(1) lookup by effect operations
         )
     }
 
@@ -270,8 +288,15 @@ class ASTToTruffleConverterV2(
         val contentHash = impl.contentHash
             ?: throw RuntimeException("Content hash required for parameterized effect handler")
 
+        // Get the effect's content hash from the effect reference (set by ContentHashComputer)
+        val effectHash = impl.effect.resolvedContentHash
+
         // Effect name is already normalized by the typechecker
-        handlerToEffectMapping[impl.performerName] = impl.effect.localName to contentHash
+        handlerToEffectMapping[impl.performerName] = HandlerMappingInfo(
+            effectName = impl.effect.localName,
+            implContentHash = contentHash,
+            effectContentHash = effectHash
+        )
 
         val implParamNames = impl.performerParams.map { it.name }
 
@@ -1208,7 +1233,12 @@ class ASTToTruffleConverterV2(
                 val isEffectCall = receiver is VariantConstruction || !variableInfo.containsKey(receiverName)
                 if (isEffectCall) {
                     val argsNode = convertExpression(funcCall.arguments)
-                    return DynamicEffectCallNode.create(receiverName, operationName, argsNode)
+                    // Get effect content hash from the receiver's resolution (if available)
+                    val effectContentHash = when (val resolution = (receiver as? VariantConstruction)?.resolution) {
+                        is ConstructorResolution.EffectReference -> resolution.effectContentHash
+                        else -> null
+                    }
+                    return DynamicEffectCallNode.create(receiverName, operationName, argsNode, effectContentHash)
                 }
             }
         }
@@ -2007,15 +2037,23 @@ class ASTToTruffleConverterV2(
             val parametersNode = convertExpression(handler.parameters!!)
 
             if (mapping != null) {
-                val (effectName, contentHash) = mapping
+                val effectName = mapping.effectName
+                val implHash = mapping.implContentHash
+                val effectHash = mapping.effectContentHash
+
+                // Build content hashes array with both impl and effect hashes
+                val contentHashes = buildList {
+                    add(implHash)
+                    if (effectHash != null && effectHash.isNotEmpty() && effectHash != implHash) add(effectHash)
+                }.toTypedArray()
 
                 // Check if this is a scoped parameterized effect
-                val scopedInfo = scopedEffectInfo[contentHash]
+                val scopedInfo = scopedEffectInfo[implHash]
                 if (scopedInfo != null && scopedInfo.isScopedEffect) {
                     return ParameterizedScopedHandleNode(
                         handler.performer.localName,
                         arrayOf(effectName),
-                        arrayOf(contentHash),
+                        contentHashes,
                         parametersNode,
                         bodyNode,
                         scopedInfo.scopeSlot,
@@ -2027,7 +2065,7 @@ class ASTToTruffleConverterV2(
                 return ParameterizedHandleNode(
                     handler.performer.localName,
                     arrayOf(effectName),
-                    arrayOf(contentHash),
+                    contentHashes,
                     parametersNode,
                     bodyNode
                 )
@@ -2035,11 +2073,18 @@ class ASTToTruffleConverterV2(
 
             // Use resolved info from typechecker for cross-module impls
             val effectName = resolvedInfo?.effectName ?: handler.performer.localName
-            val contentHash = resolvedInfo?.implDeclarationHash ?: ""
+            val implHash = resolvedInfo?.implDeclarationHash ?: ""
+            val effectHash = resolvedInfo?.effectDeclarationHash ?: ""
+
+            // Build content hashes array with both impl and effect hashes
+            val contentHashes = buildList {
+                if (implHash.isNotEmpty()) add(implHash)
+                if (effectHash.isNotEmpty() && effectHash != implHash) add(effectHash)
+            }.toTypedArray()
 
             // Check if resolved info indicates a scoped parameterized effect (for stdlib imports)
             if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
-                val scopeSlot = getOrCreateSlot("__scope_${contentHash.ifEmpty { handler.performer.localName }}__")
+                val scopeSlot = getOrCreateSlot("__scope_${implHash.ifEmpty { handler.performer.localName }}__")
 
                 // initialize_scope and finalize_scope are lambdas: {} -> ...
                 // We need to invoke them with {} as argument
@@ -2057,7 +2102,7 @@ class ASTToTruffleConverterV2(
                 return ParameterizedScopedHandleNode(
                     handler.performer.localName,
                     arrayOf(effectName),
-                    if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
+                    contentHashes,
                     parametersNode,
                     bodyNode,
                     scopeSlot,
@@ -2069,7 +2114,7 @@ class ASTToTruffleConverterV2(
             return ParameterizedHandleNode(
                 handler.performer.localName,
                 arrayOf(effectName),
-                if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
+                contentHashes,
                 parametersNode,
                 bodyNode
             )
@@ -2077,15 +2122,23 @@ class ASTToTruffleConverterV2(
 
         // Non-parameterized handler
         if (mapping != null) {
-            val (effectName, contentHash) = mapping
-            val localSlot = contentHashToSlot[contentHash]
+            val effectName = mapping.effectName
+            val implHash = mapping.implContentHash
+            val effectHash = mapping.effectContentHash
+            val localSlot = contentHashToSlot[implHash]
+
+            // Build content hashes array with both impl and effect hashes
+            val contentHashes = buildList {
+                add(implHash)
+                if (effectHash != null && effectHash.isNotEmpty() && effectHash != implHash) add(effectHash)
+            }.toTypedArray()
 
             // Check if this is a scoped effect
-            val scopedInfo = scopedEffectInfo[contentHash]
+            val scopedInfo = scopedEffectInfo[implHash]
             if (scopedInfo != null && scopedInfo.isScopedEffect) {
                 return HandleNode.createScoped(
                     localSlot ?: -1,
-                    contentHash,
+                    contentHashes,
                     arrayOf(effectName),
                     handler.performer.localName,
                     bodyNode,
@@ -2097,7 +2150,7 @@ class ASTToTruffleConverterV2(
 
             return HandleNode.create(
                 localSlot ?: -1,
-                contentHash,
+                contentHashes,
                 arrayOf(effectName),
                 handler.performer.localName,
                 bodyNode
@@ -2106,11 +2159,18 @@ class ASTToTruffleConverterV2(
 
         // Use resolved info from typechecker for cross-module impls
         val effectName = resolvedInfo?.effectName ?: handler.performer.localName
-        val contentHash = resolvedInfo?.implDeclarationHash
+        val implHash = resolvedInfo?.implDeclarationHash
+        val effectHash = resolvedInfo?.effectDeclarationHash
+
+        // Build content hashes array with both impl and effect hashes for non-parameterized handlers
+        val contentHashes = buildList {
+            if (implHash != null && implHash.isNotEmpty()) add(implHash)
+            if (effectHash != null && effectHash.isNotEmpty() && effectHash != implHash) add(effectHash)
+        }.toTypedArray()
 
         // Check if resolved info indicates a scoped effect (for stdlib imports)
         if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
-            val scopeSlot = getOrCreateSlot("__scope_${contentHash ?: handler.performer.localName}__")
+            val scopeSlot = getOrCreateSlot("__scope_${implHash ?: handler.performer.localName}__")
 
             // initialize_scope and finalize_scope are lambdas: {} -> ...
             // We need to invoke them with {} as argument
@@ -2126,9 +2186,11 @@ class ASTToTruffleConverterV2(
                 InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
             }
 
+            // Pass both impl and effect hashes for registration
+            // Handler is looked up by primary hash but registered under both
             return HandleNode.createScoped(
                 -1,  // No local slot for cross-module impls
-                contentHash ?: "",
+                contentHashes,  // Pass all content hashes for registration
                 arrayOf(effectName),
                 handler.performer.localName,
                 bodyNode,
@@ -2141,7 +2203,7 @@ class ASTToTruffleConverterV2(
         return DynamicHandleNode(
             handler.performer.localName,
             arrayOf(effectName),
-            if (contentHash != null) arrayOf(contentHash) else emptyArray(),
+            contentHashes,
             bodyNode
         )
     }

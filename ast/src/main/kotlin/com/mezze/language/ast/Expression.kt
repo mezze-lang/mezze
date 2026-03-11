@@ -48,6 +48,7 @@ data class ResolvedAbility(
  * @property effectName The name of the effect being handled (e.g., "Console")
  * @property performerName The name of the performer/handler (e.g., "NativeConsole")
  * @property implDeclarationHash Content-addressable hash of the handler implementation for runtime lookup
+ * @property effectDeclarationHash Content-addressable hash of the effect declaration for operation lookup
  * @property isScopedEffect Whether this impl has initialize_scope/finalize_scope
  * @property initializeScopeExpr The initialize_scope expression (AST) for scoped effects
  * @property finalizeScopeExpr The finalize_scope expression (AST) for scoped effects
@@ -57,6 +58,7 @@ data class ResolvedEffectHandler(
     val effectName: String,
     val performerName: String,
     val implDeclarationHash: String? = null,
+    val effectDeclarationHash: String? = null,
     val isScopedEffect: Boolean = false,
     val initializeScopeExpr: Expression? = null,
     val finalizeScopeExpr: Expression? = null
@@ -258,7 +260,16 @@ data class Identifier(
     )
 
     companion object {
-        /** Create an Identifier from a full name string (for backwards compatibility) */
+        /**
+         * Create an Identifier from a full name string (for backwards compatibility).
+         *
+         * @deprecated Prefer constructing Identifier directly with localName and qualifier.
+         *             String parsing loses information and is fragile.
+         */
+        @Deprecated(
+            message = "Use Identifier constructor with localName and qualifier instead",
+            replaceWith = ReplaceWith("Identifier(localName = name, qualifier = null, sourceLocation = sourceLocation)")
+        )
         fun fromName(name: String, sourceLocation: SourceLocation? = null): Identifier {
             return if (name.contains("::")) {
                 val parts = name.split("::")
@@ -442,7 +453,10 @@ sealed class ConstructorResolution {
 
     /** Effect reference (Log, Filesystem, user-defined effects) */
     @Serializable
-    data class EffectReference(val effectName: String) : ConstructorResolution()
+    data class EffectReference(
+        val effectName: String,
+        val effectContentHash: String? = null
+    ) : ConstructorResolution()
 
     /** Handler/Performer reference (Console, NativeRandom, etc.) */
     @Serializable

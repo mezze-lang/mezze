@@ -273,6 +273,14 @@ class ContentAddressableHashingE2ETest {
             perform Calculator in Math.add {x = 10, y = 32}
         """
 
+        // Debug: check hashes on the typed program
+        val typedProgram = MezzeTestHelper.typeCheck(source)
+        val effectDecl = typedProgram.items.filterIsInstance<EffectDeclaration>().first()
+        val implDecl = typedProgram.items.filterIsInstance<ImplDeclaration>().first()
+        println("DEBUG - Effect name: ${effectDecl.name}, hash: ${effectDecl.contentHash}")
+        println("DEBUG - Impl performer: ${implDecl.performerName}, impl hash: ${implDecl.contentHash}")
+        println("DEBUG - Impl effect.localName: ${implDecl.effect.localName}, effect.resolvedContentHash: ${implDecl.effect.resolvedContentHash}")
+
         val result = eval(source)
         assertEquals(42L, result)
     }

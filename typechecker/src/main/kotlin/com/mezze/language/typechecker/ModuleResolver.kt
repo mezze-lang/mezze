@@ -1,11 +1,14 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.debug.ContentHashRegistry
+import com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.util.StringDistance
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -124,7 +127,7 @@ data class ExportedItem(
     val mezzeType: MezzeType,
     val originalName: String,
     val visibility: Visibility = Visibility.PUBLIC,
-    val contentHash: String? = null  // Content hash hex string for content-addressed lookup
+    val contentHash: String  // Content hash hex string for content-addressed lookup (REQUIRED)
 )
 
 /**
@@ -253,9 +256,14 @@ class ModuleResolver(
     private val projectRoot: Path = findProjectRoot(currentPath)
 
     companion object {
-        // Cache for parsed modules to avoid reprocessing (shared across all instances)
+        // Primary cache: module path -> Module (for lookup by path)
         // Access is synchronized for thread safety
         private val moduleCache = mutableMapOf<String, Module>()
+
+        // Secondary cache: source content hash -> Module (for content-addressed deduplication)
+        // Same content at different paths shares a single Module instance
+        private val contentHashCache = mutableMapOf<String, Module>()
+
         private val cacheLock = Any()
         // Per-module locks to prevent duplicate loading of the same module
         private val moduleLoadingLocks = mutableMapOf<String, Any>()
@@ -267,6 +275,7 @@ class ModuleResolver(
         fun clearCache() {
             synchronized(cacheLock) {
                 moduleCache.clear()
+                contentHashCache.clear()
                 moduleLoadingLocks.clear()
             }
         }
@@ -281,7 +290,7 @@ class ModuleResolver(
         }
 
         /**
-         * Get a module from the cache (thread-safe).
+         * Get a module from the cache by path (thread-safe).
          */
         internal fun getFromCache(modulePath: String): Module? {
             synchronized(cacheLock) {
@@ -290,11 +299,27 @@ class ModuleResolver(
         }
 
         /**
+         * Get a module from the cache by content hash (thread-safe).
+         * This enables content-addressed deduplication - same content at different
+         * paths returns the same Module instance.
+         */
+        internal fun getFromCacheByContentHash(contentHash: String): Module? {
+            synchronized(cacheLock) {
+                return contentHashCache[contentHash]
+            }
+        }
+
+        /**
          * Put a module in the cache (thread-safe).
+         * Adds to both path-based and content-hash-based caches.
          */
         internal fun putInCache(modulePath: String, module: Module) {
             synchronized(cacheLock) {
                 moduleCache[modulePath] = module
+                // Also add to content hash cache for deduplication
+                module.sourceHash?.let { hash ->
+                    contentHashCache[hash] = module
+                }
             }
         }
 
@@ -471,11 +496,22 @@ class ModuleResolver(
                 ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
 
             // Read source and compute content hash BEFORE checking cache
-            // This enables content-based cache validation
+            // This enables content-based cache validation and deduplication
             val source = Files.readString(filePath)
             val sourceHash = MezzeHashBuilder().append(source).build().toString()
 
-            // Check cache with content-based validation
+            // First, check content-hash cache for deduplication
+            // If same content exists at a different path, reuse that module
+            getFromCacheByContentHash(sourceHash)?.let { cachedModule ->
+                DebugLogger.debug(Category.ModuleResolver) {
+                    "Found module with same content hash at different path: $modulePath (reusing ${cachedModule.name})"
+                }
+                // Update path-based cache to point to this module
+                putInCache(modulePath, cachedModule)
+                return cachedModule
+            }
+
+            // Check path-based cache with content validation
             getFromCache(modulePath)?.let { cachedModule ->
                 if (cachedModule.sourceHash == sourceHash) {
                     DebugLogger.debug(Category.ModuleResolver) {
@@ -498,9 +534,11 @@ class ModuleResolver(
                 // Create fresh parser for thread safety
                 val program = MezzeParser().parse(source, file = filePath.toString())
 
+                // Compute content hashes early - this enables content-addressed exports
                 // Don't type-check during module resolution to avoid circular dependencies
-                // The module will be type-checked when it's actually used
-                val typedProgram = program
+                // but DO compute hashes so imports can use them
+                val hashResult = ContentHashComputer.computeHashes(program)
+                val typedProgram = hashResult.program
 
                 // Extract dependencies first
                 val dependencies = extractDependencies(typedProgram)
@@ -513,7 +551,7 @@ class ModuleResolver(
                     name = modulePath,
                     filePath = filePath.toString(),
                     program = typedProgram,
-                    exports = extractExports(typedProgram),
+                    exports = extractExports(typedProgram, modulePath),
                     dependencies = dependencies,
                     sourceHash = sourceHash,
                     index = programIndex
@@ -714,9 +752,15 @@ class ModuleResolver(
     
     /**
      * Extract exported items from a program
+     * @param program The program to extract exports from
+     * @param modulePath The module path for registry purposes (e.g., "std::int")
      * @param typeContext Optional context from TypeChecker containing inferred types
      */
-    private fun extractExports(program: Program, typeContext: Map<String, MezzeType>? = null): Map<String, ExportedItem> {
+    private fun extractExports(
+        program: Program,
+        modulePath: String? = null,
+        typeContext: Map<String, MezzeType>? = null
+    ): Map<String, ExportedItem> {
         val exports = mutableMapOf<String, ExportedItem>()
 
         for (item in program.items) {
@@ -745,24 +789,46 @@ class ModuleResolver(
                             }
                         }
 
+                        val contentHash = requireNotNull(item.contentHash) {
+                            "LetBinding '${item.variableName}' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
+                        }
                         exports[item.variableName] = ExportedItem(
                             name = item.variableName,
                             type = ExportedItemType.FUNCTION,
                             mezzeType = mezzeType,
                             originalName = item.variableName,
-                            contentHash = item.contentHash
+                            contentHash = contentHash
+                        )
+                        // Register hash for debugging
+                        val qualifiedName = if (modulePath != null) "$modulePath::${item.variableName}" else item.variableName
+                        ContentHashRegistry.register(
+                            hash = contentHash,
+                            qualifiedName = qualifiedName,
+                            modulePath = modulePath,
+                            kind = if (mezzeType is MezzeType.FunctionType) DeclarationKind.FUNCTION else DeclarationKind.CONSTANT
                         )
                     }
                 }
                 is TypeDeclaration -> {
                     if (item.visibility == Visibility.PUBLIC) {
+                        val contentHash = requireNotNull(item.contentHash) {
+                            "TypeDeclaration '${item.name}' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
+                        }
                         // Export the type alias - constructors are globally available (Roc-style)
                         exports[item.name] = ExportedItem(
                             name = item.name,
                             type = ExportedItemType.TYPE,
                             mezzeType = item.inferredType ?: MezzeType.VarType(TypeVar.fresh()),
                             originalName = item.name,
-                            contentHash = item.contentHash
+                            contentHash = contentHash
+                        )
+                        // Register hash for debugging
+                        val qualifiedName = if (modulePath != null) "$modulePath::${item.name}" else item.name
+                        ContentHashRegistry.register(
+                            hash = contentHash,
+                            qualifiedName = qualifiedName,
+                            modulePath = modulePath,
+                            kind = DeclarationKind.TYPE
                         )
                     }
                 }
@@ -772,6 +838,9 @@ class ModuleResolver(
                     val fromContext = typeContext?.get(item.name)
                     val fromInferred = item.inferredType
                     val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
+                    val contentHash = requireNotNull(item.contentHash) {
+                        "EffectDeclaration '${item.name}' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
+                    }
 
                     // Export the effect type so it can be referenced (e.g., Log.info)
                     exports[item.name] = ExportedItem(
@@ -779,7 +848,15 @@ class ModuleResolver(
                         type = ExportedItemType.EFFECT,
                         mezzeType = mezzeType,
                         originalName = item.name,
-                        contentHash = item.contentHash
+                        contentHash = contentHash
+                    )
+                    // Register hash for debugging
+                    val qualifiedName = if (modulePath != null) "$modulePath::${item.name}" else item.name
+                    ContentHashRegistry.register(
+                        hash = contentHash,
+                        qualifiedName = qualifiedName,
+                        modulePath = modulePath,
+                        kind = DeclarationKind.EFFECT
                     )
                 }
                 is ImplDeclaration -> {
@@ -792,13 +869,24 @@ class ModuleResolver(
                     // Always export the performer - if typeContext is not available yet,
                     // use a placeholder type that will be updated later
                     val mezzeType = fromContext ?: item.inferredType ?: MezzeType.VarType(TypeVar.fresh())
+                    val contentHash = requireNotNull(item.contentHash) {
+                        "ImplDeclaration '$performerName' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
+                    }
 
                     exports[performerName] = ExportedItem(
                         name = performerName,
                         type = ExportedItemType.FUNCTION, // Handlers are treated as values
                         mezzeType = mezzeType,
                         originalName = performerName,
-                        contentHash = item.contentHash
+                        contentHash = contentHash
+                    )
+                    // Register hash for debugging
+                    val qualifiedName = if (modulePath != null) "$modulePath::$performerName" else performerName
+                    ContentHashRegistry.register(
+                        hash = contentHash,
+                        qualifiedName = qualifiedName,
+                        modulePath = modulePath,
+                        kind = DeclarationKind.EFFECT_HANDLER
                     )
                 }
                 is AbilityDeclaration -> {
@@ -808,13 +896,24 @@ class ModuleResolver(
                     val fromContext = typeContext?.get(item.name)
                     val fromInferred = item.inferredType
                     val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
+                    val contentHash = requireNotNull(item.contentHash) {
+                        "AbilityDeclaration '${item.name}' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
+                    }
 
                     exports[item.name] = ExportedItem(
                         name = item.name,
                         type = ExportedItemType.ABILITY,
                         mezzeType = mezzeType,
                         originalName = item.name,
-                        contentHash = item.contentHash
+                        contentHash = contentHash
+                    )
+                    // Register hash for debugging
+                    val qualifiedName = if (modulePath != null) "$modulePath::${item.name}" else item.name
+                    ContentHashRegistry.register(
+                        hash = contentHash,
+                        qualifiedName = qualifiedName,
+                        modulePath = modulePath,
+                        kind = DeclarationKind.ABILITY
                     )
                 }
                 else -> {
@@ -1010,7 +1109,7 @@ class ModuleResolver(
         val updatedModule = if (module != null) {
             module.copy(
                 program = typedProgram,
-                exports = extractExports(typedProgram, typeContext),
+                exports = extractExports(typedProgram, modulePath, typeContext),
                 index = updatedIndex
             )
         } else {
@@ -1021,7 +1120,7 @@ class ModuleResolver(
                 name = modulePath,
                 filePath = "", // Will be updated if needed
                 program = typedProgram,
-                exports = extractExports(typedProgram, typeContext),
+                exports = extractExports(typedProgram, modulePath, typeContext),
                 dependencies = emptyList(),
                 sourceHash = null,
                 index = updatedIndex

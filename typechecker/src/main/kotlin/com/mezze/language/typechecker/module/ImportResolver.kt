@@ -335,6 +335,9 @@ class ImportResolver(
         val effects = mutableMapOf<String, EffectDeclaration>()
         val impls = mutableMapOf<String, ImplDeclaration>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
+        // Content-hash indexed maps for O(1) lookup
+        val effectsByHash = mutableMapOf<String, EffectDeclaration>()
+        val abilitiesByHash = mutableMapOf<String, AbilityDeclaration>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -398,9 +401,10 @@ class ImportResolver(
                     if (abilityDecl != null) {
                         // Store under the qualified name for lookup
                         abilities[localName] = abilityDecl
-                        // NOTE: Do NOT store under original name for unqualified lookup!
-                        // Module imports are always qualified - only selective imports bring
-                        // items into unqualified scope.
+                        // Also store by content hash for O(1) lookup without string parsing
+                        abilityDecl.contentHash?.let { hash ->
+                            abilitiesByHash[hash] = abilityDecl
+                        }
                     }
 
                     // Also add as a binding for name resolution
@@ -420,9 +424,10 @@ class ImportResolver(
                     if (effectDecl != null) {
                         // Store under the qualified name for lookup
                         effects[localName] = effectDecl
-                        // NOTE: Do NOT store under original name for unqualified lookup!
-                        // Module imports are always qualified - only selective imports bring
-                        // items into unqualified scope.
+                        // Also store by content hash for O(1) lookup without string parsing
+                        effectDecl.contentHash?.let { hash ->
+                            effectsByHash[hash] = effectDecl
+                        }
                     }
 
                     // Also add as a binding for name resolution
@@ -482,7 +487,9 @@ class ImportResolver(
             importedAbilities = abilities,
             importedEffects = effects,
             importedImpls = impls,
-            importedAbilityImpls = abilityImpls
+            importedAbilityImpls = abilityImpls,
+            effectsByHash = effectsByHash,
+            abilitiesByHash = abilitiesByHash
         )
     }
 
@@ -502,6 +509,9 @@ class ImportResolver(
         val effects = mutableMapOf<String, EffectDeclaration>()
         val impls = mutableMapOf<String, ImplDeclaration>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
+        // Content-hash indexed maps for O(1) lookup
+        val effectsByHash = mutableMapOf<String, EffectDeclaration>()
+        val abilitiesByHash = mutableMapOf<String, AbilityDeclaration>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -536,6 +546,10 @@ class ImportResolver(
                     val abilityDecl = module?.index?.abilityDeclarations?.get(item.name)
                     if (abilityDecl != null) {
                         abilities[localName] = abilityDecl
+                        // Also store by content hash for O(1) lookup
+                        abilityDecl.contentHash?.let { hash ->
+                            abilitiesByHash[hash] = abilityDecl
+                        }
                     }
                 }
                 ExportedItemType.EFFECT -> {
@@ -543,6 +557,10 @@ class ImportResolver(
                     val effectDecl = module?.index?.effectDeclarations?.get(item.name)
                     if (effectDecl != null) {
                         effects[localName] = effectDecl
+                        // Also store by content hash for O(1) lookup
+                        effectDecl.contentHash?.let { hash ->
+                            effectsByHash[hash] = effectDecl
+                        }
                     }
                 }
             }
@@ -626,7 +644,9 @@ class ImportResolver(
             importedAbilities = abilities,
             importedEffects = effects,
             importedImpls = impls,
-            importedAbilityImpls = abilityImpls
+            importedAbilityImpls = abilityImpls,
+            effectsByHash = effectsByHash,
+            abilitiesByHash = abilitiesByHash
         )
     }
 

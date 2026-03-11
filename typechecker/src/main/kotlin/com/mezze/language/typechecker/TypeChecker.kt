@@ -222,7 +222,8 @@ class TypeChecker(
         // PHASE 0.5: Compute Content Hashes for Declarations
         // Compute hashes BEFORE building context so AbilityImplInfo.contentHash is populated.
         // This allows SubstitutionApplier to use content hashes directly instead of mangled lookup keys.
-        val hashedProgram = computeDeclarationHashes(program)
+        // Pass importContext so effect/ability hashes can be resolved for local impls referencing them
+        val hashedProgram = computeDeclarationHashes(program, importContext)
 
         // PHASE 1: Build Context
         // Pass imported impls, abilities, types, and effects to ContextBuilder
@@ -695,7 +696,7 @@ class TypeChecker(
         }
 
         // PHASE 0.5: Compute Content Hashes for Declarations
-        val hashedProgram = computeDeclarationHashes(program)
+        val hashedProgram = computeDeclarationHashes(program, importContext)
 
         // PHASE 1: Build Context
         val contextBuilder = ContextBuilder()
@@ -1280,13 +1281,14 @@ class TypeChecker(
         // Add imported ability implementations
         // These are needed for ability method dispatch (e.g., EncodeFormat.encode_int)
         for ((implKey, implDecl) in importContext.importedAbilityImpls) {
+            // implKey is the content hash (map is keyed by content hash)
             val implInfo = TypingContext.AbilityImplInfo(
                 abilityName = implDecl.ability.localName,
                 targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
                 targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
                 associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
                 sourceModule = null,  // TODO: Track source module
-                contentHash = implDecl.contentHash  // Propagate content hash from type-checked module
+                contentHash = implKey  // Use map key which is the content hash
             )
             context = context.extendWithImpl(implKey, implInfo)
         }
@@ -1301,9 +1303,33 @@ class TypeChecker(
      *
      * Note: This only computes hashes for declarations that exist in the source.
      * Generated codec impls get their hashes computed inline in SubstitutionApplier.
+     *
+     * @param importContext The import context containing imported effects/abilities with content hashes
      */
-    private fun computeDeclarationHashes(program: Program): Program {
-        val updatedItems = program.items.map { item ->
+    private fun computeDeclarationHashes(
+        program: Program,
+        importContext: ModuleImportContext? = null
+    ): Program {
+        // Maps for resolving references by name (temporary, for populating resolvedContentHash)
+        // These are keyed by the LOCAL NAME (e.g., "Log"), not qualified strings
+        val effectHashByName = mutableMapOf<String, String>()
+        val abilityHashByName = mutableMapOf<String, String>()
+
+        // Initialize from imported effects/abilities - extract hash from each declaration
+        // Store under the ORIGINAL name (the actual effect/ability name, not the import key)
+        importContext?.importedEffects?.values?.forEach { decl ->
+            decl.contentHash?.let { hash ->
+                effectHashByName[decl.name] = hash
+            }
+        }
+        importContext?.importedAbilities?.values?.forEach { decl ->
+            decl.contentHash?.let { hash ->
+                abilityHashByName[decl.name] = hash
+            }
+        }
+
+        // PASS 1: Compute all declaration hashes and build lookup maps
+        val pass1Items = program.items.map { item ->
             when (item) {
                 is ImplAbilityDeclaration -> {
                     if (item.contentHash == null) {
@@ -1338,17 +1364,29 @@ class TypeChecker(
                     }
                 }
                 is EffectDeclaration -> {
-                    if (item.contentHash == null) {
+                    val hashStr: String = if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashEffectDeclaration(item)
-                        item.copy(contentHash = hash.toFullHexString())
+                        hash.toFullHexString()
+                    } else {
+                        item.contentHash!!
+                    }
+                    effectHashByName[item.name] = hashStr
+                    if (item.contentHash == null) {
+                        item.copy(contentHash = hashStr)
                     } else {
                         item
                     }
                 }
                 is AbilityDeclaration -> {
-                    if (item.contentHash == null) {
+                    val hashStr: String = if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(item)
-                        item.copy(contentHash = hash.toFullHexString())
+                        hash.toFullHexString()
+                    } else {
+                        item.contentHash!!
+                    }
+                    abilityHashByName[item.name] = hashStr
+                    if (item.contentHash == null) {
+                        item.copy(contentHash = hashStr)
                     } else {
                         item
                     }
@@ -1357,6 +1395,33 @@ class TypeChecker(
                 is TopLevelExpression, is UseDeclaration, is PubUseDeclaration -> item
             }
         }
+
+        // PASS 2: Populate resolvedContentHash on QualifiedRefs within impls
+        val updatedItems = pass1Items.map { item ->
+            when (item) {
+                is ImplDeclaration -> {
+                    // Resolve effect reference to its content hash using the local name
+                    // (e.g., "Log" from "log::Log" or just "Log" for unqualified)
+                    val effectHash = effectHashByName[item.effect.localName]
+                    if (effectHash != null && item.effect.resolvedContentHash == null) {
+                        item.copy(effect = item.effect.withResolvedHash(effectHash))
+                    } else {
+                        item
+                    }
+                }
+                is ImplAbilityDeclaration -> {
+                    // Resolve ability reference to its content hash using the local name
+                    val abilityHash = abilityHashByName[item.ability.localName]
+                    if (abilityHash != null && item.ability.resolvedContentHash == null) {
+                        item.copy(ability = item.ability.withResolvedHash(abilityHash))
+                    } else {
+                        item
+                    }
+                }
+                else -> item
+            }
+        }
+
         return Program(items = updatedItems)
     }
 

@@ -185,7 +185,12 @@
       "Bash(~/.mezze/bin/mez fmt:*)",
       "Bash(pkill:*)",
       "WebFetch(domain:exp10it.io)",
-      "WebFetch(domain:arxiv.org)"
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:unison-lang.org)",
+      "WebFetch(domain:medium.com)",
+      "Bash(cat:*)",
+      "Bash(then echo \"Still running...\")",
+      "Bash(else tail -10 /tmp/interpreter_tests.txt)"
     ],
     "deny": [],
     "ask": []

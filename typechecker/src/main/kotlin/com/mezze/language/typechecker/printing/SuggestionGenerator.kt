@@ -147,6 +147,11 @@ object SuggestionGenerator {
                 "Use 'perform' to handle all effects in main",
                 "Ensure main returns {} (empty record)"
             )
+
+            is ValidationError.MissingContentHash -> listOf(
+                "This is a compiler bug - please report it",
+                "Content hashes should be computed for all top-level declarations"
+            )
         }
     }
 

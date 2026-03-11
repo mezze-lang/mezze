@@ -134,6 +134,7 @@ object ErrorFormatter {
             is ValidationError.TopLevelPerformedEffects -> formatTopLevelPerformedEffectsError(error, sourceCode)
             is ValidationError.TopLevelExpressionPerformedEffects -> formatTopLevelExpressionPerformedEffectsError(error, sourceCode)
             is ValidationError.MainFunctionTypeError -> formatMainFunctionTypeError(error, sourceCode)
+            is ValidationError.MissingContentHash -> formatMissingContentHashError(error, sourceCode)
         }
     }
 
@@ -693,6 +694,19 @@ object ErrorFormatter {
             location = error.location(),
             sourceCode = sourceCode,
             suggestion = "main should be: main = {} -> perform Handler in ... where Handler handles all effects"
+        )
+    }
+
+    private fun formatMissingContentHashError(
+        error: ValidationError.MissingContentHash,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Internal Error [Missing Content Hash]",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = "This is a compiler bug. Please report it."
         )
     }
 

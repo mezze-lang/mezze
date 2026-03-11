@@ -185,23 +185,29 @@ public final class MezzeSuspended implements TruffleObject {
             // Nested composed thunk - recurse
             effectResult = executeComposedBlockThunk(nestedComposed, handlers, context, callNode);
         } else if (originalThunk.isDeferredEffectCall()) {
-            // Deferred effect call
-            String effectName = originalThunk.getEffectName();
+            // Deferred effect call - use content hash for O(1) lookup
+            String effectContentHash = originalThunk.getEffectContentHash();
             String operationName = originalThunk.getOperationName();
             Object argument = originalThunk.getArguments();
 
-            Object handler = findHandler(effectName, handlers, context);
+            // Content hash lookup - no fallbacks
+            if (effectContentHash == null || effectContentHash.isEmpty()) {
+                throw new RuntimeException("No effect content hash available for composed block effect call. " +
+                    "Operation: " + operationName);
+            }
+
+            Object handler = handlers.get(effectContentHash);
             if (handler == null) {
-                throw new RuntimeException("No handler found for effect " + effectName + " in composed block");
+                throw new RuntimeException("No handler found for effect hash " + effectContentHash + " in composed block");
             }
 
             if (!(handler instanceof MezzeRecord handlerRecord)) {
-                throw new RuntimeException("Handler for " + effectName + " must be a record");
+                throw new RuntimeException("Handler for effect hash " + effectContentHash + " must be a record");
             }
 
             Object operation = handlerRecord.getField(operationName);
             if (!(operation instanceof MezzeFunction opFunc)) {
-                throw new RuntimeException("Operation " + operationName + " not found in handler " + effectName);
+                throw new RuntimeException("Operation " + operationName + " not found in handler (hash: " + effectContentHash + ")");
             }
 
             effectResult = callFunction(opFunc, argument, callNode);
@@ -242,22 +248,6 @@ public final class MezzeSuspended implements TruffleObject {
     }
 
     /**
-     * Find handler for an effect, checking both direct lookup and performers.
-     */
-    private Object findHandler(String effectName, Map<String, Object> handlers, MezzeContext context) {
-        Object handler = handlers.get(effectName);
-        if (handler != null) return handler;
-
-        // Try finding via performers
-        for (Map.Entry<String, Object> entry : handlers.entrySet()) {
-            if (context.performerHandlesEffect(entry.getKey(), effectName)) {
-                return entry.getValue();
-            }
-        }
-        return null;
-    }
-
-    /**
      * Call a function with closure values prepended.
      */
     private Object callFunction(MezzeFunction func, Object argument, IndirectCallNode callNode) {
@@ -280,38 +270,35 @@ public final class MezzeSuspended implements TruffleObject {
 
     /**
      * Execute a deferred effect call by resolving the handler and calling the operation.
+     * Uses content hash for O(1) collision-free lookup - no effect name fallbacks.
      */
     @TruffleBoundary
     private Object executeDeferredEffectCall(Map<String, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
-        String effectName = computation.getEffectName();
+        String effectContentHash = computation.getEffectContentHash();
         String operationName = computation.getOperationName();
         Object argument = computation.getArguments();
 
-        // Find the handler for this effect
-        Object handler = handlers.get(effectName);
-        if (handler == null) {
-            // Try finding via performers
-            for (Map.Entry<String, Object> entry : handlers.entrySet()) {
-                if (context.performerHandlesEffect(entry.getKey(), effectName)) {
-                    handler = entry.getValue();
-                    break;
-                }
-            }
+        // Content hash lookup - no fallbacks
+        if (effectContentHash == null || effectContentHash.isEmpty()) {
+            throw new RuntimeException("No effect content hash available for deferred effect call. " +
+                "Operation: " + operationName);
         }
 
+        Object handler = handlers.get(effectContentHash);
         if (handler == null) {
-            throw new RuntimeException("No handler found for effect " + effectName + " in deferred call");
+            throw new RuntimeException("No handler found for effect hash " + effectContentHash +
+                " in deferred call. Operation: " + operationName);
         }
 
         if (!(handler instanceof MezzeRecord handlerRecord)) {
-            throw new RuntimeException("Handler for " + effectName + " must be a record, got: " +
+            throw new RuntimeException("Handler for effect hash " + effectContentHash + " must be a record, got: " +
                 handler.getClass().getSimpleName());
         }
 
         // Get the operation function
         Object operation = handlerRecord.getField(operationName);
         if (!(operation instanceof MezzeFunction opFunc)) {
-            throw new RuntimeException("Operation " + operationName + " not found or not a function in handler " + effectName);
+            throw new RuntimeException("Operation " + operationName + " not found or not a function in handler (hash: " + effectContentHash + ")");
         }
 
         // Call the operation with closure values prepended

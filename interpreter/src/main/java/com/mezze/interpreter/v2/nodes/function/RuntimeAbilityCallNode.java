@@ -133,20 +133,21 @@ public final class RuntimeAbilityCallNode extends MezzeNode {
         int opIndex = cachedOperationIndex;
         if (opIndex < 0) {
             opIndex = impl.getFieldIndex(operationName);
-            if (opIndex >= 0) {
-                cachedOperationIndex = opIndex;
+            if (opIndex < 0) {
+                // Field not found
+                return null;
             }
+            cachedOperationIndex = opIndex;
         }
 
-        // Get the operation function (using index when available)
-        Object opValue;
+        // Get the operation function using cached index
         try {
-            opValue = opIndex >= 0 ? impl.getField(opIndex) : impl.getFieldByName(operationName);
+            Object opValue = impl.getField(opIndex);
             if (opValue instanceof MezzeFunction func) {
                 return func;
             }
-        } catch (com.oracle.truffle.api.interop.UnknownIdentifierException e) {
-            // Field not found
+        } catch (Exception e) {
+            // Error getting field
             return null;
         }
 

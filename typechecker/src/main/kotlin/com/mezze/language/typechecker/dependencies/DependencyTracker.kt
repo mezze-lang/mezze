@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.dependencies
 
+import com.mezze.language.ast.Identifier
 import com.mezze.language.ast.hashing.MezzeHash
 
 /**
@@ -29,11 +30,17 @@ class DependencyTracker {
     // Current binding being tracked (if any)
     private var currentBinding: String? = null
 
-    // References collected for the current binding
+    // References collected for the current binding (by name)
     private val currentReferences = mutableSetOf<DefinitionRef.ByName>()
 
-    // All unresolved dependencies collected so far
+    // Hash-based references collected for the current binding
+    private val currentHashReferences = mutableSetOf<MezzeHash>()
+
+    // All unresolved dependencies collected so far (by name)
     private val allReferences = mutableMapOf<String, MutableSet<DefinitionRef.ByName>>()
+
+    // All hash-based dependencies collected so far (no resolution needed)
+    private val allHashReferences = mutableMapOf<String, MutableSet<MezzeHash>>()
 
     // Resolved dependency graph (populated after resolve() is called)
     private var resolvedGraph: DependencyGraph? = null
@@ -62,8 +69,37 @@ class DependencyTracker {
     }
 
     /**
-     * Record a reference by qualified name (e.g., "std::list::map").
+     * Record a reference from a structured Identifier.
+     * This is the preferred method - uses structured data instead of string parsing.
+     *
+     * @param identifier The structured identifier with localName and optional qualifier
      */
+    fun recordIdentifierReference(identifier: Identifier) {
+        val modulePath = identifier.qualifier?.fullPath
+        recordReference(identifier.localName, modulePath)
+    }
+
+    /**
+     * Record a reference by content hash (MezzeHash).
+     * This is the most efficient method when the hash is already known.
+     *
+     * @param hash The MezzeHash of the referenced definition
+     */
+    fun recordHashReference(hash: MezzeHash) {
+        // Store hash references separately for direct resolution (no name-to-hash resolution needed)
+        currentHashReferences.add(hash)
+    }
+
+    /**
+     * Record a reference by qualified name (e.g., "std::list::map").
+     *
+     * @deprecated Use recordIdentifierReference with a structured Identifier instead.
+     *             String parsing loses information and is fragile.
+     */
+    @Deprecated(
+        message = "Use recordIdentifierReference with structured Identifier",
+        replaceWith = ReplaceWith("recordIdentifierReference(identifier)")
+    )
     fun recordQualifiedReference(qualifiedName: String) {
         val parts = qualifiedName.split("::")
         if (parts.size == 1) {
@@ -85,10 +121,12 @@ class DependencyTracker {
 
         // Store the references for this binding
         allReferences.getOrPut(binding) { mutableSetOf() }.addAll(currentReferences)
+        allHashReferences.getOrPut(binding) { mutableSetOf() }.addAll(currentHashReferences)
 
         // Reset state
         currentBinding = null
         currentReferences.clear()
+        currentHashReferences.clear()
     }
 
     /**
@@ -115,6 +153,7 @@ class DependencyTracker {
     ): DependencyGraph {
         val builder = DependencyGraphBuilder()
 
+        // Process name-based references (require resolution)
         for ((bindingName, refs) in allReferences) {
             val fromHash = bindingToHash(bindingName) ?: continue
 
@@ -125,6 +164,15 @@ class DependencyTracker {
                 }
                 // If toHash is null, the reference is to something without a hash
                 // (e.g., a local variable, a builtin, or an unresolved name)
+            }
+        }
+
+        // Process hash-based references (no resolution needed)
+        for ((bindingName, hashRefs) in allHashReferences) {
+            val fromHash = bindingToHash(bindingName) ?: continue
+
+            for (toHash in hashRefs) {
+                builder.addDependency(fromHash, toHash)
             }
         }
 
@@ -152,7 +200,9 @@ class DependencyTracker {
     fun clear() {
         currentBinding = null
         currentReferences.clear()
+        currentHashReferences.clear()
         allReferences.clear()
+        allHashReferences.clear()
         resolvedGraph = null
     }
 
@@ -162,6 +212,9 @@ class DependencyTracker {
     fun merge(other: DependencyTracker) {
         for ((binding, refs) in other.allReferences) {
             allReferences.getOrPut(binding) { mutableSetOf() }.addAll(refs)
+        }
+        for ((binding, hashRefs) in other.allHashReferences) {
+            allHashReferences.getOrPut(binding) { mutableSetOf() }.addAll(hashRefs)
         }
     }
 }

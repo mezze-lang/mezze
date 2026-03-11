@@ -71,7 +71,7 @@ data class TypingContext(
         val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
         val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
-        val contentHash: String? = null  // Content hash (same as the map key)
+        val contentHash: String  // Content hash (same as the map key) - required for O(1) lookup
     )
 
     /**

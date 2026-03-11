@@ -92,9 +92,11 @@ public final class HandleNode extends MezzeNode {
     @CompilationFinal
     private final String handlerName;
 
-    // Content hash for handler lookup (preferred over string name)
-    @CompilationFinal
-    private final String handlerContentHash;
+    // Content hashes for handler lookup and registration (preferred over string name)
+    // First hash is typically the impl hash (for handler lookup)
+    // Additional hashes may include effect hash (for effect operation lookup)
+    @CompilationFinal(dimensions = 1)
+    private final String[] contentHashes;
 
     @Child
     private MezzeNode handlerNode;
@@ -154,18 +156,18 @@ public final class HandleNode extends MezzeNode {
             MezzeNode handlerNode,
             MezzeNode bodyNode
     ) {
-        this(handlerSlot, effectNames, handlerName, null, handlerNode, bodyNode,
+        this(handlerSlot, effectNames, handlerName, new String[0], handlerNode, bodyNode,
              -1, null, null, false, false);
     }
 
     /**
-     * Full constructor with scoped effect support and content hash.
+     * Full constructor with scoped effect support and content hashes.
      */
     public HandleNode(
             int handlerSlot,
             String[] effectNames,
             String handlerName,
-            String handlerContentHash,
+            String[] contentHashes,
             MezzeNode handlerNode,
             MezzeNode bodyNode,
             int scopeSlot,
@@ -177,7 +179,7 @@ public final class HandleNode extends MezzeNode {
         this.handlerSlot = handlerSlot;
         this.effectNames = effectNames != null ? effectNames : new String[0];
         this.handlerName = handlerName;
-        this.handlerContentHash = handlerContentHash;
+        this.contentHashes = contentHashes != null ? contentHashes : new String[0];
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
         this.scopeSlot = scopeSlot;
@@ -196,7 +198,8 @@ public final class HandleNode extends MezzeNode {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
         // Store contentHash for processSuspended fallback lookup
-        return new HandleNode(handlerSlot, null, null, contentHash, handlerNode, bodyChild,
+        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        return new HandleNode(handlerSlot, null, null, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
 
@@ -207,12 +210,25 @@ public final class HandleNode extends MezzeNode {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
         // Store contentHash for processSuspended fallback lookup
-        return new HandleNode(handlerSlot, effectNames, handlerName, contentHash, handlerNode, bodyChild,
+        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        return new HandleNode(handlerSlot, effectNames, handlerName, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
 
     /**
-     * Create a handle node for scoped effects.
+     * Create a handle node with multiple content hashes for registration.
+     * Use this for cases where handler needs to be found by multiple hashes
+     * (e.g., both impl hash and effect hash).
+     */
+    public static HandleNode create(int handlerSlot, String[] contentHashes, String[] effectNames, String handlerName, MezzeNode bodyChild) {
+        String primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : "";
+        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
+        return new HandleNode(handlerSlot, effectNames, handlerName, contentHashes, handlerNode, bodyChild,
+                -1, null, null, false, false);
+    }
+
+    /**
+     * Create a handle node for scoped effects with a single content hash.
      *
      * @param handlerSlot Frame slot for storing the handler
      * @param contentHash Content hash for handler lookup
@@ -233,12 +249,40 @@ public final class HandleNode extends MezzeNode {
             MezzeNode initializeScopeNode,
             MezzeNode finalizeScopeNode
     ) {
-        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
+        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        return createScoped(handlerSlot, hashes, effectNames, handlerName, bodyChild, scopeSlot, initializeScopeNode, finalizeScopeNode);
+    }
+
+    /**
+     * Create a handle node for scoped effects with multiple content hashes.
+     * Use this when the handler needs to be found by both impl hash and effect hash.
+     *
+     * @param handlerSlot Frame slot for storing the handler
+     * @param contentHashes Content hashes for handler lookup and registration
+     * @param effectNames Effect names this handler handles
+     * @param handlerName The handler/performer name
+     * @param bodyChild The body to execute
+     * @param scopeSlot Frame slot for storing the scope record
+     * @param initializeScopeNode Node to execute initialize_scope
+     * @param finalizeScopeNode Node to execute finalize_scope
+     */
+    public static HandleNode createScoped(
+            int handlerSlot,
+            String[] contentHashes,
+            String[] effectNames,
+            String handlerName,
+            MezzeNode bodyChild,
+            int scopeSlot,
+            MezzeNode initializeScopeNode,
+            MezzeNode finalizeScopeNode
+    ) {
+        String primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : "";
+        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
         return new HandleNode(
                 handlerSlot,
                 effectNames,
                 handlerName,
-                contentHash,  // Pass content hash for fallback lookup
+                contentHashes,  // Pass all content hashes for registration
                 handlerNode,
                 bodyChild,
                 scopeSlot,
@@ -443,32 +487,16 @@ public final class HandleNode extends MezzeNode {
             return suspended;
         }
 
-        // Build handler map from our effect names
+        // Build handler map - look up handler under any of our content hashes
         Map<String, Object> handlers = new HashMap<>();
-        Object handler = null;
 
-        // Prefer content hash lookup (O(1), collision-free)
-        if (handlerContentHash != null) {
-            handler = context.lookupGlobal(handlerContentHash);
-        }
-
-        // Fall back to name-based lookup if content hash not available or didn't find handler
-        if (handler == null && handlerName != null) {
-            handler = context.lookupLocal(handlerName);
-            if (handler == null) {
-                handler = context.lookupGlobal(handlerName);
-            }
-        }
-
-        if (handler != null) {
-            // Use content hash as key if available, otherwise use name
-            String handlerKey = handlerContentHash != null ? handlerContentHash : handlerName;
-            if (handlerKey != null) {
-                handlers.put(handlerKey, handler);
-            }
-            // Also map effect names to this handler
-            for (String effectName : effectNames) {
-                handlers.put(effectName, handler);
+        // Content hash lookup only (O(1), collision-free) - no fallback
+        for (String hash : contentHashes) {
+            if (hash != null && !hash.isEmpty()) {
+                Object handler = context.getHandlerFor(hash);
+                if (handler != null) {
+                    handlers.put(hash, handler);
+                }
             }
         }
 
@@ -497,19 +525,17 @@ public final class HandleNode extends MezzeNode {
             return;
         }
 
-        // Register under handler name
-        if (handlerName != null) {
-            context.defineLocal(handlerName, handler);
-        }
-
-        // Register under each effect name
-        for (String effectName : effectNames) {
-            context.defineLocal(effectName, handler);
+        // Register under all content hashes (O(1) lookup) - no effect names
+        for (String hash : contentHashes) {
+            if (hash != null && !hash.isEmpty()) {
+                context.defineLocal(hash, handler);
+            }
         }
     }
 
     /**
      * Push handlers onto the context's handler stack for lazy effects.
+     * Registers under all content hashes.
      */
     @TruffleBoundary
     private void pushHandlersToStack(Object handler) {
@@ -522,16 +548,18 @@ public final class HandleNode extends MezzeNode {
             return;
         }
 
-        // Build handler map
+        // Build handler map - register under all content hashes
         Map<String, Object> handlers = new HashMap<>();
-        if (handlerName != null) {
-            handlers.put(handlerName, handler);
-        }
-        for (String effectName : effectNames) {
-            handlers.put(effectName, handler);
+
+        for (String hash : contentHashes) {
+            if (hash != null && !hash.isEmpty()) {
+                handlers.put(hash, handler);
+            }
         }
 
-        context.pushHandlers(handlers);
+        if (!handlers.isEmpty()) {
+            context.pushHandlers(handlers);
+        }
     }
 
     /**

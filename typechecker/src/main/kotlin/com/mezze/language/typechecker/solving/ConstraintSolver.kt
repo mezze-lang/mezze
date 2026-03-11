@@ -3823,9 +3823,8 @@ class ConstraintSolver(
                 MezzeType.EffectRow.simple(annotation.effects.toSet(), rowVar, annotation.isPerformed)
             }
             is QualifiedTypeAnnotation -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
                 MezzeType.TypeApplication(
-                    constructor = qualifiedName,
+                    constructor = annotation.qualifiedName,
                     args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
                 )
             }

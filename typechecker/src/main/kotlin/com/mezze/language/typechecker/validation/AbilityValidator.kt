@@ -356,9 +356,8 @@ object AbilityValidator {
             is SeqTypeAnnotation -> "[${typeAnnotationToString(annotation.elementType)}]"
             is EffectRowAnnotation -> "<${annotation.effects.joinToString(", ")}>"
             is QualifiedTypeAnnotation -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                if (annotation.args.isEmpty()) qualifiedName
-                else "$qualifiedName ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
+                if (annotation.args.isEmpty()) annotation.qualifiedName
+                else "${annotation.qualifiedName} ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
             }
         }
     }

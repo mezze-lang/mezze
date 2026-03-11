@@ -512,6 +512,27 @@ sealed interface ValidationError {
 
         override fun location() = sourceLocation
     }
+
+    /**
+     * Missing content hash on identifier.
+     *
+     * This is an internal compiler bug - identifiers should always have
+     * their resolvedContentHash populated after typechecking (for top-level/imported bindings).
+     *
+     * Example: Identifier `foo` has no resolvedContentHash
+     */
+    data class MissingContentHash(
+        val identifierName: String,
+        val kind: String,  // "identifier", "ability call", "effect handler", etc.
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Internal error: $kind '$identifierName' has no content hash. ")
+            append("This is a bug in the typechecker - content hashes should be populated for all top-level/imported bindings.")
+        }
+
+        override fun location() = sourceLocation
+    }
 }
 
 /**

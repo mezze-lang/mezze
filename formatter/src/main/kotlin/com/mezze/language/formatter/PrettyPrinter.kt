@@ -234,10 +234,11 @@ class PrettyPrinter {
 
     private fun printVariantDefinition(def: VariantDefinition) {
         // Mezze variant syntax: | Constructor1, Constructor2 { data: Type }, ... |
-        // For variant definitions, we print each constructor on its own line
-        // unless it's very simple
-        val simple = def.constructors.size <= config.VARIANT_SINGLE_LINE_MAX_CONSTRUCTORS &&
-                def.constructors.all { it.dataType == null || isSimpleType(it.dataType) }
+        // Calculate total width to decide single-line vs multi-line
+        val estimatedWidth = 4 + def.constructors.sumOf { c ->
+            c.name.length + (c.dataType?.let { 1 + estimateTypeWidth(it) } ?: 0) + 2
+        }
+        val simple = estimatedWidth <= config.RECORD_SINGLE_LINE_THRESHOLD
 
         if (simple && def.constructors.isNotEmpty()) {
             // Single line: | Constructor1, Constructor2 |
@@ -255,25 +256,28 @@ class PrettyPrinter {
             }
             append(" |")
         } else {
-            // Multi-line format
+            // Multi-line format - use same | ... | syntax but spread across lines
+            append("|")
             newLine()
             indent {
                 def.constructors.forEachIndexed { index, constructor ->
                     printIndent()
-                    append("| ")
                     append(constructor.name)
                     constructor.dataType?.let {
                         append(" ")
                         printTypeAnnotation(it)
                     }
+                    append(",")
                     newLine()
                 }
                 if (def.isOpen) {
                     printIndent()
-                    append("| ...")
+                    append("...")
                     newLine()
                 }
             }
+            printIndent()
+            append("|")
         }
     }
 

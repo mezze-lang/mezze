@@ -424,42 +424,44 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                         String name = letBinding.getVariableName();
                         Integer slot = variableSlots.get(name);
                         if (slot != null) {
-                            // Use readSlotValue to handle different slot types (Long, Double, Boolean, Object)
                             Object value = readSlotValue(moduleFrame, slot);
                             if (value != null) {
-                                String fullQualifiedName = modulePath + "::" + name;
-                                String shortQualifiedName = shortPrefix + "::" + name;
-                                // ModuleQualifier uses __ instead of :: for internal naming
-                                String internalQualifiedName = modulePath.replace("::", "__") + "__" + name;
-                                context.defineGlobal(fullQualifiedName, value);
-                                context.defineGlobal(shortQualifiedName, value);
-                                context.defineGlobal(internalQualifiedName, value);
-                                // Also register with just the name for direct lookup
-                                context.defineGlobal(name, value);
-                                // Register by content hash for content-addressable lookup
+                                // Primary: Register by content hash for O(1) content-addressable lookup
                                 String contentHash = letBinding.getContentHash();
                                 if (contentHash != null && !contentHash.isEmpty()) {
                                     context.defineGlobal(contentHash, value);
                                 }
+                                // Backward compatibility: Register under qualified names
+                                // These are used by some runtime code paths that haven't been migrated
+                                String fullQualifiedName = modulePath + "::" + name;
+                                String shortQualifiedName = shortPrefix + "::" + name;
+                                String internalQualifiedName = modulePath.replace("::", "__") + "__" + name;
+                                context.defineGlobal(fullQualifiedName, value);
+                                context.defineGlobal(shortQualifiedName, value);
+                                context.defineGlobal(internalQualifiedName, value);
+                                context.defineGlobal(name, value);
                             }
                         }
                     }
                 } else if (item instanceof com.mezze.language.ast.ImplDeclaration implDecl) {
-                    // Register effect performers with qualified names
+                    // Register effect performers
                     String performerName = implDecl.getPerformerName();
                     Integer slot = variableSlots.get(performerName);
                     if (slot != null) {
-                        // Use readSlotValue to handle different slot types
                         Object value = readSlotValue(moduleFrame, slot);
                         if (value != null) {
+                            // Primary: Register by content hash for O(1) content-addressable lookup
+                            String contentHash = implDecl.getContentHash();
+                            if (contentHash != null && !contentHash.isEmpty()) {
+                                context.defineGlobal(contentHash, value);
+                            }
+                            // Backward compatibility: Register under qualified names
                             String fullQualifiedName = modulePath + "::" + performerName;
                             String shortQualifiedName = shortPrefix + "::" + performerName;
-                            // ModuleQualifier uses __ instead of :: for internal naming
                             String internalQualifiedName = modulePath.replace("::", "__") + "__" + performerName;
                             context.defineGlobal(fullQualifiedName, value);
                             context.defineGlobal(shortQualifiedName, value);
                             context.defineGlobal(internalQualifiedName, value);
-                            // Also register with just the performer name
                             context.defineGlobal(performerName, value);
                         }
                     }

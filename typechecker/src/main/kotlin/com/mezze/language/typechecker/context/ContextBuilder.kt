@@ -907,9 +907,8 @@ class ContextBuilder {
                 MezzeType.VarType(TypeVar.fresh())
             }
             is QualifiedTypeAnnotation -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
                 MezzeType.TypeApplication(
-                    constructor = qualifiedName,
+                    constructor = annotation.qualifiedName,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) }
                 )
             }

@@ -389,9 +389,10 @@ class EffectImplStorageNode(
     @field:Child private var recordChild: MezzeNode,
     private val hashSlot: Int,
     private val performerSlot: Int,
-    private val contentHash: String,
+    private val implContentHash: String,
     private val performerName: String,
-    private val effectName: String
+    private val effectName: String,
+    private val effectContentHash: String? = null  // Effect's content hash for O(1) lookup
 ) : MezzeNode() {
 
     override fun execute(frame: VirtualFrame): Any {
@@ -405,13 +406,13 @@ class EffectImplStorageNode(
     @TruffleBoundary
     private fun storeInContext(value: Any) {
         val context = MezzeContext.get(this)
-        context.defineGlobal(contentHash, value)
+        // Register under impl content hash
+        context.defineGlobal(implContentHash, value)
         context.defineLocal(performerName, value)
-        // Also store under effect name for DynamicEffectCallNode to find when no explicit perform block.
-        // Only do this for non-parameterized impls (this class is for non-parameterized),
-        // since parameterized impls require the function to be called first.
-        context.defineGlobal(effectName, value)
-        context.defineLocal(effectName, value)
+        // Also register under effect content hash for DynamicEffectCallNode O(1) lookup
+        if (effectContentHash != null && effectContentHash.isNotEmpty() && effectContentHash != implContentHash) {
+            context.defineGlobal(effectContentHash, value)
+        }
     }
 }
 
@@ -765,13 +766,14 @@ class DynamicHandleNode(
         val handler = getHandler(frame)
 
         if (handler != null) {
-            // Install handler by name in frame for effect operations to find
+            // Install handler - content hash only
             val context = MezzeContext.get(this)
-            context.defineLocal(handlerName, handler)
 
-            // CRITICAL: Also store under each effect name so DynamicEffectCallNode can find it
-            for (effectName in effectNames) {
-                context.defineLocal(effectName, handler)
+            // Register under content hashes only (O(1) collision-free lookup)
+            for (hash in contentHashes) {
+                if (hash.isNotEmpty()) {
+                    context.defineLocal(hash, handler)
+                }
             }
 
             // LAZY EFFECTS: Push handlers onto handler stack for lazy effects
@@ -791,14 +793,17 @@ class DynamicHandleNode(
 
     /**
      * Push handlers onto the context's handler stack for lazy effects.
+     * Registers under content hashes only.
      */
     @TruffleBoundary
     private fun pushHandlersToStack(handler: Any) {
         val context = MezzeContext.get(this)
         val handlers = mutableMapOf<String, Any>()
-        handlers[handlerName] = handler
-        for (effectName in effectNames) {
-            handlers[effectName] = handler
+        // Register under content hashes only (O(1) collision-free lookup)
+        for (hash in contentHashes) {
+            if (hash.isNotEmpty()) {
+                handlers[hash] = handler
+            }
         }
         context.pushHandlers(handlers)
     }
@@ -815,8 +820,12 @@ class DynamicHandleNode(
     /**
      * Process the result:
      * - For MezzeSuspended (lazy effects), execute with our handlers
-     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
-     * - For Exception effect, wrap successful results in Ok variant
+     * - For MezzeContinuationSuspended, extract suspended value (this is how
+     *   continuation-based effects like Exception.throw and Return.return work)
+     *
+     * NOTE: We do NOT wrap results in Ok - the user code is responsible for
+     * wrapping success values explicitly. This keeps effects as pure userland
+     * constructs without hardcoded effect names in the interpreter.
      */
     @TruffleBoundary
     private fun processResult(result: Any): Any {
@@ -825,18 +834,11 @@ class DynamicHandleNode(
             return processSuspended(result)
         }
 
-        // Handle suspended continuations (for early return/exception)
+        // Handle suspended continuations - extract the suspended value.
+        // This is how continuation-based effects (Exception, Return, etc.) work:
+        // the handler calls suspend_with {value = ...} and we extract that value.
         if (result is MezzeContinuationSuspended) {
-            // Exception and Return effects use suspend_with to return early
-            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
-                return result.suspendedValue
-            }
-            return result
-        }
-
-        // Wrap successful results in Ok for Exception effect
-        if (effectNames.contains("Exception")) {
-            return MezzeVariant.ok(result)
+            return result.suspendedValue
         }
 
         return result
@@ -849,31 +851,23 @@ class DynamicHandleNode(
     private fun processSuspended(suspended: MezzeSuspended): Any {
         val context = MezzeContext.get(this)
 
-        // Build handler map from our effect names
+        // Build handler map - content hash only
         val handlers = mutableMapOf<String, Any>()
 
-        // Prefer content hash lookup (O(1), collision-free)
+        // Use handler stack lookup (content hash only - no fallback)
         for (hash in contentHashes) {
-            val handler = context.lookupGlobal(hash)
-            if (handler != null) {
-                handlers[hash] = handler
-                // Also map effect names to this handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
+            if (hash.isNotEmpty()) {
+                val handler = context.getHandlerFor(hash)
+                if (handler != null) {
+                    handlers[hash] = handler
+                    break
                 }
-                break
             }
         }
 
-        // Fall back to name-based lookup if content hash not available
-        if (handlers.isEmpty()) {
-            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-            if (handler != null) {
-                handlers[handlerName] = handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
-                }
-            }
+        // Content hash is required - no fallback
+        if (handlers.isEmpty() && contentHashes.isNotEmpty()) {
+            throw RuntimeException("Handler not found via content hash for: $handlerName (content hash required)")
         }
 
         // Execute the suspended computation with our handlers
@@ -890,25 +884,24 @@ class DynamicHandleNode(
 
         val context = MezzeContext.get(this)
 
-        // First try content hashes (most reliable)
+        // Content hash lookup only - no fallback to name-based lookup
         for (hash in contentHashes) {
-            val handler = context.lookupGlobal(hash)
-            if (handler != null) {
-                cachedHandler = handler
-                initialized = true
-                return handler
+            if (hash.isNotEmpty()) {
+                val handler = context.lookupGlobal(hash)
+                if (handler != null) {
+                    cachedHandler = handler
+                    initialized = true
+                    return handler
+                }
             }
         }
 
-        // Fall back to name lookup
-        val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-
-        if (handler != null && !initialized) {
-            cachedHandler = handler
-            initialized = true
+        // No handler found - content hash is required
+        if (contentHashes.isEmpty()) {
+            throw RuntimeException("Handler '$handlerName' has no content hash - content hash is required")
         }
 
-        return handler
+        return null
     }
 }
 
@@ -942,12 +935,14 @@ class ParameterizedHandleNode(
         val handler = getAndCallImplFunction(parameters)
 
         if (handler != null) {
-            // Install handler by name and effect names
+            // Install handler - content hash only
             val context = MezzeContext.get(this)
-            context.defineLocal(handlerName, handler)
 
-            for (effectName in effectNames) {
-                context.defineLocal(effectName, handler)
+            // Register under content hashes only (O(1) collision-free lookup)
+            for (hash in contentHashes) {
+                if (hash.isNotEmpty()) {
+                    context.defineLocal(hash, handler)
+                }
             }
 
             // LAZY EFFECTS: Push handlers onto handler stack
@@ -970,14 +965,17 @@ class ParameterizedHandleNode(
 
     /**
      * Push handlers onto the context's handler stack for lazy effects.
+     * Registers under content hashes only.
      */
     @TruffleBoundary
     private fun pushHandlersToStack(handler: Any) {
         val context = MezzeContext.get(this)
         val handlers = mutableMapOf<String, Any>()
-        handlers[handlerName] = handler
-        for (effectName in effectNames) {
-            handlers[effectName] = handler
+        // Register under content hashes only (O(1) collision-free lookup)
+        for (hash in contentHashes) {
+            if (hash.isNotEmpty()) {
+                handlers[hash] = handler
+            }
         }
         context.pushHandlers(handlers)
     }
@@ -994,8 +992,12 @@ class ParameterizedHandleNode(
     /**
      * Process the result:
      * - For MezzeSuspended (lazy effects), execute with our handlers
-     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
-     * - For Exception effect, wrap successful results in Ok variant
+     * - For MezzeContinuationSuspended, extract suspended value (this is how
+     *   continuation-based effects like Exception.throw and Return.return work)
+     *
+     * NOTE: We do NOT wrap results in Ok - the user code is responsible for
+     * wrapping success values explicitly. This keeps effects as pure userland
+     * constructs without hardcoded effect names in the interpreter.
      */
     @TruffleBoundary
     private fun processResult(result: Any): Any {
@@ -1004,18 +1006,11 @@ class ParameterizedHandleNode(
             return processSuspended(result)
         }
 
-        // Handle suspended continuations (for early return/exception)
+        // Handle suspended continuations - extract the suspended value.
+        // This is how continuation-based effects (Exception, Return, etc.) work:
+        // the handler calls suspend_with {value = ...} and we extract that value.
         if (result is MezzeContinuationSuspended) {
-            // Exception and Return effects use suspend_with to return early
-            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
-                return result.suspendedValue
-            }
-            return result
-        }
-
-        // Wrap successful results in Ok for Exception effect
-        if (effectNames.contains("Exception")) {
-            return MezzeVariant.ok(result)
+            return result.suspendedValue
         }
 
         return result
@@ -1028,31 +1023,23 @@ class ParameterizedHandleNode(
     private fun processSuspended(suspended: MezzeSuspended): Any {
         val context = MezzeContext.get(this)
 
-        // Build handler map from our effect names
+        // Build handler map - content hash only
         val handlers = mutableMapOf<String, Any>()
 
-        // Prefer content hash lookup (O(1), collision-free)
+        // Use handler stack lookup (content hash only - no fallback)
         for (hash in contentHashes) {
-            val handler = context.lookupGlobal(hash)
-            if (handler != null) {
-                handlers[hash] = handler
-                // Also map effect names to this handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
+            if (hash.isNotEmpty()) {
+                val handler = context.getHandlerFor(hash)
+                if (handler != null) {
+                    handlers[hash] = handler
+                    break
                 }
-                break
             }
         }
 
-        // Fall back to name-based lookup if content hash not available
-        if (handlers.isEmpty()) {
-            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-            if (handler != null) {
-                handlers[handlerName] = handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
-                }
-            }
+        // Content hash is required - no fallback to name-based lookup
+        if (handlers.isEmpty() && contentHashes.isNotEmpty()) {
+            throw RuntimeException("Handler not found via content hash for: $handlerName (content hash required)")
         }
 
         // Execute the suspended computation with our handlers
@@ -1063,45 +1050,30 @@ class ParameterizedHandleNode(
     private fun getAndCallImplFunction(parameters: Any): Any? {
         val context = MezzeContext.get(this)
 
-        // Look up the parameterized impl by content hash
+        // Content hash lookup only - no fallback to name-based lookup
         for (hash in contentHashes) {
-            val implFunc = context.lookupGlobal(hash)
-            if (implFunc is MezzeFunction) {
-                // Call the impl function with parameters to get the handler record
-                val closureValues = implFunc.closureValues
-                val arguments = if (closureValues.isEmpty()) {
-                    arrayOf(parameters)
-                } else {
-                    Array(closureValues.size + 1) { i ->
-                        if (i < closureValues.size) closureValues[i] else parameters
+            if (hash.isNotEmpty()) {
+                val implFunc = context.lookupGlobal(hash)
+                if (implFunc is MezzeFunction) {
+                    // Call the impl function with parameters to get the handler record
+                    val closureValues = implFunc.closureValues
+                    val arguments = if (closureValues.isEmpty()) {
+                        arrayOf(parameters)
+                    } else {
+                        Array(closureValues.size + 1) { i ->
+                            if (i < closureValues.size) closureValues[i] else parameters
+                        }
                     }
+                    return callNode.call(implFunc.callTarget, *arguments)
+                } else if (implFunc is MezzeRecord) {
+                    // Already a record (non-parameterized), use directly
+                    return implFunc
                 }
-                // Use spread operator to pass array elements as individual arguments
-                return callNode.call(implFunc.callTarget, *arguments)
-            } else if (implFunc is MezzeRecord) {
-                // Already a record (non-parameterized), use directly
-                return implFunc
             }
         }
 
-        // Fall back to name lookup
-        val implFunc = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-        if (implFunc is MezzeFunction) {
-            val closureValues = implFunc.closureValues
-            val arguments = if (closureValues.isEmpty()) {
-                arrayOf(parameters)
-            } else {
-                Array(closureValues.size + 1) { i ->
-                    if (i < closureValues.size) closureValues[i] else parameters
-                }
-            }
-            // Use spread operator to pass array elements as individual arguments
-            return callNode.call(implFunc.callTarget, *arguments)
-        } else if (implFunc is MezzeRecord) {
-            return implFunc
-        }
-
-        throw RuntimeException("Parameterized impl not found for: $handlerName")
+        // No handler found - content hash is required
+        throw RuntimeException("Parameterized impl not found for: $handlerName (content hash required)")
     }
 }
 
@@ -1159,12 +1131,14 @@ class ParameterizedScopedHandleNode(
         val finalizeScopeFunc = handlerRecord?.getField("__finalize_scope__") as? MezzeFunction
 
         if (handler != null) {
-            // Install handler by name and effect names
+            // Install handler - content hash only
             val context = MezzeContext.get(this)
-            context.defineLocal(handlerName, handler)
 
-            for (effectName in effectNames) {
-                context.defineLocal(effectName, handler)
+            // Register under content hashes only (O(1) collision-free lookup)
+            for (hash in contentHashes) {
+                if (hash.isNotEmpty()) {
+                    context.defineLocal(hash, handler)
+                }
             }
 
             // LAZY EFFECTS: Push handlers onto handler stack
@@ -1328,6 +1302,16 @@ class ParameterizedScopedHandleNode(
         return scopeCallNode.call(func.callTarget, *arguments)
     }
 
+    /**
+     * Process the result:
+     * - For MezzeSuspended (lazy effects), execute with our handlers
+     * - For MezzeContinuationSuspended, extract suspended value (this is how
+     *   continuation-based effects like Exception.throw and Return.return work)
+     *
+     * NOTE: We do NOT wrap results in Ok - the user code is responsible for
+     * wrapping success values explicitly. This keeps effects as pure userland
+     * constructs without hardcoded effect names in the interpreter.
+     */
     @TruffleBoundary
     private fun processResult(result: Any): Any {
         // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
@@ -1335,15 +1319,11 @@ class ParameterizedScopedHandleNode(
             return processSuspendedScoped(result)
         }
 
+        // Handle suspended continuations - extract the suspended value.
+        // This is how continuation-based effects (Exception, Return, etc.) work:
+        // the handler calls suspend_with {value = ...} and we extract that value.
         if (result is MezzeContinuationSuspended) {
-            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
-                return result.suspendedValue
-            }
-            return result
-        }
-
-        if (effectNames.contains("Exception")) {
-            return MezzeVariant.ok(result)
+            return result.suspendedValue
         }
 
         return result
@@ -1356,31 +1336,23 @@ class ParameterizedScopedHandleNode(
     private fun processSuspendedScoped(suspended: MezzeSuspended): Any {
         val context = MezzeContext.get(this)
 
-        // Build handler map from our effect names
+        // Build handler map - content hash only
         val handlers = mutableMapOf<String, Any>()
 
-        // Prefer content hash lookup (O(1), collision-free)
+        // Use handler stack lookup (content hash only - no fallback)
         for (hash in contentHashes) {
-            val handler = context.lookupGlobal(hash)
-            if (handler != null) {
-                handlers[hash] = handler
-                // Also map effect names to this handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
+            if (hash.isNotEmpty()) {
+                val handler = context.getHandlerFor(hash)
+                if (handler != null) {
+                    handlers[hash] = handler
+                    break
                 }
-                break
             }
         }
 
-        // Fall back to name-based lookup if content hash not available
-        if (handlers.isEmpty()) {
-            val handler = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-            if (handler != null) {
-                handlers[handlerName] = handler
-                for (effectName in effectNames) {
-                    handlers[effectName] = handler
-                }
-            }
+        // Content hash is required - no fallback
+        if (handlers.isEmpty() && contentHashes.isNotEmpty()) {
+            throw RuntimeException("Handler not found via content hash for: $handlerName (content hash required)")
         }
 
         // Execute the suspended computation with our handlers
@@ -1391,51 +1363,43 @@ class ParameterizedScopedHandleNode(
     private fun getAndCallImplFunction(parameters: Any): Any? {
         val context = MezzeContext.get(this)
 
+        // Content hash lookup only - no fallback to name-based lookup
         for (hash in contentHashes) {
-            val implFunc = context.lookupGlobal(hash)
-            if (implFunc is MezzeFunction) {
-                val closureValues = implFunc.closureValues
-                val arguments = if (closureValues.isEmpty()) {
-                    arrayOf(parameters)
-                } else {
-                    Array(closureValues.size + 1) { i ->
-                        if (i < closureValues.size) closureValues[i] else parameters
+            if (hash.isNotEmpty()) {
+                val implFunc = context.lookupGlobal(hash)
+                if (implFunc is MezzeFunction) {
+                    val closureValues = implFunc.closureValues
+                    val arguments = if (closureValues.isEmpty()) {
+                        arrayOf(parameters)
+                    } else {
+                        Array(closureValues.size + 1) { i ->
+                            if (i < closureValues.size) closureValues[i] else parameters
+                        }
                     }
+                    return callNode.call(implFunc.callTarget, *arguments)
+                } else if (implFunc is MezzeRecord) {
+                    return implFunc
                 }
-                return callNode.call(implFunc.callTarget, *arguments)
-            } else if (implFunc is MezzeRecord) {
-                return implFunc
             }
         }
 
-        val implFunc = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
-        if (implFunc is MezzeFunction) {
-            val closureValues = implFunc.closureValues
-            val arguments = if (closureValues.isEmpty()) {
-                arrayOf(parameters)
-            } else {
-                Array(closureValues.size + 1) { i ->
-                    if (i < closureValues.size) closureValues[i] else parameters
-                }
-            }
-            return callNode.call(implFunc.callTarget, *arguments)
-        } else if (implFunc is MezzeRecord) {
-            return implFunc
-        }
-
-        throw RuntimeException("Parameterized impl not found for: $handlerName")
+        // No handler found - content hash is required
+        throw RuntimeException("Parameterized impl not found for: $handlerName (content hash required)")
     }
 
     /**
      * Push handlers onto the context's handler stack for lazy effects.
+     * Registers under content hashes only.
      */
     @TruffleBoundary
     private fun pushHandlersToStack(handler: Any) {
         val context = MezzeContext.get(this)
         val handlers = mutableMapOf<String, Any>()
-        handlers[handlerName] = handler
-        for (effectName in effectNames) {
-            handlers[effectName] = handler
+        // Register under content hashes only (O(1) collision-free lookup)
+        for (hash in contentHashes) {
+            if (hash.isNotEmpty()) {
+                handlers[hash] = handler
+            }
         }
         context.pushHandlers(handlers)
     }

@@ -292,47 +292,37 @@ public final class MezzeContext {
      * Check if a handler is currently available for the given effect.
      */
     @TruffleBoundary
-    public boolean hasHandlerFor(String effectName) {
+    /**
+     * Check if there's a handler for the given effect content hash.
+     *
+     * @param effectContentHash The content hash of the effect (NOT the effect name)
+     * @return true if a handler exists for this effect
+     */
+    public boolean hasHandlerFor(String effectContentHash) {
         Map<String, Object> handlers = getCurrentHandlers();
         if (handlers == null) return false;
 
-        // Direct lookup
-        if (handlers.containsKey(effectName)) return true;
-
-        // Check performers that handle this effect
-        Set<String> performers = effectToPerformers.get(effectName);
-        if (performers != null) {
-            for (String performer : performers) {
-                if (handlers.containsKey(performer)) return true;
-            }
-        }
-
-        return false;
+        // Direct O(1) lookup by content hash
+        return handlers.containsKey(effectContentHash);
     }
 
     /**
      * Get the handler for an effect from the current handler stack.
      * Searches the ENTIRE stack from top to bottom (innermost to outermost handler).
+     *
+     * @param effectContentHash The content hash of the effect (NOT the effect name)
+     * @return The handler for the effect, or null if not found
      */
     @TruffleBoundary
-    public Object getHandlerFor(String effectName) {
+    public Object getHandlerFor(String effectContentHash) {
         Deque<Map<String, Object>> stack = handlerStack.get();
         if (stack.isEmpty()) return null;
 
         // Search the entire stack (top to bottom)
+        // Handlers are keyed by content hash - direct O(1) lookup
         for (Map<String, Object> handlers : stack) {
-            // Direct lookup
-            Object handler = handlers.get(effectName);
+            Object handler = handlers.get(effectContentHash);
             if (handler != null) return handler;
-
-            // Check performers that handle this effect
-            Set<String> performers = effectToPerformers.get(effectName);
-            if (performers != null) {
-                for (String performer : performers) {
-                    handler = handlers.get(performer);
-                    if (handler != null) return handler;
-                }
-            }
         }
 
         return null;

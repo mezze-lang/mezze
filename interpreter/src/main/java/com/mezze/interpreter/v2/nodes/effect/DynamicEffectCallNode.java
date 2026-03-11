@@ -41,6 +41,10 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @CompilationFinal
     private final String operationName;  // e.g., "log"
 
+    /** Content hash for effect lookup (preferred over effectName when available) */
+    @CompilationFinal
+    private final String effectContentHash;
+
     @Child
     private MezzeNode argumentNode;
 
@@ -61,11 +65,17 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @CompilationFinal
     private int cachedOperationIndex = -1;
 
-    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode) {
+    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode, String effectContentHash) {
         this.effectName = effectName;
         this.operationName = operationName;
         this.argumentNode = argumentNode;
+        this.effectContentHash = effectContentHash;
         this.callNode = IndirectCallNode.create();
+    }
+
+    /** Constructor without content hash (backward compatibility) */
+    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode) {
+        this(effectName, operationName, argumentNode, null);
     }
 
     @Override
@@ -92,7 +102,12 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // The handler stack is the source of truth for active handlers.
         // Handlers registered in locals/globals are NOT automatically active -
         // they must be explicitly installed via perform.
-        Object handler = context.getHandlerFor(effectName);
+
+        // Content hash lookup only (O(1), collision-free) - no fallback
+        Object handler = null;
+        if (effectContentHash != null && !effectContentHash.isEmpty()) {
+            handler = context.getHandlerFor(effectContentHash);
+        }
 
         // NO HANDLER AVAILABLE - Create suspended computation (LAZY EFFECTS)
         if (handler == null) {
@@ -123,8 +138,8 @@ public final class DynamicEffectCallNode extends MezzeNode {
         Object operation = opIndex >= 0 ? handlerRecord.getField(opIndex) : handlerRecord.getField(operationName);
 
         if (!(operation instanceof MezzeFunction opFunc)) {
-            throw new RuntimeException("Operation '" + operationName + "' not found or not a function in handler " + effectName +
-                ", got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
+            throw new RuntimeException("Operation '" + operationName + "' not found or not a function in handler (hash: " +
+                effectContentHash + "), got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
         }
 
         return callOperation(opFunc, argument);
@@ -133,16 +148,23 @@ public final class DynamicEffectCallNode extends MezzeNode {
     /**
      * Create a suspended effect call when no handler is available.
      * This implements the lazy effects model.
+     * Requires content hash for handler resolution - no effect name fallbacks.
      */
     @TruffleBoundary
     private MezzeSuspended createSuspendedEffectCall(Object argument) {
-        // Create a thunk for the deferred effect operation
-        MezzeThunk thunk = new MezzeThunk(effectName, operationName, argument);
+        // Content hash is required for proper handler resolution
+        if (effectContentHash == null || effectContentHash.isEmpty()) {
+            throw new RuntimeException("Effect content hash is required for suspended effect call. " +
+                "Operation: " + operationName);
+        }
 
-        // Wrap in MezzeSuspended with this effect as unhandled
+        // Create a thunk for the deferred effect operation with content hash
+        MezzeThunk thunk = new MezzeThunk(effectName, operationName, argument, effectContentHash);
+
+        // Use content hash as effect identifier (no fallback to name)
         return new MezzeSuspended(
             thunk,
-            Collections.singleton(effectName)
+            Collections.singleton(effectContentHash)
         );
     }
 
@@ -168,13 +190,25 @@ public final class DynamicEffectCallNode extends MezzeNode {
     }
 
     /**
-     * Create a dynamic effect call node.
+     * Create a dynamic effect call node with content hash for O(1) lookup.
+     *
+     * @param effectName The effect name (e.g., "Log", "Random")
+     * @param operationName The operation name (e.g., "log", "nextInt")
+     * @param argumentNode The argument expression node
+     * @param effectContentHash Content hash of the effect (preferred for lookup)
+     */
+    public static DynamicEffectCallNode create(String effectName, String operationName, MezzeNode argumentNode, String effectContentHash) {
+        return new DynamicEffectCallNode(effectName, operationName, argumentNode, effectContentHash);
+    }
+
+    /**
+     * Create a dynamic effect call node (backward compatible, no content hash).
      *
      * @param effectName The effect name (e.g., "Log", "Random")
      * @param operationName The operation name (e.g., "log", "nextInt")
      * @param argumentNode The argument expression node
      */
     public static DynamicEffectCallNode create(String effectName, String operationName, MezzeNode argumentNode) {
-        return new DynamicEffectCallNode(effectName, operationName, argumentNode);
+        return new DynamicEffectCallNode(effectName, operationName, argumentNode, null);
     }
 }

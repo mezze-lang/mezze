@@ -73,11 +73,20 @@ object ContentHashComputer {
      * Compute content hashes for all declarations in a program.
      *
      * Returns a new program with contentHash fields populated.
+     *
+     * This is a two-pass process:
+     * 1. First pass: Compute all declaration hashes and build name->hash lookup
+     * 2. Second pass: Resolve references (e.g., ImplDeclaration.effect.resolvedContentHash)
      */
     fun computeHashes(program: Program): HashResult {
         val hashMap = mutableMapOf<String, MezzeHash>()
 
-        val updatedItems = program.items.map { item ->
+        // Maps for resolving references by name (temporary, for internal use only)
+        val effectHashByName = mutableMapOf<String, String>()
+        val abilityHashByName = mutableMapOf<String, String>()
+
+        // PASS 1: Compute all declaration hashes
+        val pass1Items = program.items.map { item ->
             when (item) {
                 is LetBinding -> {
                     val hash = ASTHasher.hashLetBinding(item)
@@ -94,8 +103,10 @@ object ContentHashComputer {
 
                 is EffectDeclaration -> {
                     val hash = ASTHasher.hashEffectDeclaration(item)
+                    val hashStr = hash.toFullHexString()
                     hashMap[item.name] = hash
-                    item.copy(contentHash = hash.toFullHexString())
+                    effectHashByName[item.name] = hashStr
+                    item.copy(contentHash = hashStr)
                 }
 
                 is ImplDeclaration -> {
@@ -107,8 +118,10 @@ object ContentHashComputer {
 
                 is AbilityDeclaration -> {
                     val hash = ASTHasher.hashAbilityDeclaration(item)
+                    val hashStr = hash.toFullHexString()
                     hashMap[item.name] = hash
-                    item.copy(contentHash = hash.toFullHexString())
+                    abilityHashByName[item.name] = hashStr
+                    item.copy(contentHash = hashStr)
                 }
 
                 is ImplAbilityDeclaration -> {
@@ -121,6 +134,33 @@ object ContentHashComputer {
                 is TopLevelExpression -> item  // No hash for top-level expressions
                 is UseDeclaration -> item  // No hash for imports
                 is PubUseDeclaration -> item  // No hash for re-exports
+            }
+        }
+
+        // PASS 2: Resolve references (populate resolvedContentHash on QualifiedRefs)
+        val updatedItems = pass1Items.map { item ->
+            when (item) {
+                is ImplDeclaration -> {
+                    // Resolve effect reference
+                    val effectHash = effectHashByName[item.effect.localName]
+                    if (effectHash != null && item.effect.resolvedContentHash == null) {
+                        item.copy(effect = item.effect.withResolvedHash(effectHash))
+                    } else {
+                        item
+                    }
+                }
+
+                is ImplAbilityDeclaration -> {
+                    // Resolve ability reference
+                    val abilityHash = abilityHashByName[item.ability.localName]
+                    if (abilityHash != null && item.ability.resolvedContentHash == null) {
+                        item.copy(ability = item.ability.withResolvedHash(abilityHash))
+                    } else {
+                        item
+                    }
+                }
+
+                else -> item
             }
         }
 
