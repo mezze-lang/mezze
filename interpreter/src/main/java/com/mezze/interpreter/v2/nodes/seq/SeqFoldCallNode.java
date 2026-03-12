@@ -1,9 +1,14 @@
 package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.seq.SeqStorage;
+import com.mezze.datastructures.seq.LongSeqStorage;
+import com.mezze.datastructures.seq.DoubleSeqStorage;
+import com.mezze.datastructures.seq.ObjectSeqStorage;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -17,8 +22,13 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  * This node provides specialized implementations with:
  * 1. DirectCallNode for monomorphic call sites (JIT-inlinable)
  * 2. Loop unrolling for small sequences
- * 3. No intermediate allocations during fold
+ * 3. Storage type profiling for JIT optimization
  * 4. Proper MezzeRecord argument wrapping for { acc, x }
+ *
+ * Key optimizations:
+ * - DirectCallNode for monomorphic call sites (JIT-inlinable)
+ * - Storage type profiling allows JIT to specialize based on element type
+ * - No intermediate allocations during fold
  */
 @NodeInfo(shortName = "seq.fold.call")
 public final class SeqFoldCallNode extends MezzeNode {
@@ -43,6 +53,13 @@ public final class SeqFoldCallNode extends MezzeNode {
 
     @CompilationFinal
     private int cachedClosureLength;
+
+    // Storage type profiling for JIT optimization
+    @CompilationFinal
+    private Class<?> seenStorageType;
+
+    @CompilationFinal
+    private boolean seenMultipleTypes;
 
     public SeqFoldCallNode(MezzeNode seqNode, MezzeNode initNode, MezzeNode folderNode) {
         this.seqNode = seqNode;
@@ -72,16 +89,143 @@ public final class SeqFoldCallNode extends MezzeNode {
             return init;
         }
 
-        // Use size-based dispatch
+        // Profile storage type for JIT optimization
+        SeqStorage storage = seq.getStorage();
+        Class<?> storageType = storage.getClass();
+
+        if (!seenMultipleTypes) {
+            if (seenStorageType == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                seenStorageType = storageType;
+            } else if (seenStorageType != storageType) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                seenMultipleTypes = true;
+            }
+        }
+
+        // Type-directed dispatch: JIT can optimize based on storage type
+        if (!seenMultipleTypes) {
+            if (seenStorageType == LongSeqStorage.class) {
+                return foldLongSeq((LongSeqStorage) storage, init, size);
+            } else if (seenStorageType == DoubleSeqStorage.class) {
+                return foldDoubleSeq((DoubleSeqStorage) storage, init, size);
+            } else if (seenStorageType == ObjectSeqStorage.class) {
+                return foldObjectSeq((ObjectSeqStorage) storage, init, size);
+            }
+        }
+
+        // Megamorphic fallback
+        return foldGeneric(seq, init, size);
+    }
+
+    /**
+     * Specialized path for long sequences.
+     * JIT can optimize knowing elements are longs.
+     */
+    private Object foldLongSeq(LongSeqStorage storage, Object init, int size) {
+        long[] data = storage.getArray();
+
         if (size <= 8) {
-            return foldSmall(seq, init, size);
+            return foldLongSmall(data, init, size);
         } else {
-            return foldLarge(seq, init, size);
+            return foldLongLarge(data, init, size);
         }
     }
 
     @ExplodeLoop
-    private Object foldSmall(MezzeSeq<?> seq, Object init, int size) {
+    private Object foldLongSmall(long[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    @TruffleBoundary
+    private Object foldLongLarge(long[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    /**
+     * Specialized path for double sequences.
+     * JIT can optimize knowing elements are doubles.
+     */
+    private Object foldDoubleSeq(DoubleSeqStorage storage, Object init, int size) {
+        double[] data = storage.getArray();
+
+        if (size <= 8) {
+            return foldDoubleSmall(data, init, size);
+        } else {
+            return foldDoubleLarge(data, init, size);
+        }
+    }
+
+    @ExplodeLoop
+    private Object foldDoubleSmall(double[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    @TruffleBoundary
+    private Object foldDoubleLarge(double[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    /**
+     * Specialized path for object sequences.
+     */
+    private Object foldObjectSeq(ObjectSeqStorage storage, Object init, int size) {
+        Object[] data = storage.getArray();
+
+        if (size <= 8) {
+            return foldObjectSmall(data, init, size);
+        } else {
+            return foldObjectLarge(data, init, size);
+        }
+    }
+
+    @ExplodeLoop
+    private Object foldObjectSmall(Object[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    @TruffleBoundary
+    private Object foldObjectLarge(Object[] data, Object init, int size) {
+        Object acc = init;
+        for (int i = 0; i < size; i++) {
+            acc = callFolder(acc, data[i]);
+        }
+        return acc;
+    }
+
+    /**
+     * Generic fallback for megamorphic sites.
+     */
+    private Object foldGeneric(MezzeSeq<?> seq, Object init, int size) {
+        if (size <= 8) {
+            return foldGenericSmall(seq, init, size);
+        } else {
+            return foldGenericLarge(seq, init, size);
+        }
+    }
+
+    @ExplodeLoop
+    private Object foldGenericSmall(MezzeSeq<?> seq, Object init, int size) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
             acc = callFolder(acc, seq.get(i));
@@ -90,7 +234,7 @@ public final class SeqFoldCallNode extends MezzeNode {
     }
 
     @TruffleBoundary
-    private Object foldLarge(MezzeSeq<?> seq, Object init, int size) {
+    private Object foldGenericLarge(MezzeSeq<?> seq, Object init, int size) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
             acc = callFolder(acc, seq.get(i));
