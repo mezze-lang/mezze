@@ -571,7 +571,7 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_partition: {xs: ['a], p: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]}
+        // __native_seq_partition: {xs: ['a], p: {x: 'a} -> Bool} -> {pass: ['a], fail: ['a]}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val seqType = MezzeType.SeqType(elemType)
@@ -580,8 +580,8 @@ object SeqTypes {
                 MezzeType.BoolType
             )
             val resultType = MezzeType.RecordType(mapOf(
-                "matching" to seqType,
-                "not_matching" to seqType
+                "pass" to seqType,
+                "fail" to seqType
             ))
             context["__native_seq_partition"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -592,13 +592,13 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_zip: {xs: ['a], ys: ['b]} -> [{first: 'a, second: 'b}]
+        // __native_seq_zip: {xs: ['a], ys: ['b]} -> [{fst: 'a, snd: 'b}]
         run {
             val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
             val seqTypeA = MezzeType.SeqType(elemTypeA)
             val seqTypeB = MezzeType.SeqType(elemTypeB)
-            val pairType = MezzeType.RecordType(mapOf("first" to elemTypeA, "second" to elemTypeB))
+            val pairType = MezzeType.RecordType(mapOf("fst" to elemTypeA, "snd" to elemTypeB))
             val resultType = MezzeType.SeqType(pairType)
             context["__native_seq_zip"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to seqTypeA, "ys" to seqTypeB)),
@@ -889,13 +889,13 @@ object SeqTypes {
 
         // ==================== Split Operations ====================
 
-        // __native_seq_split_at: {xs: ['a], i: Int} -> {left: ['a], right: ['a]}
+        // __native_seq_split_at: {xs: ['a], i: Int} -> {l: ['a], r: ['a]}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val seqType = MezzeType.SeqType(elemType)
             val resultType = MezzeType.RecordType(mapOf(
-                "left" to seqType,
-                "right" to seqType
+                "l" to seqType,
+                "r" to seqType
             ))
             context["__native_seq_split_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -906,7 +906,7 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_span: {xs: ['a], p: {x: 'a} -> Bool} -> {left: ['a], right: ['a]}
+        // __native_seq_span: {xs: ['a], p: {x: 'a} -> Bool} -> {l: ['a], r: ['a]}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val seqType = MezzeType.SeqType(elemType)
@@ -915,8 +915,8 @@ object SeqTypes {
                 MezzeType.BoolType
             )
             val resultType = MezzeType.RecordType(mapOf(
-                "left" to seqType,
-                "right" to seqType
+                "l" to seqType,
+                "r" to seqType
             ))
             context["__native_seq_span"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -1288,12 +1288,12 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_zip3: {xs: ['a], ys: ['b], zs: ['c]} -> [{first: 'a, second: 'b, third: 'c}]
+        // __native_seq_zip3: {xs: ['a], ys: ['b], zs: ['c]} -> [{fst: 'a, snd: 'b, thd: 'c}]
         run {
             val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
             val elemTypeC = MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
-            val tripleType = MezzeType.RecordType(mapOf("first" to elemTypeA, "second" to elemTypeB, "third" to elemTypeC))
+            val tripleType = MezzeType.RecordType(mapOf("fst" to elemTypeA, "snd" to elemTypeB, "thd" to elemTypeC))
             context["__native_seq_zip3"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to MezzeType.SeqType(elemTypeA),
@@ -1304,14 +1304,14 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_zip4: {xs: ['a], ys: ['b], zs: ['c], ws: ['d]} -> [{first: 'a, second: 'b, third: 'c, fourth: 'd}]
+        // __native_seq_zip4: {xs: ['a], ys: ['b], zs: ['c], ws: ['d]} -> [{fst: 'a, snd: 'b, thd: 'c, fth: 'd}]
         run {
             val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
             val elemTypeC = MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
             val elemTypeD = MezzeType.VarType(com.mezze.language.ast.TypeVar("d"))
             val quadType = MezzeType.RecordType(mapOf(
-                "first" to elemTypeA, "second" to elemTypeB, "third" to elemTypeC, "fourth" to elemTypeD
+                "fst" to elemTypeA, "snd" to elemTypeB, "thd" to elemTypeC, "fth" to elemTypeD
             ))
             context["__native_seq_zip4"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
@@ -1324,11 +1324,11 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_cartesian_product: {xs: ['a], ys: ['b]} -> [{first: 'a, second: 'b}]
+        // __native_seq_cartesian_product: {xs: ['a], ys: ['b]} -> [{fst: 'a, snd: 'b}]
         run {
             val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            val pairType = MezzeType.RecordType(mapOf("first" to elemTypeA, "second" to elemTypeB))
+            val pairType = MezzeType.RecordType(mapOf("fst" to elemTypeA, "snd" to elemTypeB))
             context["__native_seq_cartesian_product"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to MezzeType.SeqType(elemTypeA),

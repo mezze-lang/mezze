@@ -591,7 +591,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let parts = list::partition { xs = xs, p = { x } -> x > 5 }
-            list::length { xs = parts.matching }
+            list::length { xs = parts.pass }
         """)
         assertEquals(4L, result)  // 6, 7, 8, 9
     }
@@ -602,7 +602,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let parts = list::partition { xs = xs, p = { x } -> x > 5 }
-            list::length { xs = parts.not_matching }
+            list::length { xs = parts.fail }
         """)
         assertEquals(5L, result)  // 1, 2, 3, 4, 5
     }

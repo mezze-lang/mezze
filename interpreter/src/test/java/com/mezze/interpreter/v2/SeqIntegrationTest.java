@@ -232,7 +232,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.matching }
+            seq::length { xs = result.pass }
             """);
         assertEquals(3L, result);  // 3, 4, 5
     }
@@ -242,7 +242,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.not_matching }
+            seq::length { xs = result.fail }
             """);
         assertEquals(2L, result);  // 1, 2
     }

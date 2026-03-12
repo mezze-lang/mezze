@@ -314,7 +314,7 @@ class ComprehensiveConcurrencyValidationTest {
                 perform VirtualParallel in do
                     let xs = [1, 2, 3, 4, 5]
                     let result = Parallel.map {xs = xs, f = {x} -> x * 2}
-                    let sum = Parallel.reduce {xs = result, f = {left, right} -> left + right}
+                    let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
                     match sum is
                         Some {val} -> val
                         None -> 0
@@ -331,13 +331,13 @@ class ComprehensiveConcurrencyValidationTest {
                 perform VirtualParallel in do
                     # Two independent operations
                     let both_result = Parallel.both {
-                        left = {} -> [1, 2, 3],
-                        right = {} -> [4, 5, 6]
+                        l = {} -> [1, 2, 3],
+                        r = {} -> [4, 5, 6]
                     }
 
                     # Dependent operation - uses results from both
-                    let left_sum = Parallel.reduce {xs = both_result.left, f = {left, right} -> left + right}
-                    let right_sum = Parallel.reduce {xs = both_result.right, f = {left, right} -> left + right}
+                    let left_sum = Parallel.reduce {xs = both_result.l, f = {l, r} -> l + r}
+                    let right_sum = Parallel.reduce {xs = both_result.r, f = {l, r} -> l + r}
 
                     let l = match left_sum is
                         Some {val} -> val
@@ -616,23 +616,23 @@ class ComprehensiveConcurrencyValidationTest {
                 perform VirtualParallel in do
                     # First phase: independent operations
                     let phase1 = Parallel.both {
-                        left = {} -> [1, 2, 3],
-                        right = {} -> [4, 5, 6]
+                        l = {} -> [1, 2, 3],
+                        r = {} -> [4, 5, 6]
                     }
 
                     # Second phase: depends on first phase
                     let combined_sum = Parallel.fold {
-                        xs = phase1.left,
+                        xs = phase1.l,
                         zero = 0,
                         map_fn = {x} -> x,
-                        combine = {left, right} -> left + right
+                        combine = {l, r} -> l + r
                     }
 
                     let right_sum = Parallel.fold {
-                        xs = phase1.right,
+                        xs = phase1.r,
                         zero = 0,
                         map_fn = {x} -> x,
-                        combine = {left, right} -> left + right
+                        combine = {l, r} -> l + r
                     }
 
                     combined_sum + right_sum

@@ -349,7 +349,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let result = deque::split_at { d = d, i = 2 }
-            deque::length { d = result.left }
+            deque::length { d = result.l }
             """);
         assertEquals(2L, result);
     }
@@ -360,7 +360,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let result = deque::split_at { d = d, i = 2 }
-            deque::length { d = result.right }
+            deque::length { d = result.r }
             """);
         assertEquals(3L, result);
     }
@@ -371,7 +371,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [10, 20, 30, 40, 50] }
             let result = deque::split_at { d = d, i = 3 }
-            match deque::peek_front { d = result.right } is
+            match deque::peek_front { d = result.r } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -384,7 +384,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 1, 2] }
             let result = deque::span { d = d, p = { val } -> val < 4 }
-            deque::length { d = result.left }
+            deque::length { d = result.l }
             """);
         assertEquals(3L, result);
     }
@@ -395,7 +395,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let result = deque::span { d = d, p = { val } -> val < 4 }
-            match deque::peek_front { d = result.right } is
+            match deque::peek_front { d = result.r } is
                 Some { val } -> val
                 None -> -1
             """);
@@ -408,7 +408,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3] }
             let result = deque::span { d = d, p = { val } -> val < 10 }
-            deque::length { d = result.left } + deque::length { d = result.right }
+            deque::length { d = result.l } + deque::length { d = result.r }
             """);
         assertEquals(3L, result);
     }
@@ -612,7 +612,7 @@ class DequeAndSortedCollectionsTest {
             let d2 = deque::from_seq { xs = [1, 2, 3] }
             let zipped = deque::zip { d1 = d1, d2 = d2 }
             match deque::peek_front { d = zipped } is
-                Some { val } -> val.first + val.second
+                Some { val } -> val.fst + val.snd
                 None -> -1
             """);
         assertEquals(11L, result);  // 10 + 1

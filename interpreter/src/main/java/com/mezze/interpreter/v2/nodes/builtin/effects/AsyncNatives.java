@@ -581,7 +581,7 @@ public final class AsyncNatives {
 
     // Pre-allocated field name arrays to avoid allocation in hot paths
     private static final String[] X_FIELD = new String[]{"x"};
-    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"left", "right"};
+    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"l", "r"};
     private static final String[] ABC_FIELDS = new String[]{"a", "b", "c"};
 
     // ==================== OPTIMIZATION: Thread-Local Argument Buffers ====================
@@ -1027,8 +1027,8 @@ public final class AsyncNatives {
 
     @TruffleBoundary
     public static MezzeRecord loomJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        MezzeFunction left = getFunction(args, "left");
-        MezzeFunction right = getFunction(args, "right");
+        MezzeFunction left = getFunction(args, "l");
+        MezzeFunction right = getFunction(args, "r");
 
         Object[] leftClosure = left.getClosureValues();
         Object[] rightClosure = right.getClosureValues();
@@ -1825,8 +1825,8 @@ public final class AsyncNatives {
 
     @TruffleBoundary
     public static MezzeRecord osJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        MezzeFunction left = getFunction(args, "left");
-        MezzeFunction right = getFunction(args, "right");
+        MezzeFunction left = getFunction(args, "l");
+        MezzeFunction right = getFunction(args, "r");
 
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
@@ -2305,8 +2305,8 @@ public final class AsyncNatives {
 
     @TruffleBoundary
     public static MezzeRecord coopJoin(MezzeRecord args, IndirectCallNode callNode) {
-        MezzeFunction left = getFunction(args, "left");
-        MezzeFunction right = getFunction(args, "right");
+        MezzeFunction left = getFunction(args, "l");
+        MezzeFunction right = getFunction(args, "r");
 
         Object leftResult = callThunkFunction(left, callNode);
         Object rightResult = callThunkFunction(right, callNode);

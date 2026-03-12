@@ -361,6 +361,23 @@ public final class MezzeVariant implements TruffleObject {
         return "None".equals(getConstructorName());
     }
 
+    /**
+     * Get the unwrapped value from a Some variant.
+     * The Some variant stores { val = value }, so we extract the "val" field.
+     * Returns null if this is a None variant.
+     */
+    public Object getSomeValue() {
+        if (isNone()) {
+            return null;
+        }
+        Object payload = getPayloadValue();
+        if (payload instanceof MezzeRecord record) {
+            return record.getField("val");
+        }
+        // Fallback for direct value storage
+        return payload;
+    }
+
     // ==========================================
     // Result type helpers (Ok/Err)
     // Uses GLOBAL registry for consistency with pattern matching

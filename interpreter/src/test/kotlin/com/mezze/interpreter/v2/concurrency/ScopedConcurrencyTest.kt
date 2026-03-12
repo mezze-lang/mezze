@@ -131,14 +131,14 @@ class ScopedConcurrencyTest {
 
                     # Also use join for other concurrent work
                     let joined = Async.join {
-                        left = {} -> 5,
-                        right = {} -> 15
+                        l = {} -> 5,
+                        r = {} -> 15
                     }
 
                     let r1 = Async.await {p = p1}
                     let r2 = Async.await {p = p2}
 
-                    r1 + r2 + joined.left + joined.right
+                    r1 + r2 + joined.l + joined.r
                 }
         """
         val result = eval(code)

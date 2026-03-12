@@ -181,11 +181,11 @@ pub let take_while = { d, p } ->
 pub let drop_while = { d, p } ->
     __native_deque_drop_while { d = d, p = p }
 
-# Split at index into {left, right}
+# Split at index into {l, r}
 pub let split_at = { d, i } ->
     __native_deque_split_at { d = d, i = i }
 
-# Split at first element failing predicate into {left, right}
+# Split at first element failing predicate into {l, r}
 pub let span = { d, p } ->
     __native_deque_span { d = d, p = p }
 

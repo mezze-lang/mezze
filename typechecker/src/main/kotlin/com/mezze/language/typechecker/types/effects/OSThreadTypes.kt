@@ -96,21 +96,21 @@ object OSThreadTypes {
 
         // === Structured Concurrency ===
 
-        // __native_os_join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b}
+        // __native_os_join: {l: {} -> 'a, r: {} -> 'b} -> {l: 'a, r: 'b}
         context["__native_os_join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "left" to MezzeType.FunctionType(
+                "l" to MezzeType.FunctionType(
                     MezzeType.RecordType(emptyMap()),
                     MezzeType.VarType(TypeVar("a"))
                 ),
-                "right" to MezzeType.FunctionType(
+                "r" to MezzeType.FunctionType(
                     MezzeType.RecordType(emptyMap()),
                     MezzeType.VarType(TypeVar("b"))
                 )
             )),
             MezzeType.RecordType(mapOf(
-                "left" to MezzeType.VarType(TypeVar("a")),
-                "right" to MezzeType.VarType(TypeVar("b"))
+                "l" to MezzeType.VarType(TypeVar("a")),
+                "r" to MezzeType.VarType(TypeVar("b"))
             ))
         )
 

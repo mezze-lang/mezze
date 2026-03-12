@@ -451,7 +451,7 @@ object MapTypes {
                 )),
                 MezzeType.MapType(
                     MezzeType.VarType(mapKeyTypeVar),
-                    MezzeType.RecordType(mapOf("first" to v1Type, "second" to v2Type))
+                    MezzeType.RecordType(mapOf("fst" to v1Type, "snd" to v2Type))
                 )
             )
         }

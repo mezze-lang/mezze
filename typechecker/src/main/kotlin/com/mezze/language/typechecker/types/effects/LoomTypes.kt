@@ -156,16 +156,16 @@ object LoomTypes {
 
         // === Structured Concurrency ===
 
-        // __native_loom_join: {left: {} -> 'a <...>, right: {} -> 'b <...>} -> {left: 'a, right: 'b}
+        // __native_loom_join: {l: {} -> 'a <...>, r: {} -> 'b <...>} -> {l: 'a, r: 'b}
         // Callback parameters accept any effects (<...>)
         context["__native_loom_join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "left" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "right" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
+                "l" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "r" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             )),
             MezzeType.RecordType(mapOf(
-                "left" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                "right" to MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+                "l" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
+                "r" to MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
             ))
         )
 

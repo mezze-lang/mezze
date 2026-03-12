@@ -211,8 +211,8 @@ class AsyncEffectHandlerPropagationTest {
 
             perform LoomAsync in do
                 let result = Async.join {
-                    left = {} -> atomically {f = {} -> STM.write {var = a, val = 10}},
-                    right = {} -> atomically {f = {} -> STM.write {var = b, val = 20}}
+                    l = {} -> atomically {f = {} -> STM.write {var = a, val = 10}},
+                    r = {} -> atomically {f = {} -> STM.write {var = b, val = 20}}
                 }
                 let va = deref {var = a}
                 let vb = deref {var = b}

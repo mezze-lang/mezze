@@ -621,7 +621,7 @@ public final class DequeNatives {
             i++;
         }
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            new String[]{"l", "r"},
             new Object[]{left, right}
         );
     }
@@ -647,7 +647,7 @@ public final class DequeNatives {
             }
         }
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            new String[]{"l", "r"},
             new Object[]{left, right}
         );
     }
@@ -724,7 +724,7 @@ public final class DequeNatives {
         java.util.Iterator<Object> it2 = d2.iterator();
         while (it1.hasNext() && it2.hasNext()) {
             result = result.pushBack(MezzeRecord.fromFields(
-                new String[]{"first", "second"},
+                new String[]{"fst", "snd"},
                 new Object[]{it1.next(), it2.next()}
             ));
         }

@@ -142,8 +142,8 @@ pub let find_index: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <.
 # =============================================================================
 
 # Partition list into matching and non-matching elements
-# Example: partition {xs = [1, 2, 3, 4], p = {x} -> x > 2} -> {matching = [3, 4], not_matching = [1, 2]}
-pub let partition: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { matching: List 'a, not_matching: List 'a } <...> = { xs, p } ->
+# Example: partition {xs = [1, 2, 3, 4], p = {x} -> x > 2} -> {pass = [3, 4], fail = [1, 2]}
+pub let partition: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } ->
     __native_list_partition { xs = xs, p = p }
 
 # =============================================================================
@@ -236,12 +236,12 @@ pub let scan: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
 # =============================================================================
 
 # Split at an index
-# Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { left = [1, 2], right = [3, 4, 5] }
-pub let split_at: { xs: List 'a, i: Int } -> { left: List 'a, right: List 'a } = {xs, i} -> __native_list_split_at {xs = xs, i = i}
+# Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { l = [1, 2], r = [3, 4, 5] }
+pub let split_at: { xs: List 'a, i: Int } -> { l: List 'a, r: List 'a } = {xs, i} -> __native_list_split_at {xs = xs, i = i}
 
 # Split while predicate holds (like take_while + drop_while combined)
-# Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { left = [1, 2], right = [3, 4, 1] }
-pub let span: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { left: List 'a, right: List 'a } <...> = {xs, p} -> __native_list_span {xs = xs, p = p}
+# Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { l = [1, 2], r = [3, 4, 1] }
+pub let span: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { l: List 'a, r: List 'a } <...> = {xs, p} -> __native_list_span {xs = xs, p = p}
 
 # =============================================================================
 # Dedup Operations

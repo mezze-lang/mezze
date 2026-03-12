@@ -137,14 +137,14 @@ class ScopeModuleTest {
                     let p2 = scope_spawn { sc = sc, f = {} -> 20 }
 
                     let joined = Async.join {
-                        left = {} -> 5,
-                        right = {} -> 15
+                        l = {} -> 5,
+                        r = {} -> 15
                     }
 
                     let r1 = Async.await { p = p1 }
                     let r2 = Async.await { p = p2 }
 
-                    r1 + r2 + joined.left + joined.right
+                    r1 + r2 + joined.l + joined.r
                 }
         """)
         assertEquals(50L, result)

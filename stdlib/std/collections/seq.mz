@@ -175,15 +175,15 @@ pub let flatten = {xss} -> __native_seq_flatten {xs = xss}
 # ============================================================================
 # Partition into matching and non-matching elements
 # Example: partition { xs = [1, 2, 3, 4], p = {x} -> x > 2 }
-#          -> { matching = [3, 4], not_matching = [1, 2] }
+#          -> { pass =[3, 4], fail =[1, 2] }
 
-pub let partition: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { matching: ['a], not_matching: ['a] } <...> = {xs, p} -> __native_seq_partition {xs = xs, p = p}
+pub let partition: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <...> = {xs, p} -> __native_seq_partition {xs = xs, p = p}
 # ============================================================================
 # Zip Operations
 # ============================================================================
 # Zip two sequences together into sequence of records
 # Example: zip { xs = [1, 2], ys = ["a", "b"] }
-#          -> [{ first = 1, second = "a" }, { first = 2, second = "b" }]
+#          -> [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
 
 pub let zip = {xs, ys} -> __native_seq_zip {xs = xs, ys = ys}
 # Zip with indices
@@ -306,13 +306,13 @@ pub let scan: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> ['b] 
 # Split Operations
 # ============================================================================
 # Split at an index
-# Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { left = [1, 2], right = [3, 4, 5] }
+# Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { l = [1, 2], r = [3, 4, 5] }
 
 pub let split_at = {xs, i} -> __native_seq_split_at {xs = xs, i = i}
 # Split while predicate holds (like take_while + drop_while combined)
-# Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { left = [1, 2], right = [3, 4, 1] }
+# Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { l = [1, 2], r = [3, 4, 1] }
 
-pub let span: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { left: ['a], right: ['a] } <...> = {xs, p} -> __native_seq_span {xs = xs, p = p}
+pub let span: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { l: ['a], r: ['a] } <...> = {xs, p} -> __native_seq_span {xs = xs, p = p}
 # ============================================================================
 # Dedup Operations
 # ============================================================================
@@ -455,15 +455,15 @@ pub let join: { xs: [String], sep: String } -> String = {xs, sep} -> __native_se
 pub let zip_with: { xs: ['a], ys: ['b], f: { a: 'a, b: 'b } -> 'c <...> } -> ['c] <...> = {xs, ys, f} -> __native_seq_zip_with {xs = xs, ys = ys, f = f}
 
 # Zip three sequences
-# Example: zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] } -> [{ first = 1, second = "a", third = True }, ...]
+# Example: zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] } -> [{ fst = 1, snd = "a", thd = True }, ...]
 pub let zip3 = {xs, ys, zs} -> __native_seq_zip3 {xs = xs, ys = ys, zs = zs}
 
 # Zip four sequences
-# Example: zip4 { xs = [1], ys = [2], zs = [3], ws = [4] } -> [{ first = 1, second = 2, third = 3, fourth = 4 }]
+# Example: zip4 { xs = [1], ys = [2], zs = [3], ws = [4] } -> [{ fst = 1, snd = 2, thd = 3, fth = 4 }]
 pub let zip4 = {xs, ys, zs, ws} -> __native_seq_zip4 {xs = xs, ys = ys, zs = zs, ws = ws}
 
 # Cartesian product of two sequences
-# Example: cartesian_product { xs = [1, 2], ys = ["a", "b"] } -> [{ first = 1, second = "a" }, { first = 1, second = "b" }, ...]
+# Example: cartesian_product { xs = [1, 2], ys = ["a", "b"] } -> [{ fst = 1, snd = "a" }, { fst = 1, snd = "b" }, ...]
 pub let cartesian_product = {xs, ys} -> __native_seq_cartesian_product {xs = xs, ys = ys}
 
 # ============================================================================

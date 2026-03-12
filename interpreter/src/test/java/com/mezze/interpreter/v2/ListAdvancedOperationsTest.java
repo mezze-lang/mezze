@@ -518,20 +518,18 @@ class ListAdvancedOperationsTest {
     // ========================================
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in set::group_by")
     void toSetConvertsListToSet() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             use std::collections::set
             let xs = list::from_seq { xs = [1, 2, 2, 3, 3, 3] }
             let s = list::to_set { xs = xs }
-            set::size { xs = s }
+            set::size { s = s }
             """);
         assertEquals(3L, result);  // Duplicates removed
     }
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in set::group_by")
     void fromSetConvertsSetToList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -544,14 +542,13 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in set::group_by")
     void toSetRemovesDuplicates() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             use std::collections::set
             let xs = list::from_seq { xs = [1, 1, 1, 1, 1] }
             let s = list::to_set { xs = xs }
-            set::size { xs = s }
+            set::size { s = s }
             """);
         assertEquals(1L, result);
     }
@@ -561,20 +558,18 @@ class ListAdvancedOperationsTest {
     // ========================================
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in deque module")
     void toDequeConvertsListToDeque() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             use std::collections::deque
             let xs = list::from_seq { xs = [1, 2, 3] }
             let d = list::to_deque { xs = xs }
-            deque::size { xs = d }
+            deque::length { d = d }
             """);
         assertEquals(3L, result);
     }
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in deque module")
     void fromDequeConvertsDequeToList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -587,7 +582,6 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in deque module")
     void toDequeFromDequeRoundTrip() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -683,7 +677,6 @@ class ListAdvancedOperationsTest {
     // ========================================
 
     @Test
-    @Disabled("Blocked by ClassCastException in ListNatives.stddev")
     void stddevCalculatesCorrectly() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -696,7 +689,6 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("Blocked by ClassCastException in ListNatives.stddev")
     void stddevReturnsNoneForEmptyList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -709,7 +701,6 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("Blocked by ClassCastException in ListNatives.stddev")
     void stddevOfIdenticalElements() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
@@ -1085,11 +1076,12 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("list::range returns Int list but list::average expects Float list")
     void statisticsOnLargeList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            let xs = list::range { start = 1, end = 101 }
+            use std::float
+            let ints = list::range { start = 1, end = 101 }
+            let xs = list::map { xs = ints, f = { x } -> float::from_int { n = x } }
             match list::average { xs = xs } is
                 Some { val } -> val
                 None -> -1.0
@@ -1125,7 +1117,6 @@ class ListAdvancedOperationsTest {
     }
 
     @Test
-    @Disabled("Blocked by stdlib type annotation issue in set module")
     void convertToSetAndBack() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list

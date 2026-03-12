@@ -1609,7 +1609,7 @@ public final class ConcurrencyNatives {
         Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
             return MezzeRecord.fromFields(
-                new String[]{"satisfying", "notSatisfying"},
+                new String[]{"pass", "fail"},
                 new Object[]{MezzeSeq.fromArray(new Object[0]), MezzeSeq.fromArray(new Object[0])}
             );
         }
@@ -1636,18 +1636,18 @@ public final class ConcurrencyNatives {
             }
         }
         return MezzeRecord.fromFields(
-            new String[]{"matching", "not_matching"},
+            new String[]{"pass", "fail"},
             new Object[]{MezzeSeq.fromArray(trueArr), MezzeSeq.fromArray(falseArr)}
         );
     }
 
     @TruffleBoundary
     public static MezzeRecord sequentialBoth(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        MezzeFunction left = getFunction(args, "left");
-        MezzeFunction right = getFunction(args, "right");
+        MezzeFunction left = getFunction(args, "l");
+        MezzeFunction right = getFunction(args, "r");
         Object leftResult = callNode.call(left.getCallTarget(), left.getClosureValues());
         Object rightResult = callNode.call(right.getCallTarget(), right.getClosureValues());
-        return MezzeRecord.fromFields(new String[]{"left", "right"}, new Object[]{leftResult, rightResult});
+        return MezzeRecord.fromFields(new String[]{"l", "r"}, new Object[]{leftResult, rightResult});
     }
 
     // ==================== Parallel Operations ====================
@@ -1844,7 +1844,7 @@ public final class ConcurrencyNatives {
         return MezzeSeq.fromArray(results);
     }
 
-    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"left", "right"};
+    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"l", "r"};
 
     /**
      * Parallel fold using parallel map phase + sequential reduce.
@@ -2495,7 +2495,7 @@ public final class ConcurrencyNatives {
         return createNone();
     }
 
-    private static final String[] MATCHING_NOT_MATCHING = new String[]{"matching", "not_matching"};
+    private static final String[] PASS_FAIL_FIELDS = new String[]{"pass", "fail"};
 
     /**
      * Parallel partition - split elements by predicate.
@@ -2506,7 +2506,7 @@ public final class ConcurrencyNatives {
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
-            return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+            return MezzeRecord.fromFields(PASS_FAIL_FIELDS,
                 new Object[]{MezzeSeq.fromArray(new Object[0]), MezzeSeq.fromArray(new Object[0])});
         }
 
@@ -2572,7 +2572,7 @@ public final class ConcurrencyNatives {
             }
         }
 
-        return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+        return MezzeRecord.fromFields(PASS_FAIL_FIELDS,
             new Object[]{MezzeSeq.fromArray(matchingArr), MezzeSeq.fromArray(notMatchingArr)});
     }
 
@@ -2604,7 +2604,7 @@ public final class ConcurrencyNatives {
                 notMatchingArr[nIdx++] = store[i];
             }
         }
-        return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+        return MezzeRecord.fromFields(PASS_FAIL_FIELDS,
             new Object[]{MezzeSeq.fromArray(matchingArr), MezzeSeq.fromArray(notMatchingArr)});
     }
 
@@ -2621,8 +2621,8 @@ public final class ConcurrencyNatives {
      */
     @TruffleBoundary
     public static MezzeRecord parallelBoth(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        MezzeFunction left = getFunction(args, "left");
-        MezzeFunction right = getFunction(args, "right");
+        MezzeFunction left = getFunction(args, "l");
+        MezzeFunction right = getFunction(args, "r");
 
         Env env = MezzeContext.get(node).getEnv();
 

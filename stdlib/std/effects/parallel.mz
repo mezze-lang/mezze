@@ -36,16 +36,16 @@ effect Parallel where {
 
     # Reduce collection in parallel with associative operation
     # The operation must be associative: f(f(a, b), c) == f(a, f(b, c))
-    reduce: {xs: ['a], f: {left: 'a, right: 'a} -> 'a} -> Option 'a <Parallel>,
+    reduce: {xs: ['a], f: {l: 'a, r: 'a} -> 'a} -> Option 'a <Parallel>,
 
     # Fold collection in parallel with associative combiner
     # combine must be associative, and combine(zero, x) == x
-    fold: {xs: ['a], zero: 'b, map_fn: {x: 'a} -> 'b, combine: {left: 'b, right: 'b} -> 'b} -> 'b <Parallel>,
+    fold: {xs: ['a], zero: 'b, map_fn: {x: 'a} -> 'b, combine: {l: 'b, r: 'b} -> 'b} -> 'b <Parallel>,
 
     # === Tuple Operations ===
 
     # Run two computations in parallel
-    both: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b} <Parallel>,
+    both: {l: {} -> 'a, r: {} -> 'b} -> {l: 'a, r: 'b} <Parallel>,
 
     # Run three computations in parallel
     both3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c} <Parallel>,
@@ -63,8 +63,8 @@ effect Parallel where {
 
     # === Partitioning ===
 
-    # Partition elements based on predicate, returns {matching, not_matching}
-    partition: {xs: ['a], f: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]} <Parallel>,
+    # Partition elements based on predicate, returns {pass, fail}
+    partition: {xs: ['a], f: {x: 'a} -> Bool} -> {pass: ['a], fail: ['a]} <Parallel>,
 
     # Group elements by key function
     group_by: {xs: ['a], f: {x: 'a} -> 'k} -> [{key: 'k, values: ['a]}] <Parallel>
@@ -93,7 +93,7 @@ impl Parallel for VirtualParallel where {
     filter = {xs, f} -> __native_parallel_filter {xs = xs, f = f},
     reduce = {xs, f} -> __native_parallel_reduce {xs = xs, f = f},
     fold = {xs, zero, map_fn, combine} -> __native_parallel_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine},
-    both = {left, right} -> __native_parallel_both {left = left, right = right},
+    both = {l, r} -> __native_parallel_both {l = l, r = r},
     both3 = {a, b, c} -> __native_parallel_both3 {a = a, b = b, c = c},
     find = {xs, f} -> __native_parallel_find {xs = xs, f = f},
     any = {xs, f} -> __native_parallel_any {xs = xs, f = f},
@@ -122,7 +122,7 @@ impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } wher
     filter = {xs, f} -> __native_parallel_filter_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
     reduce = {xs, f} -> __native_parallel_reduce_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
     fold = {xs, zero, map_fn, combine} -> __native_parallel_fold_cfg {xs = xs, zero = zero, map_fn = map_fn, combine = combine, parallelism = parallelism, chunk_size = chunk_size},
-    both = {left, right} -> __native_parallel_both {left = left, right = right},
+    both = {l, r} -> __native_parallel_both {l = l, r = r},
     both3 = {a, b, c} -> __native_parallel_both3 {a = a, b = b, c = c},
     find = {xs, f} -> __native_parallel_find_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
     any = {xs, f} -> __native_parallel_any_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
@@ -158,7 +158,7 @@ impl Parallel for ForkJoinParallel where {
     filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = 64, parallelism = 0},
     reduce = {xs, f} -> __native_forkjoin_reduce {xs = xs, f = f, threshold = 64, parallelism = 0},
     fold = {xs, zero, map_fn, combine} -> __native_forkjoin_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine, threshold = 64, parallelism = 0},
-    both = {left, right} -> __native_forkjoin_both {left = left, right = right, parallelism = 0},
+    both = {l, r} -> __native_forkjoin_both {l = l, r = r, parallelism = 0},
     both3 = {a, b, c} -> __native_forkjoin_both3 {a = a, b = b, c = c, parallelism = 0},
     find = {xs, f} -> __native_forkjoin_find {xs = xs, f = f, threshold = 64, parallelism = 0},
     any = {xs, f} -> __native_forkjoin_any {xs = xs, f = f, threshold = 64, parallelism = 0},
@@ -187,7 +187,7 @@ impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } wher
     filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
     reduce = {xs, f} -> __native_forkjoin_reduce {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
     fold = {xs, zero, map_fn, combine} -> __native_forkjoin_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine, threshold = threshold, parallelism = parallelism},
-    both = {left, right} -> __native_forkjoin_both {left = left, right = right, parallelism = parallelism},
+    both = {l, r} -> __native_forkjoin_both {l = l, r = r, parallelism = parallelism},
     both3 = {a, b, c} -> __native_forkjoin_both3 {a = a, b = b, c = c, parallelism = parallelism},
     find = {xs, f} -> __native_forkjoin_find {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
     any = {xs, f} -> __native_forkjoin_any {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
@@ -215,7 +215,7 @@ impl Parallel for Sequential where {
     filter = {xs, f} -> __native_sequential_filter {xs = xs, f = f},
     reduce = {xs, f} -> __native_sequential_reduce {xs = xs, f = f},
     fold = {xs, zero, map_fn, combine} -> __native_sequential_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine},
-    both = {left, right} -> __native_sequential_both {left = left, right = right},
+    both = {l, r} -> __native_sequential_both {l = l, r = r},
     both3 = {a, b, c} -> __native_sequential_both3 {a = a, b = b, c = c},
     find = {xs, f} -> __native_sequential_find {xs = xs, f = f},
     any = {xs, f} -> __native_sequential_any {xs = xs, f = f},
@@ -230,13 +230,13 @@ impl Parallel for Sequential where {
 
 # Sum a list of numbers in parallel
 pub let sum: {xs: [Int]} -> Int <Parallel> = {xs} ->
-    match Parallel.reduce {xs = xs, f = {left, right} -> left + right} is
+    match Parallel.reduce {xs = xs, f = {l, r} -> l + r} is
         Some {val} -> val
         None -> 0
 
 # Product of a list of numbers in parallel
 pub let product: {xs: [Int]} -> Int <Parallel> = {xs} ->
-    match Parallel.reduce {xs = xs, f = {left, right} -> left * right} is
+    match Parallel.reduce {xs = xs, f = {l, r} -> l * r} is
         Some {val} -> val
         None -> 1
 
@@ -248,7 +248,7 @@ pub let count: {xs: ['a], f: {x: 'a} -> Bool} -> Int <Parallel> = {xs, f} ->
         map_fn = {x} -> match f {x = x} is
             True -> 1
             False -> 0,
-        combine = {left, right} -> left + right
+        combine = {l, r} -> l + r
     }
 
 # Flatten nested seqs in parallel
@@ -257,7 +257,7 @@ pub let flatten: {xs: [['a]]} -> ['a] <Parallel> = {xs} ->
         xs = xs,
         zero = [],
         map_fn = {x} -> x,
-        combine = {left, right} -> seq::concat {xs = left, ys = right}
+        combine = {l, r} -> seq::concat {xs = l, ys = r}
     }
 
 # Flat map - map then flatten in parallel

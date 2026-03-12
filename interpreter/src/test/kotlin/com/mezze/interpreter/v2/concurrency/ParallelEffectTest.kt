@@ -160,7 +160,7 @@ class ParallelEffectTest {
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -176,7 +176,7 @@ class ParallelEffectTest {
 
             perform VirtualParallel in do
                 let xs = [42]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -192,7 +192,7 @@ class ParallelEffectTest {
 
             perform VirtualParallel in do
                 let xs: [Int] = []
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> 1
                     None -> 0
@@ -216,7 +216,7 @@ class ParallelEffectTest {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * 2,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
                 result
         """
@@ -235,7 +235,7 @@ class ParallelEffectTest {
                     xs = xs,
                     zero = 100,
                     map_fn = {x} -> x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
                 result
         """
@@ -254,10 +254,10 @@ class ParallelEffectTest {
 
             perform VirtualParallel in do
                 let result = Parallel.both {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(30L, result)
@@ -411,8 +411,8 @@ class ParallelEffectTest {
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6]
                 let result = Parallel.partition {xs = xs, f = {x} -> x % 2 == 0}
-                match result.matching is
-                    [_, _, _] -> match result.not_matching is
+                match result.pass is
+                    [_, _, _] -> match result.fail is
                         [_, _, _] -> 6
                         _ -> 0
                     _ -> 0
@@ -489,7 +489,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let xs = [1, 2, 3, 4]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left * right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l * r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -505,10 +505,10 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let result = Parallel.both {
-                    left = {} -> 5,
-                    right = {} -> 10
+                    l = {} -> 5,
+                    r = {} -> 10
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -566,7 +566,7 @@ class ParallelEffectTest {
 
             perform VirtualParallelWith {parallelism = 4, chunk_size = 3} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -606,7 +606,7 @@ class ParallelEffectTest {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
                 result
         """
@@ -670,7 +670,7 @@ class ParallelEffectTest {
                 let xs = [1, 2, 3, 4, 5]
                 # Double each element, then sum
                 let doubled = Parallel.map {xs = xs, f = {x} -> x * 2}
-                let sum = Parallel.reduce {xs = doubled, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = doubled, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -717,7 +717,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -742,7 +742,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -801,7 +801,7 @@ class ParallelEffectTest {
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -821,7 +821,7 @@ class ParallelEffectTest {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
                 result
         """
@@ -836,10 +836,10 @@ class ParallelEffectTest {
 
             perform ForkJoinParallel in do
                 let result = Parallel.both {
-                    left = {} -> 100,
-                    right = {} -> 200
+                    l = {} -> 100,
+                    r = {} -> 200
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(300L, result)
@@ -910,7 +910,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {left, right} -> left + right}
+                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0

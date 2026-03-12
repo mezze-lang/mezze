@@ -463,7 +463,7 @@ object ListTypes {
             )
         }
 
-        // __native_list_partition: {xs: List 'a, p: {x: 'a} -> Bool} -> {matching: List 'a, not_matching: List 'a}
+        // __native_list_partition: {xs: List 'a, p: {x: 'a} -> Bool} -> {pass: List 'a, fail: List 'a}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val listType = MezzeType.ListType(elemType)
@@ -472,8 +472,8 @@ object ListTypes {
                 MezzeType.BoolType
             )
             val resultType = MezzeType.RecordType(mapOf(
-                "matching" to listType,
-                "not_matching" to listType
+                "pass" to listType,
+                "fail" to listType
             ))
             context["__native_list_partition"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
@@ -663,18 +663,18 @@ object ListTypes {
 
         // ==================== Split Operations ====================
 
-        // __native_list_split_at: {xs: List 'a, i: Int} -> {left: List 'a, right: List 'a}
+        // __native_list_split_at: {xs: List 'a, i: Int} -> {l: List 'a, r: List 'a}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val listType = MezzeType.ListType(elemType)
-            val resultType = MezzeType.RecordType(mapOf("left" to listType, "right" to listType))
+            val resultType = MezzeType.RecordType(mapOf("l" to listType, "r" to listType))
             context["__native_list_split_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType, "i" to MezzeType.IntType)),
                 resultType
             )
         }
 
-        // __native_list_span: {xs: List 'a, p: {x: 'a} -> Bool} -> {left: List 'a, right: List 'a}
+        // __native_list_span: {xs: List 'a, p: {x: 'a} -> Bool} -> {l: List 'a, r: List 'a}
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val listType = MezzeType.ListType(elemType)
@@ -682,7 +682,7 @@ object ListTypes {
                 MezzeType.RecordType(mapOf("x" to elemType)),
                 MezzeType.BoolType
             )
-            val resultType = MezzeType.RecordType(mapOf("left" to listType, "right" to listType))
+            val resultType = MezzeType.RecordType(mapOf("l" to listType, "r" to listType))
             context["__native_list_span"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
                 resultType

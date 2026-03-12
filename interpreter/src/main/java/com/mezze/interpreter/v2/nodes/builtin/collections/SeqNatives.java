@@ -28,19 +28,20 @@ public final class SeqNatives {
 
     // ==================== Cached Field Name Arrays ====================
     // Avoid per-call allocation of common field name patterns
+    // Using short, consistent names: fst/snd for pairs, pass/fail for partitions
     private static final String[] FIELD_X = {"x"};
     private static final String[] FIELD_I = {"i"};
     private static final String[] FIELD_ACC_X = {"acc", "x"};
     private static final String[] FIELD_A_B = {"a", "b"};
-    private static final String[] FIELD_FIRST_SECOND = {"first", "second"};
+    private static final String[] FIELD_FST_SND = {"fst", "snd"};
     private static final String[] FIELD_VALUE_INDEX = {"value", "index"};
     private static final String[] FIELD_FSTS_SNDS = {"fsts", "snds"};
-    private static final String[] FIELD_MATCHING_NOT_MATCHING = {"matching", "not_matching"};
+    private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
     private static final String[] FIELD_KEY_VALUES = {"key", "values"};
-    private static final String[] FIELD_LEFT_RIGHT = {"left", "right"};
+    private static final String[] FIELD_L_R = {"l", "r"};
     private static final String[] FIELD_LOWER_UPPER = {"lower", "upper"};
-    private static final String[] FIELD_FIRST_SECOND_THIRD = {"first", "second", "third"};
-    private static final String[] FIELD_FIRST_SECOND_THIRD_FOURTH = {"first", "second", "third", "fourth"};
+    private static final String[] FIELD_FST_SND_THD = {"fst", "snd", "thd"};
+    private static final String[] FIELD_FST_SND_THD_FTH = {"fst", "snd", "thd", "fth"};
 
     // ==================== Basic Operations ====================
 
@@ -346,7 +347,7 @@ public final class SeqNatives {
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
-                FIELD_FIRST_SECOND,
+                FIELD_FST_SND,
                 new Object[]{seq1.get(i), seq2.get(i)}
             );
         }
@@ -393,7 +394,7 @@ public final class SeqNatives {
         int size = seq.size();
         if (size == 0) {
             return MezzeRecord.fromFields(
-                FIELD_MATCHING_NOT_MATCHING,
+                FIELD_PASS_FAIL,
                 new Object[]{MezzeSeq.empty(), MezzeSeq.empty()}
             );
         }
@@ -423,7 +424,7 @@ public final class SeqNatives {
         }
 
         return MezzeRecord.fromFields(
-            FIELD_MATCHING_NOT_MATCHING,
+            FIELD_PASS_FAIL,
             new Object[]{
                 MezzeSeq.fromArray(matchingArr),
                 MezzeSeq.fromArray(nonMatchingArr)
@@ -775,7 +776,7 @@ public final class SeqNatives {
     public static MezzeRecord splitAt(MezzeSeq seq, long index) {
         int idx = Math.max(0, Math.min(seq.size(), (int) index));
         return MezzeRecord.fromFields(
-            FIELD_LEFT_RIGHT,
+            FIELD_L_R,
             new Object[]{seq.take(idx), seq.drop(idx)}
         );
     }
@@ -793,7 +794,7 @@ public final class SeqNatives {
             }
         }
         return MezzeRecord.fromFields(
-            FIELD_LEFT_RIGHT,
+            FIELD_L_R,
             new Object[]{seq.take(splitIdx), seq.drop(splitIdx)}
         );
     }
@@ -1192,7 +1193,7 @@ public final class SeqNatives {
         Object[] result = new Object[minLen];
         for (int i = 0; i < minLen; i++) {
             result[i] = MezzeRecord.fromFields(
-                FIELD_FIRST_SECOND_THIRD,
+                FIELD_FST_SND_THD,
                 new Object[]{seq1.get(i), seq2.get(i), seq3.get(i)}
             );
         }
@@ -1205,7 +1206,7 @@ public final class SeqNatives {
         Object[] result = new Object[minLen];
         for (int i = 0; i < minLen; i++) {
             result[i] = MezzeRecord.fromFields(
-                FIELD_FIRST_SECOND_THIRD_FOURTH,
+                FIELD_FST_SND_THD_FTH,
                 new Object[]{seq1.get(i), seq2.get(i), seq3.get(i), seq4.get(i)}
             );
         }
@@ -1221,7 +1222,7 @@ public final class SeqNatives {
         for (int i = 0; i < seq1.size(); i++) {
             for (int j = 0; j < seq2.size(); j++) {
                 result[idx++] = MezzeRecord.fromFields(
-                    FIELD_FIRST_SECOND,
+                    FIELD_FST_SND,
                     new Object[]{seq1.get(i), seq2.get(j)}
                 );
             }

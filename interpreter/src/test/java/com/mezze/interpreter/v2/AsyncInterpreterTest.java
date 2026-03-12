@@ -61,10 +61,10 @@ public class AsyncInterpreterTest {
 
             perform CoopAsync {cont = continuation::new {}} in do
                 let r = Async.join {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
-                r.left + r.right
+                r.l + r.r
         """);
         assertEquals(30L, result);
     }
@@ -135,10 +135,10 @@ public class AsyncInterpreterTest {
 
             perform LoomAsync {} in do
                 let r = Async.join {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
-                r.left + r.right
+                r.l + r.r
         """);
         assertEquals(30L, result);
     }
@@ -177,10 +177,10 @@ public class AsyncInterpreterTest {
 
             perform OSThreadAsync {} in do
                 let r = Async.join {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
-                r.left + r.right
+                r.l + r.r
         """);
         assertEquals(30L, result);
     }

@@ -207,8 +207,8 @@ pub let filter_values: { m: Map 'k 'v, p: { val: 'v } -> Bool <...> } -> Map 'k 
 # === Multi-Map Operations ===
 
 # Zip two maps together by keys present in both
-# Returns map of {key, {first: value1, second: value2}}
-pub let zip_maps: { m1: Map 'k 'v1, m2: Map 'k 'v2 } -> Map 'k { first: 'v1, second: 'v2 } = {m1, m2} ->
+# Returns map of {key, {fst: value1, snd: value2}}
+pub let zip_maps: { m1: Map 'k 'v1, m2: Map 'k 'v2 } -> Map 'k { fst: 'v1, snd: 'v2 } = {m1, m2} ->
     __native_map_zip_maps { m1 = m1, m2 = m2 }
 
 # Difference of two maps: keys in m1 but not in m2

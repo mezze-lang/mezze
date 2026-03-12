@@ -207,12 +207,12 @@ class AutomaticParallelismValidationTest {
             perform VirtualParallel in do
                 # First: two independent operations
                 let phase1 = Parallel.both {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
 
                 # Then: dependent operation uses phase1 results
-                let combined = phase1.left + phase1.right
+                let combined = phase1.l + phase1.r
                 combined
         """
         val result = eval(code)
@@ -302,7 +302,7 @@ class AutomaticParallelismValidationTest {
                     xs = [1, 2, 3],
                     f = {x} -> x * 2
                 }
-                let sum = Parallel.reduce {xs = result, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -325,8 +325,8 @@ class AutomaticParallelismValidationTest {
                 # Pattern 2 (similar to pattern 1)
                 let result2 = Parallel.map {xs = [3, 4], f = {x} -> x * 2}
 
-                let sum1 = Parallel.reduce {xs = result1, f = {left, right} -> left + right}
-                let sum2 = Parallel.reduce {xs = result2, f = {left, right} -> left + right}
+                let sum1 = Parallel.reduce {xs = result1, f = {l, r} -> l + r}
+                let sum2 = Parallel.reduce {xs = result2, f = {l, r} -> l + r}
 
                 let s1 = match sum1 is
                     Some {val} -> val
@@ -350,13 +350,13 @@ class AutomaticParallelismValidationTest {
             perform VirtualParallel in do
                 # Phase 1: Map two lists in parallel using both
                 let phase1 = Parallel.both {
-                    left = {} -> [1, 2, 3],
-                    right = {} -> [4, 5, 6]
+                    l = {} -> [1, 2, 3],
+                    r = {} -> [4, 5, 6]
                 }
 
                 # Phase 2: Reduce each list
-                let left_sum = Parallel.reduce {xs = phase1.left, f = {left, right} -> left + right}
-                let right_sum = Parallel.reduce {xs = phase1.right, f = {left, right} -> left + right}
+                let left_sum = Parallel.reduce {xs = phase1.l, f = {l, r} -> l + r}
+                let right_sum = Parallel.reduce {xs = phase1.r, f = {l, r} -> l + r}
 
                 # Phase 3: Combine results
                 let l = match left_sum is
@@ -381,7 +381,7 @@ class AutomaticParallelismValidationTest {
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = result, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -399,7 +399,7 @@ class AutomaticParallelismValidationTest {
             perform Sequential in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = result, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -434,7 +434,7 @@ class AutomaticParallelismValidationTest {
                           31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
                           41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
                 let squared = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = squared, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = squared, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -453,7 +453,7 @@ class AutomaticParallelismValidationTest {
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
                 let doubled = Parallel.map {xs = xs, f = {x} -> x * 2}
-                let sum = Parallel.reduce {xs = doubled, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = doubled, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -471,7 +471,7 @@ class AutomaticParallelismValidationTest {
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
                 let evens = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
-                let sum = Parallel.reduce {xs = evens, f = {left, right} -> left + right}
+                let sum = Parallel.reduce {xs = evens, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -492,7 +492,7 @@ class AutomaticParallelismValidationTest {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
                 result
         """

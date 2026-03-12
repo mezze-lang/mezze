@@ -2,6 +2,10 @@ package com.mezze.interpreter.v2.nodes.control;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.seq.SeqStorage;
+import com.mezze.datastructures.seq.LongSeqStorage;
+import com.mezze.datastructures.seq.DoubleSeqStorage;
+import com.mezze.datastructures.seq.ObjectSeqStorage;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -170,7 +174,8 @@ public final class ForEachLoopNode extends MezzeNode {
     // ==================== RepeatingNode implementations ====================
 
     /**
-     * RepeatingNode for MezzeSeq (Vavr Vector).
+     * RepeatingNode for MezzeSeq with storage-type profiling.
+     * Direct array access for primitive sequences.
      */
     private static final class SeqRepeatingNode extends Node implements RepeatingNode {
 
@@ -189,6 +194,13 @@ public final class ForEachLoopNode extends MezzeNode {
         @Child
         private MezzeNode bodyNode;
 
+        // Storage type profiling for JIT optimization
+        @CompilationFinal
+        private Class<?> seenStorageType;
+
+        @CompilationFinal
+        private boolean seenMultipleTypes;
+
         SeqRepeatingNode(int elementSlot, int indexSlot, int arraySlot, int lengthSlot, MezzeNode bodyNode) {
             this.elementSlot = elementSlot;
             this.indexSlot = indexSlot;
@@ -206,9 +218,36 @@ public final class ForEachLoopNode extends MezzeNode {
                 return false;  // Done
             }
 
-            // Get sequence and extract element
-            MezzeSeq seq = (MezzeSeq) frame.getObject(arraySlot);
-            frame.setObject(elementSlot, seq.get(index));
+            // Get sequence and extract element with storage-type profiling
+            MezzeSeq<?> seq = (MezzeSeq<?>) frame.getObject(arraySlot);
+            SeqStorage storage = seq.getStorage();
+            Class<?> storageType = storage.getClass();
+
+            // Profile storage type
+            if (!seenMultipleTypes) {
+                if (seenStorageType == null) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    seenStorageType = storageType;
+                } else if (seenStorageType != storageType) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    seenMultipleTypes = true;
+                }
+            }
+
+            // Type-directed element extraction
+            Object element;
+            if (!seenMultipleTypes && seenStorageType == LongSeqStorage.class) {
+                element = ((LongSeqStorage) storage).getArray()[index];
+            } else if (!seenMultipleTypes && seenStorageType == DoubleSeqStorage.class) {
+                element = ((DoubleSeqStorage) storage).getArray()[index];
+            } else if (!seenMultipleTypes && seenStorageType == ObjectSeqStorage.class) {
+                element = ((ObjectSeqStorage) storage).getArray()[index];
+            } else {
+                // Megamorphic fallback
+                element = seq.get(index);
+            }
+
+            frame.setObject(elementSlot, element);
 
             // Increment index
             frame.setInt(indexSlot, index + 1);

@@ -356,7 +356,7 @@ public final class ListNatives {
         System.arraycopy(nonMatching, 0, nonMatchTrimmed, 0, nonMatchCount);
 
         return MezzeRecord.fromFields(
-            new String[]{"matching", "not_matching"},
+            new String[]{"pass", "fail"},
             new Object[]{
                 MezzeList.of(matchTrimmed),
                 MezzeList.of(nonMatchTrimmed)
@@ -719,7 +719,7 @@ public final class ListNatives {
     public static MezzeRecord splitAt(MezzeList list, long index) {
         int idx = Math.max(0, Math.min(list.size(), (int) index));
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            new String[]{"l", "r"},
             new Object[]{list.slice(0, idx), list.slice(idx, list.size())}
         );
     }
@@ -737,7 +737,7 @@ public final class ListNatives {
             }
         }
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            new String[]{"l", "r"},
             new Object[]{list.slice(0, splitIdx), list.slice(splitIdx, list.size())}
         );
     }
@@ -1284,7 +1284,7 @@ public final class ListNatives {
         if (varianceResult.isNone()) {
             return varianceResult;
         }
-        double var = (Double) varianceResult.getPayloadValue();
+        double var = (Double) varianceResult.getSomeValue();
         return MezzeVariant.some(Math.sqrt(var));
     }
 

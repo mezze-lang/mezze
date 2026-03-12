@@ -19,6 +19,20 @@ public final class MapNatives {
 
     private MapNatives() {}
 
+    // ==================== Cached Field Name Arrays ====================
+    // Avoids repeated allocation of common field name arrays
+
+    private static final String[] FIELD_X = {"x"};
+    private static final String[] FIELD_VAL = {"val"};
+    private static final String[] FIELD_K_V = {"k", "v"};
+    private static final String[] FIELD_KEY_VALUE = {"key", "value"};
+    private static final String[] FIELD_ACC_X = {"acc", "x"};
+    private static final String[] FIELD_ACC_K_V = {"acc", "k", "v"};
+    private static final String[] FIELD_ACC_ENTRY = {"acc", "entry"};
+    private static final String[] FIELD_L_R = {"l", "r"};
+    private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
+    private static final String[] FIELD_FST_SND = {"fst", "snd"};
+
     // ==================== Factory Operations ====================
 
     public static MezzeMap empty() {
@@ -111,7 +125,7 @@ public final class MapNatives {
         int i = 0;
         for (MezzeMap.Entry entry : delegate) {
             result[i++] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                FIELD_KEY_VALUE,
                 new Object[]{entry.key(), entry.value()}
             );
         }
@@ -127,7 +141,7 @@ public final class MapNatives {
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             // filter callback: { k: 'k, v: 'v } -> Bool
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object res = callNode.call(predicate.getCallTarget(),
@@ -203,7 +217,7 @@ public final class MapNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
+            FIELD_X, new Object[]{arg}
         );
         return args;
     }
@@ -213,7 +227,7 @@ public final class MapNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "x"}, new Object[]{arg1, arg2}
+            FIELD_ACC_X, new Object[]{arg1, arg2}
         );
         return args;
     }
@@ -224,7 +238,7 @@ public final class MapNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"val"}, new Object[]{val}
+            FIELD_VAL, new Object[]{val}
         );
         return args;
     }
@@ -244,7 +258,7 @@ public final class MapNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "k", "v"}, new Object[]{acc, k, v}
+            FIELD_ACC_K_V, new Object[]{acc, k, v}
         );
         return args;
     }
@@ -255,7 +269,7 @@ public final class MapNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"l", "r"}, new Object[]{l, r}
+            FIELD_L_R, new Object[]{l, r}
         );
         return args;
     }
@@ -267,7 +281,7 @@ public final class MapNatives {
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
@@ -283,7 +297,7 @@ public final class MapNatives {
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
@@ -305,7 +319,7 @@ public final class MapNatives {
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
@@ -322,7 +336,7 @@ public final class MapNatives {
         long cnt = 0;
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, kvRecord));
@@ -375,7 +389,7 @@ public final class MapNatives {
         int i = 0;
         for (MezzeMap.Entry entry : delegate) {
             result[i++] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                FIELD_KEY_VALUE,
                 new Object[]{entry.key(), entry.value()}
             );
         }
@@ -409,7 +423,7 @@ public final class MapNatives {
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             Object result = callNode.call(predicate.getCallTarget(),
                 new Object[]{MezzeRecord.fromFields(
-                    new String[]{"k", "v"},
+                    FIELD_K_V,
                     new Object[]{entry.key(), entry.value()})});
             if (result instanceof Boolean && (Boolean) result) {
                 passMap = passMap.put(entry.key(), entry.value());
@@ -418,7 +432,7 @@ public final class MapNatives {
             }
         }
         return MezzeRecord.fromFields(
-            new String[]{"pass", "fail"},
+            FIELD_PASS_FAIL,
             new Object[]{passMap, failMap}
         );
     }
@@ -513,18 +527,18 @@ public final class MapNatives {
         java.util.Iterator<MezzeMap.Entry> iter = map.iterator();
         MezzeMap.Entry first = iter.next();
         MezzeRecord acc = MezzeRecord.fromFields(
-            new String[]{"k", "v"},
+            FIELD_K_V,
             new Object[]{first.key(), first.value()}
         );
         while (iter.hasNext()) {
             MezzeMap.Entry entry = iter.next();
             MezzeRecord current = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object result = callNode.call(f.getCallTarget(),
                 new Object[]{MezzeRecord.fromFields(
-                    new String[]{"acc", "entry"},
+                    FIELD_ACC_ENTRY,
                     new Object[]{acc, current}
                 )});
             acc = (MezzeRecord) result;
@@ -613,7 +627,7 @@ public final class MapNatives {
             Object key = entry.key();
             if (m2.containsKey(key)) {
                 result = result.put(key, MezzeRecord.fromFields(
-                    new String[]{"first", "second"},
+                    FIELD_FST_SND,
                     new Object[]{entry.value(), m2.get(key)}
                 ));
             }
@@ -682,7 +696,7 @@ public final class MapNatives {
         int i = 0;
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             entries[i++] = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
         }
@@ -716,7 +730,7 @@ public final class MapNatives {
         MezzeMap result = MezzeMap.empty();
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"k", "v"},
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
             Object mapped = callNode.call(f.getCallTarget(), prepareArgsKV(f, kvRecord));

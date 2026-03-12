@@ -545,7 +545,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5, 6]
             let result = seq::partition { xs = xs, p = { x } -> x % 2 == 0 }
-            seq::length { xs = result.matching }
+            seq::length { xs = result.pass }
         """)
         assertEquals(3L, result)  // evens: 2, 4, 6
     }

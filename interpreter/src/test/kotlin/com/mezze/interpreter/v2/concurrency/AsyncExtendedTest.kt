@@ -38,10 +38,10 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let result = Async.join {
-                    left = {} -> 10,
-                    right = {} -> 20
+                    l = {} -> 10,
+                    r = {} -> 20
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(30L, result)
@@ -54,10 +54,10 @@ class AsyncExtendedTest {
 
             perform OSThreadAsync in do
                 let result = Async.join {
-                    left = {} -> 100,
-                    right = {} -> 200
+                    l = {} -> 100,
+                    r = {} -> 200
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(300L, result)
@@ -70,10 +70,10 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let result = Async.join {
-                    left = {} -> "hello",
-                    right = {} -> 42
+                    l = {} -> "hello",
+                    r = {} -> 42
                 }
-                result.right
+                result.r
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -399,10 +399,10 @@ class AsyncExtendedTest {
 
             perform CoopAsync {cont = continuation::new {}} in do
                 let result = Async.join {
-                    left = {} -> 5,
-                    right = {} -> 10
+                    l = {} -> 5,
+                    r = {} -> 10
                 }
-                result.left + result.right
+                result.l + result.r
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -453,12 +453,12 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let result = Async.join {
-                    left = {} -> Async.map {xs = [1, 2], f = {x} -> x * 2},
-                    right = {} -> Async.map {xs = [3, 4], f = {x} -> x * 3}
+                    l = {} -> Async.map {xs = [1, 2], f = {x} -> x * 2},
+                    r = {} -> Async.map {xs = [3, 4], f = {x} -> x * 3}
                 }
-                # result.left = [2, 4], result.right = [9, 12]
-                match result.left is
-                    [a, b] -> match result.right is
+                # result.l = [2, 4], result.r = [9, 12]
+                match result.l is
+                    [a, b] -> match result.r is
                         [c, d] -> a + b + c + d
                         _ -> 0
                     _ -> 0

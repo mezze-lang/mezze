@@ -126,7 +126,7 @@ class ParallelEffectTest {
             use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
-                match Parallel.reduce {xs = [1, 2, 3, 4, 5], f = {left, right} -> left + right} is
+                match Parallel.reduce {xs = [1, 2, 3, 4, 5], f = {l, r} -> l + r} is
                     Some {val} -> val
                     None -> 0
         """)
@@ -139,7 +139,7 @@ class ParallelEffectTest {
             use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
-                match Parallel.reduce {xs = [1, 2, 3, 4], f = {left, right} -> left * right} is
+                match Parallel.reduce {xs = [1, 2, 3, 4], f = {l, r} -> l * r} is
                     Some {val} -> val
                     None -> 0
         """)
@@ -152,7 +152,7 @@ class ParallelEffectTest {
             use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
-                match Parallel.reduce {xs = [], f = {left, right} -> left + right} is
+                match Parallel.reduce {xs = [], f = {l, r} -> l + r} is
                     Some {val} -> False
                     None -> True
         """)
@@ -165,7 +165,7 @@ class ParallelEffectTest {
             use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
-                match Parallel.reduce {xs = [42], f = {left, right} -> left + right} is
+                match Parallel.reduce {xs = [42], f = {l, r} -> l + r} is
                     Some {val} -> val
                     None -> 0
         """)
@@ -184,7 +184,7 @@ class ParallelEffectTest {
                     xs = [1, 2, 3],
                     zero = 0,
                     map_fn = {x} -> x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
         """)
         assertEquals(6L, result)
@@ -200,7 +200,7 @@ class ParallelEffectTest {
                     xs = [1, 2, 3],
                     zero = 0,
                     map_fn = {x} -> x * x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
         """)
         assertEquals(14L, result) // 1 + 4 + 9 = 14
@@ -216,7 +216,7 @@ class ParallelEffectTest {
                     xs = [],
                     zero = 100,
                     map_fn = {x} -> x,
-                    combine = {left, right} -> left + right
+                    combine = {l, r} -> l + r
                 }
         """)
         assertEquals(100L, result)
@@ -231,10 +231,10 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let r = Parallel.both {
-                    left = {} -> 1 + 2,
-                    right = {} -> 3 * 4
+                    l = {} -> 1 + 2,
+                    r = {} -> 3 * 4
                 }
-                r.left + r.right
+                r.l + r.r
         """)
         assertEquals(15L, result) // 3 + 12 = 15
     }
@@ -365,7 +365,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                seq::length {xs = r.matching}
+                seq::length {xs = r.pass}
         """)
         assertEquals(2L, result) // [2, 4]
     }
@@ -378,7 +378,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                seq::length {xs = r.not_matching}
+                seq::length {xs = r.fail}
         """)
         assertEquals(3L, result) // [1, 3, 5]
     }

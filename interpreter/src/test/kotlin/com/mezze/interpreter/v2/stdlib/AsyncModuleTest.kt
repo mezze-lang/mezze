@@ -122,10 +122,10 @@ class AsyncModuleTest {
     fun `test join runs two computations`() {
         val result = eval(withCoopAsync("""
             let r = Async.join {
-                left = {} -> 10,
-                right = {} -> 20
+                l = {} -> 10,
+                r = {} -> 20
             }
-            r.left + r.right
+            r.l + r.r
         """))
         assertEquals(30L, result)
     }

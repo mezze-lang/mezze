@@ -112,10 +112,10 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let result = Async.join {
-                    left = {} -> 100,
-                    right = {} -> 200
+                    l = {} -> 100,
+                    r = {} -> 200
                 }
-                result.left + result.right
+                result.l + result.r
         """.trimIndent()
 
         val result = eval(source)
@@ -442,21 +442,21 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let outer = Async.join {
-                    left = {} -> do
+                    l = {} -> do
                         let inner = Async.join {
-                            left = {} -> 1,
-                            right = {} -> 2
+                            l = {} -> 1,
+                            r = {} -> 2
                         }
-                        inner.left + inner.right
+                        inner.l + inner.r
                     ,
-                    right = {} -> do
+                    r = {} -> do
                         let inner = Async.join {
-                            left = {} -> 3,
-                            right = {} -> 4
+                            l = {} -> 3,
+                            r = {} -> 4
                         }
-                        inner.left + inner.right
+                        inner.l + inner.r
                 }
-                outer.left + outer.right
+                outer.l + outer.r
         """.trimIndent()
 
         val result = eval(source)

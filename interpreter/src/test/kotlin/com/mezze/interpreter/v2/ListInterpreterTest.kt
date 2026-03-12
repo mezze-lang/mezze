@@ -492,7 +492,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.matching }
+            list::length { xs = result.pass }
         """
         val result = eval(code)
         assertEquals(2L, result)  // 4, 5
@@ -504,7 +504,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.not_matching }
+            list::length { xs = result.fail }
         """
         val result = eval(code)
         assertEquals(3L, result)  // 1, 2, 3

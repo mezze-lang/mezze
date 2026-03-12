@@ -688,17 +688,17 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_split_at: {d: Deque 'a, i: Int} -> {left: Deque 'a, right: Deque 'a}
+        // __native_deque_split_at: {d: Deque 'a, i: Int} -> {l: Deque 'a, r: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
             context["__native_deque_split_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "i" to MezzeType.IntType)),
-                MezzeType.RecordType(mapOf("left" to dequeType, "right" to dequeType))
+                MezzeType.RecordType(mapOf("l" to dequeType, "r" to dequeType))
             )
         }
 
-        // __native_deque_span: {d: Deque 'a, p: {val: 'a} -> Bool} -> {left: Deque 'a, right: Deque 'a}
+        // __native_deque_span: {d: Deque 'a, p: {val: 'a} -> Bool} -> {l: Deque 'a, r: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
@@ -710,7 +710,7 @@ object DequeTypes {
                         MezzeType.BoolType
                     )
                 )),
-                MezzeType.RecordType(mapOf("left" to dequeType, "right" to dequeType))
+                MezzeType.RecordType(mapOf("l" to dequeType, "r" to dequeType))
             )
         }
 
@@ -784,7 +784,7 @@ object DequeTypes {
             val elemType2 = MezzeType.VarType(TypeVar("b"))
             val dequeType1 = MezzeType.TypeApplication("Deque", listOf(elemType1))
             val dequeType2 = MezzeType.TypeApplication("Deque", listOf(elemType2))
-            val pairType = MezzeType.RecordType(mapOf("first" to elemType1, "second" to elemType2))
+            val pairType = MezzeType.RecordType(mapOf("fst" to elemType1, "snd" to elemType2))
             val resultDequeType = MezzeType.TypeApplication("Deque", listOf(pairType))
             context["__native_deque_zip"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d1" to dequeType1, "d2" to dequeType2)),

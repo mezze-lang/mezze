@@ -1185,7 +1185,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let zipped = seq::zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] }
             match seq::get { xs = zipped, i = 0 } is
-                Some { val } -> val.first
+                Some { val } -> val.fst
                 None -> -1
             """);
         assertEquals(1L, result);
@@ -1197,7 +1197,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let zipped = seq::zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] }
             match seq::get { xs = zipped, i = 0 } is
-                Some { val } -> val.second
+                Some { val } -> val.snd
                 None -> "error"
             """);
         assertEquals("a", result);
@@ -1209,7 +1209,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let zipped = seq::zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] }
             match seq::get { xs = zipped, i = 0 } is
-                Some { val } -> val.third
+                Some { val } -> val.thd
                 None -> False
             """);
         assertEquals(true, result);
@@ -1245,7 +1245,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let zipped = seq::zip4 { xs = [1, 2], ys = ["a", "b"], zs = [True, False], ws = [10.0, 20.0] }
             match seq::get { xs = zipped, i = 1 } is
-                Some { val } -> val.fourth
+                Some { val } -> val.fth
                 None -> -1.0
             """);
         assertEquals(20.0, result);
@@ -1309,7 +1309,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let product = seq::cartesian_product { xs = [1, 2], ys = ["a", "b"] }
             match seq::get { xs = product, i = 0 } is
-                Some { val } -> val.first
+                Some { val } -> val.fst
                 None -> -1
             """);
         assertEquals(1L, result);
@@ -1321,7 +1321,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let product = seq::cartesian_product { xs = [1, 2], ys = ["a", "b"] }
             match seq::get { xs = product, i = 0 } is
-                Some { val } -> val.second
+                Some { val } -> val.snd
                 None -> "error"
             """);
         assertEquals("a", result);
@@ -1345,7 +1345,7 @@ class SeqAdvancedOperationsTest {
             let product = seq::cartesian_product { xs = [1, 2], ys = ["a", "b"] }
             # Last element should be (2, "b")
             match seq::get { xs = product, i = 3 } is
-                Some { val } -> val.first == 2 && val.second == "b"
+                Some { val } -> val.fst == 2 && val.snd == "b"
                 None -> False
             """);
         assertEquals(true, result);

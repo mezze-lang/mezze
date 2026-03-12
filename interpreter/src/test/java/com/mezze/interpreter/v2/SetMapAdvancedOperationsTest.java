@@ -862,7 +862,7 @@ class SetMapAdvancedOperationsTest {
             let m2 = map::insert { m = map::empty {}, k = "a", v = 10 }
             let zipped = map::zip_maps { m1 = m1, m2 = m2 }
             match map::get { m = zipped, k = "a" } is
-                Some { val } -> val.first + val.second
+                Some { val } -> val.fst + val.snd
                 None -> -1
             """);
         assertEquals(11L, result);  // 1 + 10

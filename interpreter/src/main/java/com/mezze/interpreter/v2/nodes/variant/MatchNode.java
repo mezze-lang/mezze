@@ -122,6 +122,15 @@ public final class MatchNode extends MezzeNode {
     @CompilationFinal
     private int monomorphicBranchIndex = -1;
 
+    // ===== MONOMORPHIC LITERAL CACHE =====
+    // Fast path for repeatedly matching the same literal value
+    // Avoids HashMap lookup in the common monomorphic case
+    @CompilationFinal
+    private Object cachedLiteralValue;
+
+    @CompilationFinal
+    private int cachedLiteralBranchIndex = -1;
+
     public MatchNode(MezzeNode valueNode, MatchBranchNode[] branches, int wildcardBranchIndex) {
         this.valueNode = valueNode;
         this.branches = branches;
@@ -417,10 +426,22 @@ public final class MatchNode extends MezzeNode {
 
     @ExplodeLoop
     private Object executeLiteralMatch(VirtualFrame frame, Object value) {
+        // FASTEST PATH: Monomorphic literal cache - same value every time
+        // This avoids HashMap lookup entirely
+        if (cachedLiteralBranchIndex >= 0 && literalEquals(cachedLiteralValue, value)) {
+            return branches[cachedLiteralBranchIndex].execute(frame);
+        }
+
         // FAST PATH: Use literal cache for O(1) lookup if available
         if (hasLiteralCache) {
             Integer cachedIndex = lookupLiteralCache(value);
             if (cachedIndex != null) {
+                // Update monomorphic cache for next time
+                if (cachedLiteralBranchIndex < 0) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    cachedLiteralValue = value;
+                    cachedLiteralBranchIndex = cachedIndex;
+                }
                 MatchBranchNode branch = branches[cachedIndex];
                 // Cached branches have no guards/if-let, so just execute
                 return branch.execute(frame);
@@ -457,6 +478,17 @@ public final class MatchNode extends MezzeNode {
         noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for value: " + value);
+    }
+
+    /**
+     * Fast equality check for literal values.
+     * Handles primitive types without boxing overhead.
+     */
+    private static boolean literalEquals(Object cached, Object value) {
+        if (cached == value) return true;
+        if (cached == null) return false;
+        // For boxed primitives, use equals
+        return cached.equals(value);
     }
 
     /**

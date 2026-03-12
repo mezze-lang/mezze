@@ -72,7 +72,7 @@ effect Async where {
 
     # Run two computations concurrently, return both results
     # If either fails, the other is cancelled
-    join: {left: {} -> 'a <...>, right: {} -> 'b <...>} -> {left: 'a, right: 'b} <Async>,
+    join: {l: {} -> 'a <...>, r: {} -> 'b <...>} -> {l: 'a, r: 'b} <Async>,
 
     # Run three computations concurrently
     join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c} <Async>,
@@ -149,7 +149,7 @@ impl Async for LoomAsync where {
     is_done = {p} -> __native_loom_is_done {p = p},
     is_cancelled = {} -> __native_loom_is_cancelled {},
     check = {} -> __native_loom_check {},
-    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join = {l, r} -> __native_loom_join {l = l, r = r},
     join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
     map = {xs, f} -> __native_loom_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
@@ -180,7 +180,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
     is_done = {p} -> __native_loom_is_done {p = p},
     is_cancelled = {} -> __native_loom_is_cancelled {},
     check = {} -> __native_loom_check {},
-    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join = {l, r} -> __native_loom_join {l = l, r = r},
     join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
     map = {xs, f} -> __native_loom_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
@@ -223,7 +223,7 @@ impl Async for OSThreadAsync where {
     is_done = {p} -> __native_os_is_done {p = p},
     is_cancelled = {} -> __native_os_is_cancelled {},
     check = {} -> __native_os_check {},
-    join = {left, right} -> __native_os_join {left = left, right = right},
+    join = {l, r} -> __native_os_join {l = l, r = r},
     join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
     map = {xs, f} -> __native_os_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
@@ -254,7 +254,7 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
     is_done = {p} -> __native_os_is_done {p = p},
     is_cancelled = {} -> __native_os_is_cancelled {},
     check = {} -> __native_os_check {},
-    join = {left, right} -> __native_os_join {left = left, right = right},
+    join = {l, r} -> __native_os_join {l = l, r = r},
     join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
     map = {xs, f} -> __native_os_map {xs = xs, f = f},
     for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
@@ -327,12 +327,12 @@ impl Async for CoopAsync where {
     check = {} -> {},
 
     # Join runs both functions, awaiting each
-    join = {left, right} -> do
-        let p_left = __native_scheduler_spawn { sched = scope, f = left }
-        let p_right = __native_scheduler_spawn { sched = scope, f = right }
-        let r_left = __native_scheduler_await { sched = scope, p = p_left }
-        let r_right = __native_scheduler_await { sched = scope, p = p_right }
-        { left = r_left, right = r_right }
+    join = {l, r} -> do
+        let p_l = __native_scheduler_spawn { sched = scope, f = l }
+        let p_r = __native_scheduler_spawn { sched = scope, f = r }
+        let r_l = __native_scheduler_await { sched = scope, p = p_l }
+        let r_r = __native_scheduler_await { sched = scope, p = p_r }
+        { l = r_l, r = r_r }
     ,
 
     join3 = {a, b, c} -> do
