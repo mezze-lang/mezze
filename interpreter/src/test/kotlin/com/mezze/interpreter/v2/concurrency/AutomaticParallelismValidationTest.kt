@@ -1,7 +1,7 @@
 package com.mezze.interpreter.v2.concurrency
 
 import com.mezze.interpreter.v2.MezzeTestHelper
-import com.mezze.interpreter.v2.values.MezzeList
+import com.mezze.datastructures.list.MezzeList
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach

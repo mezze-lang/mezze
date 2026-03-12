@@ -1,7 +1,10 @@
 package com.mezze.interpreter.v2.nodes.builtin.effects;
 
+import com.mezze.datastructures.list.MezzeList;
+
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -600,7 +603,7 @@ public final class AdaptiveAsyncHandler {
             results[i] = callNode.call(callTarget, callArgs);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeList.of(results);
     }
 
     private MezzeList parallelMapLoom(Object[] xs, MezzeFunction f,
@@ -647,7 +650,7 @@ public final class AdaptiveAsyncHandler {
             }
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeList.of(results);
     }
 
     // ==================== Scope Operations ====================
@@ -727,7 +730,7 @@ public final class AdaptiveAsyncHandler {
             results[i] = awaitPromise(promises[i]);
         }
 
-        return MezzeList.fromArray(results);
+        return MezzeList.of(results);
     }
 
     private Object awaitPromise(Object p) {

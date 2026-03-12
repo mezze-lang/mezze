@@ -47,7 +47,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_int {value = 42, buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -69,7 +69,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_float {value = 3.14, buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -91,7 +91,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_string {value = "hello", buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -113,7 +113,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_bool {value = True, buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -135,7 +135,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_bool {value = False, buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -169,7 +169,7 @@ class JsonStreamCodecTest {
                 Ok {val} -> val
                 Err {error} -> b1
 
-            bytes::buffer_to_string {buffer = b2}
+            bytes::buffer_to_str {buffer = b2}
         """.trimIndent()
 
         val result = eval(source)
@@ -217,7 +217,7 @@ class JsonStreamCodecTest {
                 Ok {val} -> val
                 Err {error} -> b3
 
-            bytes::buffer_to_string {buffer = b4}
+            bytes::buffer_to_str {buffer = b4}
         """.trimIndent()
 
         val result = eval(source)
@@ -253,7 +253,7 @@ class JsonStreamCodecTest {
                 Ok {val} -> val
                 Err {error} -> b1
 
-            bytes::buffer_to_string {buffer = b2}
+            bytes::buffer_to_str {buffer = b2}
         """.trimIndent()
 
         val result = eval(source)
@@ -310,7 +310,7 @@ class JsonStreamCodecTest {
                 Ok {val} -> val
                 Err {error} -> b4
 
-            bytes::buffer_to_string {buffer = b5}
+            bytes::buffer_to_str {buffer = b5}
         """.trimIndent()
 
         val result = eval(source)
@@ -335,7 +335,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_none {buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -365,7 +365,7 @@ class JsonStreamCodecTest {
             let result = stream::stream_some {value = inner, buffer = buffer, path = path}
 
             match result is
-                Ok {val} -> bytes::buffer_to_string {buffer = val}
+                Ok {val} -> bytes::buffer_to_str {buffer = val}
                 Err {error} -> "error"
         """.trimIndent()
 
@@ -706,7 +706,7 @@ class JsonStreamCodecTest {
                 Err {error} -> b2
 
             # Verify we got valid JSON output
-            let output = bytes::buffer_to_string {buffer = b3}
+            let output = bytes::buffer_to_str {buffer = b3}
             output
         """.trimIndent()
 

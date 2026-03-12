@@ -100,7 +100,7 @@ class EffectHandlingTest {
               let sum = x + y
               Log.print {msg = "Computing"}
               let randomValue = Random.nextInt {max = sum}
-              FileIO.writeFile {path = "out.txt", content = int::to_string {n = randomValue}}
+              FileIO.writeFile {path = "out.txt", content = int::to_str {n = randomValue}}
               sum + randomValue
         """.trimIndent()
 

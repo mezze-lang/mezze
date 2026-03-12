@@ -2,7 +2,12 @@ package com.mezze.datastructures.sorted;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnknownKeyException;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -17,6 +22,7 @@ import java.util.Objects;
  * @param <K> Key type (must be Comparable)
  * @param <V> Value type
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeSortedMap<K extends Comparable<K>, V> implements TruffleObject, Iterable<MezzeSortedMap.Entry<K, V>> {
 
     @CompilationFinal(dimensions = 1)
@@ -32,6 +38,11 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Key-value entry.
      */
     public record Entry<K, V>(K key, V value) {}
+
+    /**
+     * Raw key-value entry for interpreter use.
+     */
+    public record RawEntry(Object key, Object value) {}
 
     @SuppressWarnings("unchecked")
     private MezzeSortedMap(Object[] keys, Object[] values, Comparator<?> comparator) {
@@ -127,6 +138,17 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     }
 
     /**
+     * Gets the value for a key (raw type), or null if not present.
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public Object getObject(Object key) {
+        int idx = binarySearchObject(key);
+        return idx >= 0 ? values[idx] : null;
+    }
+
+    /**
      * Gets the value for a key, or default if not present.
      */
     public V getOrElse(K key, V defaultValue) {
@@ -142,10 +164,27 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     }
 
     /**
+     * Returns true if the key is present (raw type).
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    public boolean containsKeyObject(Object key) {
+        return binarySearchObject(key) >= 0;
+    }
+
+    /**
      * Binary search for key.
      */
     @TruffleBoundary
     private int binarySearch(K key) {
+        return binarySearchObject(key);
+    }
+
+    /**
+     * Binary search for key (raw type).
+     */
+    @TruffleBoundary
+    private int binarySearchObject(Object key) {
         int low = 0;
         int high = keys.length - 1;
 
@@ -209,7 +248,17 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      */
     @TruffleBoundary
     public MezzeSortedMap<K, V> put(K key, V value) {
-        int idx = binarySearch(key);
+        return putObject(key, value);
+    }
+
+    /**
+     * Returns a new sorted map with the entry added/updated (raw type).
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSortedMap<K, V> putObject(Object key, Object value) {
+        int idx = binarySearchObject(key);
 
         if (idx >= 0) {
             // Update existing
@@ -239,7 +288,17 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      */
     @TruffleBoundary
     public MezzeSortedMap<K, V> remove(K key) {
-        int idx = binarySearch(key);
+        return removeObject(key);
+    }
+
+    /**
+     * Returns a new sorted map with the key removed (raw type).
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSortedMap<K, V> removeObject(Object key) {
+        int idx = binarySearchObject(key);
         if (idx < 0) return this;
 
         if (keys.length == 1) return empty();
@@ -391,6 +450,28 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         };
     }
 
+    /**
+     * Returns a raw entry iterator for interpreter use with dynamic types.
+     */
+    public Iterable<RawEntry> rawEntries() {
+        return () -> new Iterator<>() {
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index < keys.length;
+            }
+
+            @Override
+            public RawEntry next() {
+                if (!hasNext()) throw new NoSuchElementException();
+                RawEntry entry = new RawEntry(keys[index], values[index]);
+                index++;
+                return entry;
+            }
+        };
+    }
+
     // ===== OBJECT METHODS =====
 
     @Override
@@ -415,5 +496,99 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @Override
     public int hashCode() {
         return Arrays.hashCode(keys) ^ Arrays.hashCode(values);
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasHashEntries() {
+        return true;
+    }
+
+    @ExportMessage
+    long getHashSize() {
+        return keys.length;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    boolean isHashEntryReadable(Object key) {
+        return containsKeyObject(key);
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    Object readHashValue(Object key) throws UnknownKeyException {
+        try {
+            V value = get((K) key);
+            if (value == null && !containsKey((K) key)) {
+                throw UnknownKeyException.create(key);
+            }
+            return value;
+        } catch (ClassCastException e) {
+            throw UnknownKeyException.create(key);
+        }
+    }
+
+    @ExportMessage
+    boolean isHashEntryModifiable(@SuppressWarnings("unused") Object key) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isHashEntryInsertable(@SuppressWarnings("unused") Object key) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeHashEntry(@SuppressWarnings("unused") Object key, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new SortedMapIterator(iterator());
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getHashEntriesIterator() {
+        return new SortedMapIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class SortedMapIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        SortedMapIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 }

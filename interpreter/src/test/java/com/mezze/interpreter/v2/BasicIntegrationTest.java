@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.values.*;
+import com.mezze.datastructures.seq.MezzeSeq;
 import org.junit.jupiter.api.*;
 
 import static org.junit.jupiter.api.Assertions.*;

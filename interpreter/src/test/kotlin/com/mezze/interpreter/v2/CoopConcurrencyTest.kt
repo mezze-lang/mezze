@@ -442,7 +442,7 @@ class CoopConcurrencyTest {
                 Async.is_done {p = p}
         """
         val result = eval(code)
-        // In Coop, is_done always returns true since promises are always "ready"
+        // After await, the task has run and is_done returns true
         assertEquals(true, result)
     }
 

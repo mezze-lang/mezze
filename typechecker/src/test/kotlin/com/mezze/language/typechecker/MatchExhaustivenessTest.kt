@@ -329,7 +329,7 @@ class MatchExhaustivenessTest {
             type Single = | Only { value: Int } |
 
             let test: {single: Single} -> String = {single} -> match single is
-              Only { value } -> "value: $(int::to_string {n = value})"
+              Only { value } -> "value: $(int::to_str {n = value})"
         """.trimIndent()
 
         // Should not throw - single constructor fully covered

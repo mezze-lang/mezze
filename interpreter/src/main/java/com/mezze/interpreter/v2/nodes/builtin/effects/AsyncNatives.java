@@ -1,7 +1,10 @@
 package com.mezze.interpreter.v2.nodes.builtin.effects;
 
+import com.mezze.datastructures.list.MezzeList;
+
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage.Env;
@@ -692,9 +695,12 @@ public final class AsyncNatives {
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
         java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
-        List<MezzePromise> promises = new ArrayList<>();
+        // Pre-sized array - we know exactly how many promises we'll create
+        int numFunctions = functions.length;
+        MezzePromise[] promises = new MezzePromise[numFunctions];
 
-        for (Object item : functions) {
+        for (int idx = 0; idx < numFunctions; idx++) {
+            Object item = functions[idx];
             if (!(item instanceof MezzeFunction f)) {
                 throw new RuntimeException("__native_loom_spawn_all expects list of functions");
             }
@@ -733,14 +739,14 @@ public final class AsyncNatives {
             }).virtual(true).build();
 
             vThread.start();
-            promises.add(new MezzePromise(vThread, null, promise));
+            promises[idx] = new MezzePromise(vThread, null, promise);
         }
 
         // Await all promises and collect results into an array
-        Object[] results = new Object[promises.size()];
-        for (int i = 0; i < promises.size(); i++) {
+        Object[] results = new Object[numFunctions];
+        for (int i = 0; i < numFunctions; i++) {
             try {
-                results[i] = promises.get(i).await();
+                results[i] = promises[i].await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted while awaiting promise", e);
@@ -1500,9 +1506,8 @@ public final class AsyncNatives {
 
         List<Object> results = new ArrayList<>();
         for (Object x : xs) {
-            // Wrap element in record - callbacks expect {x} -> ...
-            MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
-            callArgs[closure.length] = arg;
+            // Wrap element in record - callbacks expect {x} -> ... (use fast wrapper)
+            callArgs[closure.length] = MezzeRecord.wrapX(x);
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean && (Boolean) result) {
                 results.add(x);
@@ -2371,7 +2376,8 @@ public final class AsyncNatives {
 
         List<Object> results = new ArrayList<>();
         for (Object x : xs) {
-            MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{x});
+            // Use fast wrapper - no @TruffleBoundary
+            MezzeRecord arg = MezzeRecord.wrapX(x);
             Object result = callNode.call(callTarget, appendArg(closure, arg));
             if (result instanceof Boolean && (Boolean) result) {
                 results.add(x);
@@ -2510,7 +2516,7 @@ public final class AsyncNatives {
             }
             return result;
         }
-        if (val instanceof Object[] arr) return MezzeList.fromArray(arr);
+        if (val instanceof Object[] arr) return MezzeList.of(arr);
         throw new RuntimeException("Expected list for '" + name + "'");
     }
 

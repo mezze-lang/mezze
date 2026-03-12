@@ -1,5 +1,12 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.deque.MezzeDeque;
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedMap;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -16,18 +23,18 @@ public final class DequeNatives {
 
     // ==================== Factory Operations ====================
 
-    public static MezzeDeque empty() {
+    public static MezzeDeque<Object> empty() {
         return MezzeDeque.empty();
     }
 
     @TruffleBoundary
-    public static MezzeDeque singleton(Object element) {
+    public static MezzeDeque<Object> singleton(Object element) {
         return MezzeDeque.of(element);
     }
 
     @TruffleBoundary
-    public static MezzeDeque fromList(MezzeList list) {
-        MezzeDeque result = MezzeDeque.empty();
+    public static MezzeDeque<Object> fromList(MezzeList list) {
+        MezzeDeque<Object> result = MezzeDeque.empty();
         for (Object elem : list) {
             result = result.pushBack(elem);
         }
@@ -36,21 +43,21 @@ public final class DequeNatives {
 
     // ==================== Basic Operations ====================
 
-    public static long length(MezzeDeque deque) {
+    public static long length(MezzeDeque<Object> deque) {
         return deque.size();
     }
 
-    public static boolean isEmpty(MezzeDeque deque) {
+    public static boolean isEmpty(MezzeDeque<Object> deque) {
         return deque.isEmpty();
     }
 
     @TruffleBoundary
-    public static MezzeDeque pushFront(MezzeDeque deque, Object element) {
+    public static MezzeDeque<Object> pushFront(MezzeDeque<Object> deque, Object element) {
         return deque.pushFront(element);
     }
 
     @TruffleBoundary
-    public static MezzeDeque pushBack(MezzeDeque deque, Object element) {
+    public static MezzeDeque<Object> pushBack(MezzeDeque<Object> deque, Object element) {
         return deque.pushBack(element);
     }
 
@@ -59,13 +66,13 @@ public final class DequeNatives {
      * Returns None if empty, Some { val = { head, tail } } otherwise.
      */
     @TruffleBoundary
-    public static MezzeVariant popFront(MezzeDeque deque) {
+    public static MezzeVariant popFront(MezzeDeque<Object> deque) {
         if (deque.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object[] result = deque.popFront();
+        MezzeDeque.PopResult<Object> result = deque.popFront();
         MezzeRecord record = MezzeRecord.fromFields(
-            new String[]{"head", "tail"}, new Object[]{result[0], result[1]}
+            new String[]{"head", "tail"}, new Object[]{result.element(), result.rest()}
         );
         return MezzeVariant.some(record);
     }
@@ -75,19 +82,19 @@ public final class DequeNatives {
      * Returns None if empty, Some { val = { init, last } } otherwise.
      */
     @TruffleBoundary
-    public static MezzeVariant popBack(MezzeDeque deque) {
+    public static MezzeVariant popBack(MezzeDeque<Object> deque) {
         if (deque.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object[] result = deque.popBack();
+        MezzeDeque.PopResult<Object> result = deque.popBack();
         MezzeRecord record = MezzeRecord.fromFields(
-            new String[]{"init", "last"}, new Object[]{result[0], result[1]}
+            new String[]{"init", "last"}, new Object[]{result.rest(), result.element()}
         );
         return MezzeVariant.some(record);
     }
 
     @TruffleBoundary
-    public static MezzeVariant peekFront(MezzeDeque deque) {
+    public static MezzeVariant peekFront(MezzeDeque<Object> deque) {
         if (deque.isEmpty()) {
             return MezzeVariant.none();
         }
@@ -95,7 +102,7 @@ public final class DequeNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant peekBack(MezzeDeque deque) {
+    public static MezzeVariant peekBack(MezzeDeque<Object> deque) {
         if (deque.isEmpty()) {
             return MezzeVariant.none();
         }
@@ -164,12 +171,12 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeDeque deque) {
-        return MezzeList.fromArray(deque.toJavaArray());
+        return MezzeList.of(deque.toArray());
     }
 
     @TruffleBoundary
     public static Object[] toArray(MezzeDeque deque) {
-        return deque.toJavaArray();
+        return deque.toArray();
     }
 
     // ==================== Helper Methods ====================
@@ -325,7 +332,7 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeSeq toSeq(MezzeDeque deque) {
-        return MezzeSeq.fromArray(deque.toJavaArray());
+        return MezzeSeq.fromArray(deque.toArray());
     }
 
     // ==================== From Seq ====================
@@ -420,7 +427,7 @@ public final class DequeNatives {
     public static MezzeDeque sort(MezzeDeque deque) {
         if (deque.size() <= 1) return deque;
 
-        Object[] arr = deque.toJavaArray();
+        Object[] arr = deque.toArray();
 
         java.util.Arrays.sort(arr, (a, b) -> {
             if (a instanceof Long && b instanceof Long) {
@@ -746,7 +753,7 @@ public final class DequeNatives {
         if (shift < 0) shift += size;
         if (shift == 0) return deque;
 
-        Object[] arr = deque.toJavaArray();
+        Object[] arr = deque.toArray();
         MezzeDeque result = MezzeDeque.empty();
         for (int i = 0; i < size; i++) {
             result = result.pushBack(arr[(i + shift) % size]);
@@ -780,16 +787,17 @@ public final class DequeNatives {
     public static MezzeSet toSet(MezzeDeque deque) {
         MezzeSet result = MezzeSet.empty();
         for (Object elem : deque) {
-            result = result.add(elem);
+            result = result.addObject(elem);
         }
         return result;
     }
 
     @TruffleBoundary
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public static MezzeSortedSet toSortedSet(MezzeDeque deque) {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : deque) {
-            result = result.add(elem);
+            result = result.addObject(elem);
         }
         return result;
     }
@@ -823,7 +831,7 @@ public final class DequeNatives {
                 if (keyIdx < 0) keyIdx = rec.getFieldIndex("k");
                 if (valIdx < 0) valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
-                    result = result.put(rec.getField(keyIdx), rec.getField(valIdx));
+                    result = result.putObject(rec.getField(keyIdx), rec.getField(valIdx));
                 }
             }
         }
@@ -852,7 +860,7 @@ public final class DequeNatives {
     public static MezzeDeque fromMap(MezzeMap map) {
         // Returns deque of {key, value} records
         MezzeDeque result = MezzeDeque.empty();
-        for (com.mezze.datastructures.map.MezzeMap.Entry entry : map.getDelegate()) {
+        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord rec = MezzeRecord.fromFields(
                 new String[]{"key", "value"},
                 new Object[]{entry.key(), entry.value()}
@@ -866,10 +874,11 @@ public final class DequeNatives {
     public static MezzeDeque fromSortedMap(MezzeSortedMap map) {
         // Returns deque of {key, value} records (in sorted key order)
         MezzeDeque result = MezzeDeque.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
+        for (Object entryObj : map.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
             MezzeRecord rec = MezzeRecord.fromFields(
                 new String[]{"key", "value"},
-                new Object[]{entry.getKey(), entry.getValue()}
+                new Object[]{entry.key(), entry.value()}
             );
             result = result.pushBack(rec);
         }

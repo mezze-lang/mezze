@@ -163,7 +163,7 @@ class NatIntegrationTest {
     void toStringConvertsNatToString() {
         Object result = MezzeTestHelper.run("""
             use std::nat
-            nat::to_string { n = 42n }
+            nat::to_str { n = 42n }
             """);
         assertEquals("42", result);
     }

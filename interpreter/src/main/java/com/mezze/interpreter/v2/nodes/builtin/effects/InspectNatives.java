@@ -1,5 +1,12 @@
 package com.mezze.interpreter.v2.nodes.builtin.effects;
 
+import com.mezze.datastructures.deque.MezzeDeque;
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedMap;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
+
 import com.mezze.interpreter.v2.nodes.builtin.collections.*;
 import com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives;
 import com.mezze.interpreter.v2.values.*;
@@ -112,7 +119,7 @@ public final class InspectNatives {
             }
             StringBuilder sb = new StringBuilder("{ ");
             boolean first = true;
-            for (com.mezze.datastructures.map.MezzeMap.Entry entry : map.getDelegate()) {
+            for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
                 if (!first) sb.append(", ");
                 first = false;
                 sb.append(valueToString(entry.key()))
@@ -167,18 +174,18 @@ public final class InspectNatives {
         }
 
         // Sorted Maps
-        if (value instanceof MezzeSortedMap sortedMap) {
+        if (value instanceof MezzeSortedMap<?, ?> sortedMap) {
             if (sortedMap.isEmpty()) {
                 return "SortedMap{}";
             }
             StringBuilder sb = new StringBuilder("SortedMap{ ");
             boolean first = true;
-            for (java.util.Map.Entry<Object, Object> entry : sortedMap.toJavaMap().entrySet()) {
+            for (MezzeSortedMap.RawEntry entry : sortedMap.rawEntries()) {
                 if (!first) sb.append(", ");
                 first = false;
-                sb.append(valueToString(entry.getKey()))
+                sb.append(valueToString(entry.key()))
                   .append(" = ")
-                  .append(valueToString(entry.getValue()));
+                  .append(valueToString(entry.value()));
             }
             sb.append(" }");
             return sb.toString();

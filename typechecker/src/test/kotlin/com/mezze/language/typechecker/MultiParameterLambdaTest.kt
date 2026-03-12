@@ -169,8 +169,8 @@ class MultiParameterLambdaTest {
     @Test
     fun `test multi-parameter lambda with mixed types`() {
         val source = """
-            use std::int::{to_string}
-            let format = {name, age} -> "$(name) is $(to_string {n = age}) years old"
+            use std::int::{to_str}
+            let format = {name, age} -> "$(name) is $(to_str {n = age}) years old"
             format { name = "Alice", age = 30 }
         """.trimIndent()
 

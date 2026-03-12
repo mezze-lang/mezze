@@ -1,6 +1,6 @@
 package com.mezze.interpreter.v2
 
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -100,7 +100,7 @@ class TruffleAndLoomIntegrationTest {
 
             test {}
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         assertEquals(5, result.size())
         assertEquals(2L, result.get(0))
         assertEquals(10L, result.get(4))

@@ -129,7 +129,7 @@ class UndefinedIdentifierTest {
         val source = """
             use std::int
 
-            let result = int::to_string {n = 42}
+            let result = int::to_str {n = 42}
 
             result
         """.trimIndent()

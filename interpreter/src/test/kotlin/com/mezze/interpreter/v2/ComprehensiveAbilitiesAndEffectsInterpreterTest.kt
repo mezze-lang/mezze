@@ -28,7 +28,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             Show.show {val = 42}
@@ -48,7 +48,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> int::to_string {n = val}
+              convert : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             Convert.convert {val = 123}
@@ -68,7 +68,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show String where {
@@ -95,7 +95,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "INT:$(int::to_string {n = val})"
+              show : {val: Int} -> String = {val} -> "INT:$(int::to_str {n = val})"
             }
 
             impl Show String where {

@@ -174,10 +174,10 @@ class NatInterpreterTest {
     }
 
     @Test
-    fun `to_string converts Nat to String`() {
+    fun `to_str converts Nat to String`() {
         val code = """
             use std::nat
-            nat::to_string { n = 42n }
+            nat::to_str { n = 42n }
         """
         val result = eval(code)
         assertEquals("42", result)

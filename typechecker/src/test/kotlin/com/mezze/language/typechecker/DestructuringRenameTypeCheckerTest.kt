@@ -652,9 +652,11 @@ class DestructuringRenameTypeCheckerTest {
                 let result = if v then 1 else 0
             """.trimIndent()
 
-            // This SHOULD fail - String cannot unify with Bool
+            // This SHOULD fail - String cannot unify with Bool (| True, False |)
             // If it doesn't fail, there's a bug in the typechecker
-            assertTypeCheckFails(code, "Bool")
+            // Note: IfExpression is unified with MatchExpression at the type level,
+            // so the error message is about pattern matching on True/False
+            assertTypeCheckFails(code, "True")
         }
     }
 

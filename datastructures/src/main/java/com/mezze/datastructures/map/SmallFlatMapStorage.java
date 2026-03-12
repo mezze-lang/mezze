@@ -2,6 +2,7 @@ package com.mezze.datastructures.map;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.nodes.ExplodeLoop;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -31,6 +32,7 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
+    @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public Object get(Object searchKey) {
         for (int i = 0; i < keys.length; i++) {
             if (Objects.equals(keys[i], searchKey)) {
@@ -41,6 +43,7 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
+    @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public boolean containsKey(Object searchKey) {
         for (int i = 0; i < keys.length; i++) {
             if (Objects.equals(keys[i], searchKey)) {

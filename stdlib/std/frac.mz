@@ -39,7 +39,7 @@ pub let compare = { l, r } -> __native_frac_compare { l = l, r = r }
 pub let to_float = { n } -> __native_frac_to_float { n = n }
 
 # Convert fraction to string representation
-pub let to_string = { n } -> __native_frac_to_string { n = n }
+pub let to_str = { n } -> __native_frac_to_str { n = n }
 
 # Create fraction from two integers (numerator, denominator)
 pub let make = { numerator, denominator } -> __native_make_frac { numerator = numerator, denominator = denominator }

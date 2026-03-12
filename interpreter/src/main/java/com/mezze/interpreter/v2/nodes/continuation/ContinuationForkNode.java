@@ -3,9 +3,9 @@ package com.mezze.interpreter.v2.nodes.continuation;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 
 import com.mezze.interpreter.v2.values.MezzeFunction;
-import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
-import com.mezze.interpreter.v2.values.MezzeSeq;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -77,7 +77,7 @@ public final class ContinuationForkNode extends MezzeNode {
             }
             values = result;
         } else if (valuesObj instanceof Object[] arr) {
-            values = MezzeList.fromArray(arr);
+            values = MezzeList.of(arr);
         } else {
             errorProfile.enter(this);
             CompilerDirectives.transferToInterpreterAndInvalidate();

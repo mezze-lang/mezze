@@ -1,13 +1,22 @@
 package com.mezze.datastructures.list;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.InvalidArrayIndexException;
+import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
+import java.util.Iterator;
 import java.util.Objects;
 
 /**
  * General cons cell with Object head.
  * Used for non-primitive elements or mixed-type lists.
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeCons<A> implements MezzeList<A> {
 
     @CompilationFinal
@@ -91,5 +100,57 @@ public final class MezzeCons<A> implements MezzeList<A> {
             current = current.tail();
         }
         return result;
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasArrayElements() {
+        return true;
+    }
+
+    @ExportMessage
+    long getArraySize() {
+        return size();
+    }
+
+    @ExportMessage
+    boolean isArrayElementReadable(long index) {
+        return index >= 0 && index < size();
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object readArrayElement(long index) throws InvalidArrayIndexException {
+        if (index < 0 || index >= size()) {
+            throw InvalidArrayIndexException.create(index);
+        }
+        return get((int) index);
+    }
+
+    @ExportMessage
+    boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new ListInteropHelper.ListIterator(iterator());
     }
 }

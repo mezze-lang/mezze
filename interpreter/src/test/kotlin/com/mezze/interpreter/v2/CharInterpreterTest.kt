@@ -80,12 +80,12 @@ class CharInterpreterTest {
     }
 
     @Test
-    fun `to_string converts to single-char string`() {
+    fun `to_str converts to single-char string`() {
         val result = eval("""
             use std::char
             use std::string
             match char::from_int { code = 65 } is
-                Some { val } -> string::length { s = char::to_string { c = val } }
+                Some { val } -> string::length { s = char::to_str { c = val } }
                 None -> -1
         """)
         assertEquals(1L, result)

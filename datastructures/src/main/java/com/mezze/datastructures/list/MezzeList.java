@@ -349,6 +349,43 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
         return current;
     }
 
+    /**
+     * Returns a slice from start (inclusive) to end (exclusive).
+     * Equivalent to take(end).drop(start).
+     */
+    default MezzeList<A> slice(int start, int end) {
+        return take(end).drop(start);
+    }
+
+    /**
+     * Returns all elements except the last one.
+     * Throws if the list is empty.
+     */
+    default MezzeList<A> init() {
+        if (isEmpty()) {
+            throw new NoSuchElementException("Empty list");
+        }
+        if (tail().isEmpty()) {
+            return empty();
+        }
+        return cons(head(), tail().init());
+    }
+
+    /**
+     * Returns the last element.
+     * Throws if the list is empty.
+     */
+    default A last() {
+        if (isEmpty()) {
+            throw new NoSuchElementException("Empty list");
+        }
+        MezzeList<A> current = this;
+        while (!current.tail().isEmpty()) {
+            current = current.tail();
+        }
+        return current.head();
+    }
+
     // ===== ORDER =====
 
     /**

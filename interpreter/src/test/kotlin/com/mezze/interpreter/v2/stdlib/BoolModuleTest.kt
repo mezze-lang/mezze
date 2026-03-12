@@ -185,15 +185,15 @@ class BoolModuleTest {
     }
 
     @Test
-    fun `test bool to_string function`() {
+    fun `test bool to_str function`() {
         val source1 = """
             use std::bool
-            bool::to_string { b = True }
+            bool::to_str { b = True }
         """.trimIndent()
 
         val source2 = """
             use std::bool
-            bool::to_string { b = False }
+            bool::to_str { b = False }
         """.trimIndent()
 
         assertEquals("true", eval(source1))

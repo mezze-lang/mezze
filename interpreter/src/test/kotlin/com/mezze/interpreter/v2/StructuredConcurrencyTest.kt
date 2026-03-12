@@ -1,7 +1,7 @@
 package com.mezze.interpreter.v2
 
-import com.mezze.interpreter.v2.values.MezzeList
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.list.MezzeList
+import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -142,8 +142,8 @@ class StructuredConcurrencyTest {
             parallel_map {fn = double, items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq<*>
         assertEquals(5, seq.size())
         assertEquals(2L, seq.get(0))
         assertEquals(10L, seq.get(4))
@@ -167,8 +167,8 @@ class StructuredConcurrencyTest {
             parallel_filter {pred = is_even, items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq<*>
         assertEquals(3, seq.size())
     }
 
@@ -369,8 +369,8 @@ class StructuredConcurrencyTest {
             process_batch {items = items}
         """
         val result = MezzeTestHelper.run(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result::class.java}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result::class.java}")
+        val seq = result as MezzeSeq<*>
         assertEquals(5, seq.size())
     }
 

@@ -1,5 +1,12 @@
 package com.mezze.interpreter.v2.nodes.builtin;
 
+import com.mezze.datastructures.deque.MezzeDeque;
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedMap;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.nodes.builtin.collections.*;
 import com.mezze.interpreter.v2.nodes.builtin.concurrency.*;
@@ -7,6 +14,7 @@ import com.mezze.interpreter.v2.nodes.builtin.effects.*;
 import com.mezze.interpreter.v2.nodes.builtin.io.*;
 import com.mezze.interpreter.v2.nodes.builtin.primitives.*;
 import com.mezze.interpreter.v2.nodes.continuation.ContinuationAbortedException;
+import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
 import com.mezze.interpreter.v2.nodes.continuation.DelimiterStack;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -194,46 +202,39 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     // ==================== Int Operations ====================
+    // Uses PrimitiveNatives which leverages optimized Truffle nodes for overflow handling
 
     private static void registerIntHandlers() {
         HANDLERS.put("__native_int_add", (r, c) ->
-            Math.addExact(getLong(r, "l"), getLong(r, "r")));
+            PrimitiveNatives.intAdd(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_subtract", (r, c) ->
-            Math.subtractExact(getLong(r, "l"), getLong(r, "r")));
+            PrimitiveNatives.intSubtract(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_multiply", (r, c) ->
-            Math.multiplyExact(getLong(r, "l"), getLong(r, "r")));
-        HANDLERS.put("__native_int_divide", (r, c) -> {
-            long l = getLong(r, "l");
-            long rv = getLong(r, "r");
-            if (rv == 0) throw new RuntimeException("Division by zero");
-            return l / rv;
-        });
-        HANDLERS.put("__native_int_modulo", (r, c) -> {
-            long l = getLong(r, "l");
-            long rv = getLong(r, "r");
-            if (rv == 0) throw new RuntimeException("Modulo by zero");
-            return l % rv;
-        });
-        HANDLERS.put("__native_int_to_string", (r, c) ->
-            Long.toString(getLong(r, "n")));
+            PrimitiveNatives.intMultiply(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_divide", (r, c) ->
+            PrimitiveNatives.intDivide(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_modulo", (r, c) ->
+            PrimitiveNatives.intModulo(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_to_str", (r, c) ->
+            PrimitiveNatives.intToString(getLong(r, "n")));
         HANDLERS.put("__native_int_abs", (r, c) ->
-            Math.abs(getLong(r, "n")));
+            PrimitiveNatives.intAbs(getLong(r, "n")));
         HANDLERS.put("__native_int_min", (r, c) ->
-            Math.min(getLong(r, "l"), getLong(r, "r")));
+            PrimitiveNatives.intMin(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_max", (r, c) ->
-            Math.max(getLong(r, "l"), getLong(r, "r")));
+            PrimitiveNatives.intMax(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_clamp", (r, c) ->
-            Math.max(getLong(r, "min"), Math.min(getLong(r, "max"), getLong(r, "n"))));
+            PrimitiveNatives.intClamp(getLong(r, "n"), getLong(r, "min"), getLong(r, "max")));
         HANDLERS.put("__native_int_sign", (r, c) ->
-            (long) Long.signum(getLong(r, "n")));
+            PrimitiveNatives.intSign(getLong(r, "n")));
         HANDLERS.put("__native_int_neg", (r, c) ->
-            Math.negateExact(getLong(r, "n")));
+            PrimitiveNatives.intNegate(getLong(r, "n")));
         HANDLERS.put("__native_int_from_string", (r, c) ->
             intFromString(getString(r, "s")));
         HANDLERS.put("__native_int_from_nat", (r, c) ->
             getLong(r, "n"));
         HANDLERS.put("__native_int_to_float", (r, c) ->
-            (double) getLong(r, "n"));
+            PrimitiveNatives.intToFloat(getLong(r, "n")));
         HANDLERS.put("__native_int_to_nat", (r, c) -> {
             long n = getLong(r, "n");
             return n >= 0 ? MezzeVariant.some(n) : MezzeVariant.none();
@@ -268,61 +269,61 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Float Basic Operations ====================
 
     private static void registerFloatBasicHandlers() {
-        HANDLERS.put("__native_float_to_string", (r, c) ->
+        HANDLERS.put("__native_float_to_str", (r, c) ->
             Double.toString(getDouble(r, "n")));
         HANDLERS.put("__native_float_from_int", (r, c) ->
             (double) getLong(r, "n"));
         HANDLERS.put("__native_float_from_string", (r, c) ->
             floatFromString(getString(r, "s")));
         HANDLERS.put("__native_float_abs", (r, c) ->
-            Math.abs(getDouble(r, "n")));
+            PrimitiveNatives.floatAbs(getDouble(r, "n")));
         HANDLERS.put("__native_float_min", (r, c) ->
-            Math.min(getDouble(r, "l"), getDouble(r, "r")));
+            PrimitiveNatives.floatMin(getDouble(r, "l"), getDouble(r, "r")));
         HANDLERS.put("__native_float_max", (r, c) ->
-            Math.max(getDouble(r, "l"), getDouble(r, "r")));
+            PrimitiveNatives.floatMax(getDouble(r, "l"), getDouble(r, "r")));
         HANDLERS.put("__native_float_clamp", (r, c) ->
-            Math.max(getDouble(r, "min"), Math.min(getDouble(r, "max"), getDouble(r, "n"))));
+            PrimitiveNatives.floatClamp(getDouble(r, "n"), getDouble(r, "min"), getDouble(r, "max")));
         HANDLERS.put("__native_float_sign", (r, c) ->
-            Math.signum(getDouble(r, "n")));
+            PrimitiveNatives.floatSignum(getDouble(r, "n")));
         HANDLERS.put("__native_float_to_int", (r, c) ->
-            (long) getDouble(r, "n"));
+            PrimitiveNatives.floatToInt(getDouble(r, "n")));
         HANDLERS.put("__native_float_is_nan", (r, c) ->
-            Double.isNaN(getDouble(r, "n")));
+            PrimitiveNatives.floatIsNaN(getDouble(r, "n")));
         HANDLERS.put("__native_float_is_infinite", (r, c) ->
-            Double.isInfinite(getDouble(r, "n")));
+            PrimitiveNatives.floatIsInfinite(getDouble(r, "n")));
         HANDLERS.put("__native_float_is_finite", (r, c) ->
-            Double.isFinite(getDouble(r, "n")));
+            PrimitiveNatives.floatIsFinite(getDouble(r, "n")));
         HANDLERS.put("__native_float_floor", (r, c) ->
-            Math.floor(getDouble(r, "n")));
+            PrimitiveNatives.floatFloor(getDouble(r, "n")));
         HANDLERS.put("__native_float_ceil", (r, c) ->
-            Math.ceil(getDouble(r, "n")));
+            PrimitiveNatives.floatCeil(getDouble(r, "n")));
         HANDLERS.put("__native_float_round", (r, c) ->
-            (double) Math.round(getDouble(r, "n")));
+            (double) PrimitiveNatives.floatRound(getDouble(r, "n")));
         HANDLERS.put("__native_float_sqrt", (r, c) ->
-            Math.sqrt(getDouble(r, "n")));
+            PrimitiveNatives.floatSqrt(getDouble(r, "n")));
         HANDLERS.put("__native_float_pow", (r, c) ->
-            Math.pow(getDouble(r, "base"), getDouble(r, "exp")));
+            PrimitiveNatives.floatPow(getDouble(r, "base"), getDouble(r, "exp")));
         HANDLERS.put("__native_float_ln", (r, c) ->
-            Math.log(getDouble(r, "n")));
+            PrimitiveNatives.floatLog(getDouble(r, "n")));
         HANDLERS.put("__native_float_log10", (r, c) ->
-            Math.log10(getDouble(r, "n")));
+            PrimitiveNatives.floatLog10(getDouble(r, "n")));
         HANDLERS.put("__native_float_exp", (r, c) ->
-            Math.exp(getDouble(r, "n")));
-        // Trig operations
+            PrimitiveNatives.floatExp(getDouble(r, "n")));
+        // Trig operations - use PrimitiveNatives for consistency
         HANDLERS.put("__native_float_sin", (r, c) ->
-            Math.sin(getDouble(r, "n")));
+            PrimitiveNatives.floatSin(getDouble(r, "n")));
         HANDLERS.put("__native_float_cos", (r, c) ->
-            Math.cos(getDouble(r, "n")));
+            PrimitiveNatives.floatCos(getDouble(r, "n")));
         HANDLERS.put("__native_float_tan", (r, c) ->
-            Math.tan(getDouble(r, "n")));
+            PrimitiveNatives.floatTan(getDouble(r, "n")));
         HANDLERS.put("__native_float_asin", (r, c) ->
-            Math.asin(getDouble(r, "n")));
+            PrimitiveNatives.floatAsin(getDouble(r, "n")));
         HANDLERS.put("__native_float_acos", (r, c) ->
-            Math.acos(getDouble(r, "n")));
+            PrimitiveNatives.floatAcos(getDouble(r, "n")));
         HANDLERS.put("__native_float_atan", (r, c) ->
-            Math.atan(getDouble(r, "n")));
+            PrimitiveNatives.floatAtan(getDouble(r, "n")));
         HANDLERS.put("__native_float_atan2", (r, c) ->
-            Math.atan2(getDouble(r, "y"), getDouble(r, "x")));
+            PrimitiveNatives.floatAtan2(getDouble(r, "y"), getDouble(r, "x")));
     }
 
     @TruffleBoundary
@@ -338,16 +339,17 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== String Basic Operations ====================
 
     private static void registerStringBasicHandlers() {
+        // String operations using PrimitiveNatives
         HANDLERS.put("__native_string_concat", (r, c) ->
-            getString(r, "l") + getString(r, "r"));
+            PrimitiveNatives.stringConcat(getString(r, "l"), getString(r, "r")));
         HANDLERS.put("__native_string_length", (r, c) ->
-            (long) getString(r, "s").length());
+            (long) PrimitiveNatives.stringLength(getString(r, "s")));
         HANDLERS.put("__native_string_to_upper", (r, c) ->
-            getString(r, "s").toUpperCase());
+            PrimitiveNatives.stringToUpperCase(getString(r, "s")));
         HANDLERS.put("__native_string_to_lower", (r, c) ->
-            getString(r, "s").toLowerCase());
+            PrimitiveNatives.stringToLowerCase(getString(r, "s")));
         HANDLERS.put("__native_string_trim", (r, c) ->
-            getString(r, "s").trim());
+            PrimitiveNatives.stringTrim(getString(r, "s")));
         HANDLERS.put("__native_string_substring", (r, c) ->
             stringSubstring(getString(r, "s"), getLong(r, "start"), getLong(r, "end")));
         HANDLERS.put("__native_string_char_at", (r, c) ->
@@ -417,18 +419,19 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     // ==================== Bool Operations ====================
+    // Uses PrimitiveNatives with optimized Truffle nodes
 
     private static void registerBoolHandlers() {
-        HANDLERS.put("__native_bool_to_string", (r, c) ->
+        HANDLERS.put("__native_bool_to_str", (r, c) ->
             Boolean.toString(getBool(r, "b")));
         HANDLERS.put("__native_bool_and", (r, c) ->
-            getBool(r, "l") && getBool(r, "r"));
+            PrimitiveNatives.boolAnd(getBool(r, "l"), getBool(r, "r")));
         HANDLERS.put("__native_bool_or", (r, c) ->
-            getBool(r, "l") || getBool(r, "r"));
+            PrimitiveNatives.boolOr(getBool(r, "l"), getBool(r, "r")));
         HANDLERS.put("__native_bool_not", (r, c) ->
-            !getBool(r, "b"));
+            PrimitiveNatives.boolNot(getBool(r, "b")));
         HANDLERS.put("__native_bool_xor", (r, c) ->
-            getBool(r, "l") ^ getBool(r, "r"));
+            PrimitiveNatives.boolXor(getBool(r, "l"), getBool(r, "r")));
     }
 
     // ==================== Seq (new, MezzeSeq-backed) ====================
@@ -1669,7 +1672,7 @@ public final class NativeDispatch extends MezzeNode {
             NatNatives.fromFloat(getDouble(r, "n")));
         HANDLERS.put("__native_nat_to_int", (r, c) ->
             NatNatives.toInt(getLong(r, "n")));
-        HANDLERS.put("__native_nat_to_string", (r, c) ->
+        HANDLERS.put("__native_nat_to_str", (r, c) ->
             NatNatives.toString(getLong(r, "n")));
         HANDLERS.put("__native_nat_subtract_to_int", (r, c) ->
             NatNatives.subtractToInt(getLong(r, "l"), getLong(r, "r")));
@@ -1692,7 +1695,7 @@ public final class NativeDispatch extends MezzeNode {
             CharNatives.fromInt(getLong(r, "code")));
         HANDLERS.put("__native_char_to_int", (r, c) ->
             CharNatives.toInt(getString(r, "c")));
-        HANDLERS.put("__native_char_to_string", (r, c) ->
+        HANDLERS.put("__native_char_to_str", (r, c) ->
             CharNatives.toString(getString(r, "c")));
         HANDLERS.put("__native_char_is_letter", (r, c) ->
             CharNatives.isLetter(getString(r, "c")));
@@ -1755,7 +1758,7 @@ public final class NativeDispatch extends MezzeNode {
             FracNatives.compare(getRecord(r, "l"), getRecord(r, "r")));
         HANDLERS.put("__native_frac_to_float", (r, c) ->
             FracNatives.toFloat(getRecord(r, "n")));
-        HANDLERS.put("__native_frac_to_string", (r, c) ->
+        HANDLERS.put("__native_frac_to_str", (r, c) ->
             FracNatives.fracToString(getRecord(r, "n")));
     }
 
@@ -1799,7 +1802,7 @@ public final class NativeDispatch extends MezzeNode {
             BytesNatives.reverse(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_repeat", (r, c) ->
             BytesNatives.repeat(getBytes(r, "b"), getLong(r, "n")));
-        HANDLERS.put("__native_bytes_to_string", (r, c) ->
+        HANDLERS.put("__native_bytes_to_str", (r, c) ->
             BytesNatives.bytesToString(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_to_hex", (r, c) ->
             BytesNatives.toHex(getBytes(r, "b")));
@@ -1967,7 +1970,7 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof MezzeList list) return list;
         // Handle array literals (Object[]) - convert to MezzeList
         if (val instanceof Object[] arr) {
-            return MezzeList.fromArray(arr);
+            return MezzeList.of(arr);
         }
         // Handle Cons/Nil linked list variants
         if (val instanceof MezzeVariant variant) {
@@ -1997,7 +2000,7 @@ public final class NativeDispatch extends MezzeNode {
             }
         }
 
-        return MezzeList.fromArray(elements.toArray());
+        return MezzeList.of(elements.toArray());
     }
 
     /**
@@ -2443,6 +2446,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_scheduler_serialize", (r, c) -> SchedulerNatives.schedulerSerialize(r));
         HANDLERS.put("__native_scheduler_deserialize", (r, c) -> SchedulerNatives.schedulerDeserialize(r));
 
+        // === Generator - continuation-based generators ===
+        // TODO: Generator natives need MezzoCont implementation
+        // HANDLERS.put("__native_generator_collect", (r, c) -> GeneratorNatives.collect(r, c));
+        // HANDLERS.put("__native_generator_take", (r, c) -> GeneratorNatives.take(r, c));
+
         // === Adaptive Async - intelligent strategy selection ===
         // Adaptive handlers need node context for Truffle thread creation
         HANDLERS_WITH_NODE.put("__native_adaptive_spawn", (r, c, n) -> {
@@ -2728,7 +2736,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_buffer_from_bytes", (r, c) -> IONatives.bufferFromBytes(r));
         HANDLERS.put("__native_buffer_from_string", (r, c) -> IONatives.bufferFromString(r));
         HANDLERS.put("__native_buffer_to_bytes", (r, c) -> IONatives.bufferToBytes(r));
-        HANDLERS.put("__native_buffer_to_string", (r, c) -> IONatives.bufferToString(r));
+        HANDLERS.put("__native_buffer_to_str", (r, c) -> IONatives.bufferToString(r));
         HANDLERS.put("__native_buffer_length", (r, c) -> IONatives.bufferLength(r));
         HANDLERS.put("__native_buffer_position", (r, c) -> IONatives.bufferPosition(r));
         HANDLERS.put("__native_buffer_set_position", (r, c) -> IONatives.bufferSetPosition(r));
@@ -2888,6 +2896,64 @@ public final class NativeDispatch extends MezzeNode {
             }
 
             return MezzeVariant.none();
+        });
+
+        // __native_continuation_run_suspendable - Run thunk and catch suspension
+        // Note: This is a simplified fallback. The specialized node handles this better.
+        HANDLERS.put("__native_continuation_run_suspendable", (r, c) -> {
+            Object thunkObj = getField(r, "thunk");
+            if (!(thunkObj instanceof MezzeFunction thunk)) {
+                throw new RuntimeException("__native_continuation_run_suspendable expects 'thunk' field as function");
+            }
+
+            Object[] closureValues = thunk.getClosureValues();
+            int closureLen = closureValues.length;
+            Object[] callArgs = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+            callArgs[closureLen] = MezzeRecord.empty();
+
+            try {
+                Object result = c.call(thunk.getCallTarget(), callArgs);
+
+                // Check if result is MezzeContinuationSuspended
+                if (result instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended suspended) {
+                    Object value = suspended.getSuspendedValue();
+                    com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation cont = suspended.getContinuation();
+                    MezzeFunction contFunc = new MezzeFunction(
+                        cont.getCallTarget(),
+                        "suspended_continuation",
+                        cont.getCapturedValues()
+                    );
+                    MezzeRecord inner = MezzeRecord.fromFields(
+                        new String[]{"value", "cont"},
+                        new Object[]{value, contFunc}
+                    );
+                    int suspTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Suspended");
+                    return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), suspTag, inner);
+                }
+
+                // Normal completion
+                MezzeRecord inner = MezzeRecord.fromFields(
+                    new String[]{"value"},
+                    new Object[]{result}
+                );
+                int compTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Completed");
+                return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), compTag, inner);
+            } catch (ContinuationSuspendedException e) {
+                Object value = e.getSuspendedValue();
+                com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation cont = e.getContinuation();
+                MezzeFunction contFunc = new MezzeFunction(
+                    cont.getCallTarget(),
+                    "suspended_continuation",
+                    cont.getCapturedValues()
+                );
+                MezzeRecord inner = MezzeRecord.fromFields(
+                    new String[]{"value", "cont"},
+                    new Object[]{value, contFunc}
+                );
+                int suspTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Suspended");
+                return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), suspTag, inner);
+            }
         });
     }
 

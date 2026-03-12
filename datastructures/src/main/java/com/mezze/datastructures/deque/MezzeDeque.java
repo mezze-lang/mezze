@@ -2,7 +2,12 @@ package com.mezze.datastructures.deque;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.InvalidArrayIndexException;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Arrays;
 import java.util.Iterator;
@@ -18,6 +23,7 @@ import java.util.Objects;
  *
  * @param <A> Element type
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
 
     private static final int MIN_CAPACITY = 8;
@@ -410,6 +416,53 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
         return new MezzeDeque<>(newBuffer, 0, size, size);
     }
 
+    // ===== SLICING =====
+
+    /**
+     * Take first n elements.
+     */
+    @TruffleBoundary
+    public MezzeDeque<A> take(int n) {
+        if (n <= 0 || isEmpty()) return empty();
+        if (n >= size) return this;
+
+        Object[] newBuffer = new Object[nextPowerOf2(Math.max(n, MIN_CAPACITY))];
+        for (int i = 0; i < n; i++) {
+            newBuffer[i] = get(i);
+        }
+        return new MezzeDeque<>(newBuffer, 0, n, n);
+    }
+
+    /**
+     * Drop first n elements.
+     */
+    @TruffleBoundary
+    public MezzeDeque<A> drop(int n) {
+        if (n <= 0) return this;
+        if (n >= size) return empty();
+
+        int newSize = size - n;
+        Object[] newBuffer = new Object[nextPowerOf2(Math.max(newSize, MIN_CAPACITY))];
+        for (int i = 0; i < newSize; i++) {
+            newBuffer[i] = get(n + i);
+        }
+        return new MezzeDeque<>(newBuffer, 0, newSize, newSize);
+    }
+
+    // ===== FACTORY FROM ITERABLE =====
+
+    /**
+     * Creates a deque from an iterable.
+     */
+    @TruffleBoundary
+    public static <A> MezzeDeque<A> fromIterable(Iterable<? extends A> elements) {
+        MezzeDeque<A> result = empty();
+        for (A elem : elements) {
+            result = result.pushBack(elem);
+        }
+        return result;
+    }
+
     // ===== INTERNAL =====
 
     @TruffleBoundary
@@ -523,5 +576,85 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
             result = 31 * result + Objects.hashCode(get(i));
         }
         return result;
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasArrayElements() {
+        return true;
+    }
+
+    @ExportMessage
+    long getArraySize() {
+        return size;
+    }
+
+    @ExportMessage
+    boolean isArrayElementReadable(long index) {
+        return index >= 0 && index < size;
+    }
+
+    @ExportMessage
+    Object readArrayElement(long index) throws InvalidArrayIndexException {
+        if (index < 0 || index >= size) {
+            throw InvalidArrayIndexException.create(index);
+        }
+        return get((int) index);
+    }
+
+    @ExportMessage
+    boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new DequeIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class DequeIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        DequeIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 }

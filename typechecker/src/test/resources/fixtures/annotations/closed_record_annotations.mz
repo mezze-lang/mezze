@@ -2,7 +2,7 @@
 use std::int
 
 let processPoint: { point: { x: Int, y: Int } } -> Int = {point} -> point.x + point.y
-let formatPerson: { person: { name: String, age: Int } } -> String = {person} -> "$(person.name) is $(int::to_string {n = person.age})"
+let formatPerson: { person: { name: String, age: Int } } -> String = {person} -> "$(person.name) is $(int::to_str {n = person.age})"
 
 let point1 = {x = 10, y = 20}
 let person1 = {name = "Bob", age = 25}

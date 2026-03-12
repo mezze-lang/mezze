@@ -8,7 +8,7 @@ pub let concat = { l: String, r: String } ->
     __native_string_concat { l = l, r = r }
 
 # String utility functions
-pub let to_string = { s: String } ->
+pub let to_str = { s: String } ->
     s
 
 pub let length = { s: String } ->

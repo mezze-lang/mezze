@@ -165,11 +165,11 @@ class FracModuleTest {
     }
 
     @Test
-    fun `test frac to_string function`() {
+    fun `test frac to_str function`() {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::to_string { n = f }
+            let result = frac::to_str { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

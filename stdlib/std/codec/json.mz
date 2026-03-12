@@ -83,13 +83,13 @@ let json_type_name: {json: Json} -> String = {json} ->
 # ============================================================================
 
 # Serialize Json to string with config (uses native JSON serializer for speed)
-pub let serialize_to_string: {json: Json, config: JsonConfig} -> String = {json, config} ->
+pub let serialize_to_str: {json: Json, config: JsonConfig} -> String = {json, config} ->
     match __native_json_serialize {json = json, pretty = config.pretty} is
         Ok {val} -> val
         Err {error} -> ""  # Should not happen for valid Json
 
 # Serialize with default config (uses native JSON serializer for speed)
-pub let to_string: {json: Json} -> String = {json} ->
+pub let to_str: {json: Json} -> String = {json} ->
     match __native_json_serialize {json = json, pretty = False} is
         Ok {val} -> val
         Err {error} -> ""  # Should not happen for valid Json
@@ -99,8 +99,8 @@ let serialize_compact: {json: Json} -> String = {json} ->
     match json is
         JNull -> "null"
         JBool {val} -> if val then "true" else "false"
-        JInt {val} -> int::to_string {n = val}
-        JFloat {val} -> float::to_string {n = val}
+        JInt {val} -> int::to_str {n = val}
+        JFloat {val} -> float::to_str {n = val}
         JString {val} -> "\"$(escape_string {s = val})\""
         JArray {items} -> do
             let inner = seq::map {xs = items, f = {x} -> serialize_compact {json = x}}
@@ -120,8 +120,8 @@ let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {j
     match json is
         JNull -> "null"
         JBool {val} -> if val then "true" else "false"
-        JInt {val} -> int::to_string {n = val}
-        JFloat {val} -> float::to_string {n = val}
+        JInt {val} -> int::to_str {n = val}
+        JFloat {val} -> float::to_str {n = val}
         JString {val} -> "\"$(escape_string {s = val})\""
         JArray {items} ->
             if seq::is_empty {xs = items} then

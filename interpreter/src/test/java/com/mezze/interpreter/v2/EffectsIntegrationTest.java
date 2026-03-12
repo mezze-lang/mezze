@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Integration tests for various effects in V2 interpreter.
  *
- * Tests continuation-based effects (Exception, Choice) as well as
+ * Tests continuation-based effects (Exception) as well as
  * scoped effects (SeededRandom, Log, Time).
  *
  * All handlers use scoped continuations internally - no need to pass
@@ -95,85 +95,6 @@ public class EffectsIntegrationTest {
         assertTrue(result instanceof MezzeVariant);
         MezzeVariant variant = (MezzeVariant) result;
         assertEquals("Err", variant.getConstructorName());
-    }
-
-    // ========================
-    // Choice Effect Tests
-    // ========================
-
-    @Test
-    void testChoiceSimple() {
-        Object result = MezzeTestHelper.run("""
-            use std::effects::choice::{Choice, AllPaths}
-
-            let computation = {} -> perform AllPaths in do
-                let x = Choice.choose {options = [1, 2, 3]}
-                x * 2
-
-            computation {}
-            """);
-
-        // Should return seq [2, 4, 6]
-        assertTrue(result instanceof MezzeSeq);
-        MezzeSeq seq = (MezzeSeq) result;
-        assertEquals(3, seq.size());
-    }
-
-    @Test
-    void testChoiceWithFail() {
-        Object result = MezzeTestHelper.run("""
-            use std::effects::choice::{Choice, AllPaths}
-
-            let computation = {} -> perform AllPaths in do
-                let x = Choice.choose {options = [1, 2, 3, 4, 5]}
-                match x % 2 == 0 is
-                    True -> x
-                    False -> Choice.fail {}
-
-            computation {}
-            """);
-
-        // Should return only even numbers [2, 4]
-        assertTrue(result instanceof MezzeSeq);
-        MezzeSeq seq = (MezzeSeq) result;
-        assertEquals(2, seq.size());
-    }
-
-    @Test
-    void testChoiceMultiple() {
-        Object result = MezzeTestHelper.run("""
-            use std::effects::choice::{Choice, AllPaths}
-
-            let computation = {} -> perform AllPaths in do
-                let a = Choice.choose {options = [1, 2]}
-                let b = Choice.choose {options = [10, 20]}
-                a + b
-
-            computation {}
-            """);
-
-        // Should return [11, 21, 12, 22] - all combinations
-        assertTrue(result instanceof MezzeSeq);
-        MezzeSeq seq = (MezzeSeq) result;
-        assertEquals(4, seq.size());
-    }
-
-    @Test
-    void testRunAllPaths() {
-        Object result = MezzeTestHelper.run("""
-            use std::effects::choice::{Choice, AllPaths}
-
-            let computation = {} -> perform AllPaths in do
-                let x = Choice.choose {options = [1, 2, 3]}
-                x * x
-
-            computation {}
-            """);
-
-        // Should return [1, 4, 9]
-        assertTrue(result instanceof MezzeSeq);
-        MezzeSeq seq = (MezzeSeq) result;
-        assertEquals(3, seq.size());
     }
 
     // ========================

@@ -21,7 +21,7 @@ let game_demo = {} -> do
     let r4 = roll_dice {}
     let r5 = roll_dice {}
 
-    println {msg = " $(seq::map { xs = [r1, r2, r3, r4, r5], f = {x} -> int::to_string { n = x} } |> string::join { strings = @, separator = " ,"}) " }
+    println {msg = " $(seq::map { xs = [r1, r2, r3, r4, r5], f = {x} -> int::to_str { n = x} } |> string::join { strings = @, separator = " ,"}) " }
 
     println {msg = "Flipping coin 3 times:"}
     let f1 = flip_coin {}

@@ -27,6 +27,12 @@ import com.mezze.interpreter.v2.nodes.seq.SeqAccessNode
 import com.mezze.interpreter.v2.nodes.seq.SeqLiteralNode as OptimizedSeqLiteralNode
 import com.mezze.interpreter.v2.nodes.seq.SeqSliceNode
 import com.mezze.interpreter.v2.nodes.seq.SeqSpreadNode
+import com.mezze.interpreter.v2.nodes.seq.SeqMapCallNode
+import com.mezze.interpreter.v2.nodes.seq.SeqFilterCallNode
+import com.mezze.interpreter.v2.nodes.seq.SeqFoldCallNode
+import com.mezze.interpreter.v2.nodes.list.ListMapCallNode
+import com.mezze.interpreter.v2.nodes.list.ListFilterCallNode
+import com.mezze.interpreter.v2.nodes.list.ListFoldCallNode
 import com.mezze.interpreter.v2.nodes.effect.HandleNode
 import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinBinaryNodes.*
@@ -547,12 +553,20 @@ class ASTToTruffleConverterV2(
             is VariablePattern -> {
                 val kind = inferKind(letBinding.expression)
                 val slot = getOrCreateSlotWithKind(pattern.name, kind)
+
+                // OPTIMIZATION: Populate content hash to slot mapping for O(1) lookup
+                // This enables convertIdentifier() to skip string key construction
+                val contentHash = letBinding.contentHash
+                if (contentHash != null) {
+                    contentHashToSlot[contentHash] = slot
+                }
+
                 // Pass content hash to lambda conversion for CallTarget caching
                 val valueNode = if (letBinding.expression is LambdaExpression) {
                     convertLambdaExpression(
                         letBinding.expression as LambdaExpression,
                         pattern.name,
-                        letBinding.contentHash
+                        contentHash
                     )
                 } else {
                     convertExpression(letBinding.expression)
@@ -563,7 +577,7 @@ class ASTToTruffleConverterV2(
                 // When a nested function references a top-level variable, the frame slot may be
                 // empty, but the fallback lookup will find it in the global context.
                 if (letBinding.expression is LambdaExpression || isTopLevel) {
-                    WriteLocalWithContextNode.create(valueNode, slot, kind, pattern.name, letBinding.contentHash)
+                    WriteLocalWithContextNode.create(valueNode, slot, kind, pattern.name, contentHash)
                 } else {
                     WriteLocalNode.create(valueNode, slot, kind)
                 }
@@ -669,14 +683,22 @@ class ASTToTruffleConverterV2(
     }
 
     private fun convertIdentifier(identifier: Identifier): MezzeNode {
+        // OPTIMIZATION: Try content-hash lookup first when available
+        // This avoids string concatenation in toKeyString() for cross-module references.
+        val contentHash = identifier.resolvedContentHash
+        if (contentHash != null) {
+            val hashSlot = contentHashToSlot[contentHash]
+            if (hashSlot != null) {
+                // Direct hash-based slot lookup - O(1), no string construction
+                return ReadLocalWithFallbackNode.create(hashSlot, contentHash, contentHash)
+            }
+        }
+
         val lookupKey = identifier.toBindingKey().toKeyString()
         if (lookupKey == "__state_machine_input__") {
             val slot = getOrCreateSlot("__state_machine_input__")
             return ReadLocalNode.createObject(slot)
         }
-
-        // Content hash from typechecker indicates cross-module reference
-        val contentHash = identifier.resolvedContentHash
 
         val info = variableInfo[lookupKey]
         if (info != null) {
@@ -2366,9 +2388,82 @@ class ASTToTruffleConverterV2(
             "__native_continuation_abort" -> ContinuationAbortNode.create(convertExpression(args))
             "__native_continuation_extract_suspended" -> ContinuationExtractSuspendedNode.create(convertExpression(args))
             "__native_continuation_deactivate" -> ContinuationDeactivateNode.create(convertExpression(args))
+            "__native_continuation_run_suspendable" -> ContinuationRunSuspendableNode.create(convertExpression(args))
 
             // Built-in crash function for program termination with error
             "crash" -> NativeDispatch.create("crash", convertExpression(args))
+
+            // Optimized List HOF operations with DirectCallNode (JIT-inlinable)
+            "__native_list_map" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    ListMapCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["f"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_list_filter" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    ListFilterCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["p"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_list_fold_left" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    ListFoldCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["init"]!!),
+                        convertExpression(fields["f"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // Optimized Seq HOF operations with DirectCallNode (JIT-inlinable)
+            "__native_seq_map" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    SeqMapCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["f"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_seq_filter" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    SeqFilterCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["p"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_seq_fold" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    SeqFoldCallNode.create(
+                        convertExpression(fields["xs"]!!),
+                        convertExpression(fields["init"]!!),
+                        convertExpression(fields["f"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
 
             // All other native functions use NativeDispatch
             else -> {
@@ -2382,6 +2477,29 @@ class ASTToTruffleConverterV2(
                 }
             }
         }
+    }
+
+    /**
+     * Extract fields from a RecordLiteral expression.
+     * Returns a map of field name to expression, or null if args is not a RecordLiteral.
+     */
+    private fun extractRecordFields(args: Expression): Map<String, Expression>? {
+        if (args !is RecordLiteral) return null
+        val result = mutableMapOf<String, Expression>()
+        for (entry in args.entries) {
+            when (entry) {
+                is RecordFieldEntry -> {
+                    // For shorthand {x}, value is null and we should use Identifier(x)
+                    val value = entry.value ?: Identifier(entry.name)
+                    result[entry.name] = value
+                }
+                is RecordSpreadEntry -> {
+                    // Spread entries are not supported for optimization, fall back
+                    return null
+                }
+            }
+        }
+        return result
     }
 
     /**

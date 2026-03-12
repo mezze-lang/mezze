@@ -1,5 +1,13 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.deque.MezzeDeque;
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.*;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedMap;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
+import com.mezze.datastructures.nodes.*;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -17,6 +25,22 @@ import java.util.Arrays;
 public final class SeqNatives {
 
     private SeqNatives() {}
+
+    // ==================== Cached Field Name Arrays ====================
+    // Avoid per-call allocation of common field name patterns
+    private static final String[] FIELD_X = {"x"};
+    private static final String[] FIELD_I = {"i"};
+    private static final String[] FIELD_ACC_X = {"acc", "x"};
+    private static final String[] FIELD_A_B = {"a", "b"};
+    private static final String[] FIELD_FIRST_SECOND = {"first", "second"};
+    private static final String[] FIELD_VALUE_INDEX = {"value", "index"};
+    private static final String[] FIELD_FSTS_SNDS = {"fsts", "snds"};
+    private static final String[] FIELD_MATCHING_NOT_MATCHING = {"matching", "not_matching"};
+    private static final String[] FIELD_KEY_VALUES = {"key", "values"};
+    private static final String[] FIELD_LEFT_RIGHT = {"left", "right"};
+    private static final String[] FIELD_LOWER_UPPER = {"lower", "upper"};
+    private static final String[] FIELD_FIRST_SECOND_THIRD = {"first", "second", "third"};
+    private static final String[] FIELD_FIRST_SECOND_THIRD_FOURTH = {"first", "second", "third", "fourth"};
 
     // ==================== Basic Operations ====================
 
@@ -40,7 +64,7 @@ public final class SeqNatives {
         return MezzeVariant.some(seq.get(idx));
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeVariant set(MezzeSeq seq, long index, Object value) {
         int idx = (int) index;
         if (idx < 0 || idx >= seq.size()) {
@@ -49,31 +73,31 @@ public final class SeqNatives {
         return MezzeVariant.some(seq.update(idx, value));
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq add(MezzeSeq seq, Object element) {
         return seq.append(element);
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq push(MezzeSeq seq, Object element) {
         return seq.append(element);
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq pushFront(MezzeSeq seq, Object element) {
         return seq.prepend(element);
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeVariant remove(MezzeSeq seq, long index) {
         int idx = (int) index;
         if (idx < 0 || idx >= seq.size()) {
             return MezzeVariant.none();
         }
-        return MezzeVariant.some(seq.removeAt(idx));
+        return MezzeVariant.some(seq.remove(idx));
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq concat(MezzeSeq seq1, MezzeSeq seq2) {
         return seq1.concat(seq2);
     }
@@ -98,7 +122,7 @@ public final class SeqNatives {
         return MezzeVariant.some(seq.last());
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq tail(MezzeSeq seq) {
         if (seq.isEmpty()) {
             return MezzeSeq.empty();
@@ -106,7 +130,7 @@ public final class SeqNatives {
         return seq.tail();
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq init(MezzeSeq seq) {
         if (seq.isEmpty()) {
             return MezzeSeq.empty();
@@ -114,7 +138,7 @@ public final class SeqNatives {
         return seq.init();
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq slice(MezzeSeq seq, long start, long end) {
         int s = Math.max(0, (int) start);
         int e = Math.min(seq.size(), (int) end);
@@ -124,12 +148,12 @@ public final class SeqNatives {
         return seq.slice(s, e);
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq take(MezzeSeq seq, long n) {
         return seq.take((int) n);
     }
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq drop(MezzeSeq seq, long n) {
         return seq.drop((int) n);
     }
@@ -179,7 +203,7 @@ public final class SeqNatives {
 
     // ==================== Transform Operations ====================
 
-    @TruffleBoundary
+    // Simple delegation - no @TruffleBoundary needed for JIT inlining
     public static MezzeSeq reverse(MezzeSeq seq) {
         return seq.reverse();
     }
@@ -198,16 +222,31 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeSeq filter(MezzeSeq seq, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < seq.size(); i++) {
+        int size = seq.size();
+        if (size == 0) return MezzeSeq.empty();
+
+        // Two-pass: first count matches, then collect
+        boolean[] keep = new boolean[size];
+        int count = 0;
+        for (int i = 0; i < size; i++) {
             Object element = seq.get(i);
             Object result = callNode.call(predicate.getCallTarget(),
                 prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
-                results.add(element);
+                keep[i] = true;
+                count++;
             }
         }
-        return MezzeSeq.fromArray(results.toArray());
+
+        if (count == 0) return MezzeSeq.empty();
+        if (count == size) return seq; // All kept - return original
+
+        Object[] results = new Object[count];
+        int idx = 0;
+        for (int i = 0; i < size; i++) {
+            if (keep[i]) results[idx++] = seq.get(i);
+        }
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -307,7 +346,7 @@ public final class SeqNatives {
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"first", "second"},
+                FIELD_FIRST_SECOND,
                 new Object[]{seq1.get(i), seq2.get(i)}
             );
         }
@@ -319,7 +358,7 @@ public final class SeqNatives {
         Object[] result = new Object[seq.size()];
         for (int i = 0; i < seq.size(); i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"value", "index"},
+                FIELD_VALUE_INDEX,
                 new Object[]{seq.get(i), (long) i}
             );
         }
@@ -341,7 +380,7 @@ public final class SeqNatives {
             seconds[i] = pair.getField(secondIdx);
         }
         return MezzeRecord.fromFields(
-            new String[]{"fsts", "snds"},
+            FIELD_FSTS_SNDS,
             new Object[]{MezzeSeq.fromArray(firsts), MezzeSeq.fromArray(seconds)}
         );
     }
@@ -351,25 +390,43 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeRecord partition(MezzeSeq seq, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        java.util.ArrayList<Object> matching = new java.util.ArrayList<>();
-        java.util.ArrayList<Object> nonMatching = new java.util.ArrayList<>();
+        int size = seq.size();
+        if (size == 0) {
+            return MezzeRecord.fromFields(
+                FIELD_MATCHING_NOT_MATCHING,
+                new Object[]{MezzeSeq.empty(), MezzeSeq.empty()}
+            );
+        }
 
-        for (int i = 0; i < seq.size(); i++) {
+        // Two-pass: first determine matches, then collect
+        boolean[] matches = new boolean[size];
+        int matchCount = 0;
+        for (int i = 0; i < size; i++) {
             Object element = seq.get(i);
             Object result = callNode.call(predicate.getCallTarget(),
                 prepareArgs(predicate, element));
             if (result instanceof Boolean && (Boolean) result) {
-                matching.add(element);
+                matches[i] = true;
+                matchCount++;
+            }
+        }
+
+        Object[] matchingArr = new Object[matchCount];
+        Object[] nonMatchingArr = new Object[size - matchCount];
+        int mIdx = 0, nIdx = 0;
+        for (int i = 0; i < size; i++) {
+            if (matches[i]) {
+                matchingArr[mIdx++] = seq.get(i);
             } else {
-                nonMatching.add(element);
+                nonMatchingArr[nIdx++] = seq.get(i);
             }
         }
 
         return MezzeRecord.fromFields(
-            new String[]{"matching", "not_matching"},
+            FIELD_MATCHING_NOT_MATCHING,
             new Object[]{
-                MezzeSeq.fromArray(matching.toArray()),
-                MezzeSeq.fromArray(nonMatching.toArray())
+                MezzeSeq.fromArray(matchingArr),
+                MezzeSeq.fromArray(nonMatchingArr)
             }
         );
     }
@@ -512,6 +569,15 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeVariant min(MezzeSeq seq) {
         if (seq.isEmpty()) return MezzeVariant.none();
+        // OPTIMIZED: Use specialized nodes for unboxed storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof LongSeqStorage longStorage) {
+            return MezzeVariant.some(SeqMinLongNode.getUncached().execute(longStorage));
+        }
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return MezzeVariant.some(SeqMinDoubleNode.getUncached().execute(doubleStorage));
+        }
+        // Fallback for boxed storage
         Object minVal = seq.get(0);
         for (int i = 1; i < seq.size(); i++) {
             Object curr = seq.get(i);
@@ -525,6 +591,15 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeVariant max(MezzeSeq seq) {
         if (seq.isEmpty()) return MezzeVariant.none();
+        // OPTIMIZED: Use specialized nodes for unboxed storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof LongSeqStorage longStorage) {
+            return MezzeVariant.some(SeqMaxLongNode.getUncached().execute(longStorage));
+        }
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return MezzeVariant.some(SeqMaxDoubleNode.getUncached().execute(doubleStorage));
+        }
+        // Fallback for boxed storage
         Object maxVal = seq.get(0);
         for (int i = 1; i < seq.size(); i++) {
             Object curr = seq.get(i);
@@ -571,6 +646,12 @@ public final class SeqNatives {
 
     @TruffleBoundary
     public static long sum(MezzeSeq seq) {
+        // OPTIMIZED: Use SIMD node for unboxed long storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof LongSeqStorage longStorage) {
+            return SeqSumLongSIMDNode.getUncached().execute(longStorage);
+        }
+        // Fallback for boxed storage
         long total = 0;
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
@@ -582,6 +663,12 @@ public final class SeqNatives {
 
     @TruffleBoundary
     public static double sumFloat(MezzeSeq seq) {
+        // OPTIMIZED: Use SIMD node for unboxed double storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return SeqSumDoubleSIMDNode.getUncached().execute(doubleStorage);
+        }
+        // Fallback for boxed storage
         double total = 0.0;
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
@@ -596,6 +683,12 @@ public final class SeqNatives {
     @TruffleBoundary
     public static long product(MezzeSeq seq) {
         if (seq.isEmpty()) return 1L;
+        // OPTIMIZED: Use specialized node for unboxed long storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof LongSeqStorage longStorage) {
+            return SeqProductLongNode.getUncached().execute(longStorage);
+        }
+        // Fallback for boxed storage
         long result = 1;
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
@@ -608,6 +701,12 @@ public final class SeqNatives {
     @TruffleBoundary
     public static double productFloat(MezzeSeq seq) {
         if (seq.isEmpty()) return 1.0;
+        // OPTIMIZED: Use specialized node for unboxed double storage
+        SeqStorage storage = seq.getStorage();
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return SeqProductDoubleNode.getUncached().execute(doubleStorage);
+        }
+        // Fallback for boxed storage
         double result = 1.0;
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
@@ -634,7 +733,7 @@ public final class SeqNatives {
         int idx = 0;
         for (var entry : groups.entrySet()) {
             result[idx++] = MezzeRecord.fromFields(
-                new String[]{"key", "values"},
+                FIELD_KEY_VALUES,
                 new Object[]{entry.getKey(), MezzeSeq.fromArray(entry.getValue().toArray())}
             );
         }
@@ -676,7 +775,7 @@ public final class SeqNatives {
     public static MezzeRecord splitAt(MezzeSeq seq, long index) {
         int idx = Math.max(0, Math.min(seq.size(), (int) index));
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            FIELD_LEFT_RIGHT,
             new Object[]{seq.take(idx), seq.drop(idx)}
         );
     }
@@ -694,7 +793,7 @@ public final class SeqNatives {
             }
         }
         return MezzeRecord.fromFields(
-            new String[]{"left", "right"},
+            FIELD_LEFT_RIGHT,
             new Object[]{seq.take(splitIdx), seq.drop(splitIdx)}
         );
     }
@@ -1042,9 +1141,8 @@ public final class SeqNatives {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"i"}, new Object[]{index}
-        );
+        // Still use fromFields for {i: index} since it's less common
+        args[closureValues.length] = MezzeRecord.fromFields(FIELD_I, new Object[]{index});
         return args;
     }
 
@@ -1052,9 +1150,8 @@ public final class SeqNatives {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
-        );
+        // Use fast wrapper - no @TruffleBoundary
+        args[closureValues.length] = MezzeRecord.wrapX(arg);
         return args;
     }
 
@@ -1062,9 +1159,8 @@ public final class SeqNatives {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "x"}, new Object[]{arg1, arg2}
-        );
+        // Use fast wrapper - no @TruffleBoundary
+        args[closureValues.length] = MezzeRecord.wrapAccX(arg1, arg2);
         return args;
     }
 
@@ -1072,9 +1168,8 @@ public final class SeqNatives {
         Object[] closureValues = fn.getClosureValues();
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"a", "b"}, new Object[]{arg1, arg2}
-        );
+        // Use fast wrapper - no @TruffleBoundary
+        args[closureValues.length] = MezzeRecord.wrapAB(arg1, arg2);
         return args;
     }
 
@@ -1097,7 +1192,7 @@ public final class SeqNatives {
         Object[] result = new Object[minLen];
         for (int i = 0; i < minLen; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"first", "second", "third"},
+                FIELD_FIRST_SECOND_THIRD,
                 new Object[]{seq1.get(i), seq2.get(i), seq3.get(i)}
             );
         }
@@ -1110,7 +1205,7 @@ public final class SeqNatives {
         Object[] result = new Object[minLen];
         for (int i = 0; i < minLen; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"first", "second", "third", "fourth"},
+                FIELD_FIRST_SECOND_THIRD_FOURTH,
                 new Object[]{seq1.get(i), seq2.get(i), seq3.get(i), seq4.get(i)}
             );
         }
@@ -1119,16 +1214,19 @@ public final class SeqNatives {
 
     @TruffleBoundary
     public static MezzeSeq cartesianProduct(MezzeSeq seq1, MezzeSeq seq2) {
-        java.util.List<Object> result = new java.util.ArrayList<>();
+        // Pre-allocate exact size
+        int size = seq1.size() * seq2.size();
+        Object[] result = new Object[size];
+        int idx = 0;
         for (int i = 0; i < seq1.size(); i++) {
             for (int j = 0; j < seq2.size(); j++) {
-                result.add(MezzeRecord.fromFields(
-                    new String[]{"first", "second"},
+                result[idx++] = MezzeRecord.fromFields(
+                    FIELD_FIRST_SECOND,
                     new Object[]{seq1.get(i), seq2.get(j)}
-                ));
+                );
             }
         }
-        return MezzeSeq.fromArray(result.toArray());
+        return MezzeSeq.fromArray(result);
     }
 
     // ==================== Combinatorics ====================
@@ -1356,7 +1454,7 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeRecord equalRange(MezzeSeq seq, Object target) {
         return MezzeRecord.fromFields(
-            new String[]{"lower", "upper"},
+            FIELD_LOWER_UPPER,
             new Object[]{lowerBound(seq, target), upperBound(seq, target)}
         );
     }
@@ -1464,8 +1562,13 @@ public final class SeqNatives {
     }
 
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public static MezzeSortedSet toSortedSet(MezzeSeq seq) {
-        return MezzeSortedSet.fromIterable(java.util.Arrays.asList(seq.toArray()));
+        MezzeSortedSet result = MezzeSortedSet.empty();
+        for (int i = 0; i < seq.size(); i++) {
+            result = result.add((Comparable) seq.get(i));
+        }
+        return result;
     }
 
     @TruffleBoundary
@@ -1490,7 +1593,7 @@ public final class SeqNatives {
             if (elem instanceof MezzeRecord rec) {
                 Object k = rec.getField("k");
                 Object v = rec.getField("v");
-                result = result.put(k, v);
+                result = result.putObject(k, v);
             }
         }
         return result;

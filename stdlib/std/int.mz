@@ -19,8 +19,8 @@ pub let divide = { l: Int, r: Int } ->
 pub let modulo = { l: Int, r: Int } ->
     __native_int_modulo { l = l, r = r }
 
-pub let to_string = { n: Int } ->
-    __native_int_to_string { n = n }
+pub let to_str = { n: Int } ->
+    __native_int_to_str { n = n }
 
 pub let from_string = { s: String } ->
     __native_int_from_string { s = s }

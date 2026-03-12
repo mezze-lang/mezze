@@ -35,12 +35,12 @@ pub type JsonStream = {}
 
 impl StreamEncodeFormat JsonStream where {
     stream_int = {value, buffer, path} -> do
-        let s = __native_int_to_string {n = value}
+        let s = __native_int_to_str {n = value}
         let buf2 = buffer::write_string {buf = buffer, s = s}
         Ok {val = buf2},
 
     stream_float = {value, buffer, path} -> do
-        let s = __native_float_to_string {n = value}
+        let s = __native_float_to_str {n = value}
         let buf2 = buffer::write_string {buf = buffer, s = s}
         Ok {val = buf2},
 
@@ -59,7 +59,7 @@ impl StreamEncodeFormat JsonStream where {
         Ok {val = buf2},
 
     stream_frac = {value, buffer, path} -> do
-        let s = __native_frac_to_string {n = value}
+        let s = __native_frac_to_str {n = value}
         let buf2 = buffer::write_string {buf = buffer, s = s}
         Ok {val = buf2},
 
@@ -234,8 +234,8 @@ pub let new_buffer = {capacity} ->
     buffer::new {capacity = capacity}
 
 # Convert buffer to string (for debugging/testing)
-pub let buffer_to_string = {buf} -> do
+pub let buffer_to_str = {buf} -> do
     let b = buffer::to_bytes {buf = buf}
-    match bytes::to_string {b = b} is
+    match bytes::to_str {b = b} is
         Ok {val} -> val
         Err {error} -> ""

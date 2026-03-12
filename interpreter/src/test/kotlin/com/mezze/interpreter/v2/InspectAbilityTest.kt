@@ -163,8 +163,8 @@ class InspectAbilityTest {
     @Test
     fun `test Inspect works in lambda`() {
         val source = """
-            let to_string = {val} -> Inspect.to_str {val = val}
-            let result = to_string {val = 42}
+            let to_str = {val} -> Inspect.to_str {val = val}
+            let result = to_str {val = 42}
             result
         """.trimIndent()
 

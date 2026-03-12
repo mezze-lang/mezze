@@ -201,7 +201,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show Int where {
@@ -226,7 +226,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show String where {
@@ -322,7 +322,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             impl Convert Int String where {
-                convert: {value: Int} -> String = {value} -> int::to_string {n = value}
+                convert: {value: Int} -> String = {value} -> int::to_str {n = value}
             }
 
             Convert.convert {value = "hello"}

@@ -149,8 +149,8 @@ object BytesTypes {
             MezzeType.BoolType
         )
 
-        // __native_bytes_to_string: {b: Bytes} -> Result String String
-        context["__native_bytes_to_string"] = MezzeType.FunctionType(
+        // __native_bytes_to_str: {b: Bytes} -> Result String String
+        context["__native_bytes_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType)),
             resultType(MezzeType.StringType, MezzeType.StringType)
         )

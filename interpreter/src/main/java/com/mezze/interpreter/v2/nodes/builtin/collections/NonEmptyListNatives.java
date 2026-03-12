@@ -1,5 +1,7 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.list.MezzeList;
+
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -48,7 +50,7 @@ public final class NonEmptyListNatives {
             }
             Object[] tail = new Object[elements.length - 1];
             System.arraycopy(elements, 1, tail, 0, elements.length - 1);
-            return MezzeList.fromArray(tail);
+            return MezzeList.of(tail);
         }
 
         public Object get(int index) {
@@ -351,7 +353,7 @@ public final class NonEmptyListNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeNonEmptyList list) {
-        return MezzeList.fromArray(list.getElements());
+        return MezzeList.of(list.getElements());
     }
 
     public static Object[] toArray(MezzeNonEmptyList list) {

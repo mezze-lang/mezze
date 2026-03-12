@@ -77,10 +77,10 @@ class ModuleImportRecordTypeTest {
     }
 
     @Test
-    fun `test importing int module to_string function`() {
+    fun `test importing int module to_str function`() {
         val source = """
             use std::int
-            let result = int::to_string { n = 42 }
+            let result = int::to_str { n = 42 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

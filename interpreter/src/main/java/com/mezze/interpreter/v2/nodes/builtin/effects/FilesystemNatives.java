@@ -1,6 +1,6 @@
 package com.mezze.interpreter.v2.nodes.builtin.effects;
 
-import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.mezze.interpreter.v2.values.MezzeVariant;
@@ -175,7 +175,7 @@ public final class FilesystemNatives {
         if (entries == null) {
             entries = new String[0];
         }
-        return createOk(MezzeList.fromArray(Arrays.stream(entries).toArray()));
+        return createOk(MezzeList.of(Arrays.stream(entries).toArray()));
     }
 
     // ============== Delete Operations ==============

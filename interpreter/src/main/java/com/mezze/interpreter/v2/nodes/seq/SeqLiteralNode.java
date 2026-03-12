@@ -1,7 +1,7 @@
 package com.mezze.interpreter.v2.nodes.seq;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeSeq;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;

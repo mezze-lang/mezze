@@ -34,7 +34,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
@@ -106,7 +106,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
@@ -129,7 +129,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let displayValue: {val: 'a} -> String with Show 'a = {val} ->
@@ -163,7 +163,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> int::to_string {n = val}
+              convert : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let result = Convert.convert {val = 42}
@@ -199,7 +199,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let fetchUser: {id: Int} -> String <Database> = {id} ->
-              Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})"}
+              Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -240,7 +240,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase> = {id, token} ->
-              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})", token = token}
+              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})", token = token}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -275,7 +275,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let loggedOperation: {value: Int} -> Int <Log> = {value} -> do
-              Log.log {message = int::to_string{n = value * 2 }}
+              Log.log {message = int::to_str{n = value * 2 }}
               value * 2
 
             # Wrap in function to avoid top-level <*> restriction
@@ -318,7 +318,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show Bool where {
@@ -352,7 +352,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Log for ConsoleLogger where {

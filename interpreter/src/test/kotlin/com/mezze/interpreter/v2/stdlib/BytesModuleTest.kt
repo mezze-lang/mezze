@@ -355,11 +355,11 @@ class BytesModuleTest {
     // ===== Conversions =====
 
     @Test
-    fun `test bytes to_string`() {
+    fun `test bytes to_str`() {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            match bytes::to_string { b = b } is
+            match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Err { error } -> "failed"
         """)
@@ -406,7 +406,7 @@ class BytesModuleTest {
             let hex = bytes::to_hex { b = b1 }
             match bytes::from_hex { s = hex } is
                 Some { val } ->
-                    match bytes::to_string { b = val } is
+                    match bytes::to_str { b = val } is
                         Ok { val } -> val
                         Err { error } -> "failed"
                 None -> "failed"
@@ -422,7 +422,7 @@ class BytesModuleTest {
             let b64 = bytes::to_base64 { b = b1 }
             match bytes::from_base64 { s = b64 } is
                 Some { val } ->
-                    match bytes::to_string { b = val } is
+                    match bytes::to_str { b = val } is
                         Ok { val } -> val
                         Err { error } -> "failed"
                 None -> "failed"

@@ -25,6 +25,7 @@ import com.mezze.language.typechecker.types.effects.ContinuationTypes
 import com.mezze.language.typechecker.types.effects.LoomTypes
 import com.mezze.language.typechecker.types.effects.OSThreadTypes
 import com.mezze.language.typechecker.types.effects.CoopTypes
+import com.mezze.language.typechecker.types.effects.SchedulerTypes
 import com.mezze.language.typechecker.types.effects.ParallelTypes
 import com.mezze.language.typechecker.types.effects.STMTypes
 import com.mezze.language.typechecker.types.effects.HttpTypes
@@ -86,6 +87,7 @@ object NativeFunctionTypes {
         LoomTypes.registerAll(context)
         OSThreadTypes.registerAll(context)
         CoopTypes.registerAll(context)
+        SchedulerTypes.registerAll(context)
         ParallelTypes.registerAll(context)
         STMTypes.registerAll(context)
 

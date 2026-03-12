@@ -2141,9 +2141,9 @@ private fun prettyPrintV2Result(result: Any?): String {
             }
             "{ ${fields.joinToString(", ")} }"
         }
-        is com.mezze.interpreter.v2.values.MezzeList -> {
+        is com.mezze.datastructures.list.MezzeList<*> -> {
             val elements = (0 until result.size()).map { i ->
-                prettyPrintV2Result(result.get(i))
+                prettyPrintV2Result(result[i])
             }
             "[${elements.joinToString(", ")}]"
         }

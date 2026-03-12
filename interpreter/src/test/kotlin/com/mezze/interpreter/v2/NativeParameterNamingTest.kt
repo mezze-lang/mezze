@@ -32,10 +32,10 @@ class NativeParameterNamingTest {
 
     @Test
     fun `test int to string conversion`() {
-        // Tests that int::to_string works correctly with 'n' parameter
+        // Tests that int::to_str works correctly with 'n' parameter
         val result = eval("""
             use std::int
-            int::to_string { n = 42 }
+            int::to_str { n = 42 }
         """.trimIndent())
         assertEquals("42", result)
     }
@@ -155,10 +155,10 @@ class NativeParameterNamingTest {
 
     @Test
     fun `test float to string conversion`() {
-        // Tests float::to_string with 'n' parameter
+        // Tests float::to_str with 'n' parameter
         val result = eval("""
             use std::float
-            float::to_string { n = 3.14 }
+            float::to_str { n = 3.14 }
         """.trimIndent())
         assertEquals("3.14", result)
     }

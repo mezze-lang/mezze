@@ -6,7 +6,7 @@ import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
 import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
-import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.mezze.interpreter.v2.values.MezzeVariant;
@@ -22,6 +22,22 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+
+/**
+ * ThreadLocal reusable map to avoid allocation in hot paths.
+ * Each thread gets its own map that is cleared and reused.
+ */
+final class HandlerMapPool {
+    private static final ThreadLocal<Map<String, Object>> POOL = ThreadLocal.withInitial(HashMap::new);
+
+    static Map<String, Object> acquire() {
+        Map<String, Object> map = POOL.get();
+        map.clear();
+        return map;
+    }
+
+    // Note: No release needed - the map stays in ThreadLocal and is reused
+}
 
 /**
  * Node that looks up a handler by content hash.
@@ -487,8 +503,8 @@ public final class HandleNode extends MezzeNode {
             return suspended;
         }
 
-        // Build handler map - look up handler under any of our content hashes
-        Map<String, Object> handlers = new HashMap<>();
+        // Build handler map - reuse pooled map to avoid allocation
+        Map<String, Object> handlers = HandlerMapPool.acquire();
 
         // Content hash lookup only (O(1), collision-free) - no fallback
         for (String hash : contentHashes) {
@@ -548,8 +564,8 @@ public final class HandleNode extends MezzeNode {
             return;
         }
 
-        // Build handler map - register under all content hashes
-        Map<String, Object> handlers = new HashMap<>();
+        // Build handler map - reuse pooled map to avoid allocation
+        Map<String, Object> handlers = HandlerMapPool.acquire();
 
         for (String hash : contentHashes) {
             if (hash != null && !hash.isEmpty()) {
@@ -558,6 +574,7 @@ public final class HandleNode extends MezzeNode {
         }
 
         if (!handlers.isEmpty()) {
+            // Note: pushHandlers may copy the map if it needs to retain it
             context.pushHandlers(handlers);
         }
     }

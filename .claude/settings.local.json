@@ -190,7 +190,16 @@
       "WebFetch(domain:medium.com)",
       "Bash(cat:*)",
       "Bash(then echo \"Still running...\")",
-      "Bash(else tail -10 /tmp/interpreter_tests.txt)"
+      "Bash(else tail -10 /tmp/interpreter_tests.txt)",
+      "WebFetch(domain:pllab.is.ocha.ac.jp)",
+      "WebFetch(domain:okmij.org)",
+      "Bash(not found\" errors when loading modules with type imports.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git log:*)",
+      "Bash(do sed -i '' 's/to_string/to_str/g' \"$f\")",
+      "Bash(if ! grep -q \"No @TruffleBoundary\" \"$f\")",
+      "Bash(git -C /Users/shriyans/Projects/funk status:*)",
+      "Bash(locate:*)",
+      "Bash(python3 -c \" import sys import json for line in sys.stdin: try: obj = json.loads\\(line\\) if obj.get\\(''type''\\) == ''user'' and ''message'' in obj: content = obj[''message''].get\\(''content'', ''''\\) if isinstance\\(content, str\\) and \\(''generator'' in content.lower\\(\\) or ''effect'' in content.lower\\(\\) or ''continuation'' in content.lower\\(\\) or ''one-shot'' in content.lower\\(\\) or ''oneshot'' in content.lower\\(\\) or ''finalize'' in content.lower\\(\\)\\): print\\(''---USER MESSAGE---''\\) print\\(content[:2000]\\) print\\(\\) except: pass \")"
     ],
     "deny": [],
     "ask": []

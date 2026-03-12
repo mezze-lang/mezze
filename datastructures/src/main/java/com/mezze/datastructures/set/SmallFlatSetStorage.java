@@ -2,6 +2,7 @@ package com.mezze.datastructures.set;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.nodes.ExplodeLoop;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -27,6 +28,7 @@ public final class SmallFlatSetStorage implements SetStorage {
     }
 
     @Override
+    @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public boolean contains(Object elem) {
         for (int i = 0; i < elements.length; i++) {
             if (Objects.equals(elements[i], elem)) {

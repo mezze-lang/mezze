@@ -4,8 +4,8 @@
 # Built-in ability implementations (Eq, Inspect) are automatically available
 
 # Type conversions
-pub let to_string = { b: Bool } ->
-    __native_bool_to_string { b = b }
+pub let to_str = { b: Bool } ->
+    __native_bool_to_str { b = b }
 
 # Bool logic operations
 pub let and = { l: Bool, r: Bool } ->

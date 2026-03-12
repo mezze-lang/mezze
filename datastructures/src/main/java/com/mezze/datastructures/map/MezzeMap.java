@@ -2,7 +2,12 @@ package com.mezze.datastructures.map;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnknownKeyException;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -18,6 +23,7 @@ import java.util.function.Function;
  * @param <K> Key type
  * @param <V> Value type
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.Entry<K, V>> {
 
     @CompilationFinal
@@ -151,6 +157,16 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Returns a new map with the key-value pair added/updated.
      */
     public MezzeMap<K, V> put(K key, V value) {
+        return new MezzeMap<>(storage.put(key, value));
+    }
+
+    /**
+     * Returns a new map with the key-value pair added/updated (raw type).
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeMap<K, V> putObject(Object key, Object value) {
         return new MezzeMap<>(storage.put(key, value));
     }
 
@@ -433,6 +449,33 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         }
     }
 
+    // ===== CONVERSION =====
+
+    /**
+     * Creates a MezzeMap from a Java Map.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public static <K, V> MezzeMap<K, V> fromJavaMap(java.util.Map<K, V> map) {
+        MezzeMap<K, V> result = empty();
+        for (java.util.Map.Entry<K, V> entry : map.entrySet()) {
+            result = result.put(entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
+    /**
+     * Converts to a Java HashMap.
+     */
+    @TruffleBoundary
+    public java.util.Map<K, V> toJavaMap() {
+        java.util.HashMap<K, V> result = new java.util.HashMap<>(size());
+        for (Entry<K, V> entry : this) {
+            result.put(entry.key, entry.value);
+        }
+        return result;
+    }
+
     // ===== INTERNAL =====
 
     /**
@@ -454,6 +497,95 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      */
     public boolean isLongKeyStorage() {
         return storage instanceof LongKeyMapStorage;
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasHashEntries() {
+        return true;
+    }
+
+    @ExportMessage
+    long getHashSize() {
+        return storage.size();
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    boolean isHashEntryReadable(Object key) {
+        return storage.containsKey(key);
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object readHashValue(Object key) throws UnknownKeyException {
+        Object value = storage.get(key);
+        if (value == null && !storage.containsKey(key)) {
+            throw UnknownKeyException.create(key);
+        }
+        return value;
+    }
+
+    @ExportMessage
+    boolean isHashEntryModifiable(@SuppressWarnings("unused") Object key) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isHashEntryInsertable(@SuppressWarnings("unused") Object key) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeHashEntry(@SuppressWarnings("unused") Object key, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new MapEntryIterator(iterator());
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getHashEntriesIterator() {
+        return new MapEntryIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class MapEntryIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        MapEntryIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 
     // ===== OBJECT METHODS =====

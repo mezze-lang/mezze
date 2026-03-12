@@ -109,8 +109,8 @@ pub let fold = { b, init, f } ->
 # === Conversions ===
 
 # Convert to a UTF-8 string, returns Result String String
-pub let to_string = { b } ->
-    __native_bytes_to_string { b = b }
+pub let to_str = { b } ->
+    __native_bytes_to_str { b = b }
 
 # Convert to a seq of integers (0-255)
 pub let to_seq = { b } ->

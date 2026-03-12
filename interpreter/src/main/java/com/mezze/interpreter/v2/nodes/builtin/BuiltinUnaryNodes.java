@@ -1,5 +1,7 @@
 package com.mezze.interpreter.v2.nodes.builtin;
 
+import com.mezze.datastructures.list.MezzeList;
+
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;

@@ -36,7 +36,7 @@
 #   perform SimpleHttpClient in do
 #       get { url = "https://api.example.com/status" }
 
-use std::codec::json::{Json, to_string, parse_str}
+use std::codec::json::{Json, to_str, parse_str}
 use std::codec::core::{Encode, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, EncodeFormat, DecodeFormat}
 use std::collections::map
 use std::collections::seq
@@ -416,7 +416,7 @@ pub let patch_headers: { url: String, body: Bytes, headers: Map String String } 
 
 # Get response body as string (returns Result because of UTF-8 decoding)
 pub let body_string: { resp: Response } -> Result String String = { resp } ->
-    bytes::to_string { b = resp.body }
+    bytes::to_str { b = resp.body }
 
 # Get response body as JSON
 pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
@@ -475,7 +475,7 @@ pub let get_json: { url: String } -> Result Json HttpError <Http> = { url } -> d
 
 # POST with JSON body
 pub let post_json: { url: String, json: Json } -> Result Response HttpError <Http> = { url, json } -> do
-    let body_str = to_string { json = json }
+    let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
     let req = make_request_with_body { method = Post, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
@@ -483,7 +483,7 @@ pub let post_json: { url: String, json: Json } -> Result Response HttpError <Htt
 
 # PUT with JSON body
 pub let put_json: { url: String, json: Json } -> Result Response HttpError <Http> = { url, json } -> do
-    let body_str = to_string { json = json }
+    let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
     let req = make_request_with_body { method = Put, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
@@ -491,7 +491,7 @@ pub let put_json: { url: String, json: Json } -> Result Response HttpError <Http
 
 # PATCH with JSON body
 pub let patch_json: { url: String, json: Json } -> Result Response HttpError <Http> = { url, json } -> do
-    let body_str = to_string { json = json }
+    let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
     let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
@@ -535,7 +535,7 @@ pub let get_json_with: { url: String, config: HttpConfig } -> Result Json HttpEr
 
 # POST JSON with custom config
 pub let post_json_with: { url: String, json: Json, config: HttpConfig } -> Result Response HttpError <Http> = { url, json, config } -> do
-    let body_str = to_string { json = json }
+    let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
     let req = make_request_with_body { method = Post, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
@@ -558,7 +558,7 @@ pub let post_json_json_with: { url: String, json: Json, config: HttpConfig } -> 
 pub let post_body: { url: String, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Post, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -569,7 +569,7 @@ pub let post_body: { url: String, body: 'a } -> Result Response HttpError <Http>
 pub let put_body: { url: String, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Put, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -580,7 +580,7 @@ pub let put_body: { url: String, body: 'a } -> Result Response HttpError <Http> 
 pub let patch_body: { url: String, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -591,7 +591,7 @@ pub let patch_body: { url: String, body: 'a } -> Result Response HttpError <Http
 pub let post_body_with: { url: String, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Post, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -602,7 +602,7 @@ pub let post_body_with: { url: String, body: 'a, config: HttpConfig } -> Result 
 pub let put_body_with: { url: String, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Put, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -613,7 +613,7 @@ pub let put_body_with: { url: String, body: 'a, config: HttpConfig } -> Result R
 pub let patch_body_with: { url: String, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
     match Encode.encode { val = body, config = default_config } is
         Ok { val = json } -> do
-            let body_str = to_string { json = json }
+            let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
             let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
             let req = with_content_type { req = req, content_type = "application/json" }
@@ -819,13 +819,13 @@ pub let format_error: { err: HttpError } -> String = { err } ->
         ConnectionFailed { url, reason } ->
             string::concat { l = "Connection failed to ", r = string::concat { l = url, r = string::concat { l = ": ", r = reason } } }
         Timeout { url, ms } ->
-            string::concat { l = "Request timed out after ", r = string::concat { l = int::to_string { n = ms }, r = string::concat { l = "ms: ", r = url } } }
+            string::concat { l = "Request timed out after ", r = string::concat { l = int::to_str { n = ms }, r = string::concat { l = "ms: ", r = url } } }
         InvalidUrl { url, reason } ->
             string::concat { l = "Invalid URL '", r = string::concat { l = url, r = string::concat { l = "': ", r = reason } } }
         TlsError { url, reason } ->
             string::concat { l = "TLS error for ", r = string::concat { l = url, r = string::concat { l = ": ", r = reason } } }
         RequestFailed { url, status, body } ->
-            string::concat { l = "Request failed with status ", r = string::concat { l = int::to_string { n = status }, r = string::concat { l = ": ", r = body } } }
+            string::concat { l = "Request failed with status ", r = string::concat { l = int::to_str { n = status }, r = string::concat { l = ": ", r = body } } }
         DecodeError { url, message } ->
             string::concat { l = "Failed to decode response from ", r = string::concat { l = url, r = string::concat { l = ": ", r = message } } }
         EncodeError { url, message } ->

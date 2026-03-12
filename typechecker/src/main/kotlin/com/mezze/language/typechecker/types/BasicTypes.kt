@@ -66,7 +66,7 @@ object BasicTypes {
             MezzeType.IntType
         )
 
-        context["__native_int_to_string"] = MezzeType.FunctionType(
+        context["__native_int_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
             MezzeType.StringType
         )
@@ -110,7 +110,7 @@ object BasicTypes {
             MezzeType.IntType
         )
 
-        context["int::to_string"] = MezzeType.FunctionType(
+        context["int::to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
             MezzeType.StringType
         )
@@ -169,7 +169,7 @@ object BasicTypes {
         // Note: Float arithmetic (__native_float_add, etc.) is handled by Truffle operator nodes
         // Note: Math functions (__native_float_pow, sqrt, floor, ceil, round) are in MathCoreTypes.kt
 
-        context["__native_float_to_string"] = MezzeType.FunctionType(
+        context["__native_float_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
             MezzeType.StringType
         )
@@ -402,7 +402,7 @@ object BasicTypes {
         )
 
         // To String
-        context["__native_nat_to_string"] = MezzeType.FunctionType(
+        context["__native_nat_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
             MezzeType.StringType
         )
@@ -438,7 +438,7 @@ object BasicTypes {
             MezzeType.BoolType
         )
 
-        context["__native_bool_to_string"] = MezzeType.FunctionType(
+        context["__native_bool_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BoolType)),
             MezzeType.StringType
         )
@@ -484,7 +484,7 @@ object BasicTypes {
     }
 
     private fun registerStringTypes(context: MutableMap<String, MezzeType>) {
-        context["__native_string_to_string"] = MezzeType.FunctionType(
+        context["__native_string_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("value" to MezzeType.StringType)),
             MezzeType.StringType
         )
@@ -788,7 +788,7 @@ object BasicTypes {
             MezzeType.FloatType
         )
 
-        context["__native_frac_to_string"] = MezzeType.FunctionType(
+        context["__native_frac_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FracType)),
             MezzeType.StringType
         )
@@ -888,7 +888,7 @@ object BasicTypes {
             MezzeType.FloatType
         )
 
-        context["frac::to_string"] = MezzeType.FunctionType(
+        context["frac::to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FracType)),
             MezzeType.StringType
         )

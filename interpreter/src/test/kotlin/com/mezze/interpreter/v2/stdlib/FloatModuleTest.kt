@@ -14,10 +14,10 @@ class FloatModuleTest {
     private fun eval(source: String): Any = com.mezze.interpreter.v2.MezzeTestHelper.run(source)
 
     @Test
-    fun `test float to_string function`() {
+    fun `test float to_str function`() {
         val source = """
             use std::float
-            float::to_string { n = 3.14 }
+            float::to_str { n = 3.14 }
         """.trimIndent()
 
         val result = eval(source)

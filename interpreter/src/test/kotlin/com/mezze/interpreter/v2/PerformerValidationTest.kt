@@ -151,8 +151,8 @@ class PerformerValidationTest {
 
             impl Database for PostgresDB {host: String, port: Int} where {
               query : {sql: String} -> String <Log> = {sql} -> do
-                Log.info {msg = "Executing query on $(host):$(int::to_string {n = port})"}
-                "$(host):$(int::to_string {n = port}) -> $(sql)"
+                Log.info {msg = "Executing query on $(host):$(int::to_str {n = port})"}
+                "$(host):$(int::to_str {n = port}) -> $(sql)"
             }
 
             impl Log for FileLogger {path: String} where {

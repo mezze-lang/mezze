@@ -139,7 +139,7 @@ class BufferModuleTest {
             let buf = buffer::empty {}
             let buf2 = buffer::write_string { buf = buf, s = "Hi" }
             let b = buffer::to_bytes { buf = buf2 }
-            match bytes::to_string { b = b } is
+            match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Error { error } -> "failed"
         """)
@@ -229,7 +229,7 @@ class BufferModuleTest {
             let buf3 = buffer::clear { buf = buf2 }
             let buf4 = buffer::write_string { buf = buf3, s = "Second" }
             let b = buffer::to_bytes { buf = buf4 }
-            match bytes::to_string { b = b } is
+            match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Error { error } -> "failed"
         """)
@@ -264,7 +264,7 @@ class BufferModuleTest {
             let b = bytes::from_string { s = "C" }
             let buf4 = buffer::write { buf = buf3, bytes = b }
             let result = buffer::to_bytes { buf = buf4 }
-            match bytes::to_string { b = result } is
+            match bytes::to_str { b = result } is
                 Ok { val } -> val
                 Error { error } -> "failed"
         """)

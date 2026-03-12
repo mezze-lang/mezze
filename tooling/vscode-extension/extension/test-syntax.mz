@@ -269,7 +269,7 @@ let result = 5 |> add {x = @, y = 3}
 # ==========================================
 
 let area = math::geometry::area {width = 10, height = 20}
-let stringified = std::int::to_string {n = 42}
+let stringified = std::int::to_str {n = 42}
 
 # ==========================================
 # String Interpolation

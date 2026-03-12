@@ -1,5 +1,8 @@
 package com.mezze.interpreter.v2.nodes.builtin.io;
 
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -194,7 +197,7 @@ public final class IONatives {
         for (int i = 0; i < data.length; i++) {
             result[i] = (long) (data[i] & 0xFF);
         }
-        return MezzeList.fromArray(result);
+        return MezzeList.of(result);
     }
 
     @TruffleBoundary
@@ -1056,11 +1059,11 @@ public final class IONatives {
         if (value instanceof MezzeList list) return list;
         // Handle MezzeSeq (Vavr Vector) - convert to MezzeList
         if (value instanceof MezzeSeq seq) {
-            return MezzeList.fromArray(seq.toJavaArray());
+            return MezzeList.of(seq.toArray());
         }
         // Handle array literals (Object[]) - convert to MezzeList
         if (value instanceof Object[] arr) {
-            return MezzeList.fromArray(arr);
+            return MezzeList.of(arr);
         }
         throw new RuntimeException("Expected List for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));
@@ -1363,12 +1366,13 @@ public final class IONatives {
         };
     }
 
+    @SuppressWarnings("unchecked")
     private static Map<String, String> parseHeaders(MezzeMap headersMap) {
         Map<String, String> result = new HashMap<>();
         if (headersMap != null) {
-            for (var entry : headersMap.toJavaMap().entrySet()) {
-                String key = entry.getKey() instanceof String s ? s : entry.getKey().toString();
-                String value = entry.getValue() instanceof String s ? s : entry.getValue().toString();
+            for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) headersMap) {
+                String key = entry.key() instanceof String s ? s : entry.key().toString();
+                String value = entry.value() instanceof String s ? s : entry.value().toString();
                 result.put(key, value);
             }
         }

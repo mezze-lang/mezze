@@ -5,8 +5,8 @@
 # Note: Mathematical functions like min, max, pow, sqrt, floor, ceil, round are in std::math::core
 
 # Type conversions
-pub let to_string = { n: Float } ->
-    __native_float_to_string { n = n }
+pub let to_str = { n: Float } ->
+    __native_float_to_str { n = n }
 
 pub let from_int = { n: Int } ->
     __native_float_from_int { n = n }

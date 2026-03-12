@@ -329,11 +329,11 @@ class BytesInterpreterTest {
     }
 
     @Test
-    fun `bytes to_string success`() {
+    fun `bytes to_str success`() {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            match bytes::to_string { b = b } is
+            match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Err { error } -> error
         """)

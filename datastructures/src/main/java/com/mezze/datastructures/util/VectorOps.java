@@ -1,5 +1,6 @@
 package com.mezze.datastructures.util;
 
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import jdk.incubator.vector.*;
 
@@ -17,12 +18,18 @@ import jdk.incubator.vector.*;
 public final class VectorOps {
 
     // Vector species for different types - use preferred (largest available)
+    // @CompilationFinal allows the JIT to treat these as compile-time constants
+    @CompilationFinal
     private static final VectorSpecies<Long> LONG_SPECIES = LongVector.SPECIES_PREFERRED;
+    @CompilationFinal
     private static final VectorSpecies<Double> DOUBLE_SPECIES = DoubleVector.SPECIES_PREFERRED;
+    @CompilationFinal
     private static final VectorSpecies<Integer> INT_SPECIES = IntVector.SPECIES_PREFERRED;
 
     // Threshold below which scalar is faster (cache/setup overhead)
+    @CompilationFinal
     private static final int SIMD_THRESHOLD_LONG = LONG_SPECIES.length() * 2;
+    @CompilationFinal
     private static final int SIMD_THRESHOLD_DOUBLE = DOUBLE_SPECIES.length() * 2;
 
     private VectorOps() {} // Utility class
@@ -1055,6 +1062,305 @@ public final class VectorOps {
         }
 
         return count;
+    }
+
+    // ==================== DIVISION / MODULO ====================
+
+    /**
+     * Element-wise division: result[i] = a[i] / b[i]
+     * Note: Integer division (truncates toward zero).
+     */
+    @TruffleBoundary
+    public static long[] divideLong(long[] a, long[] b) {
+        int length = Math.min(a.length, b.length);
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = a[i] / b[i];
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector va = LongVector.fromArray(LONG_SPECIES, a, i);
+            LongVector vb = LongVector.fromArray(LONG_SPECIES, b, i);
+            va.div(vb).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = a[i] / b[i];
+        }
+
+        return result;
+    }
+
+    /**
+     * Element-wise division: result[i] = a[i] / b[i]
+     */
+    @TruffleBoundary
+    public static double[] divideDouble(double[] a, double[] b) {
+        int length = Math.min(a.length, b.length);
+        double[] result = new double[length];
+
+        if (length < SIMD_THRESHOLD_DOUBLE) {
+            for (int i = 0; i < length; i++) {
+                result[i] = a[i] / b[i];
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = DOUBLE_SPECIES.loopBound(length);
+
+        for (; i < bound; i += DOUBLE_SPECIES.length()) {
+            DoubleVector va = DoubleVector.fromArray(DOUBLE_SPECIES, a, i);
+            DoubleVector vb = DoubleVector.fromArray(DOUBLE_SPECIES, b, i);
+            va.div(vb).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = a[i] / b[i];
+        }
+
+        return result;
+    }
+
+    /**
+     * Element-wise modulo: result[i] = a[i] % b[i]
+     * SIMD modulo via: a - (a / b) * b
+     */
+    @TruffleBoundary
+    public static long[] moduloLong(long[] a, long[] b) {
+        int length = Math.min(a.length, b.length);
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = a[i] % b[i];
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector va = LongVector.fromArray(LONG_SPECIES, a, i);
+            LongVector vb = LongVector.fromArray(LONG_SPECIES, b, i);
+            // a % b = a - (a / b) * b
+            LongVector quotient = va.div(vb);
+            va.sub(quotient.mul(vb)).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = a[i] % b[i];
+        }
+
+        return result;
+    }
+
+    /**
+     * Element-wise modulo: result[i] = a[i] % b[i]
+     * SIMD modulo via: a - floor(a / b) * b
+     */
+    @TruffleBoundary
+    public static double[] moduloDouble(double[] a, double[] b) {
+        int length = Math.min(a.length, b.length);
+        double[] result = new double[length];
+
+        // Modulo for doubles is complex due to floor vs truncation
+        // Use scalar for correctness
+        for (int i = 0; i < length; i++) {
+            result[i] = a[i] % b[i];
+        }
+
+        return result;
+    }
+
+    // ==================== SHIFT OPERATIONS ====================
+
+    /**
+     * Logical left shift: result[i] = a[i] << shift
+     */
+    @TruffleBoundary
+    public static long[] shiftLeftLong(long[] data, int shift) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = data[i] << shift;
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.lanewise(VectorOperators.LSHL, shift).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = data[i] << shift;
+        }
+
+        return result;
+    }
+
+    /**
+     * Logical right shift (unsigned): result[i] = a[i] >>> shift
+     */
+    @TruffleBoundary
+    public static long[] shiftRightLogicalLong(long[] data, int shift) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = data[i] >>> shift;
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.lanewise(VectorOperators.LSHR, shift).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = data[i] >>> shift;
+        }
+
+        return result;
+    }
+
+    /**
+     * Arithmetic right shift (signed): result[i] = a[i] >> shift
+     */
+    @TruffleBoundary
+    public static long[] shiftRightArithmeticLong(long[] data, int shift) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = data[i] >> shift;
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.lanewise(VectorOperators.ASHR, shift).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = data[i] >> shift;
+        }
+
+        return result;
+    }
+
+    /**
+     * Bitwise NOT: result[i] = ~data[i]
+     */
+    @TruffleBoundary
+    public static long[] notLong(long[] data) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = ~data[i];
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.not().intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = ~data[i];
+        }
+
+        return result;
+    }
+
+    /**
+     * Rotate bits left: result[i] = Long.rotateLeft(data[i], distance)
+     */
+    @TruffleBoundary
+    public static long[] rotateLeftLong(long[] data, int distance) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = Long.rotateLeft(data[i], distance);
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.lanewise(VectorOperators.ROL, distance).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = Long.rotateLeft(data[i], distance);
+        }
+
+        return result;
+    }
+
+    /**
+     * Rotate bits right: result[i] = Long.rotateRight(data[i], distance)
+     */
+    @TruffleBoundary
+    public static long[] rotateRightLong(long[] data, int distance) {
+        int length = data.length;
+        long[] result = new long[length];
+
+        if (length < SIMD_THRESHOLD_LONG) {
+            for (int i = 0; i < length; i++) {
+                result[i] = Long.rotateRight(data[i], distance);
+            }
+            return result;
+        }
+
+        int i = 0;
+        int bound = LONG_SPECIES.loopBound(length);
+
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            v.lanewise(VectorOperators.ROR, distance).intoArray(result, i);
+        }
+
+        for (; i < length; i++) {
+            result[i] = Long.rotateRight(data[i], distance);
+        }
+
+        return result;
     }
 
     // ==================== UTILITY ====================

@@ -40,12 +40,12 @@ class AbilityConstraintTest {
     fun `function with Encode ability constraint compiles`() {
         val error = typeCheck("""
             use std::codec::core::{Encode, CodecConfig, default_config}
-            use std::codec::json::{Json, to_string}
+            use std::codec::json::{Json, to_str}
 
             let encode_to_json: { body: 'a } -> String with Encode Json 'a = { body } -> do
                 let result = Encode.encode { val = body, config = default_config }
                 match result is
-                    Ok { val } -> to_string { json = val }
+                    Ok { val } -> to_str { json = val }
                     Err { error } -> "error"
 
             let main = {} -> do

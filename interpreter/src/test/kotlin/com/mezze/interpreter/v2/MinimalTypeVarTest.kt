@@ -1,6 +1,6 @@
 package com.mezze.interpreter.v2
 
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -40,8 +40,8 @@ class MinimalTypeVarTest {
                 [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq<*>
         assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
         assertEquals(2L, seq.get(0))
@@ -65,8 +65,8 @@ class MinimalTypeVarTest {
                 [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq<*>
         assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
         assertEquals(2L, seq.get(0))
@@ -91,8 +91,8 @@ class MinimalTypeVarTest {
                 [r1, r2, r3]
         """
         val result = eval(code)
-        assertTrue(result is MezzeSeq, "Expected MezzeSeq but got ${result?.javaClass?.name}")
-        val seq = result as MezzeSeq
+        assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result?.javaClass?.name}")
+        val seq = result as MezzeSeq<*>
         assertEquals(3, seq.size())
         // Verify the results (unboxed Long values)
         assertEquals(2L, seq.get(0))

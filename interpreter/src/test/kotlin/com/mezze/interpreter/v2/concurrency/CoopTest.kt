@@ -39,14 +39,14 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 # Promise is created but computation not executed yet
                 Async.is_done {p = p}
         """
         val result = eval(code)
-        // In Coop, promises are always "ready" since computation is stored
-        assertEquals(true, result)
+        // With real scheduler, spawn queues task, it's NOT done yet
+        assertEquals(false, result)
     }
 
     @Test

@@ -235,7 +235,7 @@ class IntIntegrationTest {
     void toStringConvertsToString() {
         Object result = MezzeTestHelper.run("""
             use std::int
-            int::to_string { n = 42 }
+            int::to_str { n = 42 }
             """);
         assertEquals("42", result);
     }

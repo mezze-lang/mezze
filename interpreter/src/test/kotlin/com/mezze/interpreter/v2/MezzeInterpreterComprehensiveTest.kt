@@ -308,11 +308,11 @@ class MezzeInterpreterComprehensiveTest {
     @Test
     fun testNativeBuiltinFunctions() {
         // Note: stringToInt doesn't exist in the standard library
-        // This test only checks int::to_string which is available
+        // This test only checks int::to_str which is available
         val source = """
             use std::int
 
-            let str = int::to_string {n = 42}
+            let str = int::to_str {n = 42}
             str
         """.trimIndent()
 

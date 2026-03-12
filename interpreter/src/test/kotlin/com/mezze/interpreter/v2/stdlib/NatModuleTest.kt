@@ -307,30 +307,30 @@ class NatModuleTest {
     }
 
     @Test
-    fun `test nat to_string - zero`() {
+    fun `test nat to_str - zero`() {
         val source = """
             use std::nat
-            nat::to_string { n = 0n }
+            nat::to_str { n = 0n }
         """.trimIndent()
 
         assertEquals("0", eval(source))
     }
 
     @Test
-    fun `test nat to_string - positive`() {
+    fun `test nat to_str - positive`() {
         val source = """
             use std::nat
-            nat::to_string { n = 42n }
+            nat::to_str { n = 42n }
         """.trimIndent()
 
         assertEquals("42", eval(source))
     }
 
     @Test
-    fun `test nat to_string - large`() {
+    fun `test nat to_str - large`() {
         val source = """
             use std::nat
-            nat::to_string { n = 12345n }
+            nat::to_str { n = 12345n }
         """.trimIndent()
 
         assertEquals("12345", eval(source))

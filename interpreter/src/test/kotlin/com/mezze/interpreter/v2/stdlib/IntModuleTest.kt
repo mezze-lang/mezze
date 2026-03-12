@@ -69,10 +69,10 @@ class IntModuleTest {
     }
 
     @Test
-    fun `test int to_string function`() {
+    fun `test int to_str function`() {
         val source = """
             use std::int
-            int::to_string { n = 42 }
+            int::to_str { n = 42 }
         """.trimIndent()
 
         assertEquals("42", eval(source))

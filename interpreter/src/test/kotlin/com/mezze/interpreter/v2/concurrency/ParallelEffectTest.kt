@@ -1,8 +1,8 @@
 package com.mezze.interpreter.v2.concurrency
 
 import com.mezze.interpreter.v2.MezzeTestHelper
-import com.mezze.interpreter.v2.values.MezzeList
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.list.MezzeList
+import com.mezze.datastructures.seq.MezzeSeq
 import com.mezze.interpreter.v2.values.MezzeRecord
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -46,7 +46,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 2}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(5, elements.size)
         assertEquals(2L, elements[0])
@@ -66,7 +66,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x + 10}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(5, elements.size)
         assertEquals(15L, elements[0])
@@ -86,7 +86,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 2}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         assertEquals(0, result.size())
     }
 
@@ -104,7 +104,7 @@ class ParallelEffectTest {
                 let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(2L, elements[0])
@@ -122,7 +122,7 @@ class ParallelEffectTest {
                 let result = Parallel.filter {xs = xs, f = {x} -> x >= 10}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(10L, elements[0])
@@ -456,7 +456,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 10}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(10L, elements[0])
@@ -474,7 +474,7 @@ class ParallelEffectTest {
                 let result = Parallel.filter {xs = xs, f = {x} -> x > 2}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(3L, elements[0])
@@ -528,7 +528,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 2}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(5, elements.size)
         assertEquals(2L, elements[0])
@@ -548,7 +548,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 3}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(6, elements.size)
         assertEquals(3L, elements[0])
@@ -585,7 +585,7 @@ class ParallelEffectTest {
                 let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(5, elements.size)
         assertEquals(2L, elements[0])
@@ -691,7 +691,7 @@ class ParallelEffectTest {
                 let squared = Parallel.map {xs = evens, f = {x} -> x * x}
                 squared
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(4L, elements[0])
@@ -765,7 +765,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 2}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(5, elements.size)
         assertEquals(2L, elements[0])
@@ -785,7 +785,7 @@ class ParallelEffectTest {
                 let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(4, elements.size)
         assertEquals(2L, elements[0])
@@ -881,7 +881,7 @@ class ParallelEffectTest {
                 let result = Parallel.map {xs = xs, f = {x} -> x * 10}
                 result
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(8, elements.size)
         assertEquals(10L, elements[0])

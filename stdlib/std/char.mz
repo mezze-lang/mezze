@@ -22,8 +22,8 @@ pub let to_int = { c } ->
     __native_char_to_int { c = c }
 
 # Convert a character to a single-character string
-pub let to_string = { c } ->
-    __native_char_to_string { c = c }
+pub let to_str = { c } ->
+    __native_char_to_str { c = c }
 
 # === Case Conversion ===
 

@@ -97,7 +97,7 @@ class AbilityInterpreterTest {
             }
 
             impl Serializer Int where {
-              serialize : {val: Int} -> String = {val} -> int::to_string {n = val}
+              serialize : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             1
@@ -115,7 +115,7 @@ class AbilityInterpreterTest {
             }
 
             impl Encoder Int where {
-              encode : {val: Int} -> String = {val} -> int::to_string {n = val}
+              encode : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             42

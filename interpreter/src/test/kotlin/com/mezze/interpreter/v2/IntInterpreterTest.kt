@@ -254,10 +254,10 @@ class IntInterpreterTest {
     // ========================================
 
     @Test
-    fun `to_string converts to string`() {
+    fun `to_str converts to string`() {
         val code = """
             use std::int
-            int::to_string { n = 42 }
+            int::to_str { n = 42 }
         """
         val result = eval(code)
         assertEquals("42", result)

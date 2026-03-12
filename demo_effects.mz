@@ -27,7 +27,7 @@ let process_greeting = { name } -> do
 let calculate_sum = { a, b } -> do
     Log.debug { msg = "Starting calculation..." }
     let result = a + b
-    Log.info { msg = "Result: $(int::to_string { val = result })" }
+    Log.info { msg = "Result: $(int::to_str { val = result })" }
     result
 
 # Write to a file (demonstrates FileSystem effect)
@@ -50,7 +50,7 @@ let demo = {} -> do
     Log.println { msg = "Demo 2: Calculation" }
     Log.println { msg = "Calculating 42 + 58..." }
     let sum = calculate_sum { a = 42, b = 58 }
-    Log.println { msg = int::to_string {val = sum} }
+    Log.println { msg = int::to_str {val = sum} }
 
     # Demo 3: File Writing
     Log.println { msg = "Demo 3: FileSystem Effect" }

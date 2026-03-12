@@ -74,12 +74,12 @@ class CharModuleTest {
     }
 
     @Test
-    fun `test char to_string`() {
+    fun `test char to_str`() {
         val result = eval("""
             use std::char
             let c = char::from_int { code = 65 }
             match c is
-                Some { val } -> char::to_string { c = val }
+                Some { val } -> char::to_str { c = val }
                 None -> "error"
         """)
         assertEquals("A", result)
@@ -93,7 +93,7 @@ class CharModuleTest {
             use std::char
             let c = char::from_int { code = 97 }
             match c is
-                Some { val } -> char::to_string { c = char::to_upper { c = val } }
+                Some { val } -> char::to_str { c = char::to_upper { c = val } }
                 None -> "error"
         """)
         assertEquals("A", result)
@@ -105,7 +105,7 @@ class CharModuleTest {
             use std::char
             let c = char::from_int { code = 65 }
             match c is
-                Some { val } -> char::to_string { c = char::to_lower { c = val } }
+                Some { val } -> char::to_str { c = char::to_lower { c = val } }
                 None -> "error"
         """)
         assertEquals("a", result)

@@ -92,25 +92,6 @@ object ContinuationTypes {
             MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
         )
 
-        // __native_continuation_fork: { delim: 'c, cont: { value: 'a } -> 'b, values: ['a] } -> ['b]
-        // Multi-shot: resumes continuation once for each value, collects all results
-        // This is the key primitive for implementing nondeterministic choice (amb/backtracking)
-        context["__native_continuation_fork"] = MezzeType.FunctionType(
-            // Parameter type: { delim: 'c, cont: { value: 'a } -> 'b, values: ['a] }
-            MezzeType.RecordType(mapOf(
-                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c")),
-                "cont" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-                    )),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-                ),
-                "values" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
-            )),
-            // Return type: ['b] (array of all results from resuming with each value)
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
-        )
-
         // __native_continuation_abort: { delim: 'c } -> 'b
         // Aborts the current computation without resuming
         context["__native_continuation_abort"] = MezzeType.FunctionType(
@@ -165,6 +146,35 @@ object ContinuationTypes {
             )),
             // Return type: {} (unit)
             MezzeType.RecordType(emptyMap())
+        )
+
+        // __native_continuation_run_suspendable: { thunk: {} -> 'a } -> | Completed {value: 'a}, Suspended {value: 'v, cont: {value: 'r} -> 'a} |
+        // Runs a thunk and catches any suspension, returning either Completed or Suspended.
+        // This is THE KEY PRIMITIVE for generators - it catches ContinuationSuspendedException
+        // and returns the suspended value + continuation in a usable form.
+        context["__native_continuation_run_suspendable"] = MezzeType.FunctionType(
+            // Parameter type: { thunk: {} -> 'a }
+            MezzeType.RecordType(mapOf(
+                "thunk" to MezzeType.FunctionType(
+                    MezzeType.RecordType(emptyMap()),
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                )
+            )),
+            // Return type: | Completed {value: 'a}, Suspended {value: 'v, cont: {value: 'r} -> 'a} |
+            MezzeType.VariantType(mapOf(
+                "Completed" to MezzeType.RecordType(mapOf(
+                    "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                )),
+                "Suspended" to MezzeType.RecordType(mapOf(
+                    "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("v")),
+                    "cont" to MezzeType.FunctionType(
+                        MezzeType.RecordType(mapOf(
+                            "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("r"))
+                        )),
+                        MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                    )
+                ))
+            ))
         )
     }
 }

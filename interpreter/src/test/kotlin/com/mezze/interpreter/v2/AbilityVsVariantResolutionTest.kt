@@ -227,12 +227,12 @@ class AbilityVsVariantResolutionTest {
     fun `test ability in lambda with map`() {
         val source = """
             let numbers = [1, 2, 3, 4, 5]
-            let to_strings = {xs} -> match xs is
+            let to_strs = {xs} -> match xs is
                 [] -> []
-                [x, ...rest] -> [...to_strings {xs = rest}, Inspect.to_str {val = x}]
+                [x, ...rest] -> [...to_strs {xs = rest}, Inspect.to_str {val = x}]
 
             let main = {} -> do
-                let strings = to_strings {xs = numbers}
+                let strings = to_strs {xs = numbers}
                 {}
         """.trimIndent()
 

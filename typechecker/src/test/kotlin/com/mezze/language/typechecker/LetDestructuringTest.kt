@@ -269,7 +269,7 @@ class LetDestructuringTest {
 
             let point = { x = 10, y = 20 }
             let { x, y } = point
-            let result = int::to_string { n = x + y }
+            let result = int::to_str { n = x + y }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

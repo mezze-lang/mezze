@@ -1,7 +1,9 @@
 package com.mezze.interpreter.v2.nodes.builtin.concurrency;
 
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage.Env;
@@ -1497,14 +1499,24 @@ public final class ConcurrencyNatives {
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
         if (store == null || store.length == 0) return MezzeSeq.fromArray(new Object[0]);
-        java.util.List<Object> results = new java.util.ArrayList<>();
-        for (Object x : store) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
+
+        // First pass: determine which elements to keep
+        boolean[] keep = new boolean[store.length];
+        int count = 0;
+        for (int i = 0; i < store.length; i++) {
+            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
             if (result instanceof Boolean b && b) {
-                results.add(x);
+                keep[i] = true;
+                count++;
             }
         }
-        return MezzeSeq.fromArray(results.toArray());
+        // Second pass: collect matching elements
+        Object[] results = new Object[count];
+        int idx = 0;
+        for (int i = 0; i < store.length; i++) {
+            if (keep[i]) results[idx++] = store[i];
+        }
+        return MezzeSeq.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1595,25 +1607,37 @@ public final class ConcurrencyNatives {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
         Object[] store = xs.toArray();
-        if (store == null) {
+        if (store == null || store.length == 0) {
             return MezzeRecord.fromFields(
                 new String[]{"satisfying", "notSatisfying"},
                 new Object[]{MezzeSeq.fromArray(new Object[0]), MezzeSeq.fromArray(new Object[0])}
             );
         }
-        java.util.List<Object> trueList = new java.util.ArrayList<>();
-        java.util.List<Object> falseList = new java.util.ArrayList<>();
-        for (Object x : store) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
+
+        // First pass: determine which elements match
+        boolean[] matches = new boolean[store.length];
+        int matchCount = 0;
+        for (int i = 0; i < store.length; i++) {
+            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
             if (result instanceof Boolean b && b) {
-                trueList.add(x);
+                matches[i] = true;
+                matchCount++;
+            }
+        }
+        // Second pass: collect into exact-sized arrays
+        Object[] trueArr = new Object[matchCount];
+        Object[] falseArr = new Object[store.length - matchCount];
+        int tIdx = 0, fIdx = 0;
+        for (int i = 0; i < store.length; i++) {
+            if (matches[i]) {
+                trueArr[tIdx++] = store[i];
             } else {
-                falseList.add(x);
+                falseArr[fIdx++] = store[i];
             }
         }
         return MezzeRecord.fromFields(
             new String[]{"matching", "not_matching"},
-            new Object[]{MezzeSeq.fromArray(trueList.toArray()), MezzeSeq.fromArray(falseList.toArray())}
+            new Object[]{MezzeSeq.fromArray(trueArr), MezzeSeq.fromArray(falseArr)}
         );
     }
 
@@ -1690,7 +1714,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd; i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     results[i] = callNode.call(callTarget, callArgs);
                 }
             }).virtual(true).build();
@@ -1719,7 +1743,7 @@ public final class ConcurrencyNatives {
 
         for (int i = 0; i < store.length; i++) {
             // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+            callArgs[closure.length] = MezzeRecord.wrapX(store[i]);
             results[i] = callNode.call(callTarget, callArgs);
         }
         return MezzeSeq.fromArray(results);
@@ -1765,7 +1789,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd; i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     keep[i] = result instanceof Boolean b && b;
                 }
@@ -1783,12 +1807,15 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel filter interrupted", e);
         }
 
-        // Collect results
-        List<Object> results = new ArrayList<>();
+        // Count matches first, then allocate exact-sized array
+        int count = 0;
+        for (boolean k : keep) if (k) count++;
+        Object[] results = new Object[count];
+        int idx = 0;
         for (int i = 0; i < store.length; i++) {
-            if (keep[i]) results.add(store[i]);
+            if (keep[i]) results[idx++] = store[i];
         }
-        return MezzeSeq.fromArray(results.toArray());
+        return MezzeSeq.fromArray(results);
     }
 
     private static MezzeSeq sequentialFilter(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
@@ -1797,16 +1824,24 @@ public final class ConcurrencyNatives {
         Object[] callArgs = getCallArgsBuffer(closure.length + 1);
         System.arraycopy(closure, 0, callArgs, 0, closure.length);
 
-        List<Object> results = new ArrayList<>();
-        for (Object x : store) {
-            // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+        // First pass: determine which elements to keep
+        boolean[] keep = new boolean[store.length];
+        int count = 0;
+        for (int i = 0; i < store.length; i++) {
+            callArgs[closure.length] = MezzeRecord.wrapX(store[i]);
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
-                results.add(x);
+                keep[i] = true;
+                count++;
             }
         }
-        return MezzeSeq.fromArray(results.toArray());
+        // Second pass: collect matching elements
+        Object[] results = new Object[count];
+        int idx = 0;
+        for (int i = 0; i < store.length; i++) {
+            if (keep[i]) results[idx++] = store[i];
+        }
+        return MezzeSeq.fromArray(results);
     }
 
     private static final String[] LEFT_RIGHT_FIELDS = new String[]{"left", "right"};
@@ -1854,7 +1889,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd; i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[mapClosureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[mapClosureLen] = MezzeRecord.wrapX(store[i]);
                     mapped[i] = callNode.call(mapTarget, callArgs);
                 }
             }).virtual(true).build();
@@ -1894,7 +1929,7 @@ public final class ConcurrencyNatives {
         Object[] mapped = new Object[store.length];
         for (int i = 0; i < store.length; i++) {
             // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[mapClosure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+            callArgs[mapClosure.length] = MezzeRecord.wrapX(store[i]);
             mapped[i] = callNode.call(mapTarget, callArgs);
         }
 
@@ -1975,7 +2010,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd && allTrue.get(); i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (!(result instanceof Boolean bool && bool)) {
                         allTrue.set(false);
@@ -2007,7 +2042,7 @@ public final class ConcurrencyNatives {
 
         for (Object x : store) {
             // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            callArgs[closure.length] = MezzeRecord.wrapX(x);
             Object result = callNode.call(callTarget, callArgs);
             if (!(result instanceof Boolean b && b)) {
                 return false;
@@ -2058,7 +2093,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd && !foundTrue.get(); i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (result instanceof Boolean bool && bool) {
                         foundTrue.set(true);
@@ -2090,7 +2125,7 @@ public final class ConcurrencyNatives {
 
         for (Object x : store) {
             // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            callArgs[closure.length] = MezzeRecord.wrapX(x);
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
                 return true;
@@ -2418,7 +2453,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd && found.get() == null; i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (result instanceof Boolean bool && bool) {
                         found.compareAndSet(null, store[i]);
@@ -2451,7 +2486,7 @@ public final class ConcurrencyNatives {
 
         for (Object x : store) {
             // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            callArgs[closure.length] = MezzeRecord.wrapX(x);
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
                 return createSome(x);
@@ -2505,7 +2540,7 @@ public final class ConcurrencyNatives {
 
                 for (int i = batchStart; i < batchEnd; i++) {
                     // Wrap element in record - callbacks expect {x} -> ...
-                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     matches[i] = result instanceof Boolean bool && bool;
                 }
@@ -2523,19 +2558,22 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel partition interrupted", e);
         }
 
-        // Collect results
-        List<Object> matching = new ArrayList<>();
-        List<Object> notMatching = new ArrayList<>();
+        // Count matches first, then allocate exact-sized arrays
+        int matchCount = 0;
+        for (boolean m : matches) if (m) matchCount++;
+        Object[] matchingArr = new Object[matchCount];
+        Object[] notMatchingArr = new Object[store.length - matchCount];
+        int mIdx = 0, nIdx = 0;
         for (int i = 0; i < store.length; i++) {
             if (matches[i]) {
-                matching.add(store[i]);
+                matchingArr[mIdx++] = store[i];
             } else {
-                notMatching.add(store[i]);
+                notMatchingArr[nIdx++] = store[i];
             }
         }
 
         return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
-            new Object[]{MezzeSeq.fromArray(matching.toArray()), MezzeSeq.fromArray(notMatching.toArray())});
+            new Object[]{MezzeSeq.fromArray(matchingArr), MezzeSeq.fromArray(notMatchingArr)});
     }
 
     private static MezzeRecord sequentialPartition(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
@@ -2544,20 +2582,30 @@ public final class ConcurrencyNatives {
         Object[] callArgs = getCallArgsBuffer(closure.length + 1);
         System.arraycopy(closure, 0, callArgs, 0, closure.length);
 
-        List<Object> matching = new ArrayList<>();
-        List<Object> notMatching = new ArrayList<>();
-        for (Object x : store) {
-            // Wrap element in record - callbacks expect {x} -> ...
-            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+        // First pass: determine which elements match
+        boolean[] matches = new boolean[store.length];
+        int matchCount = 0;
+        for (int i = 0; i < store.length; i++) {
+            callArgs[closure.length] = MezzeRecord.wrapX(store[i]);
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
-                matching.add(x);
+                matches[i] = true;
+                matchCount++;
+            }
+        }
+        // Second pass: collect into exact-sized arrays
+        Object[] matchingArr = new Object[matchCount];
+        Object[] notMatchingArr = new Object[store.length - matchCount];
+        int mIdx = 0, nIdx = 0;
+        for (int i = 0; i < store.length; i++) {
+            if (matches[i]) {
+                matchingArr[mIdx++] = store[i];
             } else {
-                notMatching.add(x);
+                notMatchingArr[nIdx++] = store[i];
             }
         }
         return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
-            new Object[]{MezzeSeq.fromArray(matching.toArray()), MezzeSeq.fromArray(notMatching.toArray())});
+            new Object[]{MezzeSeq.fromArray(matchingArr), MezzeSeq.fromArray(notMatchingArr)});
     }
 
     @TruffleBoundary
@@ -2798,11 +2846,11 @@ public final class ConcurrencyNatives {
         if (value instanceof MezzeList list) return list;
         // Handle MezzeSeq (Vavr Vector) - convert to MezzeList
         if (value instanceof MezzeSeq seq) {
-            return MezzeList.fromArray(seq.toJavaArray());
+            return MezzeList.of(seq.toArray());
         }
         // Handle array literals (Object[]) - convert to MezzeList
         if (value instanceof Object[] arr) {
-            return MezzeList.fromArray(arr);
+            return MezzeList.of(arr);
         }
         throw new RuntimeException("Expected List for field '" + fieldName + "', got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));

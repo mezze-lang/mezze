@@ -4,7 +4,7 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.interop.TruffleObject;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
@@ -30,7 +30,9 @@ public final class MezzeTVar implements TruffleObject {
     private final long id;
 
     private final AtomicReference<VersionedValue> versionedValue;
-    private final ConcurrentLinkedQueue<Thread> waiters;
+    // Using ConcurrentHashMap.newKeySet() for O(1) add/remove operations
+    // instead of ConcurrentLinkedQueue which has O(n) remove
+    private final ConcurrentHashMap.KeySetView<Thread, Boolean> waiters;
 
     /**
      * A versioned value for MVCC.
@@ -43,7 +45,7 @@ public final class MezzeTVar implements TruffleObject {
     public MezzeTVar(Object initialValue) {
         this.id = NEXT_ID.getAndIncrement();
         this.versionedValue = new AtomicReference<>(new VersionedValue(0L, initialValue));
-        this.waiters = new ConcurrentLinkedQueue<>();
+        this.waiters = ConcurrentHashMap.newKeySet();
     }
 
     /**
@@ -95,10 +97,11 @@ public final class MezzeTVar implements TruffleObject {
     }
 
     private void wakeWaiters() {
-        Thread waiter;
-        while ((waiter = waiters.poll()) != null) {
+        // Iterate and unpark all waiters, then clear
+        for (Thread waiter : waiters) {
             LockSupport.unpark(waiter);
         }
+        waiters.clear();
     }
 
     /**

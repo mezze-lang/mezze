@@ -253,8 +253,8 @@ public class UserDefinedAbilityTest {
     @Test
     void testInspectInLambda() {
         Object result = MezzeTestHelper.run("""
-            let to_string = {val} -> Inspect.to_str {val = val}
-            to_string {val = 42}
+            let to_str = {val} -> Inspect.to_str {val = val}
+            to_str {val = 42}
             """);
         assertEquals("42", result);
     }
@@ -282,7 +282,7 @@ public class UserDefinedAbilityTest {
             }
 
             impl Serializer Int where {
-                serialize: {val: Int} -> String = {val} -> int::to_string {n = val}
+                serialize: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             Serializer.serialize {val = 123}

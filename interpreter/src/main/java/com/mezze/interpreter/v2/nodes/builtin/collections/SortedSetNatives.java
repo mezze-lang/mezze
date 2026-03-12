@@ -1,18 +1,23 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
  * Native SortedSet operations - ULTRA PERFORMANT.
  *
- * Now uses com.mezze.interpreter.v2.values.MezzeSortedSet which provides:
+ * Now uses com.mezze.datastructures.sorted.MezzeSortedSet which provides:
  * - O(log n) contains (binary search)
  * - O(n) add, remove (due to array copy)
  * - O(1) min, max
  *
  * All operations are immutable (return new sets).
  */
+@SuppressWarnings({"unchecked", "rawtypes"})
 public final class SortedSetNatives {
 
     private SortedSetNatives() {}
@@ -25,14 +30,14 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeSortedSet singleton(Object element) {
-        return MezzeSortedSet.of(element);
+        return MezzeSortedSet.<Comparable>empty().addObject(element);
     }
 
     @TruffleBoundary
     public static MezzeSortedSet fromList(MezzeList list) {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (int i = 0; i < list.size(); i++) {
-            result = result.add(list.get(i));
+            result = result.addObject(list.get(i));
         }
         return result;
     }
@@ -41,7 +46,7 @@ public final class SortedSetNatives {
     public static MezzeSortedSet fromSet(MezzeSet set) {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
-            result = result.add(elem);
+            result = result.addObject(elem);
         }
         return result;
     }
@@ -58,17 +63,17 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static boolean contains(MezzeSortedSet set, Object element) {
-        return set.contains(element);
+        return set.containsObject(element);
     }
 
     @TruffleBoundary
     public static MezzeSortedSet add(MezzeSortedSet set, Object element) {
-        return set.add(element);
+        return set.addObject(element);
     }
 
     @TruffleBoundary
     public static MezzeSortedSet remove(MezzeSortedSet set, Object element) {
-        return set.remove(element);
+        return set.removeObject(element);
     }
 
     // ==================== Min/Max Operations ====================
@@ -102,8 +107,9 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public static MezzeSortedSet difference(MezzeSortedSet set1, MezzeSortedSet set2) {
-        return set1.diff(set2);
+        return set1.difference(set2);
     }
 
     @TruffleBoundary
@@ -124,12 +130,16 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeSortedSet fromArray(Object[] arr) {
-        return MezzeSortedSet.of(arr);
+        MezzeSortedSet result = MezzeSortedSet.empty();
+        for (Object elem : arr) {
+            result = result.addObject(elem);
+        }
+        return result;
     }
 
     @TruffleBoundary
     public static MezzeList toList(MezzeSortedSet set) {
-        return MezzeList.fromArray(toArray(set));
+        return MezzeList.of(toArray(set));
     }
 
     @TruffleBoundary
@@ -146,7 +156,7 @@ public final class SortedSetNatives {
         for (Object element : set) {
             Object res = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, element));
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.add(element);
+                result = result.addObject(element);
             }
         }
         return result;
@@ -168,7 +178,7 @@ public final class SortedSetNatives {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object element : set) {
             Object mapped = callNode.call(f.getCallTarget(), prepareArgs(f, element));
-            result = result.add(mapped);
+            result = result.addObject(mapped);
         }
         return result;
     }
@@ -324,9 +334,9 @@ public final class SortedSetNatives {
         for (Object elem : set) {
             Object result = callNode.call(predicate.getCallTarget(), prepareArgs(predicate, elem));
             if (result instanceof Boolean && (Boolean) result) {
-                passSet = passSet.add(elem);
+                passSet = passSet.addObject(elem);
             } else {
-                failSet = failSet.add(elem);
+                failSet = failSet.addObject(elem);
             }
         }
         return MezzeRecord.fromFields(
@@ -373,7 +383,7 @@ public final class SortedSetNatives {
         int count = 0;
         for (Object elem : set) {
             if (count >= n) break;
-            result = result.add(elem);
+            result = result.addObject(elem);
             count++;
         }
         return result;
@@ -385,7 +395,7 @@ public final class SortedSetNatives {
         int count = 0;
         for (Object elem : set) {
             if (count >= n) {
-                result = result.add(elem);
+                result = result.addObject(elem);
             }
             count++;
         }
@@ -398,7 +408,7 @@ public final class SortedSetNatives {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
             if (compare(elem, lo) >= 0 && compare(elem, hi) <= 0) {
-                result = result.add(elem);
+                result = result.addObject(elem);
             }
         }
         return result;
@@ -410,17 +420,24 @@ public final class SortedSetNatives {
     public static MezzeSortedSet symmetricDifference(MezzeSortedSet s1, MezzeSortedSet s2) {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : s1) {
-            if (!s2.contains(elem)) result = result.add(elem);
+            if (!s2.containsObject(elem)) result = result.addObject(elem);
         }
         for (Object elem : s2) {
-            if (!s1.contains(elem)) result = result.add(elem);
+            if (!s1.containsObject(elem)) result = result.addObject(elem);
         }
         return result;
     }
 
     @TruffleBoundary
     public static MezzeSortedSet headSet(MezzeSortedSet set, Object toElement) {
-        return set.below(toElement);
+        // headSet is strictly less than toElement (Java standard behavior)
+        MezzeSortedSet result = MezzeSortedSet.empty();
+        for (Object elem : set) {
+            if (compare(elem, toElement) < 0) {
+                result = result.addObject(elem);
+            }
+        }
+        return result;
     }
 
     @TruffleBoundary
@@ -429,7 +446,7 @@ public final class SortedSetNatives {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
             if (compare(elem, fromElement) >= 0) {
-                result = result.add(elem);
+                result = result.addObject(elem);
             }
         }
         return result;
@@ -440,7 +457,7 @@ public final class SortedSetNatives {
         MezzeSortedSet result = MezzeSortedSet.empty();
         for (Object elem : set) {
             if (compare(elem, lo) >= 0 && compare(elem, hi) < 0) {
-                result = result.add(elem);
+                result = result.addObject(elem);
             }
         }
         return result;
@@ -483,7 +500,7 @@ public final class SortedSetNatives {
                 // Some wraps value in { val = value }, so extract it
                 Object payload = v.getPayloadValue();
                 if (payload instanceof MezzeRecord rec) {
-                    result = result.add(rec.getField("val"));
+                    result = result.addObject(rec.getField("val"));
                 }
             }
         }
@@ -526,7 +543,7 @@ public final class SortedSetNatives {
                 }
             }
         }
-        return MezzeList.fromArray(result.toArray());
+        return MezzeList.of(result.toArray());
     }
 
     // ==================== Helper Methods ====================

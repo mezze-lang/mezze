@@ -2,7 +2,12 @@ package com.mezze.datastructures.sorted;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.InvalidArrayIndexException;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -16,6 +21,7 @@ import java.util.Objects;
  *
  * @param <A> Element type (must be Comparable)
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObject, Iterable<A> {
 
     @CompilationFinal(dimensions = 1)
@@ -153,6 +159,14 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      */
     @TruffleBoundary
     private int binarySearch(A elem) {
+        return binarySearchObject(elem);
+    }
+
+    /**
+     * Binary search for element (raw type version).
+     */
+    @TruffleBoundary
+    private int binarySearchObject(Object elem) {
         int low = 0;
         int high = elements.length - 1;
 
@@ -171,6 +185,71 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         }
 
         return -(low + 1);
+    }
+
+    // ===== RAW TYPE METHODS (for interpreter use) =====
+
+    /**
+     * Returns true if the element is present (raw type version).
+     */
+    @TruffleBoundary
+    public boolean containsObject(Object elem) {
+        return binarySearchObject(elem) >= 0;
+    }
+
+    /**
+     * Returns a new sorted set with the element added (raw type version).
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSortedSet<A> addObject(Object elem) {
+        int idx = binarySearchObject(elem);
+        if (idx >= 0) {
+            return this;  // Already present
+        }
+
+        int insertPos = -(idx + 1);
+        Object[] newElements = new Object[elements.length + 1];
+        System.arraycopy(elements, 0, newElements, 0, insertPos);
+        newElements[insertPos] = elem;
+        System.arraycopy(elements, insertPos, newElements, insertPos + 1, elements.length - insertPos);
+
+        return new MezzeSortedSet<>(newElements, comparator);
+    }
+
+    /**
+     * Returns a new sorted set with the element removed (raw type version).
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSortedSet<A> removeObject(Object elem) {
+        int idx = binarySearchObject(elem);
+        if (idx < 0) {
+            return this;  // Not present
+        }
+
+        if (elements.length == 1) {
+            return empty();
+        }
+
+        Object[] newElements = new Object[elements.length - 1];
+        System.arraycopy(elements, 0, newElements, 0, idx);
+        System.arraycopy(elements, idx + 1, newElements, idx, elements.length - idx - 1);
+
+        return new MezzeSortedSet<>(newElements, comparator);
+    }
+
+    /**
+     * Creates a sorted set from raw Object iterable (for interpreter use).
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public static <A extends Comparable<A>> MezzeSortedSet<A> fromIterable(Iterable<?> elements) {
+        MezzeSortedSet<A> result = empty();
+        for (Object elem : elements) {
+            result = result.addObject(elem);
+        }
+        return result;
     }
 
     /**
@@ -548,5 +627,85 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     @Override
     public int hashCode() {
         return Arrays.hashCode(elements);
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasArrayElements() {
+        return true;
+    }
+
+    @ExportMessage
+    long getArraySize() {
+        return elements.length;
+    }
+
+    @ExportMessage
+    boolean isArrayElementReadable(long index) {
+        return index >= 0 && index < elements.length;
+    }
+
+    @ExportMessage
+    Object readArrayElement(long index) throws InvalidArrayIndexException {
+        if (index < 0 || index >= elements.length) {
+            throw InvalidArrayIndexException.create(index);
+        }
+        return elements[(int) index];
+    }
+
+    @ExportMessage
+    boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new SortedSetIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class SortedSetIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        SortedSetIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 }

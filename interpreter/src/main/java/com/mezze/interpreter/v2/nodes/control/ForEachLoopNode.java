@@ -1,8 +1,8 @@
 package com.mezze.interpreter.v2.nodes.control;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeSeq;
-import com.mezze.interpreter.v2.values.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;

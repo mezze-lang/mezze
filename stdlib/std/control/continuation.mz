@@ -23,12 +23,14 @@ pub newtype Delim = Delim __NativeDelim
 #   'suspend - type of values passed to suspend_with (yielded/suspended value)
 #   'resume - type of values passed to resume (continuation input)
 #   'result - type returned by the continuation (result type)
+#
+# Note: These are ONE-SHOT continuations. Each captured continuation can only
+# be resumed once. Attempting to resume twice will result in undefined behavior.
 pub type Continuation 'suspend 'resume 'result = {
     capture: {} -> ({ value: 'resume } -> 'result),
     suspend: {} -> 'resume,
     suspend_with: { value: 'suspend } -> 'result,
     resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
-    fork: { cont: { value: 'resume } -> 'result, values: ['resume] } -> ['result],
     abort: {} -> 'result,
     extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result }),
     reset: {} -> {}
@@ -37,6 +39,9 @@ pub type Continuation 'suspend 'resume 'result = {
 # Create a new Continuation record with bound methods.
 # Returns a Continuation record with all methods bound to the same delimiter.
 # IMPORTANT: Call cont.reset {} when done to clean up the delimiter stack.
+#
+# These are ONE-SHOT continuations - each captured continuation can only be
+# resumed once.
 pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
     let delim_handle = __native_continuation_delimit {}
     let _ = __native_continuation_activate { delim = delim_handle }
@@ -45,7 +50,6 @@ pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
         suspend = {} -> __native_continuation_suspend_with { delim = delim_handle, value = {} },
         suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
         resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
-        fork = { cont, values } -> __native_continuation_fork { delim = delim_handle, cont = cont, values = values },
         abort = {} -> __native_continuation_abort { delim = delim_handle },
         extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended },
         reset = {} -> __native_continuation_deactivate { delim = delim_handle }
@@ -75,14 +79,10 @@ pub let suspend_with: { delim: Delim, value: 'a } -> 'b = { delim, value } ->
         Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = value }
 
 # Resume a captured continuation with a value.
+# NOTE: One-shot only - each continuation can only be resumed once.
 pub let resume: { delim: Delim, cont: { value: 'a } -> 'b, value: 'a } -> 'b = { delim, cont, value } ->
     match delim is
         Delim { val = handle } -> __native_continuation_resume { delim = handle, cont = cont, value = value }
-
-# Fork a continuation, running it multiple times with different values.
-pub let fork: { delim: Delim, cont: { value: 'a } -> 'b, values: ['a] } -> ['b] = { delim, cont, values } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_fork { delim = handle, cont = cont, values = values }
 
 # Abort the current continuation, discarding it entirely.
 pub let abort: { delim: Delim } -> 'a = { delim } ->
@@ -94,3 +94,34 @@ pub let abort: { delim: Delim } -> 'a = { delim } ->
 pub let reset: { delim: Delim } -> {} = { delim } ->
     match delim is
         Delim { val = handle } -> __native_continuation_deactivate { delim = handle }
+
+# =============================================================================
+# Suspendable execution
+# =============================================================================
+
+# Result type for run_suspendable
+# - Completed {value}: The thunk ran to completion and returned value
+# - Suspended {value, cont}: The thunk suspended via suspend_with with value,
+#   and cont is the continuation to resume
+pub type SuspendResult 'a 'v 'r = | Completed {value: 'a}, Suspended {value: 'v, cont: {value: 'r} -> 'a} |
+
+# Run a thunk and catch any suspension.
+#
+# This is THE KEY PRIMITIVE for generators and coroutines. It runs a thunk
+# (zero-argument function) and catches any ContinuationSuspendedException
+# thrown by suspend_with operations.
+#
+# Returns:
+# - Completed {value} if the thunk completes normally
+# - Suspended {value, cont} if the thunk suspends via suspend_with
+#
+# Example:
+#   let cont = continuation::new {}
+#   match run_suspendable {thunk = my_generator} is
+#       Completed {value} -> value
+#       Suspended {value, cont} -> do
+#           # Process yielded value
+#           # Resume with: cont {value = resume_value}
+#           ...
+pub let run_suspendable: {thunk: {} -> 'a} -> SuspendResult 'a 'v 'r =
+    {thunk} -> __native_continuation_run_suspendable {thunk = thunk}

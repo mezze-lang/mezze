@@ -49,7 +49,7 @@ class AbilityTypeCheckerTest {
             }
 
             impl Encoder Int where {
-              encode : {val: Int} -> String = {val} -> int::to_string {n = val}
+              encode : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
         

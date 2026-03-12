@@ -2,8 +2,8 @@ package com.mezze.interpreter.v2.concurrency
 
 import com.mezze.interpreter.v2.MezzeTestHelper
 import com.mezze.interpreter.v2.values.MezzeRecord
-import com.mezze.interpreter.v2.values.MezzeList
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.list.MezzeList
+import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -432,7 +432,7 @@ class STMEffectTest {
                 let values = read_all {vars = [a, b, c]}
                 values
         """
-        val result = eval(code) as MezzeSeq
+        val result = eval(code) as MezzeSeq<*>
         val elements = result.toArray()
         assertEquals(3, elements.size)
         assertEquals(1L, elements[0])

@@ -3,8 +3,8 @@ package com.mezze.interpreter.v2.concurrency
 import com.mezze.interpreter.v2.MezzeTestHelper
 import com.mezze.interpreter.v2.values.MezzeRecord
 import com.mezze.interpreter.v2.values.MezzeVariant
-import com.mezze.interpreter.v2.values.MezzeList
-import com.mezze.interpreter.v2.values.MezzeSeq
+import com.mezze.datastructures.list.MezzeList
+import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -104,7 +104,7 @@ class ParallelErrorPropagationTest {
         """
         val result = eval(code)
         // Result is an array
-        assertTrue(result is Array<*> || result is MezzeList || result is MezzeSeq)
+        assertTrue(result is Array<*> || result is MezzeList<*> || result is MezzeSeq<*>)
     }
 
     // =============================================================================

@@ -51,7 +51,7 @@ class BasicAbilitiesTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
 

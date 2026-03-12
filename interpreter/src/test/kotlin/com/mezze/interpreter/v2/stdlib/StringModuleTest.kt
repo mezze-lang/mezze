@@ -189,10 +189,10 @@ class StringModuleTest {
     }
 
     @Test
-    fun `test string to_string - identity`() {
+    fun `test string to_str - identity`() {
         val source = """
             use std::string
-            string::to_string { s = "hello" }
+            string::to_str { s = "hello" }
         """.trimIndent()
 
         assertEquals("hello", eval(source))

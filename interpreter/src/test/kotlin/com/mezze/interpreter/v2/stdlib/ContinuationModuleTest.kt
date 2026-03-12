@@ -33,27 +33,6 @@ class ContinuationModuleTest {
         assertEquals(42L, result)
     }
 
-    // === fork Tests ===
-
-    @Test
-    fun `test fork used in choice effect`() {
-        // Fork is tested through the Choice effect which uses it internally
-        // Use run_all_paths helper which has correct type annotation for returning ['a]
-        val result = eval("""
-            use std::effects::choice::{Choice, run_all_paths}
-            use std::collections::seq
-
-            let test = {} -> run_all_paths { computation = {} ->
-                Choice.choose { options = [1, 2, 3] }
-            }
-
-            let results = test {}
-            # run_all_paths returns ['a] (Seq)
-            seq::length {xs = results}
-        """)
-        assertEquals(3L, result)
-    }
-
     // === abort Tests ===
 
     @Test
@@ -116,23 +95,5 @@ class ContinuationModuleTest {
             test {}
         """)
         assertEquals("err", result)
-    }
-
-    @Test
-    fun `test continuation used by choice effect`() {
-        // Use run_all_paths helper which has correct type annotation for returning ['a]
-        val result = eval("""
-            use std::effects::choice::{Choice, run_all_paths}
-            use std::collections::seq
-
-            let test = {} -> run_all_paths { computation = {} ->
-                Choice.choose { options = [1, 2] }
-            }
-
-            let results = test {}
-            # run_all_paths returns ['a] (Seq)
-            seq::length {xs = results}
-        """)
-        assertEquals(2L, result)
     }
 }

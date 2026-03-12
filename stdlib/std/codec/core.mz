@@ -241,7 +241,7 @@ pub let append_path = {path: [String], field: String} ->
 
 # Append an index to a path (for sequences/lists)
 pub let append_index = {path: [String], index: Int} ->
-    seq::add { xs = path, x = int::to_string {n = index} }
+    seq::add { xs = path, x = int::to_str {n = index} }
 
 # Format a path as a string (e.g., "user.address.city")
 pub let format_path = {path: [String]} ->

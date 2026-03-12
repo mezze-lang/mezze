@@ -2,7 +2,11 @@ package com.mezze.datastructures.set;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -15,6 +19,7 @@ import java.util.function.Predicate;
  *
  * @param <A> Element type
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     @CompilationFinal
@@ -144,6 +149,16 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Returns a new set with the element added.
      */
     public MezzeSet<A> add(A elem) {
+        return new MezzeSet<>(storage.add(elem));
+    }
+
+    /**
+     * Returns a new set with the element added (raw type).
+     * For interpreter use with dynamic types.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public MezzeSet<A> addObject(Object elem) {
         return new MezzeSet<>(storage.add(elem));
     }
 
@@ -536,6 +551,84 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      */
     public boolean isLongStorage() {
         return storage instanceof LongSetStorage;
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasArrayElements() {
+        return true;
+    }
+
+    @ExportMessage
+    long getArraySize() {
+        return storage.size();
+    }
+
+    @ExportMessage
+    boolean isArrayElementReadable(long index) {
+        return index >= 0 && index < storage.size();
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object readArrayElement(long index) {
+        return storage.toArray()[(int) index];
+    }
+
+    @ExportMessage
+    boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new SetIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class SetIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        SetIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 
     // ===== OBJECT METHODS =====

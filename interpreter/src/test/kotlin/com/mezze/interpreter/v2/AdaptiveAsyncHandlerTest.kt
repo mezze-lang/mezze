@@ -178,13 +178,15 @@ class AdaptiveAsyncHandlerTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                # In Coop, promises are immediately "ready"
+                # In real Coop scheduler, tasks are queued, not run immediately
+                # So is_done returns false until await is called
                 Async.is_done {p = p}
         """
         val result = eval(code)
-        assertEquals(true, result)
+        // With real scheduler, spawned tasks are queued, not immediately run
+        assertEquals(false, result)
     }
 
     // =============================================================================

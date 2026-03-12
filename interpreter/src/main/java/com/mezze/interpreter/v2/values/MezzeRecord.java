@@ -495,6 +495,62 @@ public final class MezzeRecord implements TruffleObject {
         return new MezzeRecord(shape, new long[0], new double[0], values, true);
     }
 
+    // ==================== CACHED SINGLE-FIELD RECORDS ====================
+    // For map/filter/fold operations that wrap elements in {x: value}
+    // Pre-compute shapes to avoid @TruffleBoundary in hot loops
+
+    private static final Shape SHAPE_X;
+    private static final Shape SHAPE_ACC_X;
+    private static final Shape SHAPE_A_B;
+    static {
+        SHAPE_X = new Shape(
+            new String[]{"x"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+        SHAPE_ACC_X = new Shape(
+            new String[]{"acc", "x"},
+            new FieldLocation[]{
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
+            }
+        );
+        SHAPE_A_B = new Shape(
+            new String[]{"a", "b"},
+            new FieldLocation[]{
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
+            }
+        );
+    }
+
+    /**
+     * Create a {x: value} record - FAST PATH for map/filter predicates.
+     * Uses pre-cached shape - NO @TruffleBoundary, JIT-friendly.
+     */
+    public static MezzeRecord wrapX(Object value) {
+        return new MezzeRecord(SHAPE_X, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{value}, true);
+    }
+
+    /**
+     * Create a {acc: a, x: b} record - FAST PATH for fold operations.
+     * Uses pre-cached shape - NO @TruffleBoundary, JIT-friendly.
+     */
+    public static MezzeRecord wrapAccX(Object acc, Object x) {
+        return new MezzeRecord(SHAPE_ACC_X, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{acc, x}, true);
+    }
+
+    /**
+     * Create a {a: a, b: b} record - FAST PATH for comparator operations.
+     * Uses pre-cached shape - NO @TruffleBoundary, JIT-friendly.
+     */
+    public static MezzeRecord wrapAB(Object a, Object b) {
+        return new MezzeRecord(SHAPE_A_B, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b}, true);
+    }
+
+    // Shared empty arrays for cached wrapper records
+    private static final long[] EMPTY_LONGS = new long[0];
+    private static final double[] EMPTY_DOUBLES = new double[0];
+
     /**
      * Helper class for InteropLibrary member enumeration.
      */

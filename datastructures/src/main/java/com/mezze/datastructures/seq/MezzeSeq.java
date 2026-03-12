@@ -2,7 +2,11 @@ package com.mezze.datastructures.seq;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -17,6 +21,7 @@ import java.util.function.Predicate;
  *
  * @param <A> Element type
  */
+@ExportLibrary(InteropLibrary.class)
 public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
 
     @CompilationFinal
@@ -374,41 +379,74 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Applies a function and flattens the result.
+     * Optimized: Uses initial size estimate and grows array as needed.
      */
     @TruffleBoundary
     public <B> MezzeSeq<B> flatMap(Function<A, MezzeSeq<B>> fn) {
         if (isEmpty()) return empty();
 
-        java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < size(); i++) {
+        int sz = size();
+        // Initial estimate: assume each element produces ~2 results on average
+        int estimatedSize = Math.max(sz * 2, 16);
+        Object[] results = new Object[estimatedSize];
+        int count = 0;
+
+        for (int i = 0; i < sz; i++) {
             MezzeSeq<B> mapped = fn.apply(get(i));
-            for (int j = 0; j < mapped.size(); j++) {
-                results.add(mapped.get(j));
+            int mappedSize = mapped.size();
+
+            // Grow array if needed
+            if (count + mappedSize > results.length) {
+                int newSize = Math.max(results.length * 2, count + mappedSize);
+                Object[] newResults = new Object[newSize];
+                System.arraycopy(results, 0, newResults, 0, count);
+                results = newResults;
+            }
+
+            // Copy mapped elements
+            for (int j = 0; j < mappedSize; j++) {
+                results[count++] = mapped.get(j);
             }
         }
 
-        if (results.isEmpty()) return empty();
-        return new MezzeSeq<>(SeqStorageFactory.fromArray(results.toArray()));
+        if (count == 0) return empty();
+
+        // Trim to actual size
+        if (count == results.length) {
+            return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(results));
+        }
+        Object[] trimmed = new Object[count];
+        System.arraycopy(results, 0, trimmed, 0, count);
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(trimmed));
     }
 
     /**
      * Filters elements by predicate.
+     * Optimized: Uses pre-allocated array with trimming instead of ArrayList.
      */
     @TruffleBoundary
     public MezzeSeq<A> filter(Predicate<A> p) {
         if (isEmpty()) return this;
 
-        java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < size(); i++) {
+        int sz = size();
+        // Pre-allocate max possible size
+        Object[] results = new Object[sz];
+        int count = 0;
+
+        for (int i = 0; i < sz; i++) {
             A elem = get(i);
             if (p.test(elem)) {
-                results.add(elem);
+                results[count++] = elem;
             }
         }
 
-        if (results.isEmpty()) return empty();
-        if (results.size() == size()) return this;
-        return new MezzeSeq<>(SeqStorageFactory.fromArray(results.toArray()));
+        if (count == 0) return empty();
+        if (count == sz) return this;
+
+        // Trim to actual size
+        Object[] trimmed = new Object[count];
+        System.arraycopy(results, 0, trimmed, 0, count);
+        return new MezzeSeq<>(SeqStorageFactory.fromArray(trimmed));
     }
 
     /**
@@ -746,30 +784,67 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Flatten a sequence of sequences.
+     * Optimized: Uses initial size estimate and grows array as needed.
      */
     @TruffleBoundary
     @SuppressWarnings("unchecked")
     public <B> MezzeSeq<B> flatten() {
         if (isEmpty()) return empty();
 
-        java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        for (int i = 0; i < size(); i++) {
+        int sz = size();
+        // Initial estimate: assume each element produces ~2 results on average
+        int estimatedSize = Math.max(sz * 2, 16);
+        Object[] results = new Object[estimatedSize];
+        int count = 0;
+
+        for (int i = 0; i < sz; i++) {
             Object elem = get(i);
+            int elemSize;
+
             if (elem instanceof MezzeSeq<?> seq) {
-                for (int j = 0; j < seq.size(); j++) {
-                    results.add(seq.get(j));
+                elemSize = seq.size();
+                // Grow array if needed
+                if (count + elemSize > results.length) {
+                    int newSize = Math.max(results.length * 2, count + elemSize);
+                    Object[] newResults = new Object[newSize];
+                    System.arraycopy(results, 0, newResults, 0, count);
+                    results = newResults;
+                }
+                for (int j = 0; j < elemSize; j++) {
+                    results[count++] = seq.get(j);
                 }
             } else if (elem instanceof Object[] arr) {
-                for (Object o : arr) {
-                    results.add(o);
+                elemSize = arr.length;
+                // Grow array if needed
+                if (count + elemSize > results.length) {
+                    int newSize = Math.max(results.length * 2, count + elemSize);
+                    Object[] newResults = new Object[newSize];
+                    System.arraycopy(results, 0, newResults, 0, count);
+                    results = newResults;
                 }
+                System.arraycopy(arr, 0, results, count, elemSize);
+                count += elemSize;
             } else {
-                results.add(elem);
+                // Grow array if needed
+                if (count + 1 > results.length) {
+                    int newSize = results.length * 2;
+                    Object[] newResults = new Object[newSize];
+                    System.arraycopy(results, 0, newResults, 0, count);
+                    results = newResults;
+                }
+                results[count++] = elem;
             }
         }
 
-        if (results.isEmpty()) return empty();
-        return new MezzeSeq<>(SeqStorageFactory.fromArray(results.toArray()));
+        if (count == 0) return empty();
+
+        // Trim to actual size
+        if (count == results.length) {
+            return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(results));
+        }
+        Object[] trimmed = new Object[count];
+        System.arraycopy(results, 0, trimmed, 0, count);
+        return new MezzeSeq<>(SeqStorageFactory.fromArrayUnsafe(trimmed));
     }
 
     /**
@@ -889,25 +964,49 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Partition by predicate into (matching, non-matching).
+     * Optimized: Uses pre-allocated arrays with trimming instead of ArrayList.
      */
     @TruffleBoundary
     public MezzeSeq<A>[] partition(Predicate<A> p) {
-        java.util.ArrayList<Object> matching = new java.util.ArrayList<>();
-        java.util.ArrayList<Object> nonMatching = new java.util.ArrayList<>();
+        int sz = size();
+        // Pre-allocate max possible sizes
+        Object[] matching = new Object[sz];
+        Object[] nonMatching = new Object[sz];
+        int matchCount = 0;
+        int nonMatchCount = 0;
 
-        for (int i = 0; i < size(); i++) {
+        for (int i = 0; i < sz; i++) {
             A elem = get(i);
             if (p.test(elem)) {
-                matching.add(elem);
+                matching[matchCount++] = elem;
             } else {
-                nonMatching.add(elem);
+                nonMatching[nonMatchCount++] = elem;
             }
         }
 
         @SuppressWarnings("unchecked")
         MezzeSeq<A>[] result = new MezzeSeq[2];
-        result[0] = matching.isEmpty() ? empty() : new MezzeSeq<>(SeqStorageFactory.fromArray(matching.toArray()));
-        result[1] = nonMatching.isEmpty() ? empty() : new MezzeSeq<>(SeqStorageFactory.fromArray(nonMatching.toArray()));
+
+        if (matchCount == 0) {
+            result[0] = empty();
+        } else if (matchCount == sz) {
+            result[0] = this;
+        } else {
+            Object[] trimmedMatch = new Object[matchCount];
+            System.arraycopy(matching, 0, trimmedMatch, 0, matchCount);
+            result[0] = new MezzeSeq<>(SeqStorageFactory.fromArray(trimmedMatch));
+        }
+
+        if (nonMatchCount == 0) {
+            result[1] = empty();
+        } else if (nonMatchCount == sz) {
+            result[1] = this;
+        } else {
+            Object[] trimmedNonMatch = new Object[nonMatchCount];
+            System.arraycopy(nonMatching, 0, trimmedNonMatch, 0, nonMatchCount);
+            result[1] = new MezzeSeq<>(SeqStorageFactory.fromArray(trimmedNonMatch));
+        }
+
         return result;
     }
 
@@ -1090,6 +1189,83 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      */
     public boolean isBooleanStorage() {
         return storage instanceof BooleanSeqStorage;
+    }
+
+    // ===== INTEROP LIBRARY =====
+
+    @ExportMessage
+    boolean hasArrayElements() {
+        return true;
+    }
+
+    @ExportMessage
+    long getArraySize() {
+        return storage.size();
+    }
+
+    @ExportMessage
+    boolean isArrayElementReadable(long index) {
+        return index >= 0 && index < storage.size();
+    }
+
+    @ExportMessage
+    Object readArrayElement(long index) {
+        return storage.get((int) index);
+    }
+
+    @ExportMessage
+    boolean isArrayElementModifiable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    boolean isArrayElementInsertable(@SuppressWarnings("unused") long index) {
+        return false;
+    }
+
+    @ExportMessage
+    void writeArrayElement(@SuppressWarnings("unused") long index, @SuppressWarnings("unused") Object value) throws UnsupportedMessageException {
+        throw UnsupportedMessageException.create();
+    }
+
+    @ExportMessage
+    boolean hasIterator() {
+        return true;
+    }
+
+    @ExportMessage
+    @TruffleBoundary
+    Object getIterator() {
+        return new SeqIterator(iterator());
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class SeqIterator implements TruffleObject {
+        private final Iterator<?> iterator;
+
+        SeqIterator(Iterator<?> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        boolean isIterator() {
+            return true;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean hasIteratorNextElement() {
+            return iterator.hasNext();
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object getIteratorNextElement() throws UnsupportedMessageException {
+            if (!iterator.hasNext()) {
+                throw UnsupportedMessageException.create();
+            }
+            return iterator.next();
+        }
     }
 
     // ===== OBJECT METHODS =====

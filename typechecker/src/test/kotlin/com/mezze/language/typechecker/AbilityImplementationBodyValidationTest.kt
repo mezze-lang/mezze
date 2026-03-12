@@ -36,7 +36,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Show Int where {
-              show = {val} -> int::to_string {n = val}
+              show = {val} -> int::to_str {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -60,7 +60,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Display Int where {
-              display = {val} -> {text = int::to_string {n = val}}
+              display = {val} -> {text = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -296,7 +296,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Display Int where {
-              display = {val} -> {message = int::to_string {n = val}}
+              display = {val} -> {message = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -460,7 +460,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Transform Int where {
-              transform = {val} -> int::to_string {n = "not an int"}
+              transform = {val} -> int::to_str {n = "not an int"}
             }
 
             let t = {x} -> Transform.transform {val = x}
@@ -514,7 +514,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Format Int where {
-              format = {val} -> int::to_string {n = val + 1}
+              format = {val} -> int::to_str {n = val + 1}
             }
 
             let f = {x} -> Format.format {val = x}
@@ -538,7 +538,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Calculate Int where {
-              calculate = {x, y} -> int::to_string {n = (x + y) * 2}
+              calculate = {x, y} -> int::to_str {n = (x + y) * 2}
             }
 
             let calc = {a, b} -> Calculate.calculate {x = a, y = b}

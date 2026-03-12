@@ -1,15 +1,20 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.map.MezzeMap;
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
  * Native SortedMap operations - ULTRA PERFORMANT.
  *
- * SortedMap in V2 is represented as MezzeSortedMap from values package.
+ * SortedMap in V2 is represented as MezzeSortedMap from datastructures module.
  * Uses sorted array backing for O(log n) lookups and O(1) min/max.
  * Uses persistent semantics (returns new maps on mutation).
  */
+@SuppressWarnings({"unchecked", "rawtypes"})
 public final class SortedMapNatives {
 
     private SortedMapNatives() {}
@@ -22,20 +27,20 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap singleton(Object key, Object value) {
-        return MezzeSortedMap.of(key, value);
+        return MezzeSortedMap.<Comparable, Object>empty().putObject(key, value);
     }
 
     // ==================== Basic Operations ====================
 
     @TruffleBoundary
     public static MezzeSortedMap insert(MezzeSortedMap map, Object key, Object value) {
-        return map.put(key, value);
+        return map.putObject(key, value);
     }
 
     @TruffleBoundary
     public static MezzeVariant get(MezzeSortedMap map, Object key) {
-        Object value = map.get(key);
-        if (value == null && !map.containsKey(key)) {
+        Object value = map.getObject(key);
+        if (value == null && !map.containsKeyObject(key)) {
             return MezzeVariant.none();
         }
         return MezzeVariant.some(value);
@@ -43,12 +48,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap remove(MezzeSortedMap map, Object key) {
-        return map.remove(key);
+        return map.removeObject(key);
     }
 
     @TruffleBoundary
     public static boolean containsKey(MezzeSortedMap map, Object key) {
-        return map.containsKey(key);
+        return map.containsKeyObject(key);
     }
 
     public static long size(MezzeSortedMap map) {
@@ -61,28 +66,26 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeList keys(MezzeSortedMap map) {
-        Object[] keysArray = toArray(map.keys());
-        return MezzeList.fromArray(keysArray);
+        return MezzeList.of(map.keys());
     }
 
     @TruffleBoundary
     public static MezzeList values(MezzeSortedMap map) {
-        Object[] valuesArray = toArray(map.values());
-        return MezzeList.fromArray(valuesArray);
+        return MezzeList.of(map.values());
     }
 
     @TruffleBoundary
     public static MezzeList entries(MezzeSortedMap map) {
-        java.util.Map<Object, Object> javaMap = map.toJavaMap();
-        Object[] result = new Object[javaMap.size()];
-        int i = 0;
-        for (java.util.Map.Entry<Object, Object> entry : javaMap.entrySet()) {
-            result[i++] = MezzeRecord.fromFields(
+        Object[] keys = map.keys();
+        Object[] values = map.values();
+        Object[] result = new Object[map.size()];
+        for (int i = 0; i < keys.length; i++) {
+            result[i] = MezzeRecord.fromFields(
                 new String[]{"key", "value"},
-                new Object[]{entry.getKey(), entry.getValue()}
+                new Object[]{keys[i], values[i]}
             );
         }
-        return MezzeList.fromArray(result);
+        return MezzeList.of(result);
     }
 
     // ==================== Additional Operations ====================
@@ -97,10 +100,9 @@ public final class SortedMapNatives {
         if (map.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object[] entry = map.minEntry();
         return MezzeVariant.some(MezzeRecord.fromFields(
             new String[]{"key", "value"},
-            new Object[]{entry[0], entry[1]}
+            new Object[]{map.minKey(), map.minValue()}
         ));
     }
 
@@ -109,18 +111,18 @@ public final class SortedMapNatives {
         if (map.isEmpty()) {
             return MezzeVariant.none();
         }
-        Object[] entry = map.maxEntry();
         return MezzeVariant.some(MezzeRecord.fromFields(
             new String[]{"key", "value"},
-            new Object[]{entry[0], entry[1]}
+            new Object[]{map.maxKey(), map.maxValue()}
         ));
     }
 
     @TruffleBoundary
     public static MezzeMap toMap(MezzeSortedMap sortedMap) {
         MezzeMap result = MezzeMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : sortedMap.toJavaMap().entrySet()) {
-            result = result.put(entry.getKey(), entry.getValue());
+        for (Object entryObj : sortedMap.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
+            result = result.putObject(entry.key(), entry.value());
         }
         return result;
     }
@@ -128,8 +130,8 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeSortedMap fromMap(MezzeMap map) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (com.mezze.datastructures.map.MezzeMap.Entry entry : map.getDelegate()) {
-            result = result.put(entry.key(), entry.value());
+        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
+            result = result.putObject(entry.key(), entry.value());
         }
         return result;
     }
@@ -156,10 +158,10 @@ public final class SortedMapNatives {
     public static MezzeSortedMap filter(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object res = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object res = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.getKey(), entry.getValue());
+                result = result.putObject(entry.key(), entry.value());
             }
         }
         return result;
@@ -169,8 +171,8 @@ public final class SortedMapNatives {
     public static Object fold(MezzeSortedMap map, Object init, MezzeFunction f,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object acc = init;
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            acc = callNode.call(f.getCallTarget(), prepareArgsFold(f, acc, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            acc = callNode.call(f.getCallTarget(), prepareArgsFold(f, acc, entry.key(), entry.value()));
         }
         return acc;
     }
@@ -179,9 +181,9 @@ public final class SortedMapNatives {
     public static MezzeSortedMap mapValues(MezzeSortedMap map, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object mapped = callNode.call(f.getCallTarget(), prepareArgsVal(f, entry.getValue()));
-            result = result.put(entry.getKey(), mapped);
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object mapped = callNode.call(f.getCallTarget(), prepareArgsVal(f, entry.value()));
+            result = result.putObject(entry.key(), mapped);
         }
         return result;
     }
@@ -189,8 +191,8 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static boolean any(MezzeSortedMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -201,8 +203,8 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static boolean all(MezzeSortedMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -213,8 +215,8 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static boolean none(MezzeSortedMap map, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (result instanceof Boolean && (Boolean) result) {
                 return false;
             }
@@ -225,12 +227,12 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeVariant find(MezzeSortedMap map, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(MezzeRecord.fromFields(
                     new String[]{"k", "v"},
-                    new Object[]{entry.getKey(), entry.getValue()}
+                    new Object[]{entry.key(), entry.value()}
                 ));
             }
         }
@@ -241,8 +243,8 @@ public final class SortedMapNatives {
     public static long count(MezzeSortedMap map, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         long cnt = 0;
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }
@@ -264,8 +266,8 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static Object getOrDefault(MezzeSortedMap map, Object key, Object defaultValue) {
-        Object value = map.get(key);
-        if (value == null && !map.containsKey(key)) {
+        Object value = map.getObject(key);
+        if (value == null && !map.containsKeyObject(key)) {
             return defaultValue;
         }
         return value;
@@ -276,27 +278,33 @@ public final class SortedMapNatives {
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeVariant current = get(map, key);
         Object newValue = callNode.call(f.getCallTarget(), prepareArgsVal(f, current));
-        return map.put(key, newValue);
+        return map.putObject(key, newValue);
     }
 
     @TruffleBoundary
     public static MezzeSortedMap merge(MezzeSortedMap m1, MezzeSortedMap m2) {
-        return m1.merge(m2);
+        MezzeSortedMap result = m1;
+        for (Object entryObj : m2.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
+            result = result.putObject(entry.key(), entry.value());
+        }
+        return result;
     }
 
     @TruffleBoundary
     public static MezzeSortedMap mergeWith(MezzeSortedMap m1, MezzeSortedMap m2, MezzeFunction f,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = m1;
-        for (java.util.Map.Entry<Object, Object> entry : m2.toJavaMap().entrySet()) {
-            Object key = entry.getKey();
-            Object v2 = entry.getValue();
-            if (result.containsKey(key)) {
-                Object v1 = result.get(key);
+        for (Object entryObj : m2.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
+            Object key = entry.key();
+            Object v2 = entry.value();
+            if (result.containsKeyObject(key)) {
+                Object v1 = result.getObject(key);
                 Object merged = callNode.call(f.getCallTarget(), prepareArgsLR(f, v1, v2));
-                result = result.put(key, merged);
+                result = result.putObject(key, merged);
             } else {
-                result = result.put(key, v2);
+                result = result.putObject(key, v2);
             }
         }
         return result;
@@ -306,13 +314,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSeq toSeq(MezzeSortedMap map) {
-        java.util.Map<Object, Object> javaMap = map.toJavaMap();
-        Object[] entries = new Object[javaMap.size()];
+        Object[] entries = new Object[map.size()];
         int i = 0;
-        for (java.util.Map.Entry<Object, Object> entry : javaMap.entrySet()) {
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             entries[i++] = MezzeRecord.fromFields(
                 new String[]{"k", "v"},
-                new Object[]{entry.getKey(), entry.getValue()}
+                new Object[]{entry.key(), entry.value()}
             );
         }
         return MezzeSeq.fromArray(entries);
@@ -320,12 +327,12 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeSeq keysSeq(MezzeSortedMap map) {
-        return MezzeSeq.fromArray(toArray(map.keys()));
+        return MezzeSeq.fromArray(map.keys());
     }
 
     @TruffleBoundary
     public static MezzeSeq valuesSeq(MezzeSortedMap map) {
-        return MezzeSeq.fromArray(toArray(map.values()));
+        return MezzeSeq.fromArray(map.values());
     }
 
     // ==================== Task #15: Additional Operations ====================
@@ -335,12 +342,12 @@ public final class SortedMapNatives {
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap passMap = MezzeSortedMap.empty();
         MezzeSortedMap failMap = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.getKey(), entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object result = callNode.call(predicate.getCallTarget(), prepareArgsKV(predicate, entry.key(), entry.value()));
             if (result instanceof Boolean && (Boolean) result) {
-                passMap = passMap.put(entry.getKey(), entry.getValue());
+                passMap = passMap.putObject(entry.key(), entry.value());
             } else {
-                failMap = failMap.put(entry.getKey(), entry.getValue());
+                failMap = failMap.putObject(entry.key(), entry.value());
             }
         }
         return MezzeRecord.fromFields(
@@ -354,10 +361,10 @@ public final class SortedMapNatives {
         // Use the value class's range method which returns [lo, hi)
         // We need [lo, hi] inclusive, so we filter manually
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object key = entry.getKey();
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object key = entry.key();
             if (compare(key, loKey) >= 0 && compare(key, hiKey) <= 0) {
-                result = result.put(key, entry.getValue());
+                result = result.putObject(key, entry.value());
             }
         }
         return result;
@@ -438,7 +445,7 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         Object floorK = floorKeyOpt.getPayloadValue();
-        Object value = map.get(floorK);
+        Object value = map.getObject(floorK);
         return MezzeVariant.some(MezzeRecord.fromFields(
             new String[]{"k", "v"},
             new Object[]{floorK, value}
@@ -452,7 +459,7 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         Object ceilingK = ceilingKeyOpt.getPayloadValue();
-        Object value = map.get(ceilingK);
+        Object value = map.getObject(ceilingK);
         return MezzeVariant.some(MezzeRecord.fromFields(
             new String[]{"k", "v"},
             new Object[]{ceilingK, value}
@@ -464,9 +471,9 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeSortedMap headMap(MezzeSortedMap map, Object toKey) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            if (compare(entry.getKey(), toKey) < 0) {
-                result = result.put(entry.getKey(), entry.getValue());
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            if (compare(entry.key(), toKey) < 0) {
+                result = result.putObject(entry.key(), entry.value());
             }
         }
         return result;
@@ -475,9 +482,9 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeSortedMap tailMap(MezzeSortedMap map, Object fromKey) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            if (compare(entry.getKey(), fromKey) >= 0) {
-                result = result.put(entry.getKey(), entry.getValue());
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            if (compare(entry.key(), fromKey) >= 0) {
+                result = result.putObject(entry.key(), entry.value());
             }
         }
         return result;
@@ -486,11 +493,11 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeSortedMap subMap(MezzeSortedMap map, Object loKey, Object hiKey) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object key = entry.getKey();
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object key = entry.key();
             // subMap is [lo, hi) - lo inclusive, hi exclusive
             if (compare(key, loKey) >= 0 && compare(key, hiKey) < 0) {
-                result = result.put(key, entry.getValue());
+                result = result.putObject(key, entry.value());
             }
         }
         return result;
@@ -500,9 +507,9 @@ public final class SortedMapNatives {
     public static MezzeSortedMap take(MezzeSortedMap map, long n) {
         MezzeSortedMap result = MezzeSortedMap.empty();
         int count = 0;
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             if (count >= n) break;
-            result = result.put(entry.getKey(), entry.getValue());
+            result = result.putObject(entry.key(), entry.value());
             count++;
         }
         return result;
@@ -512,9 +519,9 @@ public final class SortedMapNatives {
     public static MezzeSortedMap drop(MezzeSortedMap map, long n) {
         MezzeSortedMap result = MezzeSortedMap.empty();
         int count = 0;
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             if (count >= n) {
-                result = result.put(entry.getKey(), entry.getValue());
+                result = result.putObject(entry.key(), entry.value());
             }
             count++;
         }
@@ -527,9 +534,9 @@ public final class SortedMapNatives {
     public static MezzeSortedMap mapKeys(MezzeSortedMap map, MezzeFunction f,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object newKey = callNode.call(f.getCallTarget(), prepareArgsVal(f, entry.getKey()));
-            result = result.put(newKey, entry.getValue());
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object newKey = callNode.call(f.getCallTarget(), prepareArgsVal(f, entry.key()));
+            result = result.putObject(newKey, entry.value());
         }
         return result;
     }
@@ -538,10 +545,10 @@ public final class SortedMapNatives {
     public static MezzeSortedMap filterKeys(MezzeSortedMap map, MezzeFunction predicate,
                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.getKey()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.key()));
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.getKey(), entry.getValue());
+                result = result.putObject(entry.key(), entry.value());
             }
         }
         return result;
@@ -551,10 +558,10 @@ public final class SortedMapNatives {
     public static MezzeSortedMap filterValues(MezzeSortedMap map, MezzeFunction predicate,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.getValue()));
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            Object res = callNode.call(predicate.getCallTarget(), prepareArgsVal(predicate, entry.value()));
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.getKey(), entry.getValue());
+                result = result.putObject(entry.key(), entry.value());
             }
         }
         return result;
@@ -563,8 +570,8 @@ public final class SortedMapNatives {
     @TruffleBoundary
     public static MezzeSortedMap invert(MezzeSortedMap map) {
         MezzeSortedMap result = MezzeSortedMap.empty();
-        for (java.util.Map.Entry<Object, Object> entry : map.toJavaMap().entrySet()) {
-            result = result.put(entry.getValue(), entry.getKey());
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
+            result = result.putObject(entry.value(), entry.key());
         }
         return result;
     }
@@ -573,16 +580,15 @@ public final class SortedMapNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeSortedMap map) {
-        java.util.Map<Object, Object> javaMap = map.toJavaMap();
-        Object[] entries = new Object[javaMap.size()];
+        Object[] entries = new Object[map.size()];
         int i = 0;
-        for (java.util.Map.Entry<Object, Object> entry : javaMap.entrySet()) {
+        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             entries[i++] = MezzeRecord.fromFields(
                 new String[]{"key", "value"},
-                new Object[]{entry.getKey(), entry.getValue()}
+                new Object[]{entry.key(), entry.value()}
             );
         }
-        return MezzeList.fromArray(entries);
+        return MezzeList.of(entries);
     }
 
     @TruffleBoundary
@@ -593,7 +599,7 @@ public final class SortedMapNatives {
                 MezzeRecord record = (MezzeRecord) item;
                 Object key = record.getField("key");
                 Object value = record.getField("value");
-                result = result.put(key, value);
+                result = result.putObject(key, value);
             }
         }
         return result;
@@ -636,14 +642,5 @@ public final class SortedMapNatives {
 
     private static Object[] prepareArgsLR(MezzeFunction f, Object left, Object right) {
         return new Object[]{MezzeRecord.fromFields(new String[]{"l", "r"}, new Object[]{left, right})};
-    }
-
-    @TruffleBoundary
-    private static Object[] toArray(Iterable<Object> iterable) {
-        java.util.List<Object> list = new java.util.ArrayList<>();
-        for (Object item : iterable) {
-            list.add(item);
-        }
-        return list.toArray();
     }
 }

@@ -21,6 +21,7 @@ import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.typechecker.continuation.ContinuationTransformer
+import com.mezze.language.typechecker.continuation.ContinuationDetector
 import com.mezze.language.typechecker.cache.TypeCheckCache
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import java.nio.file.Path
@@ -107,6 +108,8 @@ class TypeChecker(
 ) {
     // Transformer for converting perform blocks into state machines (for continuation support)
     private val continuationTransformer = ContinuationTransformer()
+    // Detector for identifying code that uses continuations
+    private val continuationDetector = ContinuationDetector()
 
     /**
      * Result of type checking.
@@ -1974,9 +1977,20 @@ class TypeChecker(
                 }
             }
             is LambdaExpression -> {
+                // First recursively transform the body
                 val transformedBody = transformExpression(expr.body)
-                if (transformedBody !== expr.body) {
-                    expr.copy(body = transformedBody)
+
+                // Then check if the body uses continuations and needs to be a state machine
+                val finalBody = when {
+                    transformedBody is DoExpression && continuationDetector.usesContinuations(transformedBody) -> {
+                        // Transform do-block body to state machine for continuation support
+                        continuationTransformer.transformToStateMachine(transformedBody)
+                    }
+                    else -> transformedBody
+                }
+
+                if (finalBody !== expr.body) {
+                    expr.copy(body = finalBody)
                 } else {
                     expr
                 }

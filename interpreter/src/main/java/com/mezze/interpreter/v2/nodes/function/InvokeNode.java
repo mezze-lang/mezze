@@ -159,13 +159,15 @@ public abstract class InvokeNode extends MezzeNode {
     ) {
         Object arg = argumentNodes[0].execute(frame);
 
-        if (!(arg instanceof MezzeRecord record)) {
-            // Not a record - just call directly (this handles {} case)
+        // Most calls pass a record - inject probability hint
+        if (CompilerDirectives.injectBranchProbability(0.05, !(arg instanceof MezzeRecord))) {
+            // Not a record - just call directly (this handles {} case) - RARE
             return callFunctionDirect(function, arg);
         }
+        MezzeRecord record = (MezzeRecord) arg;
 
-        // Check if this completes a partial application
-        if (function.hasPartialArgs()) {
+        // Partial args are rare - most functions are called with complete args
+        if (CompilerDirectives.injectBranchProbability(0.1, function.hasPartialArgs())) {
             if (function.hasAllParameters(record)) {
                 // Complete the partial application
                 MezzeRecord completeRecord = function.buildCompleteRecord(record);
@@ -176,12 +178,12 @@ public abstract class InvokeNode extends MezzeNode {
             }
         }
 
-        // Check if this is a new partial application
-        if (!function.hasAllParameters(record)) {
+        // Check if this is a new partial application - usually all params present
+        if (CompilerDirectives.injectBranchProbability(0.15, !function.hasAllParameters(record))) {
             return function.withPartialArgs(record);
         }
 
-        // All parameters present - call directly
+        // All parameters present - call directly - MOST COMMON PATH
         return callFunctionWithRecord(function, record);
     }
 

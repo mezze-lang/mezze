@@ -144,8 +144,8 @@ class ContinuationDetector {
             is Identifier -> funcExpr.localName in continuationPrimitives
             is MemberAccess -> {
                 // Handle qualified calls like Continuation.capture
-                funcExpr.member in setOf("capture", "suspend", "suspend_with") &&
-                    (funcExpr.receiver as? Identifier)?.localName == "Continuation"
+                // Also handle method calls on continuation objects like cont.suspend_with
+                funcExpr.member in setOf("capture", "suspend", "suspend_with")
             }
             else -> false
         }
@@ -153,13 +153,12 @@ class ContinuationDetector {
 
     companion object {
         /**
-         * Names of continuation primitive functions.
+         * Names of continuation primitive functions (one-shot only).
          */
         private val continuationPrimitives = setOf(
             "__native_continuation_capture",
             "__native_continuation_suspend",
             "__native_continuation_suspend_with",
-            "__native_continuation_fork",
             "__native_continuation_abort"
         )
 

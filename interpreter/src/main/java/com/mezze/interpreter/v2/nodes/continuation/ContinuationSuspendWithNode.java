@@ -2,9 +2,9 @@ package com.mezze.interpreter.v2.nodes.continuation;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.nodes.MezzeRootNode;
+import com.mezze.interpreter.v2.nodes.statemachine.StateMachineContext;
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
-
-
+import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -66,7 +66,8 @@ public final class ContinuationSuspendWithNode extends MezzeNode {
             throw new RuntimeException("__native_continuation_suspend_with expects 'value' field");
         }
 
-        // Create a continuation that, when resumed, returns the resume value
+        // Create a continuation that captures "the rest of the computation"
+        // Try to capture from state machine context first, fall back to trivial continuation
         MezzeContinuation continuation = createResumableContinuation(delim.getId());
 
         MezzeContinuationSuspended suspended = new MezzeContinuationSuspended(value, continuation);
@@ -79,10 +80,27 @@ public final class ContinuationSuspendWithNode extends MezzeNode {
     }
 
     /**
-     * Create a continuation that returns its resume value.
+     * Create a continuation that captures "the rest of the computation".
+     *
+     * If we're inside a state machine, capture the real continuation that
+     * will resume execution from the next state. Otherwise, fall back to
+     * a trivial continuation that just returns the resume value.
      */
     @TruffleBoundary
     private MezzeContinuation createResumableContinuation(long delimiterId) {
+        // Check for state machine context - if present, capture real continuation
+        StateMachineContext.ExecutionSnapshot context = StateMachineContext.getCurrentContext();
+
+        if (context != null && context.stateMachine != null) {
+            // Create a continuation that resumes the state machine from the next state
+            return MezzeContinuation.create(
+                    context.stateMachine.createResumeCallTarget(),
+                    context.capturedLocals,
+                    delimiterId
+            );
+        }
+
+        // No state machine context - return trivial continuation
         FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
         FrameDescriptor fd = builder.build();
 

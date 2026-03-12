@@ -84,7 +84,7 @@ class ComprehensiveEffectInterpreterTest {
             perform MathRandom, Console in do
               Log.print {msg = "Generating random number"}
               let num = Random.nextInt {min = 1, max = 10}
-              Log.print {msg = "Generated: $(int::to_string {n = num})"}
+              Log.print {msg = "Generated: $(int::to_str {n = num})"}
               num
         """.trimIndent()
 
@@ -114,9 +114,9 @@ class ComprehensiveEffectInterpreterTest {
                 Log.info {msg = "Starting computation"}
                 let x = 5
                 let y = 10
-                Log.info {msg = "Computing $(int::to_string {n = x}) + $(int::to_string {n = y})"}
+                Log.info {msg = "Computing $(int::to_str {n = x}) + $(int::to_str {n = y})"}
                 let result = x + y
-                Log.info {msg = "Result: $(int::to_string {n = result})"}
+                Log.info {msg = "Result: $(int::to_str {n = result})"}
                 result
 
             # Execute computation

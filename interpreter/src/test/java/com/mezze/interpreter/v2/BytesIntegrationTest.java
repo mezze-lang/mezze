@@ -330,7 +330,7 @@ class BytesIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            match bytes::to_string { b = b } is
+            match bytes::to_str { b = b } is
                 Ok { val } -> val
                 Err { error } -> error
             """);

@@ -18,8 +18,7 @@
 #       let result = Async.await {p = p}
 #       result
 
-use std::control::continuation
-use std::control::continuation::{Continuation}
+use std::collections::seq
 use std::effects::concurrent::cancellation::{CancellationToken}
 
 # Promise type - opaque wrapper around native promise/future
@@ -284,30 +283,110 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
 #       Async.await {p = p}
 
 impl Async for CoopAsync where {
-    # Continuation is created internally via scoped effects
-    initialize_scope = {} -> { cont = continuation::new {} },
-    finalize_scope = {} -> scope.cont.reset {},
+    # Create scheduler for cooperative scheduling
+    initialize_scope = {} -> __native_scheduler_new {},
 
-    spawn = {f} -> __native_coop_spawn { f = f, cont = scope.cont },
-    await = {p} -> __native_coop_await { p = p, cont = scope.cont },
-    race = {ps} -> __native_coop_race { ps = ps, cont = scope.cont },
-    all = {ps} -> __native_coop_all { ps = ps, cont = scope.cont },
-    timeout = {ms, p} -> __native_coop_timeout { ms = ms, p = p, cont = scope.cont },
-    cancel = {p} -> {},
-    sleep = {ms} -> __native_coop_sleep { ms = ms, cont = scope.cont },
-    is_done = {p} -> __native_coop_is_done { p = p },
+    # Drain remaining tasks to ensure all spawned tasks complete
+    finalize_scope = {} -> __native_scheduler_drain { sched = scope },
+
+    # Spawn queues task, returns promise (does NOT execute immediately)
+    spawn = {f} -> Promise { val = __native_scheduler_spawn { sched = scope, f = f } },
+
+    # Await runs scheduler until promise completes
+    await = {p} ->
+        match p is
+            Promise { val = native_p } -> __native_scheduler_await { sched = scope, p = native_p },
+
+    race = {ps} -> do
+        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
+        __native_scheduler_race { sched = scope, ps = native_ps }
+    ,
+
+    all = {ps} -> do
+        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
+        __native_scheduler_all { sched = scope, ps = native_ps }
+    ,
+
+    timeout = {ms, p} ->
+        match p is
+            Promise { val = native_p } ->
+                # In coop mode, there's no real time - just await the promise
+                # and always return Some (the task will complete eventually)
+                Some { val = __native_scheduler_await { sched = scope, p = native_p } }
+    ,
+
+    cancel = {p} -> {},  # Cancel is no-op in coop mode
+
+    sleep = {ms} -> __native_scheduler_sleep { sched = scope, ms = ms },
+
+    is_done = {p} ->
+        match p is
+            Promise { val = native_p } -> __native_scheduler_is_done { p = native_p },
+
     is_cancelled = {} -> False,
     check = {} -> {},
-    join = {left, right} -> __native_coop_join { left = left, right = right, cont = scope.cont },
-    join3 = {a, b, c} -> __native_coop_join3 { a = a, b = b, c = c, cont = scope.cont },
-    map = {xs, f} -> __native_coop_map { xs = xs, f = f, cont = scope.cont },
-    for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = scope.cont },
-    filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = scope.cont },
-    any = {ps} -> __native_coop_any { ps = ps, cont = scope.cont },
-    settle = {ps} -> __native_coop_settle { ps = ps, cont = scope.cont },
-    # For cooperative async, scoped is a no-op since there's no parallelism
-    # The function just runs with an empty scope
-    scoped = {f} -> __native_coop_scoped { f = f, cont = scope.cont }
+
+    # Join runs both functions, awaiting each
+    join = {left, right} -> do
+        let p_left = __native_scheduler_spawn { sched = scope, f = left }
+        let p_right = __native_scheduler_spawn { sched = scope, f = right }
+        let r_left = __native_scheduler_await { sched = scope, p = p_left }
+        let r_right = __native_scheduler_await { sched = scope, p = p_right }
+        { left = r_left, right = r_right }
+    ,
+
+    join3 = {a, b, c} -> do
+        let p_a = __native_scheduler_spawn { sched = scope, f = a }
+        let p_b = __native_scheduler_spawn { sched = scope, f = b }
+        let p_c = __native_scheduler_spawn { sched = scope, f = c }
+        let r_a = __native_scheduler_await { sched = scope, p = p_a }
+        let r_b = __native_scheduler_await { sched = scope, p = p_b }
+        let r_c = __native_scheduler_await { sched = scope, p = p_c }
+        { a = r_a, b = r_b, c = r_c }
+    ,
+
+    # Map spawns all tasks then awaits all
+    map = {xs, f} -> do
+        let promises = seq::map { xs = xs, f = {x} -> __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } } }
+        seq::map { xs = promises, f = {x} -> __native_scheduler_await { sched = scope, p = x } }
+    ,
+
+    for_each = {xs, f} -> do
+        let promises = seq::map { xs = xs, f = {x} -> __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } } }
+        seq::for_each { xs = promises, f = {x} -> __native_scheduler_await { sched = scope, p = x } }
+        {}
+    ,
+
+    filter = {xs, f} -> do
+        # Spawn filter checks for all elements
+        let checks = seq::map { xs = xs, f = {x} -> {
+            elem = x,
+            promise = __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } }
+        } }
+        # Await and filter
+        let filtered = seq::filter { xs = checks, p = {x} ->
+            __native_scheduler_await { sched = scope, p = x.promise }
+        }
+        seq::map { xs = filtered, f = {x} -> x.elem }
+    ,
+
+    any = {ps} -> do
+        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
+        __native_scheduler_race { sched = scope, ps = native_ps }
+    ,
+
+    settle = {ps} -> do
+        # Await each promise, catching errors as Err
+        seq::map { xs = ps, f = {x} ->
+            match x is
+                Promise { val = native_p } ->
+                    # TODO: proper try/catch here
+                    Ok { val = __native_scheduler_await { sched = scope, p = native_p } }
+        }
+    ,
+
+    # Scoped just runs the function - structured concurrency is implicit
+    scoped = {f} -> f { sc = Scope { val = {} } }
 }
 
 # =============================================================================

@@ -97,7 +97,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let display = {x: Int} -> "Value: $(Show.show {val = x})"
@@ -113,7 +113,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let display: {val: 'a} -> String with Show 'a = {val} ->
@@ -134,7 +134,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show String where {
@@ -156,7 +156,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let wrap: {val: 'a} -> String with Show 'a = {val} ->
@@ -445,7 +445,7 @@ class StringInterpolationTypeCheckerTest {
             let x = 10
             let y = 5
             let sum = x + y
-            let result = "Sum: $(int::to_string {n = sum})"
+            let result = "Sum: $(int::to_str {n = sum})"
             result
         """.trimIndent())
     }
@@ -587,7 +587,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             type Result = | Ok { value: Int }, Err { message: String } |
@@ -621,7 +621,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show String where {

@@ -93,7 +93,7 @@ class DoExpressionConstraintTest {
             let complex = {x, y, z} -> do
               let sum = x + y
               let product = sum * z
-              let message = "Result: $(int::to_string {n = product})"
+              let message = "Result: $(int::to_str {n = product})"
               message
         """.trimIndent()
 
@@ -190,7 +190,7 @@ class DoExpressionConstraintTest {
 
             let mixed = {num, text} -> do
               let doubled = num * 2
-              let message = "$(text) = $(int::to_string {n = doubled})"
+              let message = "$(text) = $(int::to_str {n = doubled})"
               message
         """.trimIndent()
 

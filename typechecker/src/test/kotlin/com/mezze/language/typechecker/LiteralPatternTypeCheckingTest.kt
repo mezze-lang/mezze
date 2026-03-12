@@ -119,11 +119,11 @@ class LiteralPatternTypeCheckingTest {
     @Test
     fun `should accept boolean literal patterns matching Bool scrutinee`() {
         val code = """
-            let to_string = {b} ->
+            let to_str = {b} ->
                 match b is
                   True ->"yes"
                   False ->"no"
-            let result = to_string { b = True }
+            let result = to_str { b = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

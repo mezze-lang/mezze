@@ -335,11 +335,11 @@ class BytesModuleTest {
     }
 
     @Test
-    fun `test bytes to_string function returns Result`() {
+    fun `test bytes to_str function returns Result`() {
         val source = """
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            let result = bytes::to_string { b = b }
+            let result = bytes::to_str { b = b }
             match result is
                 Ok { val } -> val
                 Err { error } -> error

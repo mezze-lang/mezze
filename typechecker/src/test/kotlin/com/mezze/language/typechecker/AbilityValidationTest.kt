@@ -60,7 +60,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -111,7 +111,7 @@ class AbilityValidationTest {
             }
 
             impl Display Int where {
-              display: {val: Int} -> {text: String} = {val} -> {text = int::to_string {n = val}}
+              display: {val: Int} -> {text: String} = {val} -> {text = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -250,7 +250,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: 'a} -> String = {val} -> int::to_string {n = val}
+              show: {val: 'a} -> String = {val} -> int::to_str {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -321,7 +321,7 @@ class AbilityValidationTest {
             }
 
             impl Display Int where {
-              display: {val: Int} -> {message: String} = {val} -> {message = int::to_string {n = val}}
+              display: {val: Int} -> {message: String} = {val} -> {message = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -369,7 +369,7 @@ class AbilityValidationTest {
             }
 
             impl Process Int where {
-              process: {val: Int} -> String = {val} -> int::to_string {n = val}
+              process: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let run = {value} -> Process.process {value = value}
@@ -420,7 +420,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show Float where {
@@ -475,7 +475,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Eq Int where {
@@ -540,7 +540,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let display: {val: 'a} -> String with Show 'a = {val} ->
@@ -595,7 +595,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let display: {val: 'a} -> String with Show 'a = {val} ->
@@ -628,7 +628,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             # Single-parameter constraint: Show 'a
@@ -683,7 +683,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Show String where {
@@ -719,7 +719,7 @@ class AbilityValidationTest {
             }
 
             impl Encode Json Int where {
-              encode: {val: Int} -> Json = {val} -> { raw = int::to_string {n = val} }
+              encode: {val: Int} -> Json = {val} -> { raw = int::to_str {n = val} }
             }
 
             # Constraint has concrete type (Json) and polymorphic type ('a)
@@ -751,7 +751,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             impl Eq Int where {
@@ -809,7 +809,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+              show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             # Higher-order: takes a function that requires Show constraint

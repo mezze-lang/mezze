@@ -46,8 +46,8 @@ object CharTypes {
             MezzeType.IntType
         )
 
-        // __native_char_to_string: {c: Char} -> String
-        context["__native_char_to_string"] = MezzeType.FunctionType(
+        // __native_char_to_str: {c: Char} -> String
+        context["__native_char_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
             MezzeType.StringType
         )

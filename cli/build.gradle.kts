@@ -28,6 +28,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
+    implementation(project(":datastructures"))
     implementation(project(":lsp"))
     implementation(project(":formatter"))
 

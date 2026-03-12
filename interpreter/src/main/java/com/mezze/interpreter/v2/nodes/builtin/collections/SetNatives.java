@@ -1,5 +1,9 @@
 package com.mezze.interpreter.v2.nodes.builtin.collections;
 
+import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -92,7 +96,7 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static MezzeSet difference(MezzeSet set1, MezzeSet set2) {
-        return set1.diff(set2);
+        return set1.difference(set2);
     }
 
     @TruffleBoundary
@@ -148,12 +152,12 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static Object[] toArray(MezzeSet set) {
-        return set.getDelegate().toArray();
+        return set.toArray();
     }
 
     @TruffleBoundary
     public static MezzeList toList(MezzeSet set) {
-        return MezzeList.fromArray(set.getDelegate().toArray());
+        return MezzeList.of(set.toArray());
     }
 
     // ==================== Helper Methods ====================
@@ -286,7 +290,7 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static MezzeSeq toSeq(MezzeSet set) {
-        return MezzeSeq.fromArray(set.getDelegate().toArray());
+        return MezzeSeq.fromArray(set.toArray());
     }
 
     // ==================== Singleton ====================
@@ -443,7 +447,7 @@ public final class SetNatives {
                 new Object[]{entry.getKey(), fromArray(entry.getValue().toArray())}
             );
         }
-        return MezzeList.fromArray(result);
+        return MezzeList.of(result);
     }
 
     @TruffleBoundary
@@ -521,7 +525,7 @@ public final class SetNatives {
                 }
             }
         }
-        return MezzeList.fromArray(result.toArray());
+        return MezzeList.of(result.toArray());
     }
 
     // ==================== SortedSet Conversions ====================

@@ -237,11 +237,11 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `bool literal pattern - basic matching`() {
         val code = """
-            let bool_to_string = {b: Bool} ->
+            let bool_to_str = {b: Bool} ->
                 match b is
                   True -> "yes"
                   False -> "no"
-            let result = bool_to_string { b = True }
+            let result = bool_to_str { b = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

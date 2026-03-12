@@ -73,8 +73,7 @@ class ContinuationTransformer {
         transformStatements(doExpr.statements, doExpr.result, states, liveVars)
 
         // Extract all captured variables - from yield states AND all live variables across states
-        // This is critical for multi-shot continuations (fork) where we need to restore
-        // all variables that are live at the point of capture
+        // This ensures all variables are available when the continuation is resumed
         val yieldCapturedVars = states.flatMap { state ->
             when (state) {
                 is YieldState -> state.capturedVariables
@@ -268,8 +267,8 @@ class ContinuationTransformer {
         return when (funcExpr) {
             is Identifier -> funcExpr.localName in suspensionPrimitives
             is MemberAccess -> {
-                funcExpr.member in setOf("suspend", "suspend_with") &&
-                    (funcExpr.receiver as? Identifier)?.localName == "Continuation"
+                // Match method calls like cont.suspend_with or Continuation.suspend_with
+                funcExpr.member in setOf("suspend", "suspend_with")
             }
             else -> false
         }

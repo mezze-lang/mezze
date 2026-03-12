@@ -53,7 +53,7 @@ class AbilityMethodCallTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let test = Show.show {val = 42}
@@ -136,7 +136,7 @@ class AbilityMethodCallTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_string {n = val}
+                show: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let test1 = Show.show {val = True}
@@ -211,7 +211,7 @@ class AbilityMethodCallTest {
             }
 
             impl Convert Int String where {
-                convert: {val: Int} -> String = {val} -> int::to_string {n = val}
+                convert: {val: Int} -> String = {val} -> int::to_str {n = val}
             }
 
             let test = Convert.convert {val = 42}
