@@ -244,6 +244,8 @@ data class Identifier(
     val qualifier: ModulePath? = null,
     /** Content hash of the referenced definition (populated by typechecker) */
     val resolvedContentHash: String? = null,
+    /** Whether this references a native function (set by typechecker, avoids string prefix checks) */
+    val isNativeFunction: Boolean = false,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression {
@@ -371,12 +373,6 @@ fun RecordLiteral.findField(name: String): RecordFieldEntry? {
 }
 
 @Serializable
-data class RecordEntry(
-    val name: String,
-    val value: Expression? = null  // null for shorthand {x} instead of {x = x}
-)
-
-@Serializable
 data class MemberAccess(
     val receiver: Expression,
     val member: String,
@@ -385,28 +381,6 @@ data class MemberAccess(
     // For module-qualified access (e.g., bytes::from_string), the content hash of the resolved function
     val resolvedContentHash: String? = null
 ) : Expression
-
-@Serializable
-data class RecordUpdate(
-    val record: Expression,
-    val updates: List<RecordEntry>,
-    override val inferredType: MezzeType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
-@Serializable
-data class RecordUpdateExpression(
-    val baseRecord: Expression,
-    val updates: List<RecordUpdateEntry>,
-    override val inferredType: MezzeType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
-@Serializable
-data class RecordUpdateEntry(
-    val fieldPath: List<String>, // ["x"] for x = v, ["y", "z"] for y.z = v
-    val value: Expression
-)
 
 // ============================================================================
 // VARIANTS

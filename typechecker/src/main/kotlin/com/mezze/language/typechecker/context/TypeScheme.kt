@@ -179,7 +179,8 @@ private fun applySubstitutionToType(
                 constructors = type.constructors.mapValues { (_, payloadType) ->
                     payloadType?.let { applySubstitutionToType(it, substitution) }
                 },
-                rowVar = type.rowVar  // RowVar doesn't get substituted
+                rowVar = type.rowVar,  // RowVar doesn't get substituted
+                typeName = type.typeName  // Preserve type name for validation
             )
         }
         is MezzeType.TypeApplication -> {

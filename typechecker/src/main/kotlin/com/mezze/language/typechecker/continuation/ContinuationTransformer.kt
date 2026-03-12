@@ -555,18 +555,6 @@ class ContinuationTransformer {
                 collectUsedVariablesRecursive(expr.seq, collector)
                 collectUsedVariablesRecursive(expr.index, collector)
             }
-            is RecordUpdate -> {
-                collectUsedVariablesRecursive(expr.record, collector)
-                expr.updates.forEach { update ->
-                    update.value?.let { collectUsedVariablesRecursive(it, collector) }
-                }
-            }
-            is RecordUpdateExpression -> {
-                collectUsedVariablesRecursive(expr.baseRecord, collector)
-                expr.updates.forEach { update ->
-                    collectUsedVariablesRecursive(update.value, collector)
-                }
-            }
             is PerformExpression -> {
                 collectUsedVariablesRecursive(expr.expression, collector)
             }

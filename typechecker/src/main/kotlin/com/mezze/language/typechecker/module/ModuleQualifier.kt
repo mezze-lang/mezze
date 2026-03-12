@@ -155,22 +155,29 @@ class ModuleQualifier {
                 val qualifiedFunction = qualifyExpression(expr.function, moduleNames, prefix)
                 val qualifiedArguments = qualifyExpression(expr.arguments, moduleNames, prefix)
 
-                // Also update resolvedFunctionName if it references a module-defined function
-                val qualifiedResolvedName = expr.resolvedFunctionName?.let { resolvedName ->
-                    // Extract the base name (before monomorphization suffix)
-                    val baseName = resolvedName.substringBefore('$')
-                    if (baseName in moduleNames) {
-                        // Qualify the base name, keep the suffix
-                        val suffix = if ('$' in resolvedName) {
-                            resolvedName.substringAfter('$', "")
-                        } else ""
-                        if (suffix.isNotEmpty()) {
-                            "${prefix}${baseName}\$$suffix"
-                        } else {
-                            prefix + baseName
+                // For monomorphic calls with content hash, the hash is already globally unique
+                // so we don't need to qualify the resolvedFunctionName.
+                // The content hash is the authoritative identifier for cross-module lookup.
+                //
+                // We only need to qualify resolvedFunctionName when:
+                // 1. There's no content hash (legacy/local calls)
+                // 2. The function is a module-local name that needs prefixing
+                val qualifiedResolvedName = if (expr.resolvedFunctionContentHash != null) {
+                    // Content hash exists - it's the authoritative lookup key
+                    // Keep resolvedFunctionName as-is (used only for debugging/slot naming)
+                    expr.resolvedFunctionName
+                } else {
+                    // No content hash - need to qualify string name for local lookup
+                    expr.resolvedFunctionName?.let { resolvedName ->
+                        val baseName = when (val func = expr.function) {
+                            is Identifier -> func.localName
+                            else -> return@let resolvedName  // Can't determine base name
                         }
-                    } else {
-                        resolvedName
+                        if (baseName in moduleNames) {
+                            prefix + baseName
+                        } else {
+                            resolvedName
+                        }
                     }
                 }
 
@@ -240,25 +247,6 @@ class ModuleQualifier {
             // Member access - qualify receiver
             is MemberAccess -> expr.copy(
                 receiver = qualifyExpression(expr.receiver, moduleNames, prefix)
-            )
-
-            // Record update - qualify record and updates
-            is RecordUpdate -> expr.copy(
-                record = qualifyExpression(expr.record, moduleNames, prefix),
-                updates = expr.updates.map { update ->
-                    update.copy(
-                        value = update.value?.let { qualifyExpression(it, moduleNames, prefix) }
-                    )
-                }
-            )
-
-            is RecordUpdateExpression -> expr.copy(
-                baseRecord = qualifyExpression(expr.baseRecord, moduleNames, prefix),
-                updates = expr.updates.map { update ->
-                    update.copy(
-                        value = qualifyExpression(update.value, moduleNames, prefix)
-                    )
-                }
             )
 
             // Variant construction - qualify value

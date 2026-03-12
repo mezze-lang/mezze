@@ -58,8 +58,6 @@ class TypeSubstitutor(
                 receiver = apply(expr.receiver),
                 inferredType = substitutedType
             )
-            is RecordUpdate -> applyToRecordUpdate(expr, substitutedType)
-            is RecordUpdateExpression -> applyToRecordUpdateExpression(expr, substitutedType)
 
             // Variants
             is VariantConstruction -> expr.copy(
@@ -132,7 +130,9 @@ class TypeSubstitutor(
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyToType(it) }
-                }
+                },
+                rowVar = type.rowVar,
+                typeName = type.typeName
             )
 
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
@@ -210,39 +210,6 @@ class TypeSubstitutor(
             }
         }
         return expr.copy(entries = updatedEntries, inferredType = substitutedType)
-    }
-
-    private fun applyToRecordUpdate(expr: RecordUpdate, substitutedType: MezzeType?): RecordUpdate {
-        val updatedRecord = apply(expr.record)
-        val updatedUpdates = expr.updates.map { update ->
-            RecordEntry(
-                name = update.name,
-                value = update.value?.let { apply(it) }
-            )
-        }
-        return expr.copy(
-            record = updatedRecord,
-            updates = updatedUpdates,
-            inferredType = substitutedType
-        )
-    }
-
-    private fun applyToRecordUpdateExpression(
-        expr: RecordUpdateExpression,
-        substitutedType: MezzeType?
-    ): RecordUpdateExpression {
-        val updatedBase = apply(expr.baseRecord)
-        val updatedUpdates = expr.updates.map { update ->
-            RecordUpdateEntry(
-                fieldPath = update.fieldPath,
-                value = apply(update.value)
-            )
-        }
-        return expr.copy(
-            baseRecord = updatedBase,
-            updates = updatedUpdates,
-            inferredType = substitutedType
-        )
     }
 
     private fun applyToLambda(expr: LambdaExpression, substitutedType: MezzeType?): LambdaExpression {
@@ -565,14 +532,6 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
             }
             is MemberAccess -> collect(e.receiver)
             is VariantConstruction -> e.value?.let { collect(it) }
-            is RecordUpdate -> {
-                collect(e.record)
-                e.updates.forEach { update -> update.value?.let { collect(it) } }
-            }
-            is RecordUpdateExpression -> {
-                collect(e.baseRecord)
-                e.updates.forEach { collect(it.value) }
-            }
             is SeqLiteral -> e.elements.forEach { element ->
                 when (element) {
                     is SeqRegularElement -> collect(element.expression)

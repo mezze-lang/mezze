@@ -93,6 +93,10 @@ public final class MatchBranchNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private int[] cachedVariantPayloadFieldIndices;
 
+    // Structured pattern payload for optimized binding (Option, Result, List patterns)
+    @CompilationFinal
+    private final PatternPayload patternPayload;
+
     /**
      * Create a variant pattern branch with field names for proper record extraction.
      * For patterns like `Some { val }`, fieldNames = ["val"], fieldSlots = [slot_for_val].
@@ -437,6 +441,14 @@ public final class MatchBranchNode extends MezzeNode {
 
         // Initialize Cons/Nil pattern info - precompute for O(1) runtime checks
         initListPatternInfo();
+
+        // Initialize structured pattern payload for optimized variant binding
+        // Only for variant patterns (tag >= 0) with field names
+        if (tag >= 0 && variantPayloadFieldNames != null && variantPayloadFieldNames.length > 0) {
+            this.patternPayload = PatternPayload.detect(variantPayloadFieldNames, payloadSlots);
+        } else {
+            this.patternPayload = null;
+        }
     }
 
     /**
@@ -508,12 +520,20 @@ public final class MatchBranchNode extends MezzeNode {
     /**
      * Bind payload values from a variant to frame slots - OPTIMIZED.
      * For variant patterns like `Some { val }`, extracts fields from the payload record.
-     * Uses shape caching for O(1) field access after warmup.
+     * Uses PatternPayload for structured patterns (Option, Result, List) or
+     * shape caching for O(1) field access after warmup.
      */
     @ExplodeLoop
     public void bindPayload(VirtualFrame frame, MezzeVariant variant) {
         if (payloadSlotCount == 0) {
             return; // Fast path for no payload
+        }
+
+        // FAST PATH: Use structured pattern payload if available
+        // This avoids string comparisons for common patterns like Some, Cons, Err
+        if (patternPayload != null) {
+            patternPayload.bind(frame, variant);
+            return;
         }
 
         // Check if we need record field extraction

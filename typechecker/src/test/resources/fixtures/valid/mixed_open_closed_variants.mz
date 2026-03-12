@@ -30,11 +30,10 @@ let branch = {choice} -> match choice is
   Right -> Beta
   _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha, Beta, Gamma |
 
-# Function that closes over open variant
+# Function matching closed Option type - all constructors covered, no wildcard needed
 let handleWithDefault = {opt} -> match opt is
   Some {val} -> val
-  None -> 42
-  _ -> 0                                                        # expected: handleWithDefault : { opt: Option Int } -> Int
+  None -> 42                                                    # expected: handleWithDefault : { opt: Option Int } -> Int
 
 # Closed variant with polymorphic operations
 let closedMath = {op, x, y} -> match op is

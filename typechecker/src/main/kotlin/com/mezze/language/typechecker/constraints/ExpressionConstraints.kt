@@ -88,8 +88,6 @@ class ExpressionConstraintGenerator {
             // Records
             is RecordLiteral -> generateRecordLiteral(expr, context)
             is MemberAccess -> generateMemberAccess(expr, context)
-            is RecordUpdate -> generateRecordUpdate(expr, context)
-            is RecordUpdateExpression -> generateRecordUpdateExpression(expr, context)
 
             // Variants
             is VariantConstruction -> generateVariantConstruction(expr, context)
@@ -1454,7 +1452,8 @@ class ExpressionConstraintGenerator {
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { substituteAssociatedTypesInType(it, associatedTypeBindings) }
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
@@ -1637,7 +1636,8 @@ class ExpressionConstraintGenerator {
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyTypeVarSubstitution(it, substitution) }
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)
@@ -1877,6 +1877,9 @@ class ExpressionConstraintGenerator {
     /**
      * Check if a MezzeType matches a type name string with bidirectional inference.
      * Used as fallback when targetTypeAnnotations are not available.
+     *
+     * NOTE: This is a legacy fallback. Prefer using structured type matching
+     * via MezzeType pattern matching when possible.
      */
     private fun typeMatchesStringBidirectional(constraintType: MezzeType, implTypeName: String): Boolean {
         // Type variable can match any concrete type
@@ -1885,25 +1888,49 @@ class ExpressionConstraintGenerator {
         }
 
         return when (constraintType) {
-            is MezzeType.IntType -> implTypeName == "Int"
-            is MezzeType.FloatType -> implTypeName == "Float"
-            is MezzeType.StringType -> implTypeName == "String"
-            is MezzeType.BoolType -> implTypeName == "Bool"
-            is MezzeType.NatType -> implTypeName == "Nat"
-            is MezzeType.FracType -> implTypeName == "Frac"
-            is MezzeType.CharType -> implTypeName == "Char"
-            is MezzeType.OrderingType -> implTypeName == "Ordering"
-            is MezzeType.BytesType -> implTypeName == "Bytes"
-            is MezzeType.ByteBufferType -> implTypeName == "ByteBuffer"
-            is MezzeType.TypeApplication -> implTypeName == constraintType.constructor || implTypeName.startsWith("${constraintType.constructor}_")
-            is MezzeType.SeqType -> implTypeName.startsWith("Seq")
-            is MezzeType.ListType -> implTypeName.startsWith("List")
-            is MezzeType.SetType -> implTypeName.startsWith("Set")
-            is MezzeType.MapType -> implTypeName.startsWith("Map")
+            // Primitive types: exact string match
+            MezzeType.IntType -> implTypeName == "Int"
+            MezzeType.FloatType -> implTypeName == "Float"
+            MezzeType.StringType -> implTypeName == "String"
+            MezzeType.BoolType -> implTypeName == "Bool"
+            MezzeType.NatType -> implTypeName == "Nat"
+            MezzeType.FracType -> implTypeName == "Frac"
+            MezzeType.CharType -> implTypeName == "Char"
+            MezzeType.OrderingType -> implTypeName == "Ordering"
+            MezzeType.BytesType -> implTypeName == "Bytes"
+            MezzeType.ByteBufferType -> implTypeName == "ByteBuffer"
+
+            // Type applications: match constructor or constructor_suffix pattern
+            is MezzeType.TypeApplication ->
+                implTypeName == constraintType.constructor ||
+                implTypeName.startsWith("${constraintType.constructor}_")
+
+            // Collection types: match "Type" or "Type_element" pattern
+            // Using exact prefix + optional suffix to avoid false positives
+            is MezzeType.SeqType -> matchesCollectionType(implTypeName, "Seq")
+            is MezzeType.ListType -> matchesCollectionType(implTypeName, "List")
+            is MezzeType.SetType -> matchesCollectionType(implTypeName, "Set")
+            is MezzeType.SortedSetType -> matchesCollectionType(implTypeName, "SortedSet")
+            is MezzeType.MapType -> matchesCollectionType(implTypeName, "Map")
+            is MezzeType.SortedMapType -> matchesCollectionType(implTypeName, "SortedMap")
+
+            // Structural types: exact name match
             is MezzeType.RecordType -> implTypeName == constraintType.typeName
             is MezzeType.VariantType -> implTypeName == constraintType.typeName
+
             else -> false
         }
+    }
+
+    /**
+     * Match a collection type name with its canonical prefix.
+     * Accepts "Seq", "Seq_Int", "Seq_String", etc.
+     * Rejects "SeqIterator" or other types that happen to start with "Seq".
+     */
+    private fun matchesCollectionType(implTypeName: String, prefix: String): Boolean {
+        return implTypeName == prefix ||                           // Exact match: "Seq"
+               implTypeName.startsWith("${prefix}_") ||            // Element suffix: "Seq_Int"
+               implTypeName.startsWith("${prefix}<")               // Generic syntax: "Seq<Int>"
     }
 
     /**
@@ -1913,51 +1940,6 @@ class ExpressionConstraintGenerator {
         if (type !is MezzeType.VariantType) return false
         val constructors = type.constructors.keys
         return constructors.size == 2 && "True" in constructors && "False" in constructors
-    }
-
-    private fun generateRecordUpdate(expr: RecordUpdate, context: ConstraintContext): ConstraintResult {
-        // {base | field1 = expr1, field2 = expr2}
-
-        val baseResult = generate(expr.record, context)
-        val constraints = mutableListOf<Constraint>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-
-        constraints.addAll(baseResult.constraints)
-        undefinedVars.addAll(baseResult.undefinedVariables)
-
-        for (update in expr.updates) {
-            val updateResult = generate(update.value ?: Identifier(localName = update.name), context)
-            constraints.addAll(updateResult.constraints)
-            undefinedVars.addAll(updateResult.undefinedVariables)
-
-            // Base record must have this field with compatible type
-            constraints.add(
-                Constraint.HasField(
-                    recordType = baseResult.type,
-                    fieldName = update.name,
-                    fieldType = updateResult.type,
-                    context = "Record update field ${update.name}"
-                )
-            )
-        }
-
-        // Result type is same as base type
-        return ConstraintResult(
-            type = baseResult.type,
-            constraints = constraints,
-            undefinedVariables = undefinedVars
-        )
-    }
-
-    private fun generateRecordUpdateExpression(expr: RecordUpdateExpression, context: ConstraintContext): ConstraintResult {
-        // Similar to RecordUpdate but with nested field paths
-        // TODO: Implement nested field update constraints
-        val baseResult = generate(expr.baseRecord, context)
-        return ConstraintResult(
-            type = baseResult.type,
-            constraints = baseResult.constraints,
-            undefinedVariables = baseResult.undefinedVariables
-        )
     }
 
     // ========================================================================
@@ -3456,8 +3438,11 @@ class ExpressionConstraintGenerator {
                 // The effectInstances track concrete bindings like 'error = String
                 // from expressions that use the effect, not the generic bindings from the performer.
                 val effectName = performerInfo.effectName
+                // Use structured path comparison for effect name matching
+                val effectNamePath = ModulePath.parse(effectName)
                 val effectInstance = exprResult.effectInstances.find { instance ->
-                    instance.name == effectName || instance.name.endsWith("::$effectName")
+                    val instancePath = ModulePath.parse(instance.name)
+                    instancePath == effectNamePath || instancePath.endsWith(effectNamePath)
                 }
 
                 // Build substitution map from effectInstance's concrete bindings
@@ -3688,8 +3673,11 @@ class ExpressionConstraintGenerator {
         // TypeApplication("Continuation", [suspendType, resumeType, resultType])
         if (type is MezzeType.TypeApplication) {
             // Check if it's a Continuation type (handle both qualified and unqualified names)
-            val isContinuation = type.constructor == "Continuation" ||
-                type.constructor.endsWith("::Continuation")
+            // Use structured path comparison instead of string endsWith
+            val constructorPath = ModulePath.parse(type.constructor)
+            val continuationPath = ModulePath(listOf("Continuation"))
+            val isContinuation = constructorPath == continuationPath ||
+                constructorPath.endsWith(continuationPath)
 
             if (isContinuation && type.args.size == 3) {
                 // Args order: 'suspend, 'resume, 'result
@@ -4075,7 +4063,12 @@ class ExpressionConstraintGenerator {
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { convertFieldType(it) }
-                    }
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+                    // Use synthetic typeName for closed inline annotations to enable validation.
+                    // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
+                    // Open annotations don't need this since they explicitly allow additional constructors.
+                    typeName = if (!annotation.isOpen) "<inline>" else null
                 )
             }
             is SeqTypeAnnotation -> {

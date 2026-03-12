@@ -532,8 +532,6 @@ class PrettyPrinter {
             is SeqLiteral -> printSeqLiteral(expr)
             is SeqAccess -> printSeqAccess(expr)
             is MemberAccess -> printMemberAccess(expr)
-            is RecordUpdate -> printRecordUpdate(expr)
-            is RecordUpdateExpression -> printRecordUpdateExpression(expr)
             is VariantConstruction -> printVariantConstruction(expr)
             is LambdaExpression -> printLambdaExpression(expr)
             is FunctionCall -> printFunctionCall(expr)
@@ -698,34 +696,6 @@ class PrettyPrinter {
         printExpression(expr.receiver)
         append(".")
         append(expr.member)
-    }
-
-    private fun printRecordUpdate(expr: RecordUpdate) {
-        append("{ ")
-        printExpression(expr.record)
-        append(" | ")
-        expr.updates.forEachIndexed { index, update ->
-            if (index > 0) append(", ")
-            append(update.name)
-            update.value?.let {
-                append(" = ")
-                printExpression(it)
-            }
-        }
-        append(" }")
-    }
-
-    private fun printRecordUpdateExpression(expr: RecordUpdateExpression) {
-        append("{ ")
-        printExpression(expr.baseRecord)
-        append(" | ")
-        expr.updates.forEachIndexed { index, update ->
-            if (index > 0) append(", ")
-            append(update.fieldPath.joinToString("."))
-            append(" = ")
-            printExpression(update.value)
-        }
-        append(" }")
     }
 
     private fun printVariantConstruction(expr: VariantConstruction) {

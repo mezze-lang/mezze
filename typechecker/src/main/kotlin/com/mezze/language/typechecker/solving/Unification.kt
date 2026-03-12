@@ -738,16 +738,22 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val closedCtors = closedVar.constructors.keys
         val openCtors = openVar.constructors.keys
 
-        // CRITICAL: If closed variant has a typeName (is a declared type), check that ALL
-        // constructors in the open variant exist in the closed variant.
+        // CRITICAL: If closed variant has a typeName (is a declared type or inline annotation),
+        // check that ALL constructors in the open variant exist in the closed variant.
         // This prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`.
         if (closedVar.typeName != null) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
                 val available = closedCtors.sorted().joinToString(", ")
                 val invalid = invalidConstructors.sorted().joinToString(", ")
+                // Use friendly message for inline annotations and inferred variants
+                val typeDesc = when (closedVar.typeName) {
+                    "<inline>" -> "inline variant type '| $available |'"
+                    "<inferred>" -> "inferred variant type '| $available |'"
+                    else -> "type '${closedVar.typeName}'"
+                }
                 return UnificationResult.Failure(
-                    message = "Constructor(s) '$invalid' not found in type '${closedVar.typeName}'. " +
+                    message = "Constructor(s) '$invalid' not found in $typeDesc. " +
                               "Available constructors: $available",
                     type1 = var1,
                     type2 = var2
@@ -817,8 +823,14 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         if (invalidConstructors.isNotEmpty()) {
             val available = declaredVar.constructors.keys.sorted().joinToString(", ")
             val invalid = invalidConstructors.sorted().joinToString(", ")
+            // Use friendly message for inline annotations and inferred variants
+            val typeDesc = when (declaredVar.typeName) {
+                "<inline>" -> "inline variant type '| $available |'"
+                "<inferred>" -> "inferred variant type '| $available |'"
+                else -> "type '${declaredVar.typeName}'"
+            }
             return UnificationResult.Failure(
-                message = "Constructor(s) '$invalid' not found in type '${declaredVar.typeName}'. " +
+                message = "Constructor(s) '$invalid' not found in $typeDesc. " +
                           "Available constructors: $available",
                 type1 = var1,
                 type2 = var2

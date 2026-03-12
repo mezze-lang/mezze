@@ -1699,41 +1699,25 @@ class TypeValidator(
             )
         }
 
-        // Check for unreachable patterns: if all constructors are covered BEFORE a wildcard,
-        // the wildcard is unreachable.
-        // IMPORTANT: Only apply this check for BoolType matches, where unreachable wildcards
-        // after true/false are clearly mistakes. For other variant types (like Option), allowing
-        // defensive wildcards after exhaustive patterns is reasonable and often intentional.
+        // Check for unreachable patterns: if all constructors of a CLOSED variant are covered
+        // BEFORE a wildcard, the wildcard is unreachable and is an error.
         //
-        // We detect Bool matches either by:
-        // 1. scrutineeType is BoolType (explicit annotation)
-        // 2. scrutineeType is a VariantType with exactly True and False constructors
-        // 3. The patterns include boolean literals (true/false) - indicates inferred Bool type
-        // 4. The patterns include True/False constructor patterns - indicates Bool variant type
-        val hasBoolLiteralPatterns = matchExpr.cases.any { case ->
-            case.patterns.any { pattern ->
-                pattern is LiteralPattern && pattern.value is BooleanLiteralValue
-            }
-        }
-        val hasBoolConstructorPatterns = matchExpr.cases.any { case ->
-            case.patterns.any { pattern ->
-                pattern is ConstructorPattern && (pattern.constructor == "True" || pattern.constructor == "False")
-            }
-        }
-        val isBoolVariant = scrutineeType is MezzeType.VariantType &&
-            scrutineeType.constructors.keys == setOf("True", "False")
-        val isBoolMatch = scrutineeType is MezzeType.BoolType || isBoolVariant ||
-            hasBoolLiteralPatterns || hasBoolConstructorPatterns
-        if (isBoolMatch && hasWildcard && uncoveredConstructors.isEmpty()) {
-            // Find the wildcard pattern to report its location
+        // This applies to ALL closed variants (Bool, Option, Result, user-defined types like Color).
+        // A wildcard after exhaustive constructor patterns is dead code that can hide type errors.
+        //
+        // Note: We already checked that expandedType.rowVar == null above (closed variant).
+        // Open variants (with rowVar != null) are handled earlier and don't reach this code.
+        if (hasWildcard && uncoveredConstructors.isEmpty()) {
+            // Find the wildcard/variable pattern to report its location
             for (case in matchExpr.cases) {
                 for (pattern in case.patterns) {
                     if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null && case.ifLetBindings.isEmpty()) {
                         errors.add(
                             ValidationError.UnreachablePattern(
                                 pattern = pattern,
-                                reason = "All constructors are already matched: ${allConstructors.joinToString(", ")}",
-                                sourceLocation = matchExpr.sourceLocation  // Use match expression's location
+                                reason = "All constructors of this closed variant are already matched: ${allConstructors.sorted().joinToString(", ")}. " +
+                                    "This pattern will never execute.",
+                                sourceLocation = case.expression.sourceLocation ?: matchExpr.sourceLocation
                             )
                         )
                     }
@@ -2126,19 +2110,6 @@ class TypeValidator(
                 }
             }
 
-            is RecordUpdate -> {
-                val baseErrors = validatePatternsInExpression(expr.record, substitution)
-                errors.addAll(baseErrors)
-
-                for (update in expr.updates) {
-                    val value = update.value
-                    if (value != null) {
-                        val updateErrors = validatePatternsInExpression(value, substitution)
-                        errors.addAll(updateErrors)
-                    }
-                }
-            }
-
             is StringLiteral -> {
                 if (expr.isInterpolated && expr.parts != null) {
                     for (part in expr.parts) {
@@ -2158,7 +2129,6 @@ class TypeValidator(
             is FractionLiteral,
             is BooleanLiteral,
             is PlaceholderExpression,
-            is RecordUpdateExpression,
             is PerformExpression,
             is EffectCallExpression,
             is StateMachineExpression -> {
@@ -2430,15 +2400,6 @@ class TypeValidator(
                 }
             }
 
-            is RecordUpdate -> {
-                errors.addAll(validatePerformExpressionsInExpression(expr.record, implDeclarations, effectDeclarations, functionDefinitions))
-                for (update in expr.updates) {
-                    update.value?.let { value ->
-                        errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
-                    }
-                }
-            }
-
             is StringLiteral -> {
                 expr.parts?.forEach { part ->
                     if (part is ExpressionPart) {
@@ -2455,7 +2416,6 @@ class TypeValidator(
             is FractionLiteral,
             is BooleanLiteral,
             is PlaceholderExpression,
-            is RecordUpdateExpression,
             is EffectCallExpression,
             is StateMachineExpression -> {
                 // No sub-expressions to validate
@@ -2664,12 +2624,6 @@ class TypeValidator(
                         is SeqSpreadElement -> traverse(element.expression)
                     }
                 }
-                is RecordUpdate -> {
-                    traverse(e.record)
-                    for (update in e.updates) {
-                        update.value?.let { traverse(it) }
-                    }
-                }
                 is StringLiteral -> {
                     e.parts?.forEach { part ->
                         if (part is ExpressionPart) traverse(part.expression)
@@ -2690,7 +2644,6 @@ class TypeValidator(
                 is FractionLiteral,
                 is BooleanLiteral,
                 is PlaceholderExpression,
-                is RecordUpdateExpression,
                 is EffectCallExpression,
                 is StateMachineExpression -> { }
 

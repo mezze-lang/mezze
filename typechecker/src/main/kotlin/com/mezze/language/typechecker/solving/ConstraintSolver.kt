@@ -2752,6 +2752,14 @@ class ConstraintSolver(
                 // SPECIAL CASE: Built-in Bool constructors (True, False)
                 // These are handled specially because Bool is a built-in type without a type declaration
                 if (constructorName == "True" || constructorName == "False") {
+                    // Bool constructors don't take a payload - reject if one is provided
+                    if (expectedPayloadType != null) {
+                        return ConstraintResult.Failure(
+                            "Constructor '$constructorName' does not take a payload. " +
+                            "Use '$constructorName' instead of '$constructorName { ... }'."
+                        )
+                    }
+
                     // Use the closed Bool variant type
                     val boolType = MezzeType.VariantType(
                         constructors = mapOf("True" to null, "False" to null),
@@ -2788,10 +2796,12 @@ class ConstraintSolver(
                         ctor.name to payloadType
                     }
 
+                    // For polymorphic types (with type params), don't set typeName
+                    // because the actual type is a TypeApplication, not just the base variant.
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
-                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,  // Use declared openness
-                        typeName = declaringType.name  // Preserve type name for Eq derivation
+                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+                        typeName = if (declaringType.typeParams.isEmpty()) declaringType.name else null
                     )
 
                     // CRITICAL: Validate payload presence/absence and unify types
@@ -2869,6 +2879,14 @@ class ConstraintSolver(
             // SPECIAL CASE: Built-in Bool constructors in expression context
             // Even when not in pattern context, True/False should resolve to Bool
             if (constructorName == "True" || constructorName == "False") {
+                // Bool constructors don't take a payload - reject if one is provided
+                if (expectedPayloadType != null) {
+                    return ConstraintResult.Failure(
+                        "Constructor '$constructorName' does not take a payload. " +
+                        "Use '$constructorName' instead of '$constructorName { ... }'."
+                    )
+                }
+
                 val boolType = MezzeType.VariantType(
                     constructors = mapOf("True" to null, "False" to null),
                     rowVar = null,  // Bool is closed
@@ -2900,10 +2918,11 @@ class ConstraintSolver(
                         ctor.name to payloadType
                     }
 
+                    // For polymorphic types (with type params), don't set typeName
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                        typeName = declaringTypeExpr.name
+                        typeName = if (declaringTypeExpr.typeParams.isEmpty()) declaringTypeExpr.name else null
                     )
 
                     var resultSubst = Substitution.single(variantType.variable, declaredVariant)
@@ -3049,10 +3068,13 @@ class ConstraintSolver(
                             ctor.name to payloadType
                         }
 
+                        // For polymorphic types (with type params), don't set typeName
+                        // because the actual type is a TypeApplication, not just the base variant.
+                        // This allows ability lookups to work correctly with Maybe Int, etc.
                         val declaredVariant = MezzeType.VariantType(
                             constructors = constructors,
                             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                            typeName = typeForConstructor.name
+                            typeName = if (typeForConstructor.typeParams.isEmpty()) typeForConstructor.name else null
                         )
 
                         var resultSubst = Substitution.single(variantType.variable, declaredVariant)
@@ -3369,7 +3391,12 @@ class ConstraintSolver(
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
                     },
                     rowVar = if (shouldClose) null else type.rowVar,
-                    typeName = type.typeName
+                    // When closing a pattern-based variant that doesn't have a typeName,
+                    // set a synthetic "<inferred>" name. This prevents the closed variant
+                    // from merging with other variants during later unification.
+                    // Example: `let f = {c} -> match c is Red -> 1 | Blue -> 2`
+                    // creates `| Red, Blue |` which should reject `f { c = Green }`.
+                    typeName = if (shouldClose && type.typeName == null) "<inferred>" else type.typeName
                 )
             }
             is MezzeType.RecordType -> {

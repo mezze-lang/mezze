@@ -166,11 +166,27 @@ class OpenVariantTypeAliasTest {
     }
 
     @Test
-    fun `test open variant accepts constructor from different variant`() {
-        assertTypeChecks(
+    fun `test open variant rejects constructor from different declared type`() {
+        // Even though Color is open, Yellow belongs to Animal (a declared type)
+        // so it cannot be assigned to Color. Open variants accept anonymous
+        // constructors, not constructors from other declared types.
+        assertTypeCheckFails(
             """
             type Color = |Red, Blue, Green, ... |
             type Animal = |Cat, Dog, Yellow |
+            let y: Color = Yellow
+            y
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `test open variant accepts anonymous constructor`() {
+        // When there's no type declaration for Yellow, it's anonymous
+        // and can be accepted by the open variant
+        assertTypeChecks(
+            """
+            type Color = |Red, Blue, Green, ... |
             let y: Color = Yellow
             y
             """.trimIndent(),

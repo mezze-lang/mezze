@@ -171,10 +171,10 @@ class VariantMergingTest {
     }
 
     @Test
-    fun `mixing type alias constructor with unknown constructor creates merged variant`() {
-        // When using constructors from a type alias AND a new constructor,
-        // the result is a merged variant containing all of them.
-        // This is valid because Pink is just an anonymous variant constructor.
+    fun `mixing type alias constructor with unknown constructor fails`() {
+        // When using constructors from a type alias AND an anonymous constructor,
+        // the type check should FAIL because you can't merge a declared type (Color)
+        // with an anonymous variant (Pink).
         val source = """
             type Color = | Red, Blue, Green |
 
@@ -184,13 +184,28 @@ class VariantMergingTest {
                 _ -> Pink
         """.trimIndent()
 
+        // This should fail - Red/Blue are from Color, Pink is anonymous
+        assertThrows<TypeCheckError> {
+            parseAndTypeCheck(source)
+        }
+    }
+
+    @Test
+    fun `mixing anonymous constructors without type declaration merges correctly`() {
+        // Without a type declaration, all constructors are anonymous and can merge
+        val source = """
+            let x = {num} -> match num is
+                1 -> Red
+                2 -> Blue
+                _ -> Pink
+        """.trimIndent()
+
         val program = parseAndTypeCheck(source)
         val typeStr = getBindingType(program, "x")
 
-        // All constructors should be present - Color's constructors plus Pink
+        // All constructors should be present in the merged anonymous variant
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Pink"),
             "Type should contain Red, Blue, and Pink: $typeStr")
-        // Note: Green is NOT in the output because it wasn't used in any branch
     }
 
     // ========================================================================

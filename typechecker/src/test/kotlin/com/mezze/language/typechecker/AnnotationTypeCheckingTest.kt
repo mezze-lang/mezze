@@ -868,11 +868,10 @@ class AnnotationTypeCheckingTest {
         )
     }
 
-    // TODO: This SHOULD fail but currently passes (known limitation)
-    // Closed variant type checking doesn't reject undefined constructors
+    // Closed inline variant annotation rejects undefined constructors
     @Test
     fun `test variant annotation missing constructor fails`() {
-        assertTypeChecks(
+        assertTypeCheckFails(
             """
             let result: | Success { val: Int } | = Failure { msg = "error" }
             result

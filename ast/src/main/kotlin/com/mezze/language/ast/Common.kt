@@ -260,6 +260,19 @@ data class ModulePath(val segments: List<String>) : UsePath {
         ModulePath(segments.dropLast(1))
     } else null
 
+    /**
+     * Check if this path ends with the given suffix path.
+     * Example: ModulePath(["std", "int"]).endsWith(ModulePath(["int"])) == true
+     * This is the structured replacement for string-based endsWith("::$name")
+     */
+    fun endsWith(suffix: ModulePath): Boolean {
+        if (suffix.segments.size > segments.size) return false
+        val offset = segments.size - suffix.segments.size
+        return suffix.segments.withIndex().all { (i, segment) ->
+            segments[offset + i] == segment
+        }
+    }
+
     companion object {
         /**
          * Parse a path string into ModulePath.

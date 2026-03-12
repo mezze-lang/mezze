@@ -111,22 +111,6 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
-        is RecordUpdate -> expr.copy(
-            record = normalizeExpression(expr.record),
-            updates = expr.updates.map { RecordEntry(it.name, it.value?.let { v -> normalizeExpression(v) }) },
-            inferredType = null,
-            sourceLocation = null
-        )
-
-        is RecordUpdateExpression -> expr.copy(
-            baseRecord = normalizeExpression(expr.baseRecord),
-            updates = expr.updates.map {
-                RecordUpdateEntry(it.fieldPath, normalizeExpression(it.value))
-            },
-            inferredType = null,
-            sourceLocation = null
-        )
-
         is VariantConstruction -> expr.copy(
             value = expr.value?.let { normalizeExpression(it) },
             inferredType = null,

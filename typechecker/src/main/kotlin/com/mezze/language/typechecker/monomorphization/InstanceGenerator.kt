@@ -52,13 +52,13 @@ class InstanceGenerator(
             val typeArgsHash = TypeCheckCache.hashTypeArgs(request.typeArgs)
             TypeCheckCache.getMonomorphicInstance(originalHash, typeArgsHash)?.let { cachedBinding ->
                 // Cache hit - return the cached monomorphic instance
-                val monomorphicName = request.generateMonomorphicName()
-                val contentHash = request.generateContentHash()
                 val key = request.toMonomorphicKey()
+                val contentHash = key.generateContentHash()
+                val bindingName = contentHash ?: request.originalName
                 return GenerationResult.Success(
                     instance = MonomorphicInstance(
                         originalName = request.originalName,
-                        monomorphicName = monomorphicName,
+                        monomorphicName = bindingName,  // Use hash-based name
                         typeArguments = request.typeArgs,
                         specializedBinding = cachedBinding,
                         contentHash = contentHash,
@@ -84,13 +84,18 @@ class InstanceGenerator(
         val substitutor = TypeSubstitutor(substitutionMap)
         val specializedExpr = substitutor.apply(originalExpr)
 
-        // Generate the monomorphic name and content hash
-        val monomorphicName = request.generateMonomorphicName()
-        val contentHash = request.generateContentHash()
+        // Generate content hash (the authoritative identifier)
+        // Build structured key first, then derive hash from it
+        val key = request.toMonomorphicKey()
+        val contentHash = key.generateContentHash()
 
-        // Create the specialized binding with content hash
+        // Use content hash as binding name (not $-delimited string)
+        // This ensures lookups are hash-based, not string-parsing based
+        val bindingName = contentHash ?: request.originalName
+
+        // Create the specialized binding with content hash as name
         val specializedBinding = originalBinding.copy(
-            pattern = VariablePattern(monomorphicName),
+            pattern = VariablePattern(bindingName),
             expression = specializedExpr,
             typeScheme = null, // No longer polymorphic
             inferredType = specializedExpr.inferredType,
@@ -106,13 +111,10 @@ class InstanceGenerator(
             TypeCheckCache.putMonomorphicInstance(originalHash, typeArgsHash, specializedBinding)
         }
 
-        // Build structured MonomorphicKey
-        val key = request.toMonomorphicKey()
-
         return GenerationResult.Success(
             instance = MonomorphicInstance(
                 originalName = request.originalName,
-                monomorphicName = monomorphicName,
+                monomorphicName = bindingName,  // Use hash-based name, not $-delimited
                 typeArguments = request.typeArgs,
                 specializedBinding = specializedBinding,
                 contentHash = contentHash,

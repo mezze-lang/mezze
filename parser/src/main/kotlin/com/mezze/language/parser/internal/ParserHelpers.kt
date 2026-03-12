@@ -317,24 +317,12 @@ internal fun desugarExpression(expr: Expression): Expression {
         is PerformExpression -> expr.copy(
             expression = desugarExpression(expr.expression)
         )
-        is RecordUpdateExpression -> expr.copy(
-            baseRecord = desugarExpression(expr.baseRecord),
-            updates = expr.updates.map { update ->
-                update.copy(value = desugarExpression(update.value))
-            }
-        )
         is SeqAccess -> expr.copy(
             seq = desugarExpression(expr.seq),
             index = desugarExpression(expr.index)
         )
         is MemberAccess -> expr.copy(
             receiver = desugarExpression(expr.receiver)
-        )
-        is RecordUpdate -> expr.copy(
-            record = desugarExpression(expr.record),
-            updates = expr.updates.map { update ->
-                update.copy(value = update.value?.let { desugarExpression(it) })
-            }
         )
         is VariantConstruction -> expr.copy(
             value = expr.value?.let { desugarExpression(it) }

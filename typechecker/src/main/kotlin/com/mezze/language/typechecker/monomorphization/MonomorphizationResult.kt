@@ -16,7 +16,8 @@ sealed class MonomorphizationResult {
     data class Success(
         val program: Program,                           // Program with updated call sites
         val monomorphicInstances: Map<String, LetBinding>, // Generated specialized functions
-        val warnings: List<String> = emptyList()
+        val warnings: List<String> = emptyList(),
+        val stats: MonomorphizationStats = MonomorphizationStats()  // Statistics for observability
     ) : MonomorphizationResult()
 
     /**
@@ -26,6 +27,81 @@ sealed class MonomorphizationResult {
         val errors: List<MonomorphizationError>
     ) : MonomorphizationResult()
 }
+
+/**
+ * Statistics for monomorphization - enables observability and performance tuning.
+ */
+data class MonomorphizationStats(
+    val totalInstancesRequested: Int = 0,      // Total unique (function, types) pairs requested
+    val instancesGenerated: Int = 0,           // Successfully generated instances
+    val cacheHits: Int = 0,                    // Instances retrieved from cache
+    val cacheMisses: Int = 0,                  // Instances that required generation
+    val totalGenerationTimeNanos: Long = 0,   // Total time spent generating instances
+    val analysisTimeNanos: Long = 0,          // Time spent analyzing program for requests
+    val callSiteUpdateTimeNanos: Long = 0,    // Time spent updating call sites
+    val instanceDetails: List<InstanceStats> = emptyList()  // Per-instance statistics
+) {
+    /**
+     * Cache hit rate (0.0 to 1.0)
+     */
+    val cacheHitRate: Double
+        get() = if (cacheHits + cacheMisses > 0) {
+            cacheHits.toDouble() / (cacheHits + cacheMisses)
+        } else 0.0
+
+    /**
+     * Average generation time per instance (excluding cache hits)
+     */
+    val avgGenerationTimeNanos: Long
+        get() = if (cacheMisses > 0) {
+            totalGenerationTimeNanos / cacheMisses
+        } else 0L
+
+    /**
+     * Total monomorphization time
+     */
+    val totalTimeNanos: Long
+        get() = analysisTimeNanos + totalGenerationTimeNanos + callSiteUpdateTimeNanos
+
+    /**
+     * Format as human-readable string
+     */
+    fun format(): String = buildString {
+        appendLine("Monomorphization Statistics:")
+        appendLine("  Instances: $instancesGenerated generated ($totalInstancesRequested requested)")
+        appendLine("  Cache: ${(cacheHitRate * 100).toInt()}% hit rate ($cacheHits hits, $cacheMisses misses)")
+        appendLine("  Timing:")
+        appendLine("    Analysis: ${analysisTimeNanos / 1_000_000}ms")
+        appendLine("    Generation: ${totalGenerationTimeNanos / 1_000_000}ms (avg ${avgGenerationTimeNanos / 1_000}us/instance)")
+        appendLine("    Call site update: ${callSiteUpdateTimeNanos / 1_000_000}ms")
+        appendLine("    Total: ${totalTimeNanos / 1_000_000}ms")
+
+        if (instanceDetails.isNotEmpty()) {
+            appendLine("  Instance breakdown:")
+            // Group by original function
+            val byFunction = instanceDetails.groupBy { it.originalName }
+            for ((fn, instances) in byFunction.entries.sortedBy { it.key }) {
+                appendLine("    $fn: ${instances.size} instantiation(s)")
+                for (inst in instances.sortedByDescending { it.callCount }) {
+                    val cached = if (inst.wasCached) " (cached)" else ""
+                    appendLine("      ${inst.typeArgsSummary}: ${inst.callCount} call site(s)$cached")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Statistics for a single monomorphic instance.
+ */
+data class InstanceStats(
+    val originalName: String,          // e.g., "map"
+    val monomorphicName: String,       // e.g., "map$Int"
+    val typeArgsSummary: String,       // e.g., "Int, String"
+    val callCount: Int,                // Number of call sites using this instance
+    val generationTimeNanos: Long,     // Time to generate (0 if cached)
+    val wasCached: Boolean             // Whether retrieved from cache
+)
 
 /**
  * Monomorphization error.

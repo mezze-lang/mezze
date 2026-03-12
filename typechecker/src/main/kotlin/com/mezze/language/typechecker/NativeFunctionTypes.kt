@@ -60,58 +60,99 @@ private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
  */
 object NativeFunctionTypes {
 
+    // Set of all registered native function names for O(1) lookup
+    private val nativeFunctionNames: MutableSet<String> = mutableSetOf()
+
+    // Track whether registerAll has been called
+    private var initialized = false
+
+    /**
+     * Check if a function name is a registered native function.
+     * Uses O(1) HashSet lookup instead of string prefix checking.
+     *
+     * This is the structured way to detect native functions - no string prefix parsing!
+     */
+    fun isNativeFunction(name: String): Boolean {
+        // Ensure we're initialized before checking
+        if (!initialized) {
+            // Create a temporary map just to populate the names
+            val tempContext = mutableMapOf<String, MezzeType>()
+            registerAll(tempContext)
+        }
+        return nativeFunctionNames.contains(name)
+    }
+
+    /**
+     * Wrapper map that captures keys as they're added.
+     * This allows us to track native function names without modifying all the type modules.
+     */
+    private class CapturingMap(
+        private val delegate: MutableMap<String, MezzeType>,
+        private val capturedKeys: MutableSet<String>
+    ) : MutableMap<String, MezzeType> by delegate {
+        override fun put(key: String, value: MezzeType): MezzeType? {
+            capturedKeys.add(key)
+            return delegate.put(key, value)
+        }
+    }
+
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        BasicTypes.registerAll(context)
-        CharTypes.registerAll(context)
+        // Wrap the context to capture all registered native function names
+        val capturingContext = CapturingMap(context, nativeFunctionNames)
 
-        SeqTypes.registerAll(context)
-        ListTypes.registerAll(context)
-        MapTypes.registerAll(context)
-        SetTypes.registerAll(context)
-        NonEmptyListTypes.registerAll(context)
-        DequeTypes.registerAll(context)
-        BytesTypes.registerAll(context)
-        ByteBufferTypes.registerAll(context)
-        SortedMapTypes.registerAll(context)
-        SortedSetTypes.registerAll(context)
+        BasicTypes.registerAll(capturingContext)
+        CharTypes.registerAll(capturingContext)
 
-        MathCoreTypes.registerAll(context)
-        MathTrigTypes.registerAll(context)
-        MathRandomTypes.registerAll(context)
+        SeqTypes.registerAll(capturingContext)
+        ListTypes.registerAll(capturingContext)
+        MapTypes.registerAll(capturingContext)
+        SetTypes.registerAll(capturingContext)
+        NonEmptyListTypes.registerAll(capturingContext)
+        DequeTypes.registerAll(capturingContext)
+        BytesTypes.registerAll(capturingContext)
+        ByteBufferTypes.registerAll(capturingContext)
+        SortedMapTypes.registerAll(capturingContext)
+        SortedSetTypes.registerAll(capturingContext)
 
-        LogTypes.registerAll(context)
-        FilesystemTypes.registerAll(context)
-        TimeTypes.registerAll(context)
-        EnvironmentTypes.registerAll(context)
-        ContinuationTypes.registerAll(context)
-        LoomTypes.registerAll(context)
-        OSThreadTypes.registerAll(context)
-        CoopTypes.registerAll(context)
-        SchedulerTypes.registerAll(context)
-        ParallelTypes.registerAll(context)
-        STMTypes.registerAll(context)
+        MathCoreTypes.registerAll(capturingContext)
+        MathTrigTypes.registerAll(capturingContext)
+        MathRandomTypes.registerAll(capturingContext)
+
+        LogTypes.registerAll(capturingContext)
+        FilesystemTypes.registerAll(capturingContext)
+        TimeTypes.registerAll(capturingContext)
+        EnvironmentTypes.registerAll(capturingContext)
+        ContinuationTypes.registerAll(capturingContext)
+        LoomTypes.registerAll(capturingContext)
+        OSThreadTypes.registerAll(capturingContext)
+        CoopTypes.registerAll(capturingContext)
+        SchedulerTypes.registerAll(capturingContext)
+        ParallelTypes.registerAll(capturingContext)
+        STMTypes.registerAll(capturingContext)
 
         // Concurrent primitives (Atom, Agent, Channel, Mutex, Semaphore, Latch, WaitGroup)
-        AtomTypes.registerAll(context)
-        AgentTypes.registerAll(context)
-        ChannelTypes.registerAll(context)
-        MutexTypes.registerAll(context)
-        SemaphoreTypes.registerAll(context)
-        LatchTypes.registerAll(context)
-        WaitGroupTypes.registerAll(context)
-        CancellationTokenTypes.registerAll(context)
+        AtomTypes.registerAll(capturingContext)
+        AgentTypes.registerAll(capturingContext)
+        ChannelTypes.registerAll(capturingContext)
+        MutexTypes.registerAll(capturingContext)
+        SemaphoreTypes.registerAll(capturingContext)
+        LatchTypes.registerAll(capturingContext)
+        WaitGroupTypes.registerAll(capturingContext)
+        CancellationTokenTypes.registerAll(capturingContext)
 
         // Codec types (JSON serialization/deserialization)
-        JsonTypes.registerAll(context)
+        JsonTypes.registerAll(capturingContext)
 
         // HTTP effect types
-        HttpTypes.registerAll(context)
+        HttpTypes.registerAll(capturingContext)
 
         // crash is a built-in function, no import needed
         // Terminates the program with an error message (like Rust's panic!)
-        context["crash"] = MezzeType.FunctionType(
+        capturingContext["crash"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("msg" to MezzeType.StringType)),
             MezzeType.VarType(TypeVar.fresh())  // Returns 'a (never returns, so can unify with any type)
         )
+
+        initialized = true
     }
 }

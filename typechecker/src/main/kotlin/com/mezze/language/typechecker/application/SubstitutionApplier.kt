@@ -5,6 +5,7 @@ import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.NativeFunctionTypes
 import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.solving.Substitution
 
@@ -360,7 +361,7 @@ class SubstitutionApplier(
      * This matches OldTypeChecker.kt:1569 which does `item.copy(inferredType = definitionType)`
      */
     private fun applyToTypeDeclaration(typeDecl: TypeDeclaration): TypeDeclaration {
-        val computedType = typeDecl.inferredType ?: convertTypeDefinition(typeDecl.definition)
+        val computedType = typeDecl.inferredType ?: convertTypeDefinition(typeDecl.definition, typeDecl.name)
         val updatedInferredType = substitution.apply(computedType)
 
         return typeDecl.copy(
@@ -374,7 +375,7 @@ class SubstitutionApplier(
      * This matches OldTypeChecker.kt:10808-10852.
      * CRITICAL: Preserves isOpen flag and rowVar for variants.
      */
-    private fun convertTypeDefinition(definition: TypeDefinition): MezzeType {
+    private fun convertTypeDefinition(definition: TypeDefinition, typeName: String? = null): MezzeType {
         return when (definition) {
             is NewtypeDefinition -> {
                 // Convert the wrapped type
@@ -382,7 +383,8 @@ class SubstitutionApplier(
                 // Newtypes are represented as single-constructor variants internally
                 MezzeType.VariantType(
                     constructors = mapOf(definition.constructor to wrappedMezzeType),
-                    rowVar = null  // Newtypes are always closed
+                    rowVar = null,  // Newtypes are always closed
+                    typeName = typeName
                 )
             }
             is RecordDefinition -> {
@@ -403,10 +405,10 @@ class SubstitutionApplier(
                 // CRITICAL: Preserve isOpen flag from VariantDefinition
                 if (definition.isOpen) {
                     // Create open variant with a row variable
-                    MezzeType.VariantType(constructors, RowVar("rest"))
+                    MezzeType.VariantType(constructors, RowVar("rest"), typeName = typeName)
                 } else {
                     // Create closed variant
-                    MezzeType.VariantType(constructors)
+                    MezzeType.VariantType(constructors, typeName = typeName)
                 }
             }
         }
@@ -699,8 +701,6 @@ class SubstitutionApplier(
             // Records
             is RecordLiteral -> applyToRecordLiteral(expr)
             is MemberAccess -> applyToMemberAccess(expr)
-            is RecordUpdate -> applyToRecordUpdate(expr)
-            is RecordUpdateExpression -> applyToRecordUpdateExpression(expr)
 
             // Variants
             is VariantConstruction -> applyToVariantConstruction(expr)
@@ -824,9 +824,15 @@ class SubstitutionApplier(
         }
         // Look up content hash for identifier (from imports or local declarations)
         val contentHash = identifierContentHashes[expr.toBindingKey()]
+
+        // Set isNativeFunction flag using structured lookup instead of string prefix checking
+        // This is set here during type checking so the interpreter can use the flag directly
+        val isNative = NativeFunctionTypes.isNativeFunction(expr.localName)
+
         return expr.copy(
             inferredType = updatedType,
-            resolvedContentHash = contentHash
+            resolvedContentHash = contentHash,
+            isNativeFunction = isNative
         )
     }
 
@@ -1003,30 +1009,6 @@ class SubstitutionApplier(
             }
             else -> MezzeType.VarType(TypeVar.fresh()) // Fallback for unknown annotations
         }
-    }
-
-    private fun applyToRecordUpdate(expr: RecordUpdate): RecordUpdate {
-        val updatedRecord = applyToExpression(expr.record)
-        val updatedUpdates = expr.updates.map { update ->
-            val updatedValue = update.value?.let { applyToExpression(it) }
-            RecordEntry(update.name, updatedValue)
-        }
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(
-            record = updatedRecord,
-            updates = updatedUpdates,
-            inferredType = updatedType
-        )
-    }
-
-    private fun applyToRecordUpdateExpression(expr: RecordUpdateExpression): RecordUpdateExpression {
-        val updatedBase = applyToExpression(expr.baseRecord)
-        val updatedUpdates = expr.updates.map { update ->
-            val updatedValue = applyToExpression(update.value)
-            RecordUpdateEntry(update.fieldPath, updatedValue)
-        }
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(baseRecord = updatedBase, updates = updatedUpdates, inferredType = updatedType)
     }
 
     // ========================================================================
@@ -2054,7 +2036,7 @@ class SubstitutionApplier(
                 val typeDecl = typeDeclarations[type.constructor]
                 if (typeDecl != null) {
                     // Use the existing convertTypeDefinition method
-                    val definitionType = convertTypeDefinition(typeDecl.definition)
+                    val definitionType = convertTypeDefinition(typeDecl.definition, typeDecl.name)
 
                     // CRITICAL: Substitute type parameters with actual args
                     // e.g., Option Int should substitute 'a with Int in the variant definition

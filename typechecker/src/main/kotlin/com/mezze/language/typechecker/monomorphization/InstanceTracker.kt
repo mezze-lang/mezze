@@ -13,12 +13,14 @@ import com.mezze.language.ast.*
  * - Immutable tracking (returns new tracker with updated state)
  * - Deduplicates requests (same function + same types = one instance)
  * - Pure functions (no side effects!)
- * - Uses MonomorphicKey for structured type-aware tracking
+ * - Uses MonomorphicKey as PRIMARY key for type-safe tracking (no string parsing)
+ * - String-based names are derived from keys when needed for backward compatibility
  */
 class InstanceTracker private constructor(
-    private val requests: Map<String, InstanceRequest>,
-    /** Structured key index for O(1) type-directed lookup */
-    private val keyIndex: Map<MonomorphicKey, InstanceRequest> = emptyMap()
+    /** PRIMARY: Structured key index for O(1) type-directed lookup */
+    private val keyIndex: Map<MonomorphicKey, InstanceRequest>,
+    /** Call counts per MonomorphicKey */
+    private val callCounts: Map<MonomorphicKey, Int> = emptyMap()
 ) {
     companion object {
         /**
@@ -33,20 +35,40 @@ class InstanceTracker private constructor(
      * Track a needed monomorphic instance.
      *
      * Returns a new tracker with the instance added.
+     * Uses MonomorphicKey for deduplication (no string parsing).
      */
     fun track(request: InstanceRequest): InstanceTracker {
-        val monomorphicName = request.generateMonomorphicName()
         val key = request.toMonomorphicKey()
 
-        // Deduplicate: if we already have this instance, don't add it again
-        if (requests.containsKey(monomorphicName)) {
-            return this
+        // Update call count even for duplicates
+        val newCallCounts = callCounts + (key to (callCounts[key] ?: 0) + 1)
+
+        // Deduplicate using structured key (no string generation needed)
+        if (keyIndex.containsKey(key)) {
+            return InstanceTracker(keyIndex, newCallCounts)
         }
 
         // Return new tracker with this request added
-        val newRequests = requests + (monomorphicName to request)
         val newKeyIndex = keyIndex + (key to request)
-        return InstanceTracker(newRequests, newKeyIndex)
+        return InstanceTracker(newKeyIndex, newCallCounts)
+    }
+
+    /**
+     * Get call counts for all tracked instances.
+     * Returns map of "functionName + typeArgsSummary" -> count for compatibility.
+     */
+    fun getCallCounts(): Map<String, Int> {
+        return callCounts.entries.associate { (key, count) ->
+            computeCallCountKey(key) to count
+        }
+    }
+
+    /**
+     * Compute a string key for call counting (for stats display).
+     */
+    private fun computeCallCountKey(key: MonomorphicKey): String {
+        val typeArgsSummary = key.typeArgs.joinToString(", ") { it.toCanonicalString() }
+        return key.originalName + typeArgsSummary
     }
 
     /**
@@ -79,13 +101,15 @@ class InstanceTracker private constructor(
      * Get all tracked instance requests.
      */
     fun getRequests(): List<InstanceRequest> {
-        return requests.values.toList()
+        return keyIndex.values.toList()
     }
 
     /**
      * Get the monomorphic name for a function call, if tracked.
      *
      * Returns null if this call doesn't need monomorphization.
+     *
+     * @deprecated Use getMonomorphicKey() for structured access without string generation.
      */
     fun getMonomorphicName(
         functionName: String,
@@ -95,27 +119,37 @@ class InstanceTracker private constructor(
             return null
         }
 
-        // Create a temporary request to compute the name
-        val tempRequest = InstanceRequest(
+        // Use structured key lookup (no string generation for deduplication)
+        val key = MonomorphicKey.create(
             originalName = functionName,
+            originalContentHash = null,
             typeArgs = typeSubstitution
         )
 
-        val monomorphicName = tempRequest.generateMonomorphicName()
-
-        // Return the name only if we've tracked this instance
-        return if (requests.containsKey(monomorphicName)) {
-            monomorphicName
+        // Only generate string if key exists
+        return if (keyIndex.containsKey(key)) {
+            key.toLegacyName()
         } else {
             null
         }
     }
 
     /**
-     * Check if an instance is tracked.
+     * Check if an instance is tracked by MonomorphicKey.
+     */
+    fun hasInstance(key: MonomorphicKey): Boolean {
+        return keyIndex.containsKey(key)
+    }
+
+    /**
+     * Check if an instance is tracked by legacy name.
+     *
+     * @deprecated Use hasInstance(MonomorphicKey) for structured lookup.
      */
     fun hasInstance(monomorphicName: String): Boolean {
-        return requests.containsKey(monomorphicName)
+        // Parse the legacy name back into a key for lookup
+        // This is slow but maintains backward compatibility
+        return keyIndex.keys.any { it.toLegacyName() == monomorphicName }
     }
 
     /**
@@ -132,16 +166,15 @@ class InstanceTracker private constructor(
             return null
         }
 
-        // Create a temporary request to compute the name
-        val tempRequest = InstanceRequest(
+        // Use structured key lookup
+        val key = MonomorphicKey.create(
             originalName = functionName,
+            originalContentHash = null,
             typeArgs = typeSubstitution
         )
 
-        val monomorphicName = tempRequest.generateMonomorphicName()
-
         // Get the original tracked request (has the originalContentHash)
-        val originalRequest = requests[monomorphicName] ?: return null
+        val originalRequest = keyIndex[key] ?: return null
 
         // Generate the content hash for this monomorphic instance
         return originalRequest.generateContentHash()
@@ -151,7 +184,7 @@ class InstanceTracker private constructor(
      * Get the number of tracked instances.
      */
     fun size(): Int {
-        return requests.size
+        return keyIndex.size
     }
 
     /**
@@ -160,16 +193,19 @@ class InstanceTracker private constructor(
      * Combines all unique instance requests from both trackers.
      */
     fun merge(other: InstanceTracker): InstanceTracker {
-        val mergedRequests = requests + other.requests
         val mergedKeyIndex = keyIndex + other.keyIndex
-        return InstanceTracker(mergedRequests, mergedKeyIndex)
+        // Merge call counts by summing
+        val mergedCallCounts = (callCounts.keys + other.callCounts.keys).associateWith { key ->
+            (callCounts[key] ?: 0) + (other.callCounts[key] ?: 0)
+        }
+        return InstanceTracker(mergedKeyIndex, mergedCallCounts)
     }
 
     /**
      * Get the MonomorphicKey for a function call, if tracked.
      *
      * Returns null if this call doesn't need monomorphization.
-     * Preferred over getMonomorphicName() for structured access.
+     * This is the PREFERRED method for structured access.
      */
     fun getMonomorphicKey(
         functionName: String,
@@ -293,22 +329,6 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
 
         is VariantConstruction -> {
             expr.value?.let { analyzeExpression(it, tracker) } ?: tracker
-        }
-
-        is RecordUpdate -> {
-            var currentTracker = analyzeExpression(expr.record, tracker)
-            for (update in expr.updates) {
-                currentTracker = update.value?.let { analyzeExpression(it, currentTracker) } ?: currentTracker
-            }
-            currentTracker
-        }
-
-        is RecordUpdateExpression -> {
-            var currentTracker = analyzeExpression(expr.baseRecord, tracker)
-            for (update in expr.updates) {
-                currentTracker = analyzeExpression(update.value, currentTracker)
-            }
-            currentTracker
         }
 
         is SeqLiteral -> {

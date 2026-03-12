@@ -235,13 +235,10 @@ class InvalidConstructorInMatchTest {
     }
 
     // ========== FUNCTION CALL WITH WRONG VARIANT CONSTRUCTOR (User's Original Bug) ==========
-    // TODO: These tests document a known limitation. Currently, closed variants inferred
-    // from match patterns don't reject undefined constructors at call sites because
-    // variant unification merges constructors. This needs to be fixed.
+    // Closed variants inferred from match patterns now correctly reject undefined constructors.
 
     @Test
     fun `test calling function with wrong variant constructor should fail`() {
-        // TODO: This SHOULD fail but currently passes (known limitation)
         val code = """
             let add = {color} -> match color is
               Red -> 4
@@ -250,8 +247,10 @@ class InvalidConstructorInMatchTest {
             let ans = add { color = Pink }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Pink") == true)
     }
 
     @Test
@@ -270,7 +269,6 @@ class InvalidConstructorInMatchTest {
 
     @Test
     fun `test multiple calls with different invalid constructors should fail`() {
-        // TODO: This SHOULD fail but currently passes (known limitation)
         val code = """
             let color_value = {c} -> match c is
               Red -> 1
@@ -279,8 +277,10 @@ class InvalidConstructorInMatchTest {
             let x = color_value { c = Green }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Green") == true)
     }
 
     // ========== MATCH BRANCH TYPE UNIFICATION ==========

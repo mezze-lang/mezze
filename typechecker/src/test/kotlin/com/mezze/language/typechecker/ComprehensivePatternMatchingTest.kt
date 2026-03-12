@@ -1049,19 +1049,34 @@ class ComprehensivePatternMatchingTest {
     }
 
     @Test
-    fun `record and variant exhaustiveness with wildcard`() {
-        // Wildcards cover remaining cases for both records and variants
+    fun `record and variant exhaustiveness with all constructors covered`() {
+        // Result is a closed variant with Ok and Err - no wildcard needed when both are covered
         val code = """
             let handle = {data} ->
                 match data is
                   Ok { val = { status = 200 } } -> "success"
                   Ok { val } -> "ok but not 200"
                   Err { error } -> "error"
-                  _ -> "unknown"
             let result = handle { data = Ok { val = { status = 200 } } }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
         assertNotNull(program)
+    }
+
+    @Test
+    fun `wildcard after exhaustive match on closed variant should fail`() {
+        // Result is a closed variant - wildcard after Ok and Err is unreachable
+        val code = """
+            let handle = {data} ->
+                match data is
+                  Ok { val } -> "ok"
+                  Err { error } -> "error"
+                  _ -> "unreachable"
+        """.trimIndent()
+
+        val error = assertThrows<TypeCheckError> { parseAndTypeCheck(code) }
+        assertTrue(error.message?.contains("Unreachable pattern") == true ||
+                   error.message?.contains("unreachable") == true)
     }
 }

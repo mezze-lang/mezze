@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.monomorphization
 
 import com.mezze.language.ast.Program
+import com.mezze.language.typechecker.debug.DebugLogger
+import com.mezze.language.typechecker.debug.DebugLogger.Category
 
 /**
  * Monomorphization engine - generates specialized versions of polymorphic functions.
@@ -93,31 +95,65 @@ class MonomorphizationEngine {
      */
     fun monomorphize(program: Program): MonomorphizationResult {
         try {
+            val totalStartTime = System.nanoTime()
+
             // PHASE 1: Analyze program to find needed monomorphic instances
+            val analysisStartTime = System.nanoTime()
             val tracker = analyzeProgram(program)
+            val analysisTimeNanos = System.nanoTime() - analysisStartTime
 
             // Early exit if no monomorphization needed
             if (tracker.size() == 0) {
                 return MonomorphizationResult.Success(
                     program = program,
                     monomorphicInstances = emptyMap(),
-                    warnings = emptyList()
+                    warnings = emptyList(),
+                    stats = MonomorphizationStats(
+                        totalInstancesRequested = 0,
+                        analysisTimeNanos = analysisTimeNanos
+                    )
                 )
             }
 
-            // PHASE 2: Generate specialized bindings
+            // PHASE 2: Generate specialized bindings (with timing and cache tracking)
+            val generationStartTime = System.nanoTime()
             val generator = InstanceGenerator(program)
-            val monomorphicInstances = generator.generateAll(tracker)
+            val generationResult = generateAllWithStats(generator, tracker)
+            val generationTimeNanos = System.nanoTime() - generationStartTime
 
             // PHASE 3: Update call sites with resolved names
+            val updateStartTime = System.nanoTime()
             val updater = CallSiteUpdater(tracker)
             val updatedProgram = updater.updateProgram(program)
+            val updateTimeNanos = System.nanoTime() - updateStartTime
+
+            // Build statistics
+            val stats = MonomorphizationStats(
+                totalInstancesRequested = tracker.size(),
+                instancesGenerated = generationResult.instances.size,
+                cacheHits = generationResult.cacheHits,
+                cacheMisses = generationResult.cacheMisses,
+                totalGenerationTimeNanos = generationTimeNanos,
+                analysisTimeNanos = analysisTimeNanos,
+                callSiteUpdateTimeNanos = updateTimeNanos,
+                instanceDetails = generationResult.instanceStats
+            )
+
+            // Log statistics if debug is enabled
+            DebugLogger.debugSection(Category.Monomorphization, "Monomorphization complete") {
+                listOf(
+                    "Generated ${generationResult.instances.size} instances (${tracker.size()} requested)",
+                    "Cache: ${(stats.cacheHitRate * 100).toInt()}% hit rate (${generationResult.cacheHits} hits, ${generationResult.cacheMisses} misses)",
+                    "Time: ${stats.totalTimeNanos / 1_000_000}ms total (analysis: ${analysisTimeNanos / 1_000_000}ms, generation: ${generationTimeNanos / 1_000_000}ms, update: ${updateTimeNanos / 1_000_000}ms)"
+                )
+            }
 
             // PHASE 4: Return results
             return MonomorphizationResult.Success(
                 program = updatedProgram,
-                monomorphicInstances = monomorphicInstances,
-                warnings = buildWarnings(tracker, monomorphicInstances)
+                monomorphicInstances = generationResult.instances,
+                warnings = buildWarnings(tracker, generationResult.instances),
+                stats = stats
             )
 
         } catch (e: Exception) {
@@ -133,6 +169,75 @@ class MonomorphizationEngine {
                 )
             )
         }
+    }
+
+    /**
+     * Result of generation with statistics.
+     */
+    private data class GenerationWithStatsResult(
+        val instances: Map<String, com.mezze.language.ast.LetBinding>,
+        val cacheHits: Int,
+        val cacheMisses: Int,
+        val instanceStats: List<InstanceStats>
+    )
+
+    /**
+     * Generate all instances while tracking statistics.
+     */
+    private fun generateAllWithStats(
+        generator: InstanceGenerator,
+        tracker: InstanceTracker
+    ): GenerationWithStatsResult {
+        val instances = mutableMapOf<String, com.mezze.language.ast.LetBinding>()
+        val instanceStats = mutableListOf<InstanceStats>()
+        var cacheHits = 0
+        var cacheMisses = 0
+
+        // Count call sites per request for statistics
+        val callCounts = tracker.getCallCounts()
+
+        for (request in tracker.getRequests()) {
+            val startTime = System.nanoTime()
+            val wasCachedBefore = com.mezze.language.typechecker.cache.TypeCheckCache.getMonomorphicInstance(
+                request.originalContentHash ?: "",
+                com.mezze.language.typechecker.cache.TypeCheckCache.hashTypeArgs(request.typeArgs)
+            ) != null
+
+            when (val result = generator.generate(request)) {
+                is GenerationResult.Success -> {
+                    val endTime = System.nanoTime()
+                    instances[result.instance.monomorphicName] = result.instance.specializedBinding
+
+                    if (wasCachedBefore) {
+                        cacheHits++
+                    } else {
+                        cacheMisses++
+                    }
+
+                    // Build type args summary
+                    val typeArgsSummary = request.typeArgs.entries
+                        .sortedBy { it.key }
+                        .joinToString(", ") { (_, type) ->
+                            com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(type)
+                        }
+
+                    instanceStats.add(InstanceStats(
+                        originalName = request.originalName,
+                        monomorphicName = result.instance.monomorphicName,
+                        typeArgsSummary = typeArgsSummary,
+                        callCount = callCounts[request.originalName + typeArgsSummary] ?: 1,
+                        generationTimeNanos = if (wasCachedBefore) 0L else (endTime - startTime),
+                        wasCached = wasCachedBefore
+                    ))
+                }
+                is GenerationResult.Failure -> {
+                    // Skip failed generations (already logged by generator)
+                    cacheMisses++
+                }
+            }
+        }
+
+        return GenerationWithStatsResult(instances, cacheHits, cacheMisses, instanceStats)
     }
 
     /**
@@ -173,7 +278,7 @@ class MonomorphizationEngine {
 /**
  * Format a monomorphization result for display.
  */
-fun formatMonomorphizationResult(result: MonomorphizationResult): String {
+fun formatMonomorphizationResult(result: MonomorphizationResult, includeStats: Boolean = false): String {
     return when (result) {
         is MonomorphizationResult.Success -> buildString {
             appendLine("✓ Monomorphization succeeded!")
@@ -191,6 +296,11 @@ fun formatMonomorphizationResult(result: MonomorphizationResult): String {
                 for (warning in result.warnings) {
                     appendLine("    - $warning")
                 }
+            }
+
+            if (includeStats) {
+                appendLine()
+                append(result.stats.format())
             }
         }
 

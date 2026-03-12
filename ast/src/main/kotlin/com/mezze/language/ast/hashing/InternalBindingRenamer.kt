@@ -122,20 +122,6 @@ class InternalBindingRenamer {
             // member name is structural, keep as-is
         )
 
-        is RecordUpdate -> expr.copy(
-            record = renameExpr(expr.record),
-            updates = expr.updates.map { entry ->
-                RecordEntry(entry.name, entry.value?.let { renameExpr(it) })
-            }
-        )
-
-        is RecordUpdateExpression -> expr.copy(
-            baseRecord = renameExpr(expr.baseRecord),
-            updates = expr.updates.map { entry ->
-                RecordUpdateEntry(entry.fieldPath, renameExpr(entry.value))
-            }
-        )
-
         // Variants
         is VariantConstruction -> expr.copy(
             value = expr.value?.let { renameExpr(it) }

@@ -81,24 +81,6 @@ class CallSiteUpdater(
                 value = expr.value?.let { update(it) }
             )
 
-            is RecordUpdate -> expr.copy(
-                record = update(expr.record),
-                updates = expr.updates.map { recordUpdate ->
-                    recordUpdate.copy(
-                        value = recordUpdate.value?.let { update(it) }
-                    )
-                }
-            )
-
-            is RecordUpdateExpression -> expr.copy(
-                baseRecord = update(expr.baseRecord),
-                updates = expr.updates.map { recordUpdate ->
-                    recordUpdate.copy(
-                        value = update(recordUpdate.value)
-                    )
-                }
-            )
-
             is SeqLiteral -> expr.copy(
                 elements = expr.elements.map { element ->
                     when (element) {
@@ -157,33 +139,30 @@ class CallSiteUpdater(
     }
 
     /**
-     * Update a function call with its resolved monomorphic name and content hash.
+     * Update a function call with its resolved content hash.
+     *
+     * Uses structured MonomorphicKey lookup (no string parsing).
+     * The content hash is the authoritative identifier for the monomorphic instance.
      */
     private fun updateFunctionCall(expr: FunctionCall): FunctionCall {
-        // Get the function name (if it's a direct identifier)
-        val functionName = when (val func = expr.function) {
-            is Identifier -> func.localName
-            else -> null
+        // Get the function name and original content hash (if it's a direct identifier)
+        val (functionName, originalContentHash) = when (val func = expr.function) {
+            is Identifier -> func.localName to func.resolvedContentHash
+            else -> null to null
         }
 
-        // Check if this call needs a monomorphic name
-        val monomorphicName = if (functionName != null && expr.typeSubstitution.isNotEmpty()) {
-            tracker.getMonomorphicName(functionName, expr.typeSubstitution)
-        } else {
-            null
-        }
-
-        // Get the content hash for the monomorphic instance
+        // Get the content hash using structured key lookup (no string generation)
         val contentHash = if (functionName != null && expr.typeSubstitution.isNotEmpty()) {
             tracker.getContentHash(functionName, expr.typeSubstitution)
         } else {
             null
         }
 
-        // Update the call with the resolved name and content hash
-        val updatedCall = if (monomorphicName != null) {
+        // Update the call with the resolved content hash
+        // Use content hash as the resolvedFunctionName too (for backward compatibility)
+        val updatedCall = if (contentHash != null) {
             expr.copy(
-                resolvedFunctionName = monomorphicName,
+                resolvedFunctionName = contentHash,  // Use hash as name (no $-delimited strings)
                 resolvedFunctionContentHash = contentHash
             )
         } else {

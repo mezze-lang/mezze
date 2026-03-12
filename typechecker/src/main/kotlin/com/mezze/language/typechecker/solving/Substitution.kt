@@ -175,7 +175,8 @@ data class Substitution(
                 }
                 MezzeType.VariantType(
                     constructors = appliedConstructors,
-                    rowVar = type.rowVar // Row variables handled separately
+                    rowVar = type.rowVar, // Row variables handled separately
+                    typeName = type.typeName // Preserve type name for validation
                 )
             }
 

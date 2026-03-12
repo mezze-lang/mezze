@@ -71,14 +71,6 @@ class ContinuationDetector {
             is MemberAccess -> {
                 usesContinuations(expr.receiver)
             }
-            is RecordUpdate -> {
-                usesContinuations(expr.record) ||
-                    expr.updates.any { it.value?.let { usesContinuations(it) } ?: false }
-            }
-            is RecordUpdateExpression -> {
-                usesContinuations(expr.baseRecord) ||
-                    expr.updates.any { usesContinuations(it.value) }
-            }
             is VariantConstruction -> {
                 expr.value?.let { usesContinuations(it) } ?: false
             }

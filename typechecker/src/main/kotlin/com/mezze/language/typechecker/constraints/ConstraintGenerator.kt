@@ -1056,7 +1056,11 @@ class ConstraintGenerator(
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
-                    }
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+                    // Use synthetic typeName for closed inline annotations to enable validation.
+                    // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
+                    typeName = if (!annotation.isOpen) "<inline>" else null
                 )
             }
             is TypeApplicationAnnotation -> {
@@ -1584,14 +1588,37 @@ class ConstraintGenerator(
 
                 when (solveResult) {
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                        // Only report clear type mismatches between concrete scalar types
-                        // Skip errors involving: effects, type variables, generics, collections
-                        // These may be handled by native functions with different semantics
                         val firstError = solveResult.errors.firstOrNull()
                         if (firstError != null) {
-                            val msg = firstError.message
+                            val constraint = firstError.constraint
+
+                            // FIRST: Check if this is a "calling non-function as function" error
+                            // This happens when one side is FunctionType and the other is not
+                            // This is always a clear error and should be reported immediately
+                            if (constraint is Constraint.Equality) {
+                                val left = constraint.left
+                                val right = constraint.right
+                                val isCallingNonFunction =
+                                    (left is MezzeType.FunctionType && !isFunctionLike(right)) ||
+                                    (right is MezzeType.FunctionType && !isFunctionLike(left))
+
+                                if (isCallingNonFunction) {
+                                    // This is a clear error: trying to call a non-function as a function
+                                    val nonFunctionType = if (left is MezzeType.FunctionType) right else left
+                                    throw com.mezze.language.typechecker.TypeCheckError(
+                                        "Cannot call non-function type as function in impl '${impl.performerName}' " +
+                                        "operation '${implOp.name}': type '${com.mezze.language.ast.prettyPrintType(nonFunctionType)}' " +
+                                        "is not a function",
+                                        firstError.constraint.sourceLocation ?: implOp.implementation.sourceLocation
+                                    )
+                                }
+                            }
+
+                            // SECOND: Check for other clear type mismatches
                             // Only report mismatches between concrete scalar types (String vs Int, etc.)
                             // Skip if message involves: effects, type variables ('a, 'b, etc.), generics, collections
+                            // These may be handled by native functions with different semantics
+                            val msg = firstError.message
                             // Type variables are 'letter patterns, not quoted field names like 'fieldName'
                             val hasTypeVar = Regex("'[a-z]\\b").containsMatchIn(msg)
                             val hasEffects = msg.contains("effectful") || msg.contains("<") && msg.contains(">")
@@ -1667,7 +1694,8 @@ class ConstraintGenerator(
                 constructors = type.constructors.mapValues { (_, payloadType) ->
                     payloadType?.let { substituteTypeParams(it, substitution) }
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
@@ -2246,6 +2274,18 @@ class ConstraintGenerator(
             is MezzeType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
             is MezzeType.VarType -> "VarType(${type.variable})"
             else -> type::class.simpleName ?: type.toString()
+        }
+    }
+
+    /**
+     * Check if a type could be function-like (FunctionType or unresolved type variable).
+     * Used to detect "calling non-function as function" errors.
+     */
+    private fun isFunctionLike(type: MezzeType): Boolean {
+        return when (type) {
+            is MezzeType.FunctionType -> true
+            is MezzeType.VarType -> true  // Type variable could resolve to function
+            else -> false
         }
     }
 }

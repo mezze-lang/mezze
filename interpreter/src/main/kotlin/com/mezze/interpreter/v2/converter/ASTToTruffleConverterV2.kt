@@ -700,6 +700,13 @@ class ASTToTruffleConverterV2(
             return ReadLocalNode.createObject(slot)
         }
 
+        // Use structured isNativeFunction flag instead of string prefix checking
+        // Native functions use GlobalLookupNode for runtime resolution
+        // Fallback to NativeDispatch lookup for compatibility with old code
+        if (identifier.isNativeFunction || NativeDispatch.isNativeFunction(identifier.localName)) {
+            return GlobalLookupNode(lookupKey)
+        }
+
         val info = variableInfo[lookupKey]
         if (info != null) {
             // Closure variables need fallback lookup for recursive function support.
@@ -731,7 +738,8 @@ class ASTToTruffleConverterV2(
             return ReadLocalNode(info.slot, info.kind)
         }
 
-        if (isBuiltinFunction(lookupKey)) {
+        // Legacy builtin functions (non-native) that need GlobalLookup
+        if (isLegacyBuiltinFunction(lookupKey)) {
             return GlobalLookupNode(lookupKey)
         }
 
@@ -753,8 +761,12 @@ class ASTToTruffleConverterV2(
         return ReadLocalWithFallbackNode.create(slot, lookupKey, contentHash)
     }
 
-    private fun isBuiltinFunction(name: String): Boolean {
-        if (name.startsWith("__native_")) return true
+    /**
+     * Check if a function name is a legacy builtin function (non-native).
+     * Native functions are handled via the isNativeFunction flag on Identifier.
+     * These are old builtins that may still be referenced.
+     */
+    private fun isLegacyBuiltinFunction(name: String): Boolean {
         return when (name) {
             "intToString", "floatToString", "boolToString", "stringToInt",
             "print", "debug", "abs", "max", "min", "length", "concat",
@@ -1185,11 +1197,16 @@ class ASTToTruffleConverterV2(
 
     private fun convertFunctionCall(funcCall: FunctionCall): MezzeNode {
         // Check for native functions FIRST (continuation and console)
+        // Use the isNativeFunction flag set by typechecker instead of string prefix checking
         if (funcCall.function is Identifier) {
-            val funcName = (funcCall.function as Identifier).localName
-            val nativeNode = convertNativeFunctionCall(funcName, funcCall.arguments)
-            if (nativeNode != null) {
-                return nativeNode
+            val funcId = funcCall.function as Identifier
+            // Use structured isNativeFunction flag, with fallback to NativeDispatch lookup
+            // for compatibility with code that hasn't been re-typechecked
+            if (funcId.isNativeFunction || NativeDispatch.isNativeFunction(funcId.localName)) {
+                val nativeNode = convertNativeFunctionCall(funcId.localName, funcCall.arguments)
+                if (nativeNode != null) {
+                    return nativeNode
+                }
             }
         }
 
@@ -2466,11 +2483,10 @@ class ASTToTruffleConverterV2(
             }
 
             // All other native functions use NativeDispatch
+            // At this point, isNativeFunction flag was already checked by caller,
+            // so we just need to verify it's registered in NativeDispatch
             else -> {
-                if (funcName.startsWith("__native_") && NativeDispatch.isNativeFunction(funcName)) {
-                    NativeDispatch.create(funcName, convertExpression(args))
-                } else if (funcName.startsWith("native_") && NativeDispatch.isNativeFunction(funcName)) {
-                    // Legacy native functions without double underscore prefix (backward compatibility)
+                if (NativeDispatch.isNativeFunction(funcName)) {
                     NativeDispatch.create(funcName, convertExpression(args))
                 } else {
                     null

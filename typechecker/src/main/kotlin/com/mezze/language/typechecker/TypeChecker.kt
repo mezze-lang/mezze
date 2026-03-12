@@ -1155,7 +1155,7 @@ class TypeChecker(
         // Only check qualified names - now using structured qualifier from AST
         if (!undefinedVar.isQualified) return null
 
-        val qualifier = undefinedVar.qualifier?.fullPath ?: return null
+        val qualifierPath = undefinedVar.qualifier ?: return null
         val itemName = undefinedVar.name.substringAfterLast("::")
 
         // Find which module this qualifier refers to
@@ -1163,22 +1163,26 @@ class TypeChecker(
         // 1. A direct module path (e.g., "std::int")
         // 2. A last-segment alias (e.g., "int" when imported via "use std::int")
 
-        // First, check loaded modules by path
+        // First, check loaded modules by path using structured path comparison
+        // Either full path matches, or the module path ends with the qualifier segments
         val moduleByPath = loadedModules.values.find { module ->
-            module.modulePath == qualifier || module.modulePath.endsWith("::$qualifier")
+            val modulePath = ModulePath.parse(module.modulePath)
+            modulePath == qualifierPath || modulePath.endsWith(qualifierPath)
         }
 
         if (moduleByPath != null) {
             // Check if the item exists in the module's program but isn't exported
             val existsButNotExported = checkIfItemExistsInModule(moduleByPath, itemName)
             if (existsButNotExported) {
-                return "'$itemName' exists in module '$qualifier' but is not public. Add 'pub' to export it."
+                return "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it."
             }
         }
 
         // Also check by matching against imported bindings to find the source module
+        // Use structured path comparison instead of string startsWith
         val matchingBinding = importContext?.importedBindings?.entries?.find { (bindingName, _) ->
-            bindingName.startsWith("$qualifier::")
+            val bindingPath = ModulePath.parse(bindingName.substringBeforeLast("::"))
+            bindingPath == qualifierPath || bindingPath.endsWith(qualifierPath)
         }
 
         if (matchingBinding != null) {
@@ -1187,7 +1191,7 @@ class TypeChecker(
             if (module != null) {
                 val existsButNotExported = checkIfItemExistsInModule(module, itemName)
                 if (existsButNotExported) {
-                    return "'$itemName' exists in module '$qualifier' but is not public. Add 'pub' to export it."
+                    return "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it."
                 }
             }
         }
@@ -2083,38 +2087,6 @@ class TypeChecker(
                 val transformedIndex = transformExpression(expr.index)
                 if (transformedSeq !== expr.seq || transformedIndex !== expr.index) {
                     expr.copy(seq = transformedSeq, index = transformedIndex)
-                } else {
-                    expr
-                }
-            }
-            is RecordUpdate -> {
-                val transformedRecord = transformExpression(expr.record)
-                val transformedUpdates = expr.updates.map { update ->
-                    val transformedValue = update.value?.let { transformExpression(it) }
-                    if (transformedValue !== update.value) {
-                        update.copy(value = transformedValue)
-                    } else {
-                        update
-                    }
-                }
-                if (transformedRecord !== expr.record || transformedUpdates != expr.updates) {
-                    expr.copy(record = transformedRecord, updates = transformedUpdates)
-                } else {
-                    expr
-                }
-            }
-            is RecordUpdateExpression -> {
-                val transformedBase = transformExpression(expr.baseRecord)
-                val transformedUpdates = expr.updates.map { update ->
-                    val transformedValue = transformExpression(update.value)
-                    if (transformedValue !== update.value) {
-                        update.copy(value = transformedValue)
-                    } else {
-                        update
-                    }
-                }
-                if (transformedBase !== expr.baseRecord || transformedUpdates != expr.updates) {
-                    expr.copy(baseRecord = transformedBase, updates = transformedUpdates)
                 } else {
                     expr
                 }

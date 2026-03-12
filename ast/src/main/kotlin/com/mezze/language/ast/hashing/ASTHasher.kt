@@ -219,28 +219,6 @@ object ASTHasher {
                 builder.append(expr.member)
             }
 
-            is RecordUpdate -> {
-                builder.append(byteArrayOf(HashTags.RECORD))
-                builder.appendBoolean(true)  // is update
-                hashExpressionInto(expr.record, builder)
-                // Sort updates by name
-                val sortedUpdates = expr.updates.sortedBy { it.name }
-                builder.appendList(sortedUpdates) { update ->
-                    append(update.name)
-                    appendNullable(update.value) { hashExpressionInto(it, this) }
-                }
-            }
-
-            is RecordUpdateExpression -> {
-                builder.append(byteArrayOf(HashTags.RECORD))
-                builder.appendBoolean(true)  // is update
-                hashExpressionInto(expr.baseRecord, builder)
-                builder.appendList(expr.updates) { update ->
-                    appendList(update.fieldPath) { append(it) }
-                    hashExpressionInto(update.value, this)
-                }
-            }
-
             is VariantConstruction -> {
                 builder.append(byteArrayOf(HashTags.VARIANT_CONSTRUCTOR))
                 builder.append(expr.constructor)
