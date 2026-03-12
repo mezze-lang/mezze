@@ -99,7 +99,11 @@ class ExpressionConstraintGenerator {
             is FunctionCall -> generateFunctionCall(expr, context)
 
             // Control flow
-            is IfExpression -> generateIf(expr, context)
+            // IfExpression is unified with MatchExpression at the type-checking level.
+            // This simplifies the typechecker (one code path for all conditionals) while
+            // preserving IfExpression in the AST for tooling and IfNode in the interpreter
+            // for optimal runtime performance.
+            is IfExpression -> generateMatch(expr.toMatchExpression(), context)
             is MatchExpression -> generateMatch(expr, context)
 
             // Blocks
@@ -2743,84 +2747,12 @@ class ExpressionConstraintGenerator {
     // CONTROL FLOW
     // ========================================================================
 
-    private fun generateIf(expr: IfExpression, context: ConstraintContext): ConstraintResult {
-        // if condition then thenBranch else elseBranch
-
-        // TCO: Condition is NOT in tail position, but branches inherit tail position from context
-        val conditionResult = generate(expr.condition, context.notInTailPosition())
-        val thenResult = generate(expr.thenBranch, context)  // Preserves tail position
-        val elseResult = generate(expr.elseBranch, context)  // Preserves tail position
-
-        val constraints = mutableListOf<Constraint>()
-        constraints.addAll(conditionResult.constraints)
-        constraints.addAll(thenResult.constraints)
-        constraints.addAll(elseResult.constraints)
-
-        // Condition must be Bool (variant type | True, False |)
-        constraints.add(
-            Constraint.Equality(
-                left = conditionResult.type,
-                right = MezzeType.VariantType(
-                    constructors = mapOf("True" to null, "False" to null),
-                    rowVar = null
-                ),
-                context = "If condition must be Bool",
-                sourceLocation = expr.condition.sourceLocation
-            )
-        )
-
-        // Both branches must have same type
-        // Use a fresh type variable as the result type so variant constructors from different
-        // branches can be merged through unification (same pattern as match expressions).
-        // Without this, the then-branch's concrete type would become the result type,
-        // and variants like `if flag then Red else Blue` would only show `| Red |` instead of `| Red, Blue |`.
-        val resultType = MezzeType.VarType(TypeVar.fresh())
-
-        constraints.add(
-            Constraint.Equality(
-                left = thenResult.type,
-                right = resultType,
-                context = "If then-branch type",
-                sourceLocation = expr.thenBranch.sourceLocation,
-                isMatchCaseContext = true  // Enable variant merging (if-then-else is just match on Bool)
-            )
-        )
-        constraints.add(
-            Constraint.Equality(
-                left = elseResult.type,
-                right = resultType,
-                context = "If else-branch type",
-                sourceLocation = expr.elseBranch.sourceLocation,
-                isMatchCaseContext = true  // Enable variant merging
-            )
-        )
-
-        // EFFECT SEMANTICS: Propagate effects from condition AND branches
-        // If the condition has effects, the whole if expression has those effects
-        // Example: `if getBool {} then 1 else 2` where getBool has <Log> → result is Int <Log>
-        val effects = conditionResult.effects + thenResult.effects + elseResult.effects
-        val effectInstances = conditionResult.effectInstances + thenResult.effectInstances + elseResult.effectInstances
-        val performed = conditionResult.performed || thenResult.performed || elseResult.performed
-        val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
-        val associatedTypeConstraints = conditionResult.associatedTypeConstraints + thenResult.associatedTypeConstraints + elseResult.associatedTypeConstraints
-
-        // TCO: Propagate tail calls from branches
-        val tailCalls = conditionResult.tailCalls + thenResult.tailCalls + elseResult.tailCalls
-
-        return ConstraintResult(
-            type = resultType,  // Use fresh type variable for proper variant merging
-            constraints = constraints,
-            effects = effects,
-            effectInstances = effectInstances,
-            performed = performed,
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables,
-            tailCalls = tailCalls,
-            usedVariables = conditionResult.usedVariables + thenResult.usedVariables + elseResult.usedVariables,
-            referencedBindings = conditionResult.referencedBindings + thenResult.referencedBindings + elseResult.referencedBindings
-        )
-    }
+    // NOTE: IfExpression is unified with MatchExpression at the type-checking level.
+    // The generateIf() function has been removed - IfExpression is now transformed to
+    // MatchExpression via toMatchExpression() and handled by generateMatch().
+    // This simplifies the typechecker while preserving:
+    // - IfExpression in AST for tooling (error messages, LSP, formatting)
+    // - IfNode in interpreter for optimal runtime performance (simple branch profile)
 
     private fun generateMatch(expr: MatchExpression, context: ConstraintContext): ConstraintResult {
         // match scrutinee { pattern1 -> expr1, pattern2 -> expr2 }

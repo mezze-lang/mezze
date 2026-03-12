@@ -50,10 +50,20 @@ data class InstanceRequest(
     val originalContentHash: String? = null  // Content hash of original function (if available)
 ) {
     /**
+     * Convert to structured MonomorphicKey.
+     *
+     * This is the preferred way to identify monomorphic instances as it enables
+     * type-directed optimizations in the interpreter without string parsing.
+     */
+    fun toMonomorphicKey(): MonomorphicKey = MonomorphicKey.fromInstanceRequest(this)
+
+    /**
      * Generate the monomorphic name for this instance.
      *
      * Format: functionName$Type1$Type2
      * Example: map$Int or add$Int$Float
+     *
+     * @deprecated Use toMonomorphicKey() for structured access
      */
     fun generateMonomorphicName(): String {
         if (typeArgs.isEmpty()) return originalName
@@ -72,22 +82,11 @@ data class InstanceRequest(
      * to produce a unique, deterministic hash for this specialization.
      *
      * Returns null if original content hash is not available.
+     *
+     * @deprecated Use toMonomorphicKey().generateContentHash() for structured access
      */
     fun generateContentHash(): String? {
-        if (originalContentHash == null) return null
-        if (typeArgs.isEmpty()) return originalContentHash
-
-        // Build a canonical string representation
-        val typeArgString = typeArgs.entries
-            .sortedBy { it.key }
-            .joinToString("|") { (name, type) -> "$name=${ContentHashComputer.mezzeTypeToString(type)}" }
-
-        val combined = "$originalContentHash:$typeArgString"
-
-        // Hash the combined string
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hashBytes = digest.digest(combined.toByteArray())
-        return hashBytes.take(16).joinToString("") { "%02x".format(it) }
+        return toMonomorphicKey().generateContentHash()
     }
 }
 
@@ -98,8 +97,23 @@ data class InstanceRequest(
  */
 data class MonomorphicInstance(
     val originalName: String,              // Original polymorphic function name
-    val monomorphicName: String,           // Generated name (e.g., "map$Int")
+    val monomorphicName: String,           // Generated name (e.g., "map$Int") - deprecated, use key
     val typeArguments: Map<String, MezzeType>, // Type arguments used for specialization
     val specializedBinding: LetBinding,    // The specialized function binding
-    val contentHash: String? = null        // Content hash for this specialization
-)
+    val contentHash: String? = null,       // Content hash for this specialization
+    val monomorphicKey: MonomorphicKey? = null  // Structured key (preferred over monomorphicName)
+) {
+    /**
+     * Get or compute the MonomorphicKey for this instance.
+     * Returns the stored key or creates one from fields if not provided.
+     */
+    fun getOrComputeKey(): MonomorphicKey {
+        return monomorphicKey ?: MonomorphicKey(
+            originalName = originalName,
+            originalContentHash = specializedBinding.contentHash,
+            typeArgs = typeArguments.entries
+                .sortedBy { it.key }
+                .map { ConcreteType.fromMezzeType(it.value) }
+        )
+    }
+}

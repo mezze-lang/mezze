@@ -537,6 +537,38 @@ data class IfExpression(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
+/**
+ * Convert IfExpression to an equivalent MatchExpression on Bool.
+ *
+ * This enables unification of if-else and match at the typechecker level
+ * while preserving IfExpression in the AST for tooling (error messages, LSP).
+ *
+ * The transformation is:
+ *   if condition then thenBranch else elseBranch
+ * becomes:
+ *   match condition {
+ *       True -> thenBranch
+ *       False -> elseBranch
+ *   }
+ */
+fun IfExpression.toMatchExpression(): MatchExpression {
+    return MatchExpression(
+        expression = condition,
+        cases = listOf(
+            MatchCase(
+                patterns = listOf(ConstructorPattern("True")),
+                expression = thenBranch
+            ),
+            MatchCase(
+                patterns = listOf(ConstructorPattern("False")),
+                expression = elseBranch
+            )
+        ),
+        inferredType = inferredType,
+        sourceLocation = sourceLocation
+    )
+}
+
 @Serializable
 data class MatchExpression(
     val expression: Expression,

@@ -51,19 +51,34 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @Child
     private IndirectCallNode callNode;
 
-    // Cache for monomorphic call sites
+    // OPTIMIZATION: Version-based handler caching
+    // Cache the resolved handler and operation along with the stack version.
+    // When stack version matches, we can skip @TruffleBoundary and use cached values.
     @CompilationFinal
-    private Object cachedHandler;
+    private long cachedStackVersion = -1;
+
+    @CompilationFinal
+    private MezzeRecord cachedHandlerRecord;
 
     @CompilationFinal
     private MezzeFunction cachedOperation;
 
     @CompilationFinal
-    private boolean cacheValid = false;
+    private CallTarget cachedCallTarget;
+
+    @CompilationFinal
+    private int cachedClosureLength = -1;
+
+    @CompilationFinal(dimensions = 1)
+    private Object[] cachedClosureValues;
 
     // Cached operation field index for faster repeated access
     @CompilationFinal
     private int cachedOperationIndex = -1;
+
+    // DirectCallNode for JIT-inlined calls after cache hit
+    @Child
+    private DirectCallNode directCallNode;
 
     public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode, String effectContentHash) {
         this.effectName = effectName;
@@ -83,27 +98,49 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // Evaluate argument first
         Object argument = argumentNode.execute(frame);
 
-        // Fast path: cached handler (only for monomorphic call sites with same handler)
-        // Note: caching is NOT correct for lazy effects since handlers change dynamically!
-        // The handler stack is context-dependent, so we can't cache handler lookups.
-        // Always go through slow path for now.
-        // TODO: Consider caching based on handler stack depth/identity for performance
+        // OPTIMIZATION: Version-based cache check
+        // If handler stack version hasn't changed, we can reuse the cached handler/operation.
+        // This avoids the @TruffleBoundary in getHandlerFor() on cache hits.
+        MezzeContext context = MezzeContext.get(this);
+        long currentVersion = context.getHandlerStackVersion();
 
-        // Slow path: lookup handler
-        return executeSlowPath(argument);
+        if (currentVersion == cachedStackVersion && directCallNode != null && cachedClosureLength >= 0) {
+            // FAST PATH: Cache hit - direct call without @TruffleBoundary
+            return callCachedFast(argument);
+        }
+
+        // SLOW PATH: Cache miss - lookup handler and update cache
+        return executeSlowPath(argument, context, currentVersion);
+    }
+
+    /**
+     * FAST PATH: Call cached operation directly.
+     * No @TruffleBoundary - fully JIT-inlinable after warmup.
+     */
+    private Object callCachedFast(Object argument) {
+        if (cachedClosureLength == 0) {
+            return directCallNode.call(argument);
+        } else if (cachedClosureLength == 1) {
+            return directCallNode.call(cachedClosureValues[0], argument);
+        } else if (cachedClosureLength == 2) {
+            return directCallNode.call(cachedClosureValues[0], cachedClosureValues[1], argument);
+        } else {
+            // General case: build args array
+            Object[] args = new Object[cachedClosureLength + 1];
+            System.arraycopy(cachedClosureValues, 0, args, 0, cachedClosureLength);
+            args[cachedClosureLength] = argument;
+            return directCallNode.call(args);
+        }
     }
 
     @TruffleBoundary
-    private Object executeSlowPath(Object argument) {
-        // Look up handler from context
-        MezzeContext context = MezzeContext.get(this);
-
+    private Object executeSlowPath(Object argument, MezzeContext context, long currentVersion) {
         // LAZY EFFECTS: ONLY check the handler stack
         // The handler stack is the source of truth for active handlers.
         // Handlers registered in locals/globals are NOT automatically active -
         // they must be explicitly installed via perform.
 
-        // Content hash lookup only (O(1), collision-free) - no fallback
+        // Content hash lookup only (O(1) via collapsed map) - no fallback
         Object handler = null;
         if (effectContentHash != null && !effectContentHash.isEmpty()) {
             handler = context.getHandlerFor(effectContentHash);
@@ -116,10 +153,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
 
         // Handler should be a record. If it's a function (parameterized impl), that's an error
         // because parameterized impls should be invoked via ParameterizedHandleNode first.
-        // But for robustness, check if the DynamicHandleNode already invoked the function.
         if (!(handler instanceof MezzeRecord handlerRecord)) {
-            // If handler is a function, it's likely a parameterized impl that wasn't invoked
-            // This shouldn't normally happen if the perform expression was converted correctly
             throw new RuntimeException("Effect handler must be a record, got: " +
                 (handler == null ? "null" : handler.getClass().getSimpleName()) +
                 ". For parameterized impls, use 'perform Handler {params} in ...'");
@@ -130,7 +164,6 @@ public final class DynamicEffectCallNode extends MezzeNode {
         if (opIndex < 0) {
             opIndex = handlerRecord.getFieldIndex(operationName);
             if (opIndex >= 0) {
-                CompilerDirectives.transferToInterpreterAndInvalidate();
                 cachedOperationIndex = opIndex;
             }
         }
@@ -142,7 +175,33 @@ public final class DynamicEffectCallNode extends MezzeNode {
                 effectContentHash + "), got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
         }
 
+        // OPTIMIZATION: Update cache for future fast-path calls
+        updateCache(currentVersion, handlerRecord, opFunc);
+
         return callOperation(opFunc, argument);
+    }
+
+    /**
+     * Update the version-based cache with resolved handler and operation.
+     * After this, future calls with same stack version will hit fast path.
+     */
+    private void updateCache(long version, MezzeRecord handlerRecord, MezzeFunction operation) {
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+
+        cachedStackVersion = version;
+        cachedHandlerRecord = handlerRecord;
+        cachedOperation = operation;
+        cachedCallTarget = operation.getCallTarget();
+        cachedClosureValues = operation.getClosureValues();
+        cachedClosureLength = cachedClosureValues.length;
+
+        // Create DirectCallNode for JIT inlining
+        if (directCallNode == null) {
+            directCallNode = insert(DirectCallNode.create(cachedCallTarget));
+        } else if (directCallNode.getCallTarget() != cachedCallTarget) {
+            // CallTarget changed - replace DirectCallNode
+            directCallNode = insert(DirectCallNode.create(cachedCallTarget));
+        }
     }
 
     /**

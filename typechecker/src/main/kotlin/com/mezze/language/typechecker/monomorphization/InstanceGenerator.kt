@@ -54,13 +54,15 @@ class InstanceGenerator(
                 // Cache hit - return the cached monomorphic instance
                 val monomorphicName = request.generateMonomorphicName()
                 val contentHash = request.generateContentHash()
+                val key = request.toMonomorphicKey()
                 return GenerationResult.Success(
                     instance = MonomorphicInstance(
                         originalName = request.originalName,
                         monomorphicName = monomorphicName,
                         typeArguments = request.typeArgs,
                         specializedBinding = cachedBinding,
-                        contentHash = contentHash
+                        contentHash = contentHash,
+                        monomorphicKey = key
                     )
                 )
             }
@@ -104,13 +106,17 @@ class InstanceGenerator(
             TypeCheckCache.putMonomorphicInstance(originalHash, typeArgsHash, specializedBinding)
         }
 
+        // Build structured MonomorphicKey
+        val key = request.toMonomorphicKey()
+
         return GenerationResult.Success(
             instance = MonomorphicInstance(
                 originalName = request.originalName,
                 monomorphicName = monomorphicName,
                 typeArguments = request.typeArgs,
                 specializedBinding = specializedBinding,
-                contentHash = contentHash
+                contentHash = contentHash,
+                monomorphicKey = key
             )
         )
     }

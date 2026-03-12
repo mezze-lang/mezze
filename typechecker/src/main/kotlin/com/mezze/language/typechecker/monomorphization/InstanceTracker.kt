@@ -13,16 +13,19 @@ import com.mezze.language.ast.*
  * - Immutable tracking (returns new tracker with updated state)
  * - Deduplicates requests (same function + same types = one instance)
  * - Pure functions (no side effects!)
+ * - Uses MonomorphicKey for structured type-aware tracking
  */
 class InstanceTracker private constructor(
-    private val requests: Map<String, InstanceRequest>
+    private val requests: Map<String, InstanceRequest>,
+    /** Structured key index for O(1) type-directed lookup */
+    private val keyIndex: Map<MonomorphicKey, InstanceRequest> = emptyMap()
 ) {
     companion object {
         /**
          * Create an empty instance tracker.
          */
         fun empty(): InstanceTracker {
-            return InstanceTracker(emptyMap())
+            return InstanceTracker(emptyMap(), emptyMap())
         }
     }
 
@@ -33,6 +36,7 @@ class InstanceTracker private constructor(
      */
     fun track(request: InstanceRequest): InstanceTracker {
         val monomorphicName = request.generateMonomorphicName()
+        val key = request.toMonomorphicKey()
 
         // Deduplicate: if we already have this instance, don't add it again
         if (requests.containsKey(monomorphicName)) {
@@ -41,7 +45,8 @@ class InstanceTracker private constructor(
 
         // Return new tracker with this request added
         val newRequests = requests + (monomorphicName to request)
-        return InstanceTracker(newRequests)
+        val newKeyIndex = keyIndex + (key to request)
+        return InstanceTracker(newRequests, newKeyIndex)
     }
 
     /**
@@ -156,7 +161,46 @@ class InstanceTracker private constructor(
      */
     fun merge(other: InstanceTracker): InstanceTracker {
         val mergedRequests = requests + other.requests
-        return InstanceTracker(mergedRequests)
+        val mergedKeyIndex = keyIndex + other.keyIndex
+        return InstanceTracker(mergedRequests, mergedKeyIndex)
+    }
+
+    /**
+     * Get the MonomorphicKey for a function call, if tracked.
+     *
+     * Returns null if this call doesn't need monomorphization.
+     * Preferred over getMonomorphicName() for structured access.
+     */
+    fun getMonomorphicKey(
+        functionName: String,
+        typeSubstitution: Map<String, MezzeType>,
+        originalContentHash: String? = null
+    ): MonomorphicKey? {
+        if (typeSubstitution.isEmpty()) {
+            return null
+        }
+
+        val key = MonomorphicKey.create(
+            originalName = functionName,
+            originalContentHash = originalContentHash,
+            typeArgs = typeSubstitution
+        )
+
+        return if (keyIndex.containsKey(key)) key else null
+    }
+
+    /**
+     * Get instance request by MonomorphicKey.
+     */
+    fun getByKey(key: MonomorphicKey): InstanceRequest? {
+        return keyIndex[key]
+    }
+
+    /**
+     * Get all MonomorphicKeys tracked.
+     */
+    fun getKeys(): Set<MonomorphicKey> {
+        return keyIndex.keys
     }
 }
 

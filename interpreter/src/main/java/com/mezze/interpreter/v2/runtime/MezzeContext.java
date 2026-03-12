@@ -230,6 +230,18 @@ public final class MezzeContext {
     private final ThreadLocal<Deque<Map<String, Object>>> handlerStack =
         ThreadLocal.withInitial(ArrayDeque::new);
 
+    // OPTIMIZATION: Collapsed handler map for O(1) lookup (instead of O(N) stack search)
+    // This map is updated on every push/pop to maintain a flattened view of all active handlers.
+    // Inner scopes shadow outer scopes automatically since we rebuild on each push/pop.
+    private final ThreadLocal<Map<String, Object>> collapsedHandlers =
+        ThreadLocal.withInitial(HashMap::new);
+
+    // OPTIMIZATION: Stack version counter for DynamicEffectCallNode caching
+    // Incremented on every push/pop operation. Allows nodes to detect when their
+    // cached handler resolution is stale without expensive identity comparisons.
+    private final ThreadLocal<long[]> handlerStackVersion =
+        ThreadLocal.withInitial(() -> new long[]{0L});
+
     // Effect name → set of performer names that handle it
     // e.g., "Log" → {"Console", "FileLogger"}
     private final ConcurrentHashMap<String, Set<String>> effectToPerformers = new ConcurrentHashMap<>();
@@ -252,21 +264,48 @@ public final class MezzeContext {
     /**
      * Push a set of handlers onto the handler stack.
      * Called by perform expressions before executing their body.
+     *
+     * OPTIMIZATION: Also updates collapsed handler map for O(1) lookup
+     * and increments version counter for cache invalidation.
      */
     @TruffleBoundary
     public void pushHandlers(Map<String, Object> handlers) {
         handlerStack.get().push(new HashMap<>(handlers));
+        // Update collapsed map - inner handlers shadow outer
+        collapsedHandlers.get().putAll(handlers);
+        // Increment version for cache invalidation
+        handlerStackVersion.get()[0]++;
     }
 
     /**
      * Pop handlers from the stack.
      * Called when a perform expression completes.
+     *
+     * OPTIMIZATION: Rebuilds collapsed handler map and increments version counter.
      */
     @TruffleBoundary
     public void popHandlers() {
         Deque<Map<String, Object>> stack = handlerStack.get();
         if (!stack.isEmpty()) {
             stack.pop();
+            // Rebuild collapsed map from remaining stack
+            rebuildCollapsedHandlers();
+            // Increment version for cache invalidation
+            handlerStackVersion.get()[0]++;
+        }
+    }
+
+    /**
+     * Rebuild the collapsed handler map from the current stack.
+     * Called after pop to ensure correctness when inner handlers are removed.
+     */
+    private void rebuildCollapsedHandlers() {
+        Map<String, Object> collapsed = collapsedHandlers.get();
+        collapsed.clear();
+        // Iterate from bottom to top so inner scopes shadow outer
+        Deque<Map<String, Object>> stack = handlerStack.get();
+        for (Map<String, Object> handlers : stack) {
+            collapsed.putAll(handlers);
         }
     }
 
@@ -308,24 +347,26 @@ public final class MezzeContext {
 
     /**
      * Get the handler for an effect from the current handler stack.
-     * Searches the ENTIRE stack from top to bottom (innermost to outermost handler).
+     * OPTIMIZED: Uses collapsed handler map for O(1) lookup instead of O(N) stack search.
      *
      * @param effectContentHash The content hash of the effect (NOT the effect name)
      * @return The handler for the effect, or null if not found
      */
     @TruffleBoundary
     public Object getHandlerFor(String effectContentHash) {
-        Deque<Map<String, Object>> stack = handlerStack.get();
-        if (stack.isEmpty()) return null;
+        // O(1) lookup in collapsed map - no stack iteration needed
+        return collapsedHandlers.get().get(effectContentHash);
+    }
 
-        // Search the entire stack (top to bottom)
-        // Handlers are keyed by content hash - direct O(1) lookup
-        for (Map<String, Object> handlers : stack) {
-            Object handler = handlers.get(effectContentHash);
-            if (handler != null) return handler;
-        }
-
-        return null;
+    /**
+     * Get the current handler stack version.
+     * Used by DynamicEffectCallNode for cache invalidation.
+     * When the version changes, cached handler resolutions are stale.
+     *
+     * @return The current version counter (increments on every push/pop)
+     */
+    public long getHandlerStackVersion() {
+        return handlerStackVersion.get()[0];
     }
 
     /**

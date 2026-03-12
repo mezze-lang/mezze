@@ -3,7 +3,7 @@ package com.mezze.interpreter.v2.converter
 import com.mezze.interpreter.v2.nodes.MezzeNode
 import com.mezze.interpreter.v2.values.MezzeUnit
 import com.mezze.interpreter.v2.values.MezzeRecord
-import com.mezze.interpreter.v2.values.MezzeList
+import com.mezze.datastructures.list.MezzeList
 import com.mezze.interpreter.v2.values.MezzeVariant
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
@@ -182,157 +182,9 @@ class SeqLiteralNode(
     }
 
     @TruffleBoundary
-    private fun createList(values: Array<Any?>): MezzeList {
+    private fun createList(values: Array<Any?>): MezzeList<*> {
         @Suppress("UNCHECKED_CAST")
-        return MezzeList.fromArray(values as Array<Any>)
-    }
-}
-
-/**
- * Builtin binary operation node that extracts l and r from a record argument.
- */
-@NodeInfo(shortName = "builtin-binary")
-class BuiltinBinaryOpNode(
-    @field:Child private var argsChild: MezzeNode,
-    private val operation: String
-) : MezzeNode() {
-
-    override fun execute(frame: VirtualFrame): Any {
-        val args = argsChild.execute(frame)
-        return executeOp(args)
-    }
-
-    @TruffleBoundary
-    private fun executeOp(args: Any): Any {
-        if (args !is MezzeRecord) {
-            throw RuntimeException("Expected record argument for builtin operation, got: ${args::class.simpleName}")
-        }
-
-        val l = args.getField("l")
-        val r = args.getField("r")
-
-        return when (operation) {
-            "add" -> performAdd(l, r)
-            "subtract" -> performSubtract(l, r)
-            "multiply" -> performMultiply(l, r)
-            "divide" -> performDivide(l, r)
-            "modulo" -> performModulo(l, r)
-            "equal" -> l == r
-            "notEqual" -> l != r
-            "lessThan" -> compare(l, r) < 0
-            "greaterThan" -> compare(l, r) > 0
-            "lessEqual" -> compare(l, r) <= 0
-            "greaterEqual" -> compare(l, r) >= 0
-            "and" -> (l as Boolean) && (r as Boolean)
-            "or" -> (l as Boolean) || (r as Boolean)
-            else -> throw RuntimeException("Unknown operation: $operation")
-        }
-    }
-
-    private fun performAdd(l: Any?, r: Any?): Any {
-        return when {
-            l is Long && r is Long -> l + r
-            l is Double && r is Double -> l + r
-            l is Long && r is Double -> l.toDouble() + r
-            l is Double && r is Long -> l + r.toDouble()
-            l is String || r is String -> l.toString() + r.toString()
-            else -> throw RuntimeException("Cannot add $l and $r")
-        }
-    }
-
-    private fun performSubtract(l: Any?, r: Any?): Any {
-        return when {
-            l is Long && r is Long -> l - r
-            l is Double && r is Double -> l - r
-            l is Long && r is Double -> l.toDouble() - r
-            l is Double && r is Long -> l - r.toDouble()
-            else -> throw RuntimeException("Cannot subtract $l and $r")
-        }
-    }
-
-    private fun performMultiply(l: Any?, r: Any?): Any {
-        return when {
-            l is Long && r is Long -> l * r
-            l is Double && r is Double -> l * r
-            l is Long && r is Double -> l.toDouble() * r
-            l is Double && r is Long -> l * r.toDouble()
-            else -> throw RuntimeException("Cannot multiply $l and $r")
-        }
-    }
-
-    private fun performDivide(l: Any?, r: Any?): Any {
-        return when {
-            l is Long && r is Long -> l / r
-            l is Double && r is Double -> l / r
-            l is Long && r is Double -> l.toDouble() / r
-            l is Double && r is Long -> l / r.toDouble()
-            else -> throw RuntimeException("Cannot divide $l and $r")
-        }
-    }
-
-    private fun performModulo(l: Any?, r: Any?): Any {
-        return when {
-            l is Long && r is Long -> l % r
-            l is Double && r is Double -> l % r
-            l is Long && r is Double -> l.toDouble() % r
-            l is Double && r is Long -> l % r.toDouble()
-            else -> throw RuntimeException("Cannot modulo $l and $r")
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun compare(l: Any?, r: Any?): Int {
-        return when {
-            l is Long && r is Long -> l.compareTo(r)
-            l is Double && r is Double -> l.compareTo(r)
-            l is Long && r is Double -> l.toDouble().compareTo(r)
-            l is Double && r is Long -> l.compareTo(r.toDouble())
-            l is Comparable<*> && r != null -> (l as Comparable<Any>).compareTo(r)
-            else -> throw RuntimeException("Cannot compare $l and $r")
-        }
-    }
-}
-
-/**
- * Builtin unary operation node that extracts n or val from a record argument.
- */
-@NodeInfo(shortName = "builtin-unary")
-class BuiltinUnaryOpNode(
-    @field:Child private var argsChild: MezzeNode,
-    private val operation: String
-) : MezzeNode() {
-
-    override fun execute(frame: VirtualFrame): Any {
-        val args = argsChild.execute(frame)
-        return executeOp(args)
-    }
-
-    @TruffleBoundary
-    private fun executeOp(args: Any): Any {
-        if (args !is MezzeRecord) {
-            throw RuntimeException("Expected record argument for builtin operation, got: ${args::class.simpleName}")
-        }
-
-        // NumSub.neg uses field name 'n', LogicalNot.not uses 'val'
-        val fieldName = if (operation == "not") "val" else "n"
-        val value = args.getField(fieldName)
-
-        return when (operation) {
-            "negate" -> {
-                when (value) {
-                    is Long -> -value
-                    is Double -> -value
-                    else -> throw RuntimeException("Cannot negate $value")
-                }
-            }
-            "not" -> {
-                when (value) {
-                    is Boolean -> !value
-                    else -> throw RuntimeException("Cannot negate $value")
-                }
-            }
-            else -> throw RuntimeException("Unknown operation: $operation")
-        }
+        return MezzeList.of(*values as Array<Any>)
     }
 }
 
