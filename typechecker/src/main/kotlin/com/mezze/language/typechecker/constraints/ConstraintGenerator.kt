@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.debug.DebugLogger
@@ -1021,6 +1022,10 @@ class ConstraintGenerator(
                     paramType = convertTypeAnnotationInternal(annotation.paramType),
                     returnType = convertTypeAnnotationInternal(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
+                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
+                        // Use allEffectNames to include both simple effects and effect annotations
+                        ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
+
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
 

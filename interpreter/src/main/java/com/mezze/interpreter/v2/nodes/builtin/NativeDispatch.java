@@ -190,6 +190,8 @@ public final class NativeDispatch extends MezzeNode {
         registerCrashHandler();
         // Continuation primitives (delimited continuations for effects)
         registerContinuationHandlers();
+        // Mutation primitives (safe local mutation)
+        registerMutationHandlers();
         // Note: Comptime is handled at conversion time, no runtime handler needed
     }
 
@@ -2960,6 +2962,303 @@ public final class NativeDispatch extends MezzeNode {
                 return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), suspTag, inner);
             }
         });
+    }
+
+    // ==================== Mutation Operations ====================
+    // Safe local mutation - all mutations happen in-place on mutable wrappers
+
+    private static void registerMutationHandlers() {
+        // Debug mutation marker - prints debug info when DebugMut is used
+        HANDLERS.put("__native_debug_mutation_marker", (r, c) -> {
+            debugMutationMarker();
+            return MezzeRecord.empty();
+        });
+
+        // Seq conversions
+        HANDLERS.put("__native_seq_to_mut", (r, c) -> {
+            MezzeSeq seq = getSeq(r, "seq");
+            return MutableSeq.fromImmutable(seq);
+        });
+
+        HANDLERS.put("__native_seq_to_immut", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_seq_to_immut expects MutableSeq");
+            }
+            return mutSeq.toImmutable();
+        });
+
+        HANDLERS.put("__native_mut_seq_with_capacity", (r, c) -> {
+            long capacity = getLong(r, "capacity");
+            return MutableSeq.withCapacity((int) capacity);
+        });
+
+        // Map conversions
+        HANDLERS.put("__native_map_to_mut", (r, c) -> {
+            MezzeMap map = getMap(r, "map");
+            return MutableMap.fromImmutable(map);
+        });
+
+        HANDLERS.put("__native_map_to_immut", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_map_to_immut expects MutableMap");
+            }
+            return mutMap.toImmutable();
+        });
+
+        HANDLERS.put("__native_mut_map_with_capacity", (r, c) -> {
+            long capacity = getLong(r, "capacity");
+            return MutableMap.withCapacity((int) capacity);
+        });
+
+        // Set conversions
+        HANDLERS.put("__native_set_to_mut", (r, c) -> {
+            MezzeSet set = getSet(r, "set");
+            return MutableSet.fromImmutable(set);
+        });
+
+        HANDLERS.put("__native_set_to_immut", (r, c) -> {
+            Object setObj = getField(r, "set");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_set_to_immut expects MutableSet");
+            }
+            return mutSet.toImmutable();
+        });
+
+        HANDLERS.put("__native_mut_set_with_capacity", (r, c) -> {
+            long capacity = getLong(r, "capacity");
+            return MutableSet.withCapacity((int) capacity);
+        });
+
+        // Bytes conversions
+        HANDLERS.put("__native_bytes_to_mut", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            if (!(bytesObj instanceof byte[] bytes)) {
+                throw new RuntimeException("__native_bytes_to_mut expects Bytes");
+            }
+            return MutableBytes.fromImmutable(bytes);
+        });
+
+        HANDLERS.put("__native_bytes_to_immut", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_bytes_to_immut expects MutableBytes");
+            }
+            return mutBytes.toImmutable();
+        });
+
+        // Primitive conversions
+        HANDLERS.put("__native_int_to_mut", (r, c) -> {
+            long n = getLong(r, "n");
+            return new MutableInt(n);
+        });
+
+        HANDLERS.put("__native_int_to_immut", (r, c) -> {
+            Object nObj = getField(r, "n");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_int_to_immut expects MutableInt");
+            }
+            return mutInt.get();
+        });
+
+        HANDLERS.put("__native_float_to_mut", (r, c) -> {
+            double n = getDouble(r, "n");
+            return new MutableFloat(n);
+        });
+
+        HANDLERS.put("__native_float_to_immut", (r, c) -> {
+            Object nObj = getField(r, "n");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_float_to_immut expects MutableFloat");
+            }
+            return mutFloat.get();
+        });
+
+        HANDLERS.put("__native_bool_to_mut", (r, c) -> {
+            boolean b = getBool(r, "b");
+            return new MutableBool(b);
+        });
+
+        HANDLERS.put("__native_bool_to_immut", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_bool_to_immut expects MutableBool");
+            }
+            return mutBool.get();
+        });
+
+        // MutSeq operations
+        HANDLERS.put("__native_mut_seq_sort", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_sort expects MutableSeq");
+            }
+            mutSeq.sort();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_sort_by", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            Object cmpObj = getField(r, "cmp");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_sort_by expects MutableSeq");
+            }
+            if (!(cmpObj instanceof MezzeFunction cmp)) {
+                throw new RuntimeException("__native_mut_seq_sort_by expects comparator function");
+            }
+            mutSeq.sortBy(cmp, c);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_reverse", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_reverse expects MutableSeq");
+            }
+            mutSeq.reverse();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_fill", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            Object value = getField(r, "v");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_fill expects MutableSeq");
+            }
+            mutSeq.fill(value);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_fill_range", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long start = getLong(r, "start");
+            long end = getLong(r, "end");
+            Object value = getField(r, "v");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_fill_range expects MutableSeq");
+            }
+            mutSeq.fillRange((int) start, (int) end, value);
+            return MezzeRecord.empty();
+        });
+
+        // MutInt operations
+        HANDLERS.put("__native_mut_int_read", (r, c) -> {
+            Object nObj = getField(r, "n");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_read expects MutableInt");
+            }
+            return mutInt.get();
+        });
+
+        HANDLERS.put("__native_mut_int_write", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long v = getLong(r, "v");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_write expects MutableInt");
+            }
+            mutInt.set(v);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_int_incr", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long delta = getLong(r, "delta");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_incr expects MutableInt");
+            }
+            mutInt.add(delta);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_int_decr", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long delta = getLong(r, "delta");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_decr expects MutableInt");
+            }
+            mutInt.subtract(delta);
+            return MezzeRecord.empty();
+        });
+
+        // Looping constructs
+        HANDLERS.put("__native_for_range", (r, c) -> {
+            long start = getLong(r, "start");
+            long end = getLong(r, "end");
+            Object bodyObj = getField(r, "body");
+            if (!(bodyObj instanceof MezzeFunction body)) {
+                throw new RuntimeException("__native_for_range expects body function");
+            }
+            forRange(start, end, body, c);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_while", (r, c) -> {
+            Object condObj = getField(r, "cond");
+            Object bodyObj = getField(r, "body");
+            if (!(condObj instanceof MezzeFunction cond)) {
+                throw new RuntimeException("__native_while expects cond function");
+            }
+            if (!(bodyObj instanceof MezzeFunction body)) {
+                throw new RuntimeException("__native_while expects body function");
+            }
+            whileLoop(cond, body, c);
+            return MezzeRecord.empty();
+        });
+    }
+
+    @TruffleBoundary
+    private static void debugMutationMarker() {
+        StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+        // Find the first non-internal frame
+        String location = "unknown";
+        for (StackTraceElement frame : stack) {
+            String className = frame.getClassName();
+            if (!className.startsWith("com.mezze.interpreter") &&
+                !className.startsWith("java.") &&
+                !className.startsWith("com.oracle.truffle")) {
+                location = frame.toString();
+                break;
+            }
+        }
+        System.out.println("[DebugMut] mutation at: " + location);
+    }
+
+    @TruffleBoundary
+    private static void forRange(long start, long end, MezzeFunction body, IndirectCallNode callNode) {
+        Object[] closureValues = body.getClosureValues();
+        int closureLen = closureValues.length;
+        Object[] callArgs = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+
+        for (long i = start; i < end; i++) {
+            MezzeRecord argRecord = MezzeRecord.fromFields(new String[]{"i"}, new Object[]{i});
+            callArgs[closureLen] = argRecord;
+            callNode.call(body.getCallTarget(), callArgs);
+        }
+    }
+
+    @TruffleBoundary
+    private static void whileLoop(MezzeFunction cond, MezzeFunction body, IndirectCallNode callNode) {
+        Object[] condClosureValues = cond.getClosureValues();
+        int condClosureLen = condClosureValues.length;
+        Object[] condCallArgs = new Object[condClosureLen + 1];
+        System.arraycopy(condClosureValues, 0, condCallArgs, 0, condClosureLen);
+        condCallArgs[condClosureLen] = MezzeRecord.empty();
+
+        Object[] bodyClosureValues = body.getClosureValues();
+        int bodyClosureLen = bodyClosureValues.length;
+        Object[] bodyCallArgs = new Object[bodyClosureLen + 1];
+        System.arraycopy(bodyClosureValues, 0, bodyCallArgs, 0, bodyClosureLen);
+        bodyCallArgs[bodyClosureLen] = MezzeRecord.empty();
+
+        while (true) {
+            Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
+            if (!(condResult instanceof Boolean b) || !b) {
+                break;
+            }
+            callNode.call(body.getCallTarget(), bodyCallArgs);
+        }
     }
 
     // Helper for creating trivial continuation that returns its input

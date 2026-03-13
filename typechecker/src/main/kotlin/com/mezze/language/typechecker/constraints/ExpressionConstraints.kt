@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.TypeCheckError
@@ -3995,7 +3996,12 @@ class ExpressionConstraintGenerator {
                 MezzeType.FunctionType(
                     paramType = convertFieldType(annotation.paramType),
                     returnType = convertFieldType(annotation.returnType),
-                    effects = annotation.effects?.let { MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed) }
+                    effects = annotation.effects?.let {
+                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
+                        // Use allEffectNames to include both simple effects and effect annotations
+                        ContextBuilder.validateHermeticEffects(it.allEffectNames)
+                        MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed)
+                    }
                 )
             }
             is TypeApplicationAnnotation -> {

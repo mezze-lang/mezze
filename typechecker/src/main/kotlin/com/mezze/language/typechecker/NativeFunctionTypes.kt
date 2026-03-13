@@ -29,6 +29,7 @@ import com.mezze.language.typechecker.types.effects.SchedulerTypes
 import com.mezze.language.typechecker.types.effects.ParallelTypes
 import com.mezze.language.typechecker.types.effects.STMTypes
 import com.mezze.language.typechecker.types.effects.HttpTypes
+import com.mezze.language.typechecker.types.effects.MutationTypes
 import com.mezze.language.typechecker.types.concurrent.AtomTypes
 import com.mezze.language.typechecker.types.concurrent.AgentTypes
 import com.mezze.language.typechecker.types.concurrent.ChannelTypes
@@ -145,6 +146,9 @@ object NativeFunctionTypes {
 
         // HTTP effect types
         HttpTypes.registerAll(capturingContext)
+
+        // Mutation effect types (safe local mutation)
+        MutationTypes.registerAll(capturingContext)
 
         // crash is a built-in function, no import needed
         // Terminates the program with an error message (like Rust's panic!)

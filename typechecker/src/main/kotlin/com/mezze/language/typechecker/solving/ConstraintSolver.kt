@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
+import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.printing.TypeDiffPrinter
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
@@ -3814,6 +3815,9 @@ class ConstraintSolver(
                     paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
                     returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
                     effects = annotation.effects?.let { effectRow ->
+                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
+                        // Use allEffectNames to include both simple effects and effect annotations
+                        ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
                         MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
                     abilityConstraints = emptyList()

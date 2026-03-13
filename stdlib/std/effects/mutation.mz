@@ -1,0 +1,271 @@
+# std/effects/mutation.mz - Safe Local Mutation Effect
+#
+# Provides safe in-place mutation with compile-time data race prevention.
+# The Mutation effect is "hermetic" - it cannot coexist with any other effect.
+# This ensures mutations are always local and never leak across async boundaries.
+#
+# Usage:
+#   use std::effects::mutation::{Mutation, LocalMut, MutSeq, to_mut, to_immut}
+#
+#   # Convert to mutable, mutate, convert back
+#   let sorted = perform LocalMut in do
+#       let arr = to_mut {seq = [3, 1, 4, 1, 5]}
+#       MutSeq.sort {c = arr}
+#       to_immut {seq = arr}
+#
+# The hermetic rule ensures:
+# - No async/await inside mutation blocks
+# - No logging or other effects that could observe partial state
+# - No effects that could allow mutation to escape
+#
+# This is similar to Rust's &mut references - exclusive access guaranteed.
+
+# =============================================================================
+# Mutation Effect
+# =============================================================================
+
+# The Mutation effect is a marker effect that enables mutation operations.
+# It has a single operation `mutate` which serves as the effect marker.
+# The actual mutation methods are on the Mutable ability.
+effect Mutation where {
+    # Marker operation - used internally by abilities to get the effect
+    # This is a no-op at runtime but carries the <Mutation> effect
+    mutate: {} -> {}
+}
+
+# =============================================================================
+# LocalMut - The Production Handler
+# =============================================================================
+
+# LocalMut is the primary performer for Mutation.
+# It's a trivial handler - mutations are done directly on memory.
+# Safety comes from the type system (hermetic rule), not runtime checks.
+impl Mutation for LocalMut where {
+    mutate = {} -> {}
+}
+
+# =============================================================================
+# DebugMut - Debug Handler (uses interpreter internals)
+# =============================================================================
+
+# DebugMut provides debugging capabilities for mutation operations.
+# Since Mutation is hermetic (can't have other effects like Log),
+# debugging is done through the interpreter's internal mechanisms.
+#
+# When enabled, DebugMut will log mutation operations via content-hash
+# addressing - identifying functions by their unique hash rather than name.
+impl Mutation for DebugMut where {
+    mutate = {} -> __native_debug_mutation_marker {}
+}
+
+# =============================================================================
+# Mutable Newtypes - Wrappers for mutable collections
+# =============================================================================
+
+# Mutable sequence - wraps native mutable array
+pub newtype MutSeq 'a = MutSeq __NativeMutSeq
+
+# Mutable map - wraps native mutable hash map
+pub newtype MutMap 'k 'v = MutMap __NativeMutMap
+
+# Mutable set - wraps native mutable hash set
+pub newtype MutSet 'a = MutSet __NativeMutSet
+
+# Mutable bytes - wraps native mutable byte array
+pub newtype MutBytes = MutBytes __NativeMutBytes
+
+# Mutable deque - wraps native mutable deque
+pub newtype MutDeque 'a = MutDeque __NativeMutDeque
+
+# =============================================================================
+# Mutable Primitives - Single-value wrappers for primitives
+# =============================================================================
+
+# Mutable Int - for incrementing counters etc.
+pub newtype MutInt = MutInt __NativeMutInt
+
+# Mutable Float - for accumulators etc.
+pub newtype MutFloat = MutFloat __NativeMutFloat
+
+# Mutable Bool - for flags
+pub newtype MutBool = MutBool __NativeMutBool
+
+# =============================================================================
+# Conversion Functions - to_mut / to_immut
+# =============================================================================
+
+# Convert immutable sequence to mutable (creates a copy)
+pub let seq_to_mut: {seq: ['a]} -> MutSeq 'a <Mutation> = {seq} -> do
+    Mutation.mutate {}
+    __native_seq_to_mut {seq = seq}
+
+# Convert mutable sequence back to immutable (zero-copy, freezes the mutable)
+pub let seq_to_immut: {seq: MutSeq 'a} -> ['a] <Mutation> = {seq} -> do
+    Mutation.mutate {}
+    __native_seq_to_immut {seq = seq}
+
+# Alias for convenience
+pub let to_mut = seq_to_mut
+pub let to_immut = seq_to_immut
+
+# Map conversions
+pub let map_to_mut: {map: Map 'k 'v} -> MutMap 'k 'v <Mutation> = {map} -> do
+    Mutation.mutate {}
+    __native_map_to_mut {map = map}
+
+pub let map_to_immut: {map: MutMap 'k 'v} -> Map 'k 'v <Mutation> = {map} -> do
+    Mutation.mutate {}
+    __native_map_to_immut {map = map}
+
+# Set conversions
+pub let set_to_mut: {set: Set 'a} -> MutSet 'a <Mutation> = {set} -> do
+    Mutation.mutate {}
+    __native_set_to_mut {set = set}
+
+pub let set_to_immut: {set: MutSet 'a} -> Set 'a <Mutation> = {set} -> do
+    Mutation.mutate {}
+    __native_set_to_immut {set = set}
+
+# Bytes conversions
+pub let bytes_to_mut: {bytes: Bytes} -> MutBytes <Mutation> = {bytes} -> do
+    Mutation.mutate {}
+    __native_bytes_to_mut {bytes = bytes}
+
+pub let bytes_to_immut: {bytes: MutBytes} -> Bytes <Mutation> = {bytes} -> do
+    Mutation.mutate {}
+    __native_bytes_to_immut {bytes = bytes}
+
+# =============================================================================
+# Primitive Conversions
+# =============================================================================
+
+pub let int_to_mut: {n: Int} -> MutInt <Mutation> = {n} -> do
+    Mutation.mutate {}
+    __native_int_to_mut {n = n}
+
+pub let int_to_immut: {n: MutInt} -> Int <Mutation> = {n} -> do
+    Mutation.mutate {}
+    __native_int_to_immut {n = n}
+
+pub let float_to_mut: {n: Float} -> MutFloat <Mutation> = {n} -> do
+    Mutation.mutate {}
+    __native_float_to_mut {n = n}
+
+pub let float_to_immut: {n: MutFloat} -> Float <Mutation> = {n} -> do
+    Mutation.mutate {}
+    __native_float_to_immut {n = n}
+
+pub let bool_to_mut: {b: Bool} -> MutBool <Mutation> = {b} -> do
+    Mutation.mutate {}
+    __native_bool_to_mut {b = b}
+
+pub let bool_to_immut: {b: MutBool} -> Bool <Mutation> = {b} -> do
+    Mutation.mutate {}
+    __native_bool_to_immut {b = b}
+
+# =============================================================================
+# Mutable Ability - Operations on Mutable Containers
+# =============================================================================
+
+# The Mutable ability defines operations for in-place mutation.
+# All operations have the <Mutation> effect.
+ability Mutable 'c having 'elem where {
+    # Get element at index (returns Option for bounds safety)
+    get: {c: 'c, i: Int} -> Option 'elem <Mutation>,
+
+    # Set element at index (returns True if in bounds)
+    set: {c: 'c, i: Int, v: 'elem} -> Bool <Mutation>,
+
+    # Get length
+    len: {c: 'c} -> Int <Mutation>,
+
+    # Swap elements at two indices
+    swap: {c: 'c, i: Int, j: Int} -> Bool <Mutation>
+}
+
+# =============================================================================
+# MutSeq Operations - Sequence-specific mutations
+# =============================================================================
+
+# Sort in place (natural ordering)
+pub let sort: {seq: MutSeq Int} -> {} <Mutation> = {seq} -> do
+    Mutation.mutate {}
+    __native_mut_seq_sort {seq = seq}
+
+# Sort in place with comparator
+pub let sort_by: {seq: MutSeq 'a, cmp: {a: 'a, b: 'a} -> Int} -> {} <Mutation> = {seq, cmp} -> do
+    Mutation.mutate {}
+    __native_mut_seq_sort_by {seq = seq, cmp = cmp}
+
+# Reverse in place
+pub let reverse: {seq: MutSeq 'a} -> {} <Mutation> = {seq} -> do
+    Mutation.mutate {}
+    __native_mut_seq_reverse {seq = seq}
+
+# Fill with value
+pub let fill: {seq: MutSeq 'a, v: 'a} -> {} <Mutation> = {seq, v} -> do
+    Mutation.mutate {}
+    __native_mut_seq_fill {seq = seq, v = v}
+
+# Fill range with value
+pub let fill_range: {seq: MutSeq 'a, start: Int, end: Int, v: 'a} -> {} <Mutation> = {seq, start, end, v} -> do
+    Mutation.mutate {}
+    __native_mut_seq_fill_range {seq = seq, start = start, end = end, v = v}
+
+# =============================================================================
+# MutInt Operations - Primitive int mutations
+# =============================================================================
+
+# Read value
+pub let read_int: {n: MutInt} -> Int <Mutation> = {n} -> do
+    Mutation.mutate {}
+    __native_mut_int_read {n = n}
+
+# Write value
+pub let write_int: {n: MutInt, v: Int} -> {} <Mutation> = {n, v} -> do
+    Mutation.mutate {}
+    __native_mut_int_write {n = n, v = v}
+
+# Increment by delta
+pub let incr: {n: MutInt, delta: Int} -> {} <Mutation> = {n, delta} -> do
+    Mutation.mutate {}
+    __native_mut_int_incr {n = n, delta = delta}
+
+# Decrement by delta
+pub let decr: {n: MutInt, delta: Int} -> {} <Mutation> = {n, delta} -> do
+    Mutation.mutate {}
+    __native_mut_int_decr {n = n, delta = delta}
+
+# =============================================================================
+# Looping - Imperative loops for mutation
+# =============================================================================
+
+# Loop with index from 0 to n-1
+# This is the primary looping construct for mutation
+pub let for_range: {start: Int, end: Int, body: {i: Int} -> {} <Mutation>} -> {} <Mutation> = {start, end, body} -> do
+    Mutation.mutate {}
+    __native_for_range {start = start, end = end, body = body}
+
+# Loop while condition is true
+pub let while: {cond: {} -> Bool <Mutation>, body: {} -> {} <Mutation>} -> {} <Mutation> = {cond, body} -> do
+    Mutation.mutate {}
+    __native_while {cond = cond, body = body}
+
+# =============================================================================
+# Convenience: Create with initial capacity
+# =============================================================================
+
+# Create empty mutable sequence with capacity
+pub let seq_with_capacity: {capacity: Int} -> MutSeq 'a <Mutation> = {capacity} -> do
+    Mutation.mutate {}
+    __native_mut_seq_with_capacity {capacity = capacity}
+
+# Create empty mutable map with capacity
+pub let map_with_capacity: {capacity: Int} -> MutMap 'k 'v <Mutation> = {capacity} -> do
+    Mutation.mutate {}
+    __native_mut_map_with_capacity {capacity = capacity}
+
+# Create empty mutable set with capacity
+pub let set_with_capacity: {capacity: Int} -> MutSet 'a <Mutation> = {capacity} -> do
+    Mutation.mutate {}
+    __native_mut_set_with_capacity {capacity = capacity}

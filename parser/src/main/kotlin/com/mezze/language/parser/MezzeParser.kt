@@ -981,6 +981,7 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.USE -> "'use'"
     TokenType.HAVING -> "'having'"
     TokenType.FORALL -> "'forall'"
+    TokenType.DERIVING -> "'deriving'"
 
     // Literals and identifiers - describe what they are
     TokenType.INTEGER -> "integer"

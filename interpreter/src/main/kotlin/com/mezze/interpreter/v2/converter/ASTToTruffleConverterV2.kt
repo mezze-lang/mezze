@@ -48,6 +48,7 @@ import com.mezze.interpreter.v2.values.MezzeFunction
 import com.mezze.interpreter.v2.nodes.MezzeRootNode
 import com.mezze.interpreter.v2.nodes.continuation.*
 import com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode
+import com.mezze.interpreter.v2.nodes.mutation.*
 import com.mezze.interpreter.v2.runtime.MezzeContext
 import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.scope.ScopedEffectConstants
@@ -2479,6 +2480,141 @@ class ASTToTruffleConverterV2(
                         convertExpression(fields["xs"]!!),
                         convertExpression(fields["init"]!!),
                         convertExpression(fields["f"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // =================================================================
+            // Optimized Mutation operations (JIT-inlinable)
+            // =================================================================
+
+            // Seq conversions
+            "__native_seq_to_mut" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    SeqToMutNode.create(convertExpression(fields["seq"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_seq_to_immut" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    SeqToImmutNode.create(convertExpression(fields["seq"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // Int conversions
+            "__native_int_to_mut" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    IntToMutNode.create(convertExpression(fields["n"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_int_to_immut" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    IntToImmutNode.create(convertExpression(fields["n"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // MutSeq operations
+            "__native_mut_seq_sort" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutSeqSortNode.create(convertExpression(fields["seq"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_mut_seq_reverse" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutSeqReverseNode.create(convertExpression(fields["seq"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // MutInt operations
+            "__native_mut_int_read" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutIntOpsNode.ReadNode.create(convertExpression(fields["n"]!!))
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_mut_int_write" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutIntOpsNode.WriteNode.create(
+                        convertExpression(fields["n"]!!),
+                        convertExpression(fields["v"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_mut_int_incr" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutIntOpsNode.IncrNode.create(
+                        convertExpression(fields["n"]!!),
+                        convertExpression(fields["delta"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_mut_int_decr" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    MutIntOpsNode.DecrNode.create(
+                        convertExpression(fields["n"]!!),
+                        convertExpression(fields["delta"]!!)
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+
+            // Looping constructs - these need special handling for LoopNode optimization
+            "__native_for_range" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    // Allocate frame slots for loop state
+                    val indexSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Long, "for_range_index", null)
+                    val endSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Long, "for_range_end", null)
+                    val bodySlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, "for_range_body", null)
+                    ForRangeNode(
+                        convertExpression(fields["start"]!!),
+                        convertExpression(fields["end"]!!),
+                        convertExpression(fields["body"]!!),
+                        indexSlot, endSlot, bodySlot
+                    )
+                } else {
+                    NativeDispatch.create(funcName, convertExpression(args))
+                }
+            }
+            "__native_while" -> {
+                val fields = extractRecordFields(args)
+                if (fields != null) {
+                    // Allocate frame slots for loop state
+                    val condSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, "while_cond", null)
+                    val bodySlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, "while_body", null)
+                    WhileMutNode(
+                        convertExpression(fields["cond"]!!),
+                        convertExpression(fields["body"]!!),
+                        condSlot, bodySlot
                     )
                 } else {
                     NativeDispatch.create(funcName, convertExpression(args))

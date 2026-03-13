@@ -434,6 +434,17 @@ class AbilityResolver(
     }
 
     private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
+        // Check if this is a newtype by looking up the type declaration
+        // A newtype is identified by its TypeDeclaration having a NewtypeDefinition, not by constructor count
+        val typeName = type.typeName
+        val typeDecl = if (typeName != null) typeDeclarations[typeName] else null
+        val isNewtype = typeDecl?.definition is NewtypeDefinition
+
+        if (isNewtype) {
+            return checkNewtypeAbility(type, abilityName, typeArgs, typeDecl!!.definition as NewtypeDefinition)
+        }
+
+        // Regular variant handling
         return when (abilityName) {
             "Eq" -> {
                 // Variants can have Eq if all constructors have Eq
@@ -464,6 +475,126 @@ class AbilityResolver(
                 AbilityCheckResult.Satisfied("Built-in Variant to_string (derived from all constructors)")
             }
             else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+        }
+    }
+
+    /**
+     * Check ability for newtype.
+     *
+     * Newtypes have special rules:
+     * - Inspect: Always auto-derived (universal debugging)
+     * - Eq, Ord, etc.: Only available if explicitly listed in `deriving` clause
+     */
+    private fun checkNewtypeAbility(
+        type: MezzeType.VariantType,
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        definition: NewtypeDefinition
+    ): AbilityCheckResult {
+        val typeName = type.typeName ?: return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+
+        // Get the wrapped type (payload of the single constructor)
+        val wrappedType = type.constructors.values.firstOrNull()
+
+        return when (abilityName) {
+            "Inspect" -> {
+                // Inspect is always auto-derived for newtypes (universal debugging)
+                if (wrappedType != null) {
+                    val wrappedCheck = checkAbility(wrappedType, "Inspect")
+                    if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
+                        return AbilityCheckResult.Unsatisfied(
+                            reason = "Newtype '$typeName' Inspect requires wrapped type to have Inspect"
+                        )
+                    }
+                }
+                AbilityCheckResult.Satisfied("Built-in Newtype to_string (auto-derived)")
+            }
+            "Eq", "Ord" -> {
+                // Eq and Ord require explicit deriving
+                val derivedAbilities = definition.derivedAbilities
+
+                if (abilityName in derivedAbilities) {
+                    // Check that wrapped type also has this ability
+                    if (wrappedType != null) {
+                        val wrappedCheck = checkAbility(wrappedType, abilityName)
+                        if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
+                            return AbilityCheckResult.Unsatisfied(
+                                reason = "Newtype '$typeName' cannot derive $abilityName because wrapped type doesn't have $abilityName"
+                            )
+                        }
+                    }
+                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
+                } else {
+                    AbilityCheckResult.Unsatisfied(
+                        reason = "Newtype '$typeName' does not derive $abilityName. Add 'deriving $abilityName' to the newtype declaration.",
+                        suggestions = listOf("newtype $typeName = ... deriving $abilityName")
+                    )
+                }
+            }
+            else -> {
+                // Other abilities require explicit impl or deriving
+                val derivedAbilities = definition.derivedAbilities
+
+                if (abilityName in derivedAbilities) {
+                    // Check that wrapped type also has this ability
+                    if (wrappedType != null) {
+                        val wrappedCheck = checkAbility(wrappedType, abilityName)
+                        if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
+                            return AbilityCheckResult.Unsatisfied(
+                                reason = "Newtype '$typeName' cannot derive $abilityName because wrapped type doesn't have $abilityName"
+                            )
+                        }
+                    }
+                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
+                } else {
+                    checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+                }
+            }
+        }
+    }
+
+    /**
+     * Check ability for newtype when accessed via TypeApplication.
+     *
+     * This is called when the type is represented as TypeApplication("UserId", [])
+     * rather than VariantType (which happens during constraint generation).
+     */
+    private fun checkNewtypeAbilityForTypeApplication(
+        type: MezzeType.TypeApplication,
+        abilityName: String,
+        typeArgs: List<MezzeType>,
+        definition: NewtypeDefinition
+    ): AbilityCheckResult {
+        val typeName = type.constructor
+
+        return when (abilityName) {
+            "Inspect" -> {
+                // Inspect is always auto-derived for newtypes (universal debugging)
+                AbilityCheckResult.Satisfied("Built-in Newtype to_string (auto-derived)")
+            }
+            "Eq", "Ord" -> {
+                // Eq and Ord require explicit deriving
+                val derivedAbilities = definition.derivedAbilities
+
+                if (abilityName in derivedAbilities) {
+                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
+                } else {
+                    AbilityCheckResult.Unsatisfied(
+                        reason = "Newtype '$typeName' does not derive $abilityName. Add 'deriving $abilityName' to the newtype declaration.",
+                        suggestions = listOf("newtype $typeName = ... deriving $abilityName")
+                    )
+                }
+            }
+            else -> {
+                // Other abilities require explicit impl or deriving
+                val derivedAbilities = definition.derivedAbilities
+
+                if (abilityName in derivedAbilities) {
+                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
+                } else {
+                    checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
+                }
+            }
         }
     }
 
@@ -510,36 +641,49 @@ class AbilityResolver(
         // For user-defined type applications, check if the underlying type declaration
         // supports the ability. This handles recursive types like Tree 'a.
         val typeDecl = typeDeclarations[type.constructor]
-        if (typeDecl != null && (abilityName == "Eq" || abilityName == "Inspect")) {
-            // First check if type arguments support the ability
-            val allArgsSupport = type.args.all { arg ->
-                checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
-            }
-            if (!allArgsSupport) {
-                return AbilityCheckResult.Unsatisfied(
-                    reason = "${type.constructor} $abilityName requires type arguments to have $abilityName"
+        if (typeDecl != null) {
+            // Check if this is a newtype - newtypes have special deriving rules
+            if (typeDecl.definition is NewtypeDefinition) {
+                return checkNewtypeAbilityForTypeApplication(
+                    type, abilityName, typeArgs, typeDecl.definition as NewtypeDefinition
                 )
             }
 
-            // Check the underlying type structure
-            return when (val definition = typeDecl.definition) {
-                is VariantDefinition -> {
-                    // For variant types, check all constructor data types
-                    // But skip recursive references (handled by inProgressChecks)
-                    for (constructor in definition.constructors) {
-                        val dataTypeAnnotation = constructor.dataType ?: continue
-                        // Check if this is a self-reference - if so, skip
-                        if (isSelfReference(dataTypeAnnotation, type.constructor)) continue
+            // For regular variants and records, check built-in abilities
+            if (abilityName == "Eq" || abilityName == "Inspect") {
+                // First check if type arguments support the ability
+                val allArgsSupport = type.args.all { arg ->
+                    checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
+                }
+                if (!allArgsSupport) {
+                    return AbilityCheckResult.Unsatisfied(
+                        reason = "${type.constructor} $abilityName requires type arguments to have $abilityName"
+                    )
+                }
 
-                        // For non-self-referential parts, we need to check the concrete type
-                        // This is already handled by the recursive check with inProgressChecks
+                // Check the underlying type structure
+                return when (val definition = typeDecl.definition) {
+                    is VariantDefinition -> {
+                        // For variant types, check all constructor data types
+                        // But skip recursive references (handled by inProgressChecks)
+                        for (constructor in definition.constructors) {
+                            val dataTypeAnnotation = constructor.dataType ?: continue
+                            // Check if this is a self-reference - if so, skip
+                            if (isSelfReference(dataTypeAnnotation, type.constructor)) continue
+
+                            // For non-self-referential parts, we need to check the concrete type
+                            // This is already handled by the recursive check with inProgressChecks
+                        }
+                        AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
                     }
-                    AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
+                    is RecordDefinition -> {
+                        AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
+                    }
+                    is NewtypeDefinition -> {
+                        // Already handled above, but needed for exhaustive when
+                        checkNewtypeAbilityForTypeApplication(type, abilityName, typeArgs, definition)
+                    }
                 }
-                is RecordDefinition -> {
-                    AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
-                }
-                else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
             }
         }
 

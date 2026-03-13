@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
 
@@ -158,7 +159,13 @@ class ContextBuilder {
             )
         }
 
-        // 3. Validate ability implementations (associated types, etc.)
+        // 3. Validate ability declarations (operation effects)
+        // Operations cannot have polymorphic (<...>) or performed (<*>) effects
+        for (abilityDecl in abilityDecls.values) {
+            AbilityValidator.validateAbilityDeclaration(abilityDecl)
+        }
+
+        // 4. Validate ability implementations (associated types, etc.)
         // CRITICAL: Merge local and imported abilities to support qualified ability names
         // e.g., `impl codec::EncodeFormat MyType where { ... }` needs access to imported abilities
         val allAbilityDecls = abilityDecls + importedAbilities
@@ -169,7 +176,7 @@ class ContextBuilder {
             )
         }
 
-        // 4. Validate orphan rules for ability implementations
+        // 5. Validate orphan rules for ability implementations
         // An impl must be in the same module as either the ability or one of the target types
         val localAbilityNames = abilityDecls.keys
         val localTypeNames = typeDecls.keys
@@ -823,6 +830,10 @@ class ContextBuilder {
                     paramType = convertTypeAnnotationInternal(annotation.paramType),
                     returnType = convertTypeAnnotationInternal(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
+                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
+                        // Use allEffectNames to include both simple effects and effect annotations
+                        validateHermeticEffects(effectRow.allEffectNames)
+
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
                         MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
@@ -1030,5 +1041,38 @@ class ContextBuilder {
         // This allows:
         // 1. stdlib's list module to use the optimized ListType/MezzeCons/MezzeNil
         // 2. Users to define their own List variant type if desired
+    }
+
+    companion object {
+        /**
+         * Names of hermetic effects that cannot coexist with other effects.
+         * Hermetic effects are isolated for data-race freedom.
+         */
+        private val HERMETIC_EFFECTS = setOf("Mutation")
+
+        /**
+         * Validate that an effect set doesn't violate hermetic effect rules.
+         *
+         * Hermetic effects (like Mutation) cannot coexist with other effects
+         * to ensure data-race freedom.
+         *
+         * @param effects The set of effect names
+         * @param sourceLocation Optional source location for error messages
+         * @throws TypeCheckError if a hermetic effect coexists with other effects
+         */
+        fun validateHermeticEffects(effects: Set<String>, sourceLocation: SourceLocation? = null) {
+            val hermeticEffectsInSet = effects.intersect(HERMETIC_EFFECTS)
+            if (hermeticEffectsInSet.isNotEmpty() && effects.size > 1) {
+                val hermeticEffect = hermeticEffectsInSet.first()
+                val otherEffects = (effects - HERMETIC_EFFECTS).joinToString(", ")
+                throw TypeCheckError(
+                    "$hermeticEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +
+                        "$hermeticEffect must be the only effect in scope to prevent data races. " +
+                        "Either handle the other effects before entering the $hermeticEffect scope, " +
+                        "or restructure the code to separate $hermeticEffect from other effectful operations.",
+                    sourceLocation
+                )
+            }
+        }
     }
 }

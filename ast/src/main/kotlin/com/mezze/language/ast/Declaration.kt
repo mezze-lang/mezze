@@ -204,13 +204,14 @@ data class VariantDefinition(
  *
  * Examples:
  *   newtype Email = Email String
- *   newtype UserId = UserId Int
- *   newtype Point = Point { x: Float, y: Float }
+ *   newtype UserId = UserId Int deriving Eq
+ *   newtype Point = Point { x: Float, y: Float } deriving Eq, Ord
  */
 @Serializable
 data class NewtypeDefinition(
     val constructor: String,        // Constructor name (e.g., "Email")
-    val wrappedType: TypeAnnotation // Type being wrapped (e.g., String)
+    val wrappedType: TypeAnnotation, // Type being wrapped (e.g., String)
+    val derivedAbilities: List<String> = emptyList() // Abilities to auto-derive (e.g., ["Eq", "Ord"])
 ) : TypeDefinition
 
 @Serializable
@@ -339,12 +340,30 @@ data class AbilityDependency(
     val typeArgs: List<TypeAnnotation> = emptyList()  // Type arguments for the dependency
 )
 
+/**
+ * An operation declared in an ability.
+ *
+ * Operations can optionally declare effects they perform.
+ * If no effects are specified, the operation is pure.
+ *
+ * Examples:
+ * - Pure: `len: {c: 'c} -> Int`
+ * - With effect: `get: {c: 'c, i: Int} -> Option 'elem <Mutation>`
+ * - With multiple effects: `read: {path: String} -> Bytes <IO, Exception>`
+ */
 @Serializable
 data class AbilityOperation(
     val name: String,
     val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation
-)
+    val returnType: TypeAnnotation,
+    val effects: EffectRowAnnotation? = null  // Optional effects the operation performs
+) {
+    /** Returns true if this operation declares any effects */
+    val hasEffects: Boolean get() = effects != null && effects.allEffectNames.isNotEmpty()
+
+    /** Returns true if this operation is pure (no effects) */
+    val isPure: Boolean get() = !hasEffects
+}
 
 @Serializable
 data class ImplAbilityDeclaration(

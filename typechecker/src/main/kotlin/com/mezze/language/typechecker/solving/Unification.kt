@@ -1009,6 +1009,24 @@ private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.Susp
  * effects to be unified.
  */
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): UnificationResult {
+    // HERMETIC EFFECT CHECK: Mutation cannot coexist with other effects
+    // This ensures data-race freedom by preventing interleaving of mutation with other effects
+    val allEffects1 = eff1.allEffectNames
+    val allEffects2 = eff2.allEffectNames
+    val combinedEffects = allEffects1 + allEffects2
+
+    if ("Mutation" in combinedEffects && combinedEffects.size > 1) {
+        val otherEffects = (combinedEffects - "Mutation").joinToString(", ")
+        return UnificationResult.Failure(
+            message = "Mutation effect is hermetic: cannot coexist with other effects ($otherEffects). " +
+                "Mutation must be the only effect in scope to prevent data races. " +
+                "Either handle the other effects before entering the mutation scope, " +
+                "or restructure the code to separate mutation from other effectful operations.",
+            type1 = eff1,
+            type2 = eff2
+        )
+    }
+
     // Effect rows use UNION semantics for effect names, but when the same effect
     // appears in both rows with associated types, those associated types must unify.
 

@@ -5,12 +5,51 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 
 /**
- * Validates ability implementations against ability declarations.
+ * Validates ability declarations and implementations.
  *
  * Based on validation logic from OldTypeChecker.kt:13063-13122
  * which implements all 8 validation rules for abilities.
  */
 object AbilityValidator {
+
+    /**
+     * Validate ability declaration.
+     *
+     * Checks:
+     * 1. Operation effects are not polymorphic (<...>)
+     * 2. Operation effects are not performed (<*>)
+     *
+     * Ability operations must declare concrete effects because they define a contract.
+     * Polymorphic or performed effects would make the contract ambiguous.
+     *
+     * @param ability The ability declaration to validate
+     * @throws TypeCheckError if validation fails
+     */
+    fun validateAbilityDeclaration(ability: AbilityDeclaration) {
+        for (operation in ability.operations) {
+            val effects = operation.effects ?: continue  // No effects is fine (pure operation)
+
+            // Rule 1: No polymorphic effects (<...> or <Effect, ...>)
+            if (effects.isPolymorphic) {
+                throw TypeCheckError(
+                    "Ability operation '${operation.name}' in '${ability.name}' cannot have polymorphic effects (<...>). " +
+                    "Ability operations must declare concrete effects to define a clear contract. " +
+                    "Use specific effects like <Mutation> or no effects for pure operations.",
+                    ability.sourceLocation
+                )
+            }
+
+            // Rule 2: No performed marker (<*> or <Effect, *>)
+            if (effects.isPerformed) {
+                throw TypeCheckError(
+                    "Ability operation '${operation.name}' in '${ability.name}' cannot have performed marker (<*>). " +
+                    "Ability operations declare what effects they perform, not that effects are handled. " +
+                    "The <*> marker is only valid at call sites where effects are handled with 'perform'.",
+                    ability.sourceLocation
+                )
+            }
+        }
+    }
     /**
      * Validate ability implementation against declaration.
      *

@@ -519,19 +519,29 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                                         val wrappedType = typeAnnotationParser(stream5)
 
                                         when (wrappedType) {
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                TypeDeclaration(
-                                                    name = typeName.value.text,
-                                                    visibility = visibility,
-                                                    typeParams = typeParams,
-                                                    definition = NewtypeDefinition(
-                                                        constructor = constructor.value.text,
-                                                        wrappedType = wrappedType.value
-                                                    ),
-                                                    inferredType = null
-                                                ),
-                                                wrappedType.remaining
-                                            )
+                                            is ParseResult.Success -> {
+                                                // Parse optional deriving clause: deriving Eq, Ord
+                                                val streamAfterType = skipNewlines(wrappedType.remaining)
+                                                val derivingResult = parseDerivingClause(streamAfterType)
+
+                                                when (derivingResult) {
+                                                    is ParseResult.Success -> ParseResult.Success(
+                                                        TypeDeclaration(
+                                                            name = typeName.value.text,
+                                                            visibility = visibility,
+                                                            typeParams = typeParams,
+                                                            definition = NewtypeDefinition(
+                                                                constructor = constructor.value.text,
+                                                                wrappedType = wrappedType.value,
+                                                                derivedAbilities = derivingResult.value
+                                                            ),
+                                                            inferredType = null
+                                                        ),
+                                                        derivingResult.remaining
+                                                    )
+                                                    is ParseResult.Failure -> derivingResult
+                                                }
+                                            }
                                             is ParseResult.Failure -> wrappedType
                                         }
                                     }
@@ -547,6 +557,74 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
             is ParseResult.Failure -> newtypeToken
         }
     }
+
+/**
+ * Parse optional deriving clause: deriving Ability1, Ability2, ...
+ * Returns empty list if no deriving clause present.
+ */
+internal fun MezzeParser.parseDerivingClause(stream: TokenStream): ParseResult<List<String>> {
+    val derivingToken = tok(TokenType.DERIVING)(stream)
+
+    return when (derivingToken) {
+        is ParseResult.Success -> {
+            val streamAfterDeriving = skipNewlines(derivingToken.remaining)
+            val abilities = mutableListOf<String>()
+
+            // Parse first ability name (required after 'deriving')
+            val firstAbility = identifierParser(streamAfterDeriving)
+            when (firstAbility) {
+                is ParseResult.Success -> {
+                    if (!firstAbility.value.text[0].isUpperCase()) {
+                        return streamAfterDeriving.failure(
+                            "Ability name must start with uppercase letter. Got: ${firstAbility.value.text}"
+                        )
+                    }
+                    abilities.add(firstAbility.value.text)
+                    var currentStream = skipNewlines(firstAbility.remaining)
+
+                    // Parse additional abilities separated by commas
+                    while (true) {
+                        val comma = tok(TokenType.COMMA)(currentStream)
+                        when (comma) {
+                            is ParseResult.Success -> {
+                                val streamAfterComma = skipNewlines(comma.remaining)
+                                val nextAbility = identifierParser(streamAfterComma)
+                                when (nextAbility) {
+                                    is ParseResult.Success -> {
+                                        if (!nextAbility.value.text[0].isUpperCase()) {
+                                            return streamAfterComma.failure(
+                                                "Ability name must start with uppercase letter. Got: ${nextAbility.value.text}"
+                                            )
+                                        }
+                                        abilities.add(nextAbility.value.text)
+                                        currentStream = skipNewlines(nextAbility.remaining)
+                                    }
+                                    is ParseResult.Failure -> {
+                                        return streamAfterComma.failure(
+                                            "Expected ability name after ',' in deriving clause"
+                                        )
+                                    }
+                                }
+                            }
+                            is ParseResult.Failure -> break // No more abilities
+                        }
+                    }
+
+                    ParseResult.Success(abilities, currentStream)
+                }
+                is ParseResult.Failure -> {
+                    streamAfterDeriving.failure(
+                        "Expected ability name after 'deriving' keyword. Example: deriving Eq, Ord"
+                    )
+                }
+            }
+        }
+        is ParseResult.Failure -> {
+            // No deriving clause - return empty list
+            ParseResult.Success(emptyList(), stream)
+        }
+    }
+}
 
 internal val MezzeParser.typeDefinitionParser: Parser<TypeDefinition> get() = { stream ->
         // Try variant type first (| ... |), then record type
@@ -1244,7 +1322,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
     }
 
 internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() = { stream ->
-        // Parse: operationName : ParamType -> ReturnType
+        // Parse: operationName : ParamType -> ReturnType [<Effects>]
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
@@ -1260,11 +1338,14 @@ internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() 
                             is ParseResult.Success -> {
                                 val funcType = functionType.value as? FunctionTypeAnnotation
                                 if (funcType != null) {
+                                    // Extract effects from the function type (if any)
+                                    // Validation of effects (no <...> or <*>) is done in typechecker
                                     ParseResult.Success(
                                         AbilityOperation(
                                             name.value.text,
                                             funcType.paramType,
-                                            funcType.returnType
+                                            funcType.returnType,
+                                            funcType.effects
                                         ),
                                         functionType.remaining
                                     )
