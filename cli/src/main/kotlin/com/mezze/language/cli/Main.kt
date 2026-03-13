@@ -8,6 +8,7 @@ import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import org.graalvm.polyglot.PolyglotException
+import com.mezze.language.codebase.CodebaseLoader
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.SQLiteCodebase
 import kotlinx.serialization.json.Json
@@ -20,6 +21,36 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
+
+/**
+ * Flag to track if pre-compiled stdlib has been loaded.
+ */
+@Volatile
+private var stdlibLoaded = false
+
+/**
+ * Load pre-compiled stdlib from embedded resource (stdlib.db).
+ * This skips parsing and type-checking of stdlib modules entirely.
+ */
+private fun loadPrecompiledStdlib() {
+    if (stdlibLoaded) return
+
+    try {
+        val resourceStream = object {}.javaClass.classLoader.getResourceAsStream("stdlib.db")
+        if (resourceStream != null) {
+            val bytes = resourceStream.readBytes()
+            val codebase = SQLiteCodebase.fromBytes(bytes)
+            codebase.use {
+                val (_, modules) = CodebaseLoader.loadAll(codebase)
+                TypeChecker.preloadModules(modules)
+                stdlibLoaded = true
+            }
+        }
+    } catch (e: Exception) {
+        // Fall back to dynamic stdlib loading if pre-compiled not available
+        // This happens in development mode
+    }
+}
 
 /**
  * Detect the project root by finding the directory containing the stdlib folder.
@@ -141,6 +172,8 @@ fun main(args: Array<String>) {
             // Developer tools
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
+            // Internal commands (for build system)
+            "--compile-stdlib" -> handleCompileStdlibCommand(remainingArgs)
             else -> {
                 println("❌ Unknown command: $command")
                 println()
@@ -945,6 +978,9 @@ private fun prettyPrintExpression(expr: Expression): String {
 }
 
 private fun handleExecCommand(args: List<String>) {
+    val showTiming = System.getenv("MEZZE_TIMING") != null
+    val totalStart = System.nanoTime()
+
     val (source, filePath) = when {
         args.isEmpty() -> {
             // Read from stdin
@@ -967,9 +1003,11 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     // Parse the source
+    val parseStart = System.nanoTime()
     val parser = MezzeParser()
     val fileName = filePath?.fileName?.toString()
     val ast = parser.parse(source, file = fileName)
+    val parseTime = (System.nanoTime() - parseStart) / 1_000_000
 
     // Use the source file's directory for module resolution
     // This allows the ModuleResolver to find Mezze.toml in parent directories
@@ -980,7 +1018,11 @@ private fun handleExecCommand(args: List<String>) {
         java.nio.file.Paths.get(".").toAbsolutePath()
     }
 
+    // Load pre-compiled stdlib if available (skips stdlib type-checking)
+    loadPrecompiledStdlib()
+
     // Type-check with main validation: main must be {} -> {} <*>
+    val typeCheckStart = System.nanoTime()
     val typeChecker = TypeChecker()
     val typeCheckResult = try {
         typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot)
@@ -1114,6 +1156,7 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
+    val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000
 
     // Add a call to main() at the end of the program
     val mainCall = com.mezze.language.ast.FunctionCall(
@@ -1139,7 +1182,19 @@ private fun handleExecCommand(args: List<String>) {
         }
 
         // Execute using V2 interpreter (optimized Truffle implementation)
+        val execStart = System.nanoTime()
         executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
+        val execTime = (System.nanoTime() - execStart) / 1_000_000
+        val totalTime = (System.nanoTime() - totalStart) / 1_000_000
+
+        // Print timing if enabled
+        if (showTiming) {
+            System.err.println("\n⏱️  Timing breakdown:")
+            System.err.println("   Parse:      ${parseTime}ms")
+            System.err.println("   TypeCheck:  ${typeCheckTime}ms")
+            System.err.println("   Execute:    ${execTime}ms")
+            System.err.println("   Total:      ${totalTime}ms")
+        }
 
         // Program should return {}, so we don't print the result
         // Execution completed silently
@@ -1845,6 +1900,83 @@ private fun handleFmtCommand(args: List<String>) {
         println("$errorCount file(s) had errors")
         kotlin.system.exitProcess(1)
     }
+}
+
+/**
+ * Internal command: Pre-compile stdlib to SQLite for embedding in native image.
+ * Usage: mezze --compile-stdlib <output-path>
+ */
+private fun handleCompileStdlibCommand(args: List<String>) {
+    val outputPath = args.firstOrNull() ?: run {
+        System.err.println("Usage: mezze --compile-stdlib <output.db>")
+        kotlin.system.exitProcess(1)
+    }
+
+    val projectRoot = System.getProperty("mezze.project.root")?.let { File(it) }
+        ?: run {
+            System.err.println("Error: mezze.project.root not set")
+            kotlin.system.exitProcess(1)
+        }
+
+    val stdlibDir = File(projectRoot, "stdlib")
+    if (!stdlibDir.exists()) {
+        System.err.println("Error: stdlib directory not found at ${stdlibDir.absolutePath}")
+        kotlin.system.exitProcess(1)
+    }
+
+    println("Compiling stdlib from ${stdlibDir.absolutePath}...")
+
+    val stdlibModules = mutableMapOf<String, Program>()
+    val parser = MezzeParser()
+    val typeChecker = TypeChecker()
+    var successCount = 0
+    var errorCount = 0
+
+    // Collect all .mz files
+    val moduleFiles = mutableListOf<File>()
+    collectMezzeFiles(stdlibDir, moduleFiles)
+
+    for (file in moduleFiles) {
+        val relativePath = file.relativeTo(stdlibDir).path
+        val modulePath = relativePath
+            .removeSuffix(".mz")
+            .replace(File.separator, "::")
+
+        try {
+            val source = file.readText()
+            val ast = parser.parse(source, file = file.toString())
+            val result = typeChecker.typeCheck(ast, projectRoot.toPath())
+
+            if (result is TypeChecker.TypeCheckResult.Success) {
+                stdlibModules[modulePath] = result.program
+                successCount++
+            } else {
+                errorCount++
+                System.err.println("  Warning: $modulePath failed type check")
+            }
+        } catch (e: Exception) {
+            errorCount++
+            System.err.println("  Warning: $modulePath error: ${e.message}")
+        }
+    }
+
+    println("Compiled $successCount modules ($errorCount errors)")
+
+    // Save to SQLite
+    val outputFile = File(outputPath)
+    outputFile.parentFile?.mkdirs()
+
+    val codebase = com.mezze.language.codebase.SQLiteCodebase.open(outputFile, readOnly = false)
+    codebase.use {
+        com.mezze.language.codebase.CodebasePopulator.populate(
+            codebase = codebase,
+            mainProgram = Program(emptyList()),
+            modules = stdlibModules,
+            mainModulePath = null
+        )
+    }
+
+    println("Saved to $outputPath (${outputFile.length() / 1024} KB)")
 }
 
 /**

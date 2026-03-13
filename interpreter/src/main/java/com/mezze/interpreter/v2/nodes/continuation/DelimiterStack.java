@@ -4,7 +4,9 @@ package com.mezze.interpreter.v2.nodes.continuation;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 
 /**
  * Thread-local delimiter stack for continuation scoping.
@@ -27,10 +29,44 @@ public final class DelimiterStack {
         public MezzeContinuation capturedContinuation;
         public Object[] capturedLocals;
 
+        // Collected values from suspend_and_resume calls
+        private final List<Object> collected;
+
         DelimiterEntry(MezzeCont delimiter) {
             this.delimiter = delimiter;
             this.capturedContinuation = null;
             this.capturedLocals = null;
+            this.collected = new ArrayList<>();
+        }
+
+        /**
+         * Add a value to the collected list (called by suspend_and_resume).
+         */
+        public void addCollected(Object value) {
+            collected.add(value);
+        }
+
+        /**
+         * Get all collected values as a list.
+         */
+        public List<Object> getCollected() {
+            return collected;
+        }
+
+        /**
+         * Get collected values and clear the list.
+         */
+        public List<Object> takeCollected() {
+            List<Object> result = new ArrayList<>(collected);
+            collected.clear();
+            return result;
+        }
+
+        /**
+         * Get the count of collected values.
+         */
+        public int collectedCount() {
+            return collected.size();
         }
     }
 

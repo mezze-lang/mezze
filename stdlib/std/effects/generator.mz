@@ -1,109 +1,51 @@
-# std/effects/generator.mz - Generator effect with continuation-based yielding
+# std/effects/generator.mz - Generator effect for yielding values
 #
-# Provides generator/iterator functionality via one-shot continuations.
-# Uses direct continuation-based yielding without effect handlers.
-#
-# The approach:
-# 1. Create a continuation object
-# 2. Pass a yield function to the generator that uses suspend_with
-# 3. run_suspendable catches the suspension and extracts value + continuation
-# 4. A loop collects yielded values and resumes until completion
+# Provides generator functionality via algebraic effects.
+# The Generator effect has a single operation: yield.
 #
 # Usage:
-#   use std::effects::generator::{run}
+#   use std::effects::generator::{Generator, Collect}
 #
-#   let values = run {gen = {yield} -> do
-#       yield {value = 1}
-#       yield {value = 2}
-#       yield {value = 3}
-#   }
+#   let values = perform Collect in do
+#       Generator.yield {value = 1}
+#       Generator.yield {value = 2}
+#       Generator.yield {value = 3}
 #   # values = [1, 2, 3]
 
 use std::control::continuation
-use std::control::continuation::{Continuation, SuspendResult}
-use std::collections::seq
+use std::control::continuation::{Continuation}
 
-# Collection loop helper - pure function that accumulates results
-# Uses run_suspendable to catch suspensions
-let collect_loop: {
-    acc: ['a],
-    current_result: SuspendResult {} 'a {}
-} -> ['a] = {acc, current_result} ->
-    match current_result is
-        Completed {value} ->
-            # Generator completed - return accumulated results
-            acc
-        Suspended {value, cont} ->
-            # Got a yield - add value to accumulator and resume
-            collect_loop {
-                acc = seq::push {xs = acc, x = value},
-                current_result = continuation::run_suspendable {thunk = {} -> cont {value = {}}}
-            }
+# Generator effect with yield operation
+effect Generator having 'a where {
+    yield: {value: 'a} -> {} <Generator>
+}
 
 # =============================================================================
-# run: Execute generator and collect all yielded values
+# Handlers
 # =============================================================================
+
+# Collect handler - collects all yielded values into a Seq
 #
-# This is the main API for running generators.
-#
-# The generator function receives a `yield` function that it can call
-# to yield values. Each call to `yield` suspends execution until the
-# runner collects the value and resumes.
+# Uses suspend_and_resume to collect values without escaping,
+# then finalize_scope returns all collected values via suspend_with.
 #
 # Example:
-#   let values = run {gen = {yield} -> do
-#       yield {value = 1}
-#       yield {value = 2}
-#       yield {value = 3}
-#   }
+#   let values = perform Collect in do
+#       Generator.yield {value = 1}
+#       Generator.yield {value = 2}
+#       Generator.yield {value = 3}
 #   # values = [1, 2, 3]
-pub let run: {gen: ({yield: {value: 'a} -> {}}) -> {}} -> ['a] = {gen} -> do
-    # Create a continuation for yielding
-    let cont = continuation::new {}
-
-    # Create yield function that suspends with the value
-    let yield_fn = {value} -> do
-        let _ = cont.suspend_with {value = value}
-        {}
-
-    # Run the generator, catching any suspensions
-    let initial_result = continuation::run_suspendable {thunk = {} -> gen {yield = yield_fn}}
-
-    # Collect all yielded values
-    let results = collect_loop {acc = [], current_result = initial_result}
-
-    # Clean up the continuation
-    let _ = cont.reset {}
-
-    results
+impl Generator for Collect having 'a = 'x where {
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> do
+        let collected = scope.cont.take_collected {}
+        scope.cont.suspend_with {value = collected},
+    yield = {value} -> scope.cont.suspend_and_resume {value = value}
+}
 
 # =============================================================================
 # Helpers
 # =============================================================================
 
-# Generate a range from start to end (exclusive)
-pub let range = {start, end} ->
-    run {gen = {yield} ->
-        seq::for_each {xs = seq::range {start = start, end = end}, f = {x} -> yield {value = x}}
-    }
-
-# Convert sequence through generator
-pub let from_seq = {xs} ->
-    run {gen = {yield} ->
-        seq::for_each {xs = xs, f = {x} -> yield {value = x}}
-    }
-
-# First n fibonacci numbers
-pub let fibonacci = {n} ->
-    if n <= 0 then
-        []
-    else if n == 1 then
-        [0]
-    else do
-        # Generate fibonacci sequence using scan
-        let pairs = seq::scan {
-            xs = seq::range {start = 1, end = n},
-            init = {a = 0, b = 1},
-            f = {acc, x} -> {a = acc.b, b = acc.a + acc.b}
-        }
-        seq::map {xs = pairs, f = {x} -> x.a}
+# Shorthand for Generator.yield
+pub let yield = {value} -> Generator.yield {value}

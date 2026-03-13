@@ -90,7 +90,8 @@ class GlobalLookupNode(
     @TruffleBoundary
     private fun lookupGlobal(): Any {
         val context = MezzeContext.get(this)
-        return context.lookupGlobal(name) ?: MezzeUnit.INSTANCE
+        // Check locals first (for scope, handlers, etc.), then globals
+        return context.lookupLocal(name) ?: context.lookupGlobal(name) ?: MezzeUnit.INSTANCE
     }
 }
 

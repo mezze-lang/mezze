@@ -2198,6 +2198,7 @@ class ASTToTruffleConverterV2(
         val implHash = resolvedInfo?.implDeclarationHash
         val effectHash = resolvedInfo?.effectDeclarationHash
 
+
         // Build content hashes array with both impl and effect hashes for non-parameterized handlers
         val contentHashes = buildList {
             if (implHash != null && implHash.isNotEmpty()) add(implHash)
@@ -2255,10 +2256,17 @@ class ASTToTruffleConverterV2(
         val inputSlot = getOrCreateSlot("__state_machine_input__")
         val stateIndexSlot = getOrCreateSlotWithKind("__state_index__", ReadLocalNode.KIND_LONG)
 
-        // Collect captured variables
-        val capturedVars = stateMachine.capturedVariables.distinct()
+        // Collect captured variables, EXCLUDING "scope" which is always looked up from context.
+        // "scope" is a special variable used in scoped effect handlers that lives in context.locals,
+        // not in the frame. If we captured it, we'd capture null/MezzeUnit and break fallback lookup.
+        val capturedVars = stateMachine.capturedVariables.distinct().filter { it != "scope" }
         val capturedVarSlots = capturedVars.map { getOrCreateSlot(it) }.toIntArray()
         val capturedVarNames = capturedVars.toTypedArray()
+
+        // Ensure "scope" uses fallback lookup if referenced in this state machine
+        if ("scope" in stateMachine.capturedVariables) {
+            getOrCreateSlotWithFallback("scope")
+        }
 
         // Convert each state to a node
         val stateNodes = mutableListOf<MezzeNode>()
@@ -2395,6 +2403,10 @@ class ASTToTruffleConverterV2(
             "__native_continuation_extract_suspended" -> ContinuationExtractSuspendedNode.create(convertExpression(args))
             "__native_continuation_deactivate" -> ContinuationDeactivateNode.create(convertExpression(args))
             "__native_continuation_run_suspendable" -> ContinuationRunSuspendableNode.create(convertExpression(args))
+            "__native_continuation_suspend_and_resume" -> ContinuationSuspendAndResumeNode.create(convertExpression(args))
+            "__native_continuation_get_collected" -> ContinuationGetCollectedNode.create(convertExpression(args))
+            "__native_continuation_take_collected" -> ContinuationTakeCollectedNode.create(convertExpression(args))
+            "__native_continuation_collected_count" -> ContinuationCollectedCountNode.create(convertExpression(args))
 
             // Built-in crash function for program termination with error
             "crash" -> NativeDispatch.create("crash", convertExpression(args))

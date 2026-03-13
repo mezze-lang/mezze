@@ -30,9 +30,13 @@ pub type Continuation 'suspend 'resume 'result = {
     capture: {} -> ({ value: 'resume } -> 'result),
     suspend: {} -> 'resume,
     suspend_with: { value: 'suspend } -> 'result,
+    suspend_and_resume: { value: 'suspend } -> {},
     resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
     abort: {} -> 'result,
     extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result }),
+    get_collected: {} -> ['suspend],
+    take_collected: {} -> ['suspend],
+    collected_count: {} -> Nat,
     reset: {} -> {}
 }
 
@@ -49,9 +53,13 @@ pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
         capture = {} -> __native_continuation_capture { delim = delim_handle },
         suspend = {} -> __native_continuation_suspend_with { delim = delim_handle, value = {} },
         suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
+        suspend_and_resume = { value } -> __native_continuation_suspend_and_resume { delim = delim_handle, value = value },
         resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
         abort = {} -> __native_continuation_abort { delim = delim_handle },
         extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended },
+        get_collected = {} -> __native_continuation_get_collected { delim = delim_handle },
+        take_collected = {} -> __native_continuation_take_collected { delim = delim_handle },
+        collected_count = {} -> __native_continuation_collected_count { delim = delim_handle },
         reset = {} -> __native_continuation_deactivate { delim = delim_handle }
     }
 
@@ -94,6 +102,28 @@ pub let abort: { delim: Delim } -> 'a = { delim } ->
 pub let reset: { delim: Delim } -> {} = { delim } ->
     match delim is
         Delim { val = handle } -> __native_continuation_deactivate { delim = handle }
+
+# Suspend with a value and immediately resume (for Generator yield).
+# The value is collected internally and execution continues without escaping.
+# Use take_collected to retrieve all collected values.
+pub let suspend_and_resume: { delim: Delim, value: 'a } -> {} = { delim, value } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_suspend_and_resume { delim = handle, value = value }
+
+# Get all collected values without clearing the collector.
+pub let get_collected: { delim: Delim } -> ['a] = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_get_collected { delim = handle }
+
+# Get all collected values and clear the collector.
+pub let take_collected: { delim: Delim } -> ['a] = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_take_collected { delim = handle }
+
+# Get the count of collected values.
+pub let collected_count: { delim: Delim } -> Nat = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_collected_count { delim = handle }
 
 # =============================================================================
 # Suspendable execution

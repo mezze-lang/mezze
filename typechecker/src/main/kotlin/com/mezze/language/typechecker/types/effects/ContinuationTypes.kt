@@ -148,6 +148,52 @@ object ContinuationTypes {
             MezzeType.RecordType(emptyMap())
         )
 
+        // __native_continuation_suspend_and_resume: { delim: 'c, value: 'a } -> {}
+        // Collects a value and immediately resumes execution (for Generator yield).
+        // Unlike suspend_with which escapes, this adds to internal collector and continues.
+        context["__native_continuation_suspend_and_resume"] = MezzeType.FunctionType(
+            // Parameter type: { delim: 'c, value: 'a }
+            MezzeType.RecordType(mapOf(
+                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c")),
+                "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            )),
+            // Return type: {} (unit - execution continues)
+            MezzeType.RecordType(emptyMap())
+        )
+
+        // __native_continuation_get_collected: { delim: 'c } -> ['a]
+        // Gets all collected values without clearing the collector.
+        context["__native_continuation_get_collected"] = MezzeType.FunctionType(
+            // Parameter type: { delim: 'c }
+            MezzeType.RecordType(mapOf(
+                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
+            )),
+            // Return type: ['a] (seq of collected values)
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+        )
+
+        // __native_continuation_take_collected: { delim: 'c } -> ['a]
+        // Gets all collected values and clears the collector.
+        context["__native_continuation_take_collected"] = MezzeType.FunctionType(
+            // Parameter type: { delim: 'c }
+            MezzeType.RecordType(mapOf(
+                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
+            )),
+            // Return type: ['a] (seq of collected values)
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+        )
+
+        // __native_continuation_collected_count: { delim: 'c } -> Nat
+        // Gets the count of collected values.
+        context["__native_continuation_collected_count"] = MezzeType.FunctionType(
+            // Parameter type: { delim: 'c }
+            MezzeType.RecordType(mapOf(
+                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
+            )),
+            // Return type: Nat
+            MezzeType.NatType
+        )
+
         // __native_continuation_run_suspendable: { thunk: {} -> 'a } -> | Completed {value: 'a}, Suspended {value: 'v, cont: {value: 'r} -> 'a} |
         // Runs a thunk and catches any suspension, returning either Completed or Suspended.
         // This is THE KEY PRIMITIVE for generators - it catches ContinuationSuspendedException

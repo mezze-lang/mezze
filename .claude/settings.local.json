@@ -199,7 +199,17 @@
       "Bash(if ! grep -q \"No @TruffleBoundary\" \"$f\")",
       "Bash(git -C /Users/shriyans/Projects/funk status:*)",
       "Bash(locate:*)",
-      "Bash(python3 -c \" import sys import json for line in sys.stdin: try: obj = json.loads\\(line\\) if obj.get\\(''type''\\) == ''user'' and ''message'' in obj: content = obj[''message''].get\\(''content'', ''''\\) if isinstance\\(content, str\\) and \\(''generator'' in content.lower\\(\\) or ''effect'' in content.lower\\(\\) or ''continuation'' in content.lower\\(\\) or ''one-shot'' in content.lower\\(\\) or ''oneshot'' in content.lower\\(\\) or ''finalize'' in content.lower\\(\\)\\): print\\(''---USER MESSAGE---''\\) print\\(content[:2000]\\) print\\(\\) except: pass \")"
+      "Bash(python3 -c \" import sys import json for line in sys.stdin: try: obj = json.loads\\(line\\) if obj.get\\(''type''\\) == ''user'' and ''message'' in obj: content = obj[''message''].get\\(''content'', ''''\\) if isinstance\\(content, str\\) and \\(''generator'' in content.lower\\(\\) or ''effect'' in content.lower\\(\\) or ''continuation'' in content.lower\\(\\) or ''one-shot'' in content.lower\\(\\) or ''oneshot'' in content.lower\\(\\) or ''finalize'' in content.lower\\(\\)\\): print\\(''---USER MESSAGE---''\\) print\\(content[:2000]\\) print\\(\\) except: pass \")",
+      "Bash(time /Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze:*)",
+      "Bash(MEZZE_TIMING=1 /Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze exec:*)",
+      "Bash(/Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze:*)",
+      "Bash($JAVA_HOME/bin/native-image --help)",
+      "Bash($JAVA_HOME/bin/native-image --expert-options)",
+      "Bash($JAVA_HOME/bin/native-image --expert-options-all)",
+      "Bash($JAVA_HOME/bin/native-image:*)",
+      "Bash(do time /Users/shriyans/Projects/funk/cli/build/native/nativeCompile/mezze exec /tmp/hello.mz)",
+      "Bash(strace:*)",
+      "Bash(dtruss:*)"
     ],
     "deny": [],
     "ask": []

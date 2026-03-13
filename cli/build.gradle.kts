@@ -10,12 +10,25 @@ plugins {
 application {
     mainClass.set("com.mezze.language.cli.MainKt")
     applicationName = "mez"
-    // Suppress Truffle/GraalVM warnings on JDK 21+
     applicationDefaultJvmArgs = listOf(
+        // Module access for Truffle/GraalVM
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
-        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+
+        // GC tuning for short-lived CLI commands
+        "-XX:+UseG1GC",
+        "-XX:MaxGCPauseMillis=10",
+        "-XX:G1HeapRegionSize=1m",
+
+        // JIT compilation tuning
+        "-XX:+TieredCompilation",
+        "-XX:TieredStopAtLevel=1",  // Quick compilation for short commands
+        "-XX:ReservedCodeCacheSize=64m",
+
+        // Truffle/Polyglot engine options for fast startup
+        "-Dpolyglot.engine.WarnInterpreterOnly=false"
     )
 }
 
@@ -55,9 +68,12 @@ dependencies {
 
 // Include stdlib mezze files as resources in the JAR
 tasks.named<ProcessResources>("processResources") {
-    from(project.rootDir.resolve("stdlib")) {
+    // Avoid using stdlib directory during stdlib:compileKotlin
+    dependsOn(":stdlib:compileKotlin")
+
+    from(project.rootDir.resolve("stdlib/std")) {
         include("**/*.mz")
-        into("stdlib")
+        into("stdlib/std")
     }
 
     // Generate a manifest of all stdlib files for runtime discovery
@@ -87,6 +103,28 @@ tasks.named<ProcessResources>("processResources") {
 tasks.shadowJar {
     archiveFileName.set("mezze.jar")
     mergeServiceFiles()
+}
+
+// Task to pre-compile stdlib to SQLite for embedding in native image
+tasks.register<JavaExec>("compileStdlib") {
+    dependsOn("shadowJar")
+    group = "build"
+    description = "Pre-compile stdlib modules to SQLite database"
+
+    classpath = files("${layout.buildDirectory.get()}/libs/mezze.jar")
+    mainClass.set("com.mezze.language.cli.MainKt")
+    args = listOf("--compile-stdlib", "${layout.buildDirectory.get()}/resources/main/stdlib.db")
+
+    // Set project root for stdlib discovery
+    systemProperty("mezze.project.root", project.rootDir.absolutePath)
+
+    // JVM args for Truffle
+    jvmArgs(
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+    )
 }
 
 // Task to build standalone JARs with Truffle runtime for compiled Mezze programs
@@ -132,7 +170,10 @@ tasks.register<Jar>("buildStandaloneJar") {
             "Main-Class" to "com.mezze.standalone.Main",
             "Implementation-Title" to "Mezze Compiled Program",
             "Implementation-Version" to "1.0.0",
-            "Created-By" to "Mezze Compiler"
+            "Created-By" to "Mezze Compiler",
+            // Recommended JVM args for running compiled Mezze programs (long-running, JIT-optimized)
+            "Add-Opens" to "java.base/java.lang java.base/java.nio java.base/sun.nio.ch",
+            "Mezze-Recommended-Args" to "--enable-native-access=ALL-UNNAMED -XX:+UseG1GC -XX:+TieredCompilation -XX:ReservedCodeCacheSize=256m -Dpolyglot.engine.Mode=throughput"
         )
     }
     
@@ -172,6 +213,19 @@ graalvmNative {
                 args.add("-H:NativeLinkerOption=-Wl,-rpath,$zlibLibPath")
             }
 
+            // Check for PGO profile file
+            val pgoProfile = project.file("default.iprof")
+            val usePgo = project.hasProperty("pgo") || pgoProfile.exists()
+            val instrumentPgo = project.hasProperty("pgo-instrument")
+
+            if (instrumentPgo) {
+                args.add("--pgo-instrument")
+                println("Building with PGO instrumentation - run workloads then rebuild with -Ppgo")
+            } else if (usePgo && pgoProfile.exists()) {
+                args.add("--pgo=${pgoProfile.absolutePath}")
+                println("Building with PGO profile: ${pgoProfile.absolutePath}")
+            }
+
             args.addAll(listOf(
                 // Essential Polyglot support
                 "-H:IncludeResources=META-INF/truffle-languages/.*",
@@ -179,6 +233,8 @@ graalvmNative {
 
                 // Include stdlib as resources (embedded in native binary)
                 "-H:IncludeResources=stdlib/.*\\.mz",
+                "-H:IncludeResources=stdlib/MANIFEST.txt",
+                "-H:IncludeResources=stdlib\\.db",  // Pre-compiled stdlib SQLite
 
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",
@@ -192,10 +248,28 @@ graalvmNative {
                 // Initialize kotlin and kotlinx classes at build time
                 // Required for AST serialization and related static initializers
                 "--initialize-at-build-time=kotlin",
-                "--initialize-at-build-time=kotlinx"
+                "--initialize-at-build-time=kotlinx",
+
+                // Parser and AST classes
+                "--initialize-at-build-time=com.mezze.language.parser",
+                "--initialize-at-build-time=com.mezze.language.ast",
+
+                // Truffle runtime optimizations
+                "-H:+TruffleHostInlining"
             ))
+
+            // G1GC only supported on Linux
+            val os = System.getProperty("os.name").lowercase()
+            if (os.contains("linux")) {
+                args.add("--gc=G1")
+            }
 
             buildArgs.addAll(args)
         }
     }
+}
+
+// Make nativeCompile depend on compileStdlib
+tasks.named("nativeCompile") {
+    dependsOn("compileStdlib")
 }

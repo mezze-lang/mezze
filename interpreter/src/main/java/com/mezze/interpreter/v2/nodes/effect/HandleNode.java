@@ -377,6 +377,8 @@ public final class HandleNode extends MezzeNode {
 
         Object suspendedValue = null;  // For ContinuationSuspendedException
 
+        Object finalizeSuspendedValue = null;  // For ContinuationSuspendedException from finalize_scope
+
         try {
             // Execute the body with the handler (and scope if scoped effect) installed
             result = bodyNode.execute(frame);
@@ -397,7 +399,17 @@ public final class HandleNode extends MezzeNode {
             Throwable finalizeException = null;
             if (hasFinalizeScope && finalizeScopeNode != null) {
                 try {
-                    finalizeScopeNode.execute(frame);
+                    Object finalizeResult = finalizeScopeNode.execute(frame);
+                    // Check if finalize_scope returned a suspended continuation
+                    // This happens when finalize_scope uses a state machine with YieldState
+                    if (finalizeResult instanceof MezzeContinuationSuspended suspended) {
+                        finalizeSuspendedValue = suspended.getSuspendedValue();
+                    }
+                } catch (ContinuationSuspendedException e) {
+                    // finalize_scope can call suspend_with to transform/return the collected values
+                    // This is how Generator returns collected values: finalize_scope calls
+                    // suspend_with {value = collected} and we capture that value here
+                    finalizeSuspendedValue = e.getSuspendedValue();
                 } catch (Throwable t) {
                     finalizeException = t;
                 }
@@ -453,7 +465,13 @@ public final class HandleNode extends MezzeNode {
             return forkedResults;
         }
 
-        // If continuation was suspended, return the suspended value directly
+        // If finalize_scope suspended (for Generator returning collected values),
+        // that takes priority - return the suspended value from finalize_scope
+        if (finalizeSuspendedValue != null) {
+            return finalizeSuspendedValue;
+        }
+
+        // If body continuation was suspended, return the suspended value directly
         // This is how continuation-based effects (Exception, Return, etc.) work:
         // the handler calls suspend_with {value = ...} and we return that value
         if (suspendedValue != null) {
