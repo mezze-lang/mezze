@@ -695,9 +695,6 @@ class SubstitutionApplier(
                 inferredType = expr.inferredType?.let { substitution.apply(it) }
             )
 
-            // Seqs
-            is SeqAccess -> applyToSeqAccess(expr)
-
             // Records
             is RecordLiteral -> applyToRecordLiteral(expr)
             is MemberAccess -> applyToMemberAccess(expr)
@@ -839,21 +836,6 @@ class SubstitutionApplier(
     private fun applyToPlaceholder(expr: PlaceholderExpression): PlaceholderExpression {
         val updatedType = expr.inferredType?.let { substitution.apply(it) }
         return expr.copy(inferredType = updatedType)
-    }
-
-    // ========================================================================
-    // SEQS
-    // ========================================================================
-
-    private fun applyToSeqAccess(expr: SeqAccess): SeqAccess {
-        val updatedSeq = applyToExpression(expr.seq)
-        val updatedIndex = applyToExpression(expr.index)
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(
-            seq = updatedSeq,
-            index = updatedIndex,
-            inferredType = updatedType
-        )
     }
 
     // ========================================================================
@@ -1065,12 +1047,33 @@ class SubstitutionApplier(
                     MezzeType.ListType(elemType)
                 }
                 else -> {
-                    // For other constructors, create an open variant with just this constructor
-                    val payloadType = updatedValue?.inferredType
-                    MezzeType.VariantType(
-                        constructors = mapOf(expr.constructor to payloadType),
-                        rowVar = RowVar.fresh()
-                    )
+                    // For other constructors, look up the type declaration to get the full variant
+                    // This is critical for Result, Option custom types, etc.
+                    val typeDecl = findTypeDeclarationForConstructorInApplier(expr.constructor)
+                    if (typeDecl != null && typeDecl.definition is VariantDefinition) {
+                        val variantDef = typeDecl.definition as VariantDefinition
+                        // Build type parameter mapping with fresh vars
+                        val typeParamMapping = typeDecl.typeParams.associateWith {
+                            MezzeType.VarType(TypeVar.fresh())
+                        }
+                        // Convert all constructors with their proper payloads
+                        val constructors = variantDef.constructors.associate { ctor ->
+                            val payloadType = ctor.dataType?.let { convertTypeAnnotationWithMapping(it, typeParamMapping) }
+                            ctor.name to payloadType
+                        }
+                        MezzeType.VariantType(
+                            constructors = constructors,
+                            rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+                            typeName = if (typeDecl.typeParams.isEmpty()) typeDecl.name else null
+                        )
+                    } else {
+                        // Fallback: create an open variant with just this constructor
+                        val payloadType = updatedValue?.inferredType
+                        MezzeType.VariantType(
+                            constructors = mapOf(expr.constructor to payloadType),
+                            rowVar = RowVar.fresh()
+                        )
+                    }
                 }
             }
         }
@@ -2544,6 +2547,81 @@ class SubstitutionApplier(
             is MezzeType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
             is MezzeType.VarType -> "VarType(${type.variable})"
             else -> type::class.simpleName ?: type.toString()
+        }
+    }
+
+    /**
+     * Find the type declaration that contains the given constructor.
+     * Searches both local typeDeclarations and cached module declarations.
+     */
+    private fun findTypeDeclarationForConstructorInApplier(constructorName: String): TypeDeclaration? {
+        // First check local type declarations
+        for ((_, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is VariantDefinition) {
+                val hasConstructor = definition.constructors.any { it.name == constructorName }
+                if (hasConstructor) {
+                    return typeDecl
+                }
+            }
+        }
+        // Then check cached module declarations
+        return com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclarationForConstructor(constructorName)
+    }
+
+    /**
+     * Convert TypeAnnotation to MezzeType with a type parameter mapping.
+     * Used when converting constructor payloads with type parameters.
+     */
+    private fun convertTypeAnnotationWithMapping(annotation: TypeAnnotation, typeParamMapping: Map<String, MezzeType>): MezzeType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                // Check if it's a type parameter
+                val mapped = typeParamMapping[annotation.name] ?: typeParamMapping["'${annotation.name}"]
+                if (mapped != null) {
+                    mapped
+                } else {
+                    // Use the regular conversion
+                    convertTypeAnnotation(annotation)
+                }
+            }
+            is RecordTypeAnnotation -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertTypeAnnotationWithMapping(entry.type, typeParamMapping)
+                    },
+                    rowVar = annotation.restField?.let { RowVar(it) }
+                )
+            }
+            is FunctionTypeAnnotation -> {
+                MezzeType.FunctionType(
+                    paramType = convertTypeAnnotationWithMapping(annotation.paramType, typeParamMapping),
+                    returnType = convertTypeAnnotationWithMapping(annotation.returnType, typeParamMapping),
+                    effects = annotation.effects?.let { effectRow ->
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
+                    },
+                    abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                        MezzeType.FunctionAbilityConstraint(
+                            abilityName = constraint.abilityName,
+                            typeArgs = constraint.typeArgs.map { convertTypeAnnotationWithMapping(it, typeParamMapping) }
+                        )
+                    }
+                )
+            }
+            is TypeApplicationAnnotation -> {
+                MezzeType.TypeApplication(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { convertTypeAnnotationWithMapping(it, typeParamMapping) }
+                )
+            }
+            is VariantTypeAnnotation -> {
+                val constructors = annotation.constructors.associate { ctor: VariantTypeConstructor ->
+                    ctor.name to ctor.dataType?.let { convertTypeAnnotationWithMapping(it, typeParamMapping) }
+                }
+                MezzeType.VariantType(constructors)
+            }
+            // For other annotation types, delegate to the regular conversion
+            else -> convertTypeAnnotation(annotation)
         }
     }
 

@@ -45,13 +45,6 @@ class TypeSubstitutor(
                 inferredType = substitutedType
             )
 
-            // Seqs
-            is SeqAccess -> expr.copy(
-                seq = apply(expr.seq),
-                index = apply(expr.index),
-                inferredType = substitutedType
-            )
-
             // Records
             is RecordLiteral -> applyToRecordLiteral(expr, substitutedType)
             is MemberAccess -> expr.copy(
@@ -537,10 +530,6 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
                     is SeqRegularElement -> collect(element.expression)
                     is SeqSpreadElement -> collect(element.expression)
                 }
-            }
-            is SeqAccess -> {
-                collect(e.seq)
-                collect(e.index)
             }
             is StringLiteral -> {
                 e.parts?.forEach { part ->

@@ -45,6 +45,7 @@ import com.mezze.interpreter.v2.nodes.ability.DirectDictionaryCallNode
 import com.mezze.interpreter.v2.nodes.function.RuntimeAbilityCallNode
 import com.mezze.interpreter.v2.nodes.function.DictionaryPassingInvokeNode
 import com.mezze.interpreter.v2.values.MezzeFunction
+import com.mezze.interpreter.v2.nodes.MezzeRootNode
 import com.mezze.interpreter.v2.nodes.continuation.*
 import com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode
 import com.mezze.interpreter.v2.runtime.MezzeContext
@@ -657,7 +658,6 @@ class ASTToTruffleConverterV2(
             is LambdaExpression -> convertLambdaExpression(expr)
             is RecordLiteral -> convertRecordLiteral(expr)
             is SeqLiteral -> convertSeqLiteral(expr)
-            is SeqAccess -> convertSeqAccess(expr)
             is MemberAccess -> convertMemberAccess(expr)
             is VariantConstruction -> convertVariantConstruction(expr)
             is DoExpression -> convertDoExpression(expr)
@@ -1768,7 +1768,6 @@ class ASTToTruffleConverterV2(
                     }
                 }
                 is MemberAccess -> visit(e.receiver)
-                is SeqAccess -> visit(e.seq) || visit(e.index)
                 is VariantConstruction -> e.value?.let { visit(it) } == true
                 is PerformExpression -> visit(e.expression)
                 else -> false
@@ -1845,10 +1844,6 @@ class ASTToTruffleConverterV2(
                             is SeqSpreadElement -> visit(element.expression)
                         }
                     }
-                }
-                is SeqAccess -> {
-                    visit(e.seq)
-                    visit(e.index)
                 }
                 is MemberAccess -> {
                     if (e.receiver is Identifier) {
@@ -1986,12 +1981,6 @@ class ASTToTruffleConverterV2(
 
             return OptimizedSeqLiteralNode.create(elementNodes)
         }
-    }
-
-    private fun convertSeqAccess(seqAccess: SeqAccess): MezzeNode {
-        val seqNode = convertExpression(seqAccess.seq)
-        val indexNode = convertExpression(seqAccess.index)
-        return SeqAccessNode.create(seqNode, indexNode)
     }
 
     private fun convertMemberAccess(memberAccess: MemberAccess): MezzeNode {
@@ -2517,7 +2506,6 @@ class ASTToTruffleConverterV2(
         }
         return result
     }
-
     /**
      * Wraps a body node with nested record field extraction.
      *

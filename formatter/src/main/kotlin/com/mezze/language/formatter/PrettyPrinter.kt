@@ -530,7 +530,6 @@ class PrettyPrinter {
             is Identifier -> printIdentifier(expr)
             is RecordLiteral -> printRecordLiteral(expr)
             is SeqLiteral -> printSeqLiteral(expr)
-            is SeqAccess -> printSeqAccess(expr)
             is MemberAccess -> printMemberAccess(expr)
             is VariantConstruction -> printVariantConstruction(expr)
             is LambdaExpression -> printLambdaExpression(expr)
@@ -683,13 +682,6 @@ class PrettyPrinter {
                 printExpression(element.expression)
             }
         }
-    }
-
-    private fun printSeqAccess(expr: SeqAccess) {
-        printExpression(expr.seq)
-        append("[")
-        printExpression(expr.index)
-        append("]")
     }
 
     private fun printMemberAccess(expr: MemberAccess) {

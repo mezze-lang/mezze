@@ -551,10 +551,6 @@ class ContinuationTransformer {
                     }
                 }
             }
-            is SeqAccess -> {
-                collectUsedVariablesRecursive(expr.seq, collector)
-                collectUsedVariablesRecursive(expr.index, collector)
-            }
             is PerformExpression -> {
                 collectUsedVariablesRecursive(expr.expression, collector)
             }

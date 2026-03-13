@@ -90,11 +90,6 @@ class CallSiteUpdater(
                 }
             )
 
-            is SeqAccess -> expr.copy(
-                seq = update(expr.seq),
-                index = update(expr.index)
-            )
-
             is StringLiteral -> {
                 val updatedParts = expr.parts?.map { part ->
                     when (part) {

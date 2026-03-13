@@ -264,11 +264,6 @@ class ModuleQualifier {
                 }
             )
 
-            is SeqAccess -> expr.copy(
-                seq = qualifyExpression(expr.seq, moduleNames, prefix),
-                index = qualifyExpression(expr.index, moduleNames, prefix)
-            )
-
             // String literal - qualify interpolated expressions
             is StringLiteral -> {
                 expr.parts?.let { parts ->

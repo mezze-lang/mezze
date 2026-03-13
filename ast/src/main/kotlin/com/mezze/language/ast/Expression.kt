@@ -13,8 +13,8 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * - Expression: All expression types (Lambda, Application, Match, If, etc.)
  * - Literal expressions: IntLiteral, FloatLiteral, StringLiteral, etc.
  * - String interpolation: StringInterpolationPart hierarchy
- * - Variables and access: Identifier, MemberAccess, SeqAccess
- * - Records: RecordLiteral, RecordUpdate, RecordLiteralEntry hierarchy
+ * - Variables and access: Identifier, MemberAccess
+ * - Records: RecordLiteral, RecordLiteralEntry hierarchy
  * - Variants: VariantConstruction
  * - Functions: LambdaExpression, FunctionCall, LambdaParameters hierarchy
  * - Control flow: IfExpression, MatchExpression, DoExpression
@@ -208,14 +208,6 @@ data class SeqRegularElement(val expression: Expression) : SeqElement()
  */
 @Serializable
 data class SeqSpreadElement(val expression: Expression) : SeqElement()
-
-@Serializable
-data class SeqAccess(
-    val seq: Expression,
-    val index: Expression,
-    override val inferredType: MezzeType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
 
 // ============================================================================
 // VARIABLES

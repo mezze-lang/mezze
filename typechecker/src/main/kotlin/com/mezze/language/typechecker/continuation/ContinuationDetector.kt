@@ -82,9 +82,6 @@ class ContinuationDetector {
                     }
                 }
             }
-            is SeqAccess -> {
-                usesContinuations(expr.seq) || usesContinuations(expr.index)
-            }
             is StringLiteral -> {
                 // Check interpolated expressions
                 expr.parts?.any { part ->

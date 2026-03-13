@@ -2082,15 +2082,6 @@ class TypeChecker(
                     expr
                 }
             }
-            is SeqAccess -> {
-                val transformedSeq = transformExpression(expr.seq)
-                val transformedIndex = transformExpression(expr.index)
-                if (transformedSeq !== expr.seq || transformedIndex !== expr.index) {
-                    expr.copy(seq = transformedSeq, index = transformedIndex)
-                } else {
-                    expr
-                }
-            }
             is EffectCallExpression -> {
                 val transformedArgs = transformExpression(expr.arguments)
                 if (transformedArgs !== expr.arguments) {

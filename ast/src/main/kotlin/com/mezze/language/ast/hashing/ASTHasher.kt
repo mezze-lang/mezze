@@ -170,12 +170,6 @@ object ASTHasher {
                 }
             }
 
-            is SeqAccess -> {
-                builder.append(byteArrayOf(HashTags.INDEX_ACCESS))
-                hashExpressionInto(expr.seq, builder)
-                hashExpressionInto(expr.index, builder)
-            }
-
             is Identifier -> {
                 builder.append(byteArrayOf(HashTags.IDENTIFIER))
                 // Hash the structured identifier data, not the reconstructed string

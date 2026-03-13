@@ -82,9 +82,6 @@ class ExpressionConstraintGenerator {
             // Parenthesized expression - just delegate to inner
             is ParenthesizedExpression -> generate(expr.expression, context)
 
-            // Seqs
-            is SeqAccess -> generateSeqAccess(expr, context)
-
             // Records
             is RecordLiteral -> generateRecordLiteral(expr, context)
             is MemberAccess -> generateMemberAccess(expr, context)
@@ -445,51 +442,6 @@ class ExpressionConstraintGenerator {
         // Placeholder for pipe operator - should be replaced during parsing
         // Create fresh type variable
         return ConstraintResult.simple(MezzeType.VarType(TypeVar.fresh()))
-    }
-
-    // ========================================================================
-    // SEQS
-    // ========================================================================
-
-    private fun generateSeqAccess(expr: SeqAccess, context: ConstraintContext): ConstraintResult {
-        // seq[index]
-        // seq must be Seq<T>, index must be Int, result is T
-
-        val seqResult = generate(expr.seq, context)
-        val indexResult = generate(expr.index, context)
-
-        val elementType = MezzeType.VarType(TypeVar.fresh())
-
-        val constraints = mutableListOf<Constraint>()
-        constraints.addAll(seqResult.constraints)
-        constraints.addAll(indexResult.constraints)
-
-        // seq must be Seq<elementType>
-        constraints.add(
-            Constraint.Equality(
-                left = seqResult.type,
-                right = MezzeType.SeqType(elementType),
-                context = "Seq access requires seq type",
-                sourceLocation = expr.seq.sourceLocation
-            )
-        )
-
-        // index must be Int
-        constraints.add(
-            Constraint.Equality(
-                left = indexResult.type,
-                right = MezzeType.IntType,
-                context = "Seq index must be Int",
-                sourceLocation = expr.index.sourceLocation
-            )
-        )
-
-        return ConstraintResult(
-            type = elementType,
-            constraints = constraints,
-            undefinedVariables = seqResult.undefinedVariables + indexResult.undefinedVariables,
-            referencedBindings = seqResult.referencedBindings + indexResult.referencedBindings
-        )
     }
 
     // ========================================================================

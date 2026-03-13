@@ -190,6 +190,7 @@ public final class NativeDispatch extends MezzeNode {
         registerCrashHandler();
         // Continuation primitives (delimited continuations for effects)
         registerContinuationHandlers();
+        // Note: Comptime is handled at conversion time, no runtime handler needed
     }
 
     // ==================== Crash ====================
@@ -200,6 +201,10 @@ public final class NativeDispatch extends MezzeNode {
             throw new RuntimeException("crash: " + msg);
         });
     }
+
+    // Note: Comptime is handled at conversion time by ASTToTruffleConverterV2.
+    // It either executes immediately or creates a ComptimePlaceholderNode.
+    // No runtime handler is needed.
 
     // ==================== Int Operations ====================
     // Uses PrimitiveNatives which leverages optimized Truffle nodes for overflow handling

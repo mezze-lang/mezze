@@ -404,6 +404,19 @@ class VariantTypeRulesTest {
     }
 
     @Test
+    fun `F5b - open type without wildcard fails`() {
+        // Open variants MUST have a wildcard to handle unknown constructors
+        val code = """
+            type Color = | Blue, Red, ... |
+
+            let my_func = { x, y, c } -> match c is
+                Red -> x + y
+                Blue -> x - y
+        """.trimIndent()
+        assertTypeCheckFails(code, "wildcard")
+    }
+
+    @Test
     fun `F6 - variable pattern after all constructors is unreachable`() {
         val code = """
             type Color = | Red, Blue |
@@ -867,5 +880,105 @@ class VariantTypeRulesTest {
                 _ -> 2
         """.trimIndent()
         assertTypeCheckFails(code, "unreachable")
+    }
+
+    // ========================================================================
+    // M. BUILT-IN RESULT TYPE MATCHING
+    // ========================================================================
+
+    @Test
+    fun `M1 - Result type Ok constructor infers full type with Err`() {
+        // When using Ok, the full Result type should be inferred including Err with payload
+        val code = """
+            let f = {} -> do
+                let r = Ok {val = 42}
+                match r is
+                    Ok {val} -> val
+                    Err {error} -> 0
+        """.trimIndent()
+        assertTypeCheckPasses(code)
+    }
+
+    @Test
+    fun `M2 - Result type Err constructor infers full type with Ok`() {
+        // When using Err, the full Result type should be inferred including Ok with payload
+        val code = """
+            let f = {} -> do
+                let r = Err {error = "oops"}
+                match r is
+                    Ok {val} -> val
+                    Err {error} -> 0
+        """.trimIndent()
+        assertTypeCheckPasses(code)
+    }
+
+    @Test
+    fun `M3 - Result type exhaustive match with both constructors`() {
+        val code = """
+            let handle_result = { r } -> match r is
+                Ok {val = v} -> v
+                Err {error = e} -> 0
+
+            let test = {} -> do
+                let x = handle_result {r = Ok {val = 42}}
+                let y = handle_result {r = Err {error = "fail"}}
+                x + y
+        """.trimIndent()
+        assertTypeCheckPasses(code)
+    }
+
+    @Test
+    fun `M4 - Result type missing Err case is not exhaustive`() {
+        val code = """
+            let f = { r } -> match r is
+                Ok {val} -> val
+        """.trimIndent()
+        assertTypeCheckFails(code, "Missing case")
+    }
+
+    @Test
+    fun `M5 - Result type missing Ok case is not exhaustive`() {
+        val code = """
+            let f = { r } -> match r is
+                Err {error} -> 0
+        """.trimIndent()
+        assertTypeCheckFails(code, "Missing case")
+    }
+
+    @Test
+    fun `M6 - Result with wildcard is exhaustive`() {
+        val code = """
+            let f = {} -> do
+                let r = Ok {val = 42}
+                match r is
+                    Ok {val} -> val
+                    _ -> 0
+        """.trimIndent()
+        assertTypeCheckPasses(code)
+    }
+
+    @Test
+    fun `M7 - Option type Some constructor infers full type with None`() {
+        // When using Some, the full Option type should be inferred including None
+        val code = """
+            let f = {} -> do
+                let o = Some {val = 42}
+                match o is
+                    Some {val} -> val
+                    None -> 0
+        """.trimIndent()
+        assertTypeCheckPasses(code)
+    }
+
+    @Test
+    fun `M8 - Option type None constructor infers full type with Some`() {
+        val code = """
+            let f = {} -> do
+                let o: Option Int = None
+                match o is
+                    Some {val} -> val
+                    None -> 0
+        """.trimIndent()
+        assertTypeCheckPasses(code)
     }
 }

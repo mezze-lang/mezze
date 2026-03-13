@@ -107,11 +107,6 @@ class InternalBindingRenamer {
             elements = expr.elements.map { renameSeqElement(it) }
         )
 
-        is SeqAccess -> expr.copy(
-            seq = renameExpr(expr.seq),
-            index = renameExpr(expr.index)
-        )
-
         // Records
         is RecordLiteral -> expr.copy(
             entries = expr.entries.map { renameRecordEntry(it) }

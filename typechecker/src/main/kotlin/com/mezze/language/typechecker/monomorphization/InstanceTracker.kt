@@ -343,12 +343,6 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
             currentTracker
         }
 
-        is SeqAccess -> {
-            var currentTracker = analyzeExpression(expr.seq, tracker)
-            currentTracker = analyzeExpression(expr.index, currentTracker)
-            currentTracker
-        }
-
         is StringLiteral -> {
             var currentTracker = tracker
             expr.parts?.let { parts ->

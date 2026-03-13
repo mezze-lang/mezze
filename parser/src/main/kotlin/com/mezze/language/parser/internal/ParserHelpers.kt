@@ -317,10 +317,6 @@ internal fun desugarExpression(expr: Expression): Expression {
         is PerformExpression -> expr.copy(
             expression = desugarExpression(expr.expression)
         )
-        is SeqAccess -> expr.copy(
-            seq = desugarExpression(expr.seq),
-            index = desugarExpression(expr.index)
-        )
         is MemberAccess -> expr.copy(
             receiver = desugarExpression(expr.receiver)
         )

@@ -1582,22 +1582,13 @@ class TypeValidator(
 
         // CRITICAL FIX: If scrutineeType is a TypeApplication, expand it to VariantType
         // This matches OldTypeChecker behavior where type aliases are expanded
+        // IMPORTANT: Use expandTypeApplicationToVariant to properly substitute type parameters!
+        // e.g., Result Int String should expand to | Ok {val: Int}, Err {error: String} |
         val expandedType = when (scrutineeType) {
             is MezzeType.TypeApplication -> {
-                // Look up the type declaration and expand it
-                val typeDecl = typeDeclarations[scrutineeType.constructor]
-                val definition = typeDecl?.definition
-                if (definition is VariantDefinition) {
-                    // Build VariantType from definition
-                    MezzeType.VariantType(
-                        constructors = definition.constructors.associate { ctor ->
-                            ctor.name to ctor.dataType?.let { convertTypeAnnotation(it) }
-                        },
-                        rowVar = if (definition.isOpen) RowVar.fresh() else null
-                    )
-                } else {
-                    scrutineeType  // Not a variant, keep as-is
-                }
+                // Use expandTypeApplicationToVariant to properly substitute type params
+                // This handles lookup in both local declarations and cached modules
+                expandTypeApplicationToVariant(scrutineeType, typeDeclarations) ?: scrutineeType
             }
             // BoolType is internally optimized but behaves like variant for pattern matching
             is MezzeType.BoolType -> MezzeType.VariantType(
@@ -1612,12 +1603,11 @@ class TypeValidator(
             return ValidationResult.Success()
         }
 
-        // Open variants don't require exhaustiveness checking
-        if (expandedType.rowVar != null) {
-            return ValidationResult.Success()
-        }
+        // For OPEN variants, we need a wildcard to handle unknown constructors
+        // For CLOSED variants, we need to cover all constructors OR have a wildcard
+        val isOpenVariant = expandedType.rowVar != null
 
-        // This is a closed variant - check exhaustiveness
+        // Check exhaustiveness
         // Matches OldTypeChecker.kt lines 8103-8141
         val allConstructors = expandedType.constructors.keys
         val coveredConstructors = mutableSetOf<String>()
@@ -1686,40 +1676,51 @@ class TypeValidator(
 
         val uncoveredConstructors = allConstructors - coveredConstructors
 
-        if (uncoveredConstructors.isNotEmpty() && !hasWildcard) {
-            // Closed variant with missing constructors and no wildcard = error
-            // Matches OldTypeChecker.kt lines 8134-8137
-            errors.add(
-                ValidationError.NonExhaustiveMatch(
-                    expression = matchExpr,
-                    coveredConstructors = coveredConstructors.toList(),
-                    missingConstructors = uncoveredConstructors.toList(),
-                    sourceLocation = matchExpr.sourceLocation
+        if (isOpenVariant) {
+            // OPEN variant: MUST have a wildcard to handle unknown constructors
+            if (!hasWildcard) {
+                errors.add(
+                    ValidationError.NonExhaustiveMatch(
+                        expression = matchExpr,
+                        coveredConstructors = coveredConstructors.toList(),
+                        missingConstructors = listOf("_ (wildcard required for open variant)"),
+                        sourceLocation = matchExpr.sourceLocation
+                    )
                 )
-            )
-        }
+            }
+            // Open variants with wildcard are fine - no unreachable pattern check needed
+        } else {
+            // CLOSED variant: must cover all constructors OR have a wildcard
+            if (uncoveredConstructors.isNotEmpty() && !hasWildcard) {
+                errors.add(
+                    ValidationError.NonExhaustiveMatch(
+                        expression = matchExpr,
+                        coveredConstructors = coveredConstructors.toList(),
+                        missingConstructors = uncoveredConstructors.toList(),
+                        sourceLocation = matchExpr.sourceLocation
+                    )
+                )
+            }
 
-        // Check for unreachable patterns: if all constructors of a CLOSED variant are covered
-        // BEFORE a wildcard, the wildcard is unreachable and is an error.
-        //
-        // This applies to ALL closed variants (Bool, Option, Result, user-defined types like Color).
-        // A wildcard after exhaustive constructor patterns is dead code that can hide type errors.
-        //
-        // Note: We already checked that expandedType.rowVar == null above (closed variant).
-        // Open variants (with rowVar != null) are handled earlier and don't reach this code.
-        if (hasWildcard && uncoveredConstructors.isEmpty()) {
-            // Find the wildcard/variable pattern to report its location
-            for (case in matchExpr.cases) {
-                for (pattern in case.patterns) {
-                    if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null && case.ifLetBindings.isEmpty()) {
-                        errors.add(
-                            ValidationError.UnreachablePattern(
-                                pattern = pattern,
-                                reason = "All constructors of this closed variant are already matched: ${allConstructors.sorted().joinToString(", ")}. " +
-                                    "This pattern will never execute.",
-                                sourceLocation = case.expression.sourceLocation ?: matchExpr.sourceLocation
+            // Check for unreachable patterns: if all constructors of a CLOSED variant are covered
+            // BEFORE a wildcard, the wildcard is unreachable and is an error.
+            //
+            // This applies to ALL closed variants (Bool, Option, Result, user-defined types like Color).
+            // A wildcard after exhaustive constructor patterns is dead code that can hide type errors.
+            if (hasWildcard && uncoveredConstructors.isEmpty()) {
+                // Find the wildcard/variable pattern to report its location
+                for (case in matchExpr.cases) {
+                    for (pattern in case.patterns) {
+                        if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null && case.ifLetBindings.isEmpty()) {
+                            errors.add(
+                                ValidationError.UnreachablePattern(
+                                    pattern = pattern,
+                                    reason = "All constructors of this closed variant are already matched: ${allConstructors.sorted().joinToString(", ")}. " +
+                                        "This pattern will never execute.",
+                                    sourceLocation = case.expression.sourceLocation ?: matchExpr.sourceLocation
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -2092,13 +2093,6 @@ class TypeValidator(
                 errors.addAll(receiverErrors)
             }
 
-            is SeqAccess -> {
-                val seqErrors = validatePatternsInExpression(expr.seq, substitution)
-                val indexErrors = validatePatternsInExpression(expr.index, substitution)
-                errors.addAll(seqErrors)
-                errors.addAll(indexErrors)
-            }
-
             is SeqLiteral -> {
                 for (element in expr.elements) {
                     val elementExpr = when (element) {
@@ -2385,11 +2379,6 @@ class TypeValidator(
                 errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is SeqAccess -> {
-                errors.addAll(validatePerformExpressionsInExpression(expr.seq, implDeclarations, effectDeclarations, functionDefinitions))
-                errors.addAll(validatePerformExpressionsInExpression(expr.index, implDeclarations, effectDeclarations, functionDefinitions))
-            }
-
             is SeqLiteral -> {
                 for (element in expr.elements) {
                     val elementExpr = when (element) {
@@ -2614,10 +2603,6 @@ class TypeValidator(
 
                 is VariantConstruction -> e.value?.let { traverse(it) }
                 is MemberAccess -> traverse(e.receiver)
-                is SeqAccess -> {
-                    traverse(e.seq)
-                    traverse(e.index)
-                }
                 is SeqLiteral -> e.elements.forEach { element ->
                     when (element) {
                         is SeqRegularElement -> traverse(element.expression)

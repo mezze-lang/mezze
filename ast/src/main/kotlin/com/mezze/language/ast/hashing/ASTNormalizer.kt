@@ -76,13 +76,6 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
-        is SeqAccess -> expr.copy(
-            seq = normalizeExpression(expr.seq),
-            index = normalizeExpression(expr.index),
-            inferredType = null,
-            sourceLocation = null
-        )
-
         is Identifier -> expr.copy(
             inferredType = null,
             sourceLocation = null
