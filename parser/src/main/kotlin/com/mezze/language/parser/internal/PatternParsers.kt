@@ -104,7 +104,15 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                     } else {
                                         remaining
                                     }
-                                    ParseResult.Success(Pair(accum, Pair(name, afterRest)), afterRest)
+                                    // Rest pattern must be last - check that ] follows
+                                    if (afterRest.current()?.type != TokenType.RBRACKET) {
+                                        afterRest.failure(
+                                            "Rest pattern (...$name) must be the last element in a seq pattern. " +
+                                            "Use [elem1, elem2, ...rest] to match elements at the start and capture the rest."
+                                        )
+                                    } else {
+                                        ParseResult.Success(Pair(accum, Pair(name, afterRest)), afterRest)
+                                    }
                                 }
                                 is ParseResult.Failure -> {
                                     // No identifier after ... - this is an anonymous rest pattern: [x, ...] or [x, ...,]
@@ -117,7 +125,15 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                         TokenType.COMMA -> {
                                             // Anonymous rest pattern with trailing comma: [x, ...,]
                                             val afterComma = skipNewlines(afterEllipsis.advance())
-                                            ParseResult.Success(Pair(accum, Pair(null, afterComma)), afterComma)
+                                            // Rest pattern must be last - check that ] follows
+                                            if (afterComma.current()?.type != TokenType.RBRACKET) {
+                                                afterComma.failure(
+                                                    "Rest pattern (...) must be the last element in a seq pattern. " +
+                                                    "Use [elem1, elem2, ...] to match elements at the start and ignore the rest."
+                                                )
+                                            } else {
+                                                ParseResult.Success(Pair(accum, Pair(null, afterComma)), afterComma)
+                                            }
                                         }
                                         else -> {
                                             // Expected identifier or end of pattern

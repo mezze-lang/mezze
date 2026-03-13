@@ -152,11 +152,6 @@ object ASTHasher {
                 }
             }
 
-            is BooleanLiteral -> {
-                builder.append(byteArrayOf(HashTags.BOOLEAN_LITERAL))
-                builder.appendBoolean(expr.value)
-            }
-
             is FractionLiteral -> {
                 builder.append(byteArrayOf(HashTags.FLOAT_LITERAL))  // Similar structure
                 builder.appendLong(expr.numerator)

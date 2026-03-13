@@ -58,6 +58,9 @@ public final class MezzeTestHelper {
 
         // Clear module cache for clean state
         ModuleResolver.clearCache();
+        TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
         Context context = Context.newBuilder(MezzeLanguage.ID)
@@ -146,6 +149,9 @@ public final class MezzeTestHelper {
             : Paths.get(System.getProperty("mezze.project.root", "."));
 
         ModuleResolver.clearCache();
+        TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
 
         Program ast = parser.parse(sourceCode, true, null);
         var result = typeChecker.typeCheck(ast, root);
@@ -253,6 +259,9 @@ public final class MezzeTestHelper {
 
         // Clear module cache for clean state
         ModuleResolver.clearCache();
+        TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
         // Capture stdout

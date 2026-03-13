@@ -942,7 +942,6 @@ private fun prettyPrintExpression(expr: Expression): String {
         is IntLiteral -> expr.value.toString()
         is FloatLiteral -> expr.value.toString()
         is StringLiteral -> "\"${expr.value}\""
-        is BooleanLiteral -> expr.value.toString()
         is Identifier -> expr.toBindingKey().toKeyString()
         is LambdaExpression -> {
             val params = when (val p = expr.parameters) {
@@ -1932,6 +1931,12 @@ private fun handleCompileStdlibCommand(args: List<String>) {
     var successCount = 0
     var errorCount = 0
 
+    // Clear all caches to start fresh
+    ModuleResolver.clearCache()
+    TypeChecker.clearCache()
+    com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
+    com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
+
     // Collect all .mz files
     val moduleFiles = mutableListOf<File>()
     collectMezzeFiles(stdlibDir, moduleFiles)
@@ -1945,19 +1950,20 @@ private fun handleCompileStdlibCommand(args: List<String>) {
         try {
             val source = file.readText()
             val ast = parser.parse(source, file = file.toString())
+            // typeCheck throws TypeCheckError on failure, returns TypeCheckResult on success
             val result = typeChecker.typeCheck(ast, projectRoot.toPath())
-
-            if (result is TypeChecker.TypeCheckResult.Success) {
-                stdlibModules[modulePath] = result.program
-                successCount++
-            } else {
-                errorCount++
-                System.err.println("  Warning: $modulePath failed type check")
-            }
+            stdlibModules[modulePath] = result.program
+            successCount++
+        } catch (e: TypeCheckError) {
+            errorCount++
+            System.err.println("  Warning: $modulePath failed: ${e.message}")
         } catch (e: Exception) {
             errorCount++
             System.err.println("  Warning: $modulePath error: ${e.message}")
         }
+
+        // Clear type-checking stack after each module to prevent cross-contamination
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
     }
 
     println("Compiled $successCount modules ($errorCount errors)")

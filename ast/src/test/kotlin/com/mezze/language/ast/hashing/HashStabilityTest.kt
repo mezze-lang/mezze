@@ -471,19 +471,19 @@ class HashStabilityTest {
     @Test
     fun `if expression hashes correctly`() {
         val if1 = IfExpression(
-            condition = BooleanLiteral(true),
+            condition = VariantConstruction("True"),
             thenBranch = IntLiteral(1),
             elseBranch = IntLiteral(0)
         )
 
         val if2 = IfExpression(
-            condition = BooleanLiteral(true),
+            condition = VariantConstruction("True"),
             thenBranch = IntLiteral(1),
             elseBranch = IntLiteral(0)
         )
 
         val if3 = IfExpression(
-            condition = BooleanLiteral(false),  // Different condition
+            condition = VariantConstruction("False"),  // Different condition
             thenBranch = IntLiteral(1),
             elseBranch = IntLiteral(0)
         )

@@ -155,3 +155,50 @@ pub type SuspendResult 'a 'v 'r = | Completed {value: 'a}, Suspended {value: 'v,
 #           ...
 pub let run_suspendable: {thunk: {} -> 'a} -> SuspendResult 'a 'v 'r =
     {thunk} -> __native_continuation_run_suspendable {thunk = thunk}
+
+# =============================================================================
+# Serialization / Snapshot primitives
+# =============================================================================
+#
+# These primitives enable continuation serialization for workflow persistence.
+# A workflow can be checkpointed to storage and later restored to continue
+# execution from where it left off.
+
+# Serialize a continuation to bytes.
+#
+# The continuation must be a state machine with serializable captured values.
+# Serializable types include: Int, Float, Bool, String, Char, Bytes,
+# Records, Seqs, Lists, and Variants containing serializable values.
+# Functions and native objects are NOT serializable.
+#
+# Example:
+#   let data = snapshot {cont = my_suspended_continuation}
+#   # Store data to file/database
+pub let snapshot: {cont: {value: 'a} -> 'b} -> Bytes =
+    {cont} -> __native_continuation_snapshot {cont = cont}
+
+# Restore a continuation from serialized bytes.
+#
+# The function that created the continuation must still be available
+# by the same name in the current context.
+#
+# Example:
+#   # Load data from file/database
+#   let cont = restore {data = data, functions = {}}
+#   # Resume the workflow
+#   cont {value = resume_value}
+pub let restore: {data: Bytes, functions: {}} -> ({value: 'a} -> 'b) =
+    {data, functions} -> __native_continuation_restore {data = data, functions = functions}
+
+# Check if a continuation can be serialized.
+#
+# Returns true if all captured values are serializable types.
+# Use this before calling snapshot to avoid runtime errors.
+#
+# Example:
+#   if is_serializable {cont = my_continuation} then
+#       snapshot {cont = my_continuation}
+#   else
+#       # Handle non-serializable case
+pub let is_serializable: {cont: {value: 'a} -> 'b} -> Bool =
+    {cont} -> __native_continuation_is_serializable {cont = cont}

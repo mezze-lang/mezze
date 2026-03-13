@@ -308,7 +308,7 @@ class ModuleQualifier {
 
             // Literals don't need qualification
             is IntLiteral, is NatLiteral, is FloatLiteral,
-            is BooleanLiteral, is FractionLiteral, is PlaceholderExpression -> expr
+            is FractionLiteral, is PlaceholderExpression -> expr
 
             // Parenthesized - recurse into inner
             is ParenthesizedExpression -> expr.copy(

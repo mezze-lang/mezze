@@ -526,7 +526,6 @@ class PrettyPrinter {
             is FloatLiteral -> append(formatFloat(expr.value))
             is FractionLiteral -> append("${expr.numerator}//${expr.denominator}")
             is StringLiteral -> printStringLiteral(expr)
-            is BooleanLiteral -> append(if (expr.value) "True" else "False")
             is Identifier -> printIdentifier(expr)
             is RecordLiteral -> printRecordLiteral(expr)
             is SeqLiteral -> printSeqLiteral(expr)
@@ -746,7 +745,7 @@ class PrettyPrinter {
 
     private fun isSimpleExpression(expr: Expression): Boolean {
         return when (expr) {
-            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral,
+            is IntLiteral, is FloatLiteral, is StringLiteral,
             is NatLiteral, is FractionLiteral, is Identifier, is PlaceholderExpression -> true
             is VariantConstruction -> {
                 val value = expr.value
@@ -1403,7 +1402,6 @@ class PrettyPrinter {
             is IntLiteral -> expr.value.toString().length
             is FloatLiteral -> formatFloat(expr.value).length
             is StringLiteral -> expr.value.length + 2
-            is BooleanLiteral -> if (expr.value) 4 else 5
             is Identifier -> expr.toBindingKey().toKeyString().length
             is RecordLiteral -> calculateRecordLiteralWidth(expr)
             is SeqLiteral -> calculateSeqLiteralWidth(expr)

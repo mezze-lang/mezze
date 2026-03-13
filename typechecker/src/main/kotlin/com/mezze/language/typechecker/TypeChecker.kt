@@ -2117,7 +2117,7 @@ class TypeChecker(
             }
             // State machines and literals don't need transformation
             is StateMachineExpression, is IntLiteral, is NatLiteral, is FloatLiteral,
-            is BooleanLiteral, is FractionLiteral, is Identifier, is PlaceholderExpression -> expr
+            is FractionLiteral, is Identifier, is PlaceholderExpression -> expr
 
             // Parenthesized - transform inner
             is ParenthesizedExpression -> {

@@ -60,11 +60,6 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
-        is BooleanLiteral -> expr.copy(
-            inferredType = null,
-            sourceLocation = null
-        )
-
         is FractionLiteral -> expr.copy(
             inferredType = null,
             sourceLocation = null

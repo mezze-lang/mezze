@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.context.collectFreeTypeVars
+import com.mezze.language.typechecker.ModuleError
 
 /**
  * Module type checker - type-checks modules with caching.
@@ -41,9 +42,123 @@ class ModuleTypeChecker(
     private val baseContext: TypingContext = TypingContext.empty,
     private val moduleResolver: ModuleResolver? = null  // Optional, for updating module resolver cache
 ) {
-    // Thread-safe cache for typed modules
-    private val cache = mutableMapOf<String, TypedModule>()
-    private val cacheLock = Any()
+    companion object {
+        // Global tracking of modules currently being type-checked to detect circular dependencies
+        // This is static so it works across all ModuleTypeChecker instances
+        private val typeCheckingStack = mutableSetOf<String>()
+        private val stackLock = Any()
+
+        // CRITICAL FIX: Static/global cache for typed modules
+        // This ensures that when module A imports module B, and later module C also imports B,
+        // we don't re-type-check B. Re-type-checking would fail because local variables in
+        // function bodies (like `delim_handle` in continuation.mz) are not in scope when
+        // processing the module as a whole.
+        private val globalCache = mutableMapOf<String, TypedModule>()
+        private val globalCacheLock = Any()
+
+        /**
+         * Clear the global module cache. Used in tests and between compilation runs.
+         */
+        @JvmStatic
+        fun clearCache() {
+            synchronized(globalCacheLock) {
+                globalCache.clear()
+            }
+        }
+
+        /**
+         * Get a cached module from the global cache.
+         */
+        private fun getFromGlobalCache(modulePath: String): TypedModule? {
+            synchronized(globalCacheLock) {
+                return globalCache[modulePath]
+            }
+        }
+
+        /**
+         * Store a typed module in the global cache.
+         */
+        private fun putInGlobalCache(modulePath: String, module: TypedModule) {
+            synchronized(globalCacheLock) {
+                globalCache[modulePath] = module
+            }
+        }
+
+        /**
+         * Clear the type-checking stack. Used in tests.
+         */
+        @JvmStatic
+        fun clearTypeCheckingStack() {
+            synchronized(stackLock) {
+                typeCheckingStack.clear()
+            }
+        }
+
+        /**
+         * Check if a module is currently being type-checked (for cycle detection).
+         */
+        private fun isTypeChecking(modulePath: String): Boolean {
+            synchronized(stackLock) {
+                return modulePath in typeCheckingStack
+            }
+        }
+
+        /**
+         * Mark a module as being type-checked.
+         */
+        private fun startTypeChecking(modulePath: String) {
+            synchronized(stackLock) {
+                typeCheckingStack.add(modulePath)
+            }
+        }
+
+        /**
+         * Mark a module as done type-checking.
+         */
+        private fun finishTypeChecking(modulePath: String) {
+            synchronized(stackLock) {
+                typeCheckingStack.remove(modulePath)
+            }
+        }
+
+        /**
+         * Get the current type-checking stack for error messages.
+         */
+        private fun getTypeCheckingStack(): List<String> {
+            synchronized(stackLock) {
+                return typeCheckingStack.toList()
+            }
+        }
+
+        /**
+         * Create a module type checker with default configuration.
+         */
+        fun create(): ModuleTypeChecker {
+            return ModuleTypeChecker()
+        }
+
+        /**
+         * Create a module type checker with a specific base context.
+         */
+        fun withContext(context: TypingContext): ModuleTypeChecker {
+            return ModuleTypeChecker(context)
+        }
+
+        /**
+         * Create a module type checker with a module resolver.
+         * This allows updating the ModuleResolver cache after type-checking.
+         */
+        fun withResolver(resolver: ModuleResolver): ModuleTypeChecker {
+            return ModuleTypeChecker(moduleResolver = resolver)
+        }
+
+        /**
+         * Create a module type checker with both context and resolver.
+         */
+        fun withContextAndResolver(context: TypingContext, resolver: ModuleResolver): ModuleTypeChecker {
+            return ModuleTypeChecker(context, resolver)
+        }
+    }
 
     /**
      * Type-check a loaded module.
@@ -59,62 +174,76 @@ class ModuleTypeChecker(
         module: LoadedModule,
         importContext: ModuleImportContext = ModuleImportContext.empty()
     ): ModuleTypeCheckResult {
-        // Check cache first (thread-safe)
-        synchronized(cacheLock) {
-            cache[module.modulePath]?.let {
-                return ModuleTypeCheckResult.Success(it)
-            }
+        // Check GLOBAL cache first (thread-safe)
+        // This is critical - when multiple modules import the same dependency,
+        // we must return the cached result to avoid re-type-checking.
+        // Re-type-checking fails because local variables in function bodies
+        // (like `delim_handle` in continuation.mz) aren't in scope.
+        getFromGlobalCache(module.modulePath)?.let {
+            return ModuleTypeCheckResult.Success(it)
         }
 
-        // Build context for this module
-        val moduleContext = buildModuleContext(importContext)
+        // Check for circular dependency in type-checking
+        if (isTypeChecking(module.modulePath)) {
+            val cycle = getTypeCheckingStack() + module.modulePath
+            throw ModuleError.CircularDependency(cycle)
+        }
 
-        // Type-check the module using TypeChecker
-        // Use the module's file path parent directory for import resolution
-        val typeChecker = TypeChecker.withContext(moduleContext)
-        val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
-        val result = typeChecker.checkProgram(module.program, modulePath)
+        // Mark as being type-checked
+        startTypeChecking(module.modulePath)
 
-        return when (result) {
-            is TypeChecker.TypeCheckResult.Success -> {
-                // Create typed module
-                val typedModule = TypedModule(
-                    modulePath = module.modulePath,
-                    program = result.program,
-                    exports = updateExportsWithTypes(module.exports, result.program),
-                    context = moduleContext,
-                    substitution = result.substitution,
-                    monomorphicInstances = result.monomorphicInstances
-                )
+        try {
+            // Build context for this module
+            val moduleContext = buildModuleContext(importContext)
 
-                // Cache the result (thread-safe)
-                synchronized(cacheLock) {
-                    cache[module.modulePath] = typedModule
-                }
+            // Type-check the module using TypeChecker
+            // Use the module's file path parent directory for import resolution
+            val typeChecker = TypeChecker.withContext(moduleContext)
+            val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
+            val result = typeChecker.checkProgram(module.program, modulePath)
 
-                // CRITICAL FIX: Update ModuleResolver's cache with real inferred types
-                // This ensures that subsequent imports of this module get the actual function types
-                // instead of placeholder type variables
-                moduleResolver?.let { resolver ->
-                    // Build type context from inferred types
-                    val typeContext = buildTypeContextFromProgram(result.program)
-                    resolver.updateModuleExports(module.modulePath, result.program, typeContext)
-                }
-
-                ModuleTypeCheckResult.Success(typedModule)
-            }
-            is TypeChecker.TypeCheckResult.Failure -> {
-                // Convert type check errors
-                val errors = result.errors.map { error ->
-                    ModuleTypeCheckResult.TypeCheckError(
+            return when (result) {
+                is TypeChecker.TypeCheckResult.Success -> {
+                    // Create typed module
+                    val typedModule = TypedModule(
                         modulePath = module.modulePath,
-                        phase = error.phase,
-                        message = error.message,
-                        sourceLocation = error.sourceLocation
+                        program = result.program,
+                        exports = updateExportsWithTypes(module.exports, result.program),
+                        context = moduleContext,
+                        substitution = result.substitution,
+                        monomorphicInstances = result.monomorphicInstances
                     )
+
+                    // Cache the result in GLOBAL cache (thread-safe)
+                    putInGlobalCache(module.modulePath, typedModule)
+
+                    // CRITICAL FIX: Update ModuleResolver's cache with real inferred types
+                    // This ensures that subsequent imports of this module get the actual function types
+                    // instead of placeholder type variables
+                    moduleResolver?.let { resolver ->
+                        // Build type context from inferred types
+                        val typeContext = buildTypeContextFromProgram(result.program)
+                        resolver.updateModuleExports(module.modulePath, result.program, typeContext)
+                    }
+
+                    ModuleTypeCheckResult.Success(typedModule)
                 }
-                ModuleTypeCheckResult.Failure(errors)
+                is TypeChecker.TypeCheckResult.Failure -> {
+                    // Convert type check errors
+                    val errors = result.errors.map { error ->
+                        ModuleTypeCheckResult.TypeCheckError(
+                            modulePath = module.modulePath,
+                            phase = error.phase,
+                            message = error.message,
+                            sourceLocation = error.sourceLocation
+                        )
+                    }
+                    ModuleTypeCheckResult.Failure(errors)
+                }
             }
+        } finally {
+            // Always remove from type-checking stack
+            finishTypeChecking(module.modulePath)
         }
     }
 
@@ -261,53 +390,10 @@ class ModuleTypeChecker(
     }
 
     /**
-     * Clear the module cache.
-     *
-     * This is useful for testing or when modules have been updated.
-     */
-    fun clearCache() {
-        synchronized(cacheLock) {
-            cache.clear()
-        }
-    }
-
-    /**
-     * Get a cached module (if available).
+     * Get a cached module (if available) from the global cache.
      */
     fun getCachedModule(modulePath: String): TypedModule? {
-        synchronized(cacheLock) {
-            return cache[modulePath]
-        }
+        return getFromGlobalCache(modulePath)
     }
 
-    companion object {
-        /**
-         * Create a module type checker with default configuration.
-         */
-        fun create(): ModuleTypeChecker {
-            return ModuleTypeChecker()
-        }
-
-        /**
-         * Create a module type checker with a specific base context.
-         */
-        fun withContext(context: TypingContext): ModuleTypeChecker {
-            return ModuleTypeChecker(context)
-        }
-
-        /**
-         * Create a module type checker with a module resolver.
-         * This allows updating the ModuleResolver cache after type-checking.
-         */
-        fun withResolver(resolver: ModuleResolver): ModuleTypeChecker {
-            return ModuleTypeChecker(moduleResolver = resolver)
-        }
-
-        /**
-         * Create a module type checker with both context and resolver.
-         */
-        fun withContextAndResolver(context: TypingContext, resolver: ModuleResolver): ModuleTypeChecker {
-            return ModuleTypeChecker(context, resolver)
-        }
-    }
 }

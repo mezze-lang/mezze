@@ -2121,7 +2121,6 @@ class TypeValidator(
             is NatLiteral,
             is FloatLiteral,
             is FractionLiteral,
-            is BooleanLiteral,
             is PlaceholderExpression,
             is PerformExpression,
             is EffectCallExpression,
@@ -2403,7 +2402,6 @@ class TypeValidator(
             is NatLiteral,
             is FloatLiteral,
             is FractionLiteral,
-            is BooleanLiteral,
             is PlaceholderExpression,
             is EffectCallExpression,
             is StateMachineExpression -> {
@@ -2627,7 +2625,6 @@ class TypeValidator(
                 is NatLiteral,
                 is FloatLiteral,
                 is FractionLiteral,
-                is BooleanLiteral,
                 is PlaceholderExpression,
                 is EffectCallExpression,
                 is StateMachineExpression -> { }
@@ -2713,7 +2710,6 @@ class TypeValidator(
             }
             is StringLiteral -> MezzeType.StringType
             is IntLiteral -> MezzeType.IntType
-            is BooleanLiteral -> MezzeType.BoolType
             is FloatLiteral -> MezzeType.FloatType
             is Identifier -> {
                 // For identifiers, we don't know the type without context

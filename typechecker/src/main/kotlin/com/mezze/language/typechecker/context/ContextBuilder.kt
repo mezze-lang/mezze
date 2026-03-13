@@ -113,8 +113,7 @@ class ContextBuilder {
             ctx = addTypeConstructors(ctx, typeDecl)
         }
 
-        // Note: lowercase 'true' and 'false' are handled by the lexer as BOOLEAN tokens,
-        // which get parsed as BooleanLiteral AST nodes. No context bindings needed.
+        // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
 
         // Add ability methods to context
         for (abilityDecl in abilityDecls.values) {

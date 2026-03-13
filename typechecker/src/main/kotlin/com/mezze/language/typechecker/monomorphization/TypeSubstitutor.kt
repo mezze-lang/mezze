@@ -32,7 +32,6 @@ class TypeSubstitutor(
             is IntLiteral -> expr.copy(inferredType = substitutedType)
             is NatLiteral -> expr.copy(inferredType = substitutedType)
             is FloatLiteral -> expr.copy(inferredType = substitutedType)
-            is BooleanLiteral -> expr.copy(inferredType = substitutedType)
             is FractionLiteral -> expr.copy(inferredType = substitutedType)
             is StringLiteral -> applyToStringLiteral(expr, substitutedType)
             is SeqLiteral -> applyToSeqLiteral(expr, substitutedType)

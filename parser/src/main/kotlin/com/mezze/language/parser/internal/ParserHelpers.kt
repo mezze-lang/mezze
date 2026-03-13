@@ -364,7 +364,6 @@ internal fun desugarExpression(expr: Expression): Expression {
         is IntLiteral -> expr
         is NatLiteral -> expr
         is FloatLiteral -> expr
-        is BooleanLiteral -> expr
         is FractionLiteral -> expr
         is Identifier -> expr
         is PlaceholderExpression -> expr

@@ -145,13 +145,6 @@ data class StringPart(val value: String) : StringInterpolationPart
 data class ExpressionPart(val expression: Expression) : StringInterpolationPart
 
 @Serializable
-data class BooleanLiteral(
-    val value: Boolean,
-    override val inferredType: MezzeType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
-@Serializable
 data class FractionLiteral(
     val numerator: Long,
     val denominator: Long,

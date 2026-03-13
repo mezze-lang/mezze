@@ -107,7 +107,7 @@ class ContinuationDetector {
                 }
             }
             // Literals and identifiers don't use continuations
-            is IntLiteral, is NatLiteral, is FloatLiteral, is BooleanLiteral,
+            is IntLiteral, is NatLiteral, is FloatLiteral,
             is FractionLiteral, is Identifier, is PlaceholderExpression -> false
 
             // Parenthesized - check inner expression

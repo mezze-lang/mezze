@@ -222,5 +222,68 @@ object ContinuationTypes {
                 ))
             ))
         )
+
+        // =====================================================================
+        // Snapshot/Serialization primitives for workflow support
+        // =====================================================================
+
+        // __native_continuation_snapshot: { cont: {value: 'a} -> 'b } -> Bytes
+        // Serializes a continuation to bytes for persistence.
+        // The continuation must be a state machine with serializable captured values.
+        // Returns the serialized bytes or throws if not serializable.
+        context["__native_continuation_snapshot"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "cont" to MezzeType.FunctionType(
+                    MezzeType.RecordType(mapOf(
+                        "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                    )),
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+                )
+            )),
+            MezzeType.BytesType
+        )
+
+        // __native_continuation_restore: { data: Bytes, functions: {} } -> {value: 'a} -> 'b
+        // Restores a continuation from serialized bytes.
+        // The functions parameter provides the registry of available functions.
+        // Returns the restored continuation function.
+        context["__native_continuation_restore"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "data" to MezzeType.BytesType,
+                "functions" to MezzeType.RecordType(emptyMap())
+            )),
+            MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                )),
+                MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+            )
+        )
+
+        // __native_continuation_is_serializable: { cont: {value: 'a} -> 'b } -> Bool
+        // Checks if a continuation can be serialized.
+        // Returns true if all captured values are serializable primitive types,
+        // records with serializable fields, or sequences of serializable values.
+        context["__native_continuation_is_serializable"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "cont" to MezzeType.FunctionType(
+                    MezzeType.RecordType(mapOf(
+                        "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+                    )),
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+                )
+            )),
+            MezzeType.BoolType
+        )
+
+        // =====================================================================
+        // Internal state machine support (used by ContinuationTransformer)
+        // =====================================================================
+
+        // __state_machine_input__: 'a
+        // Internal placeholder for state machine input value during transformation.
+        // This is replaced by the actual runtime value when the state machine executes.
+        // The polymorphic type allows it to match any pattern binding.
+        context["__state_machine_input__"] = MezzeType.VarType(com.mezze.language.ast.TypeVar("input"))
     }
 }

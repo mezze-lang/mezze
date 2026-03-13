@@ -2248,7 +2248,7 @@ class CodecGenerator {
                             record(
                                 "key" to str(fieldName),
                                 "val" to id("field_buf"),
-                                "is_first" to BooleanLiteral(isFirst),
+                                "is_first" to VariantConstruction(if (isFirst) "True" else "False"),
                                 "buffer" to id(bufVarIn),
                                 "path" to id("path")
                             )
@@ -2339,7 +2339,7 @@ class CodecGenerator {
                         member(id("list"), "fold_indexed"),
                         record(
                             "list" to id("val"),
-                            "init" to ok(record("buffer" to id("buf_start"), "is_first" to BooleanLiteral(true))),
+                            "init" to ok(record("buffer" to id("buf_start"), "is_first" to VariantConstruction("True"))),
                             "f" to lambda(listOf("acc", "elem", "idx"),
                                 match(
                                     id("acc"),
@@ -2368,7 +2368,7 @@ class CodecGenerator {
                                                     ),
                                                     matchCase(
                                                         okPat("new_buf"),
-                                                        ok(record("buffer" to id("new_buf"), "is_first" to BooleanLiteral(false)))
+                                                        ok(record("buffer" to id("new_buf"), "is_first" to VariantConstruction("False")))
                                                     ),
                                                     matchCase(errPat("e"), err(id("e")))
                                                 )

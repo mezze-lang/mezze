@@ -70,7 +70,6 @@ class ExpressionConstraintGenerator {
             is IntLiteral -> generateIntLiteral(expr, context)
             is NatLiteral -> generateNatLiteral(expr, context)
             is FloatLiteral -> generateFloatLiteral(expr, context)
-            is BooleanLiteral -> generateBooleanLiteral(expr, context)
             is FractionLiteral -> generateFractionLiteral(expr, context)
             is StringLiteral -> generateStringLiteral(expr, context)
             is SeqLiteral -> generateSeqLiteral(expr, context)
@@ -130,12 +129,6 @@ class ExpressionConstraintGenerator {
     private fun generateFloatLiteral(expr: FloatLiteral, context: ConstraintContext): ConstraintResult {
         // Float literal has type Float, no constraints
         return ConstraintResult.simple(MezzeType.FloatType)
-    }
-
-    private fun generateBooleanLiteral(expr: BooleanLiteral, context: ConstraintContext): ConstraintResult {
-        // Boolean literal has type Bool (the built-in BoolType)
-        // This matches OldTypeChecker behavior (line 4649)
-        return ConstraintResult.simple(MezzeType.BoolType)
     }
 
     private fun generateFractionLiteral(expr: FractionLiteral, context: ConstraintContext): ConstraintResult {

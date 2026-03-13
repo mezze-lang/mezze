@@ -1303,8 +1303,7 @@ class ModuleResolver(
                 }
             )
             // Literal expressions don't need qualification
-            is IntLiteral, is NatLiteral, is FloatLiteral, is StringLiteral,
-            is BooleanLiteral -> expr
+            is IntLiteral, is NatLiteral, is FloatLiteral, is StringLiteral -> expr
             // Add more cases as needed
             else -> expr // Fallback: return unchanged
         }

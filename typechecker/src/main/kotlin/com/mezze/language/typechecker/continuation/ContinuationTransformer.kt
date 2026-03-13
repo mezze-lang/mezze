@@ -565,7 +565,7 @@ class ContinuationTransformer {
                 }
             }
             // Literals don't use variables
-            is IntLiteral, is NatLiteral, is FloatLiteral, is BooleanLiteral,
+            is IntLiteral, is NatLiteral, is FloatLiteral,
             is FractionLiteral, is PlaceholderExpression -> {}
             // Parenthesized - recurse into inner
             is ParenthesizedExpression -> collectUsedVariablesRecursive(expr.expression, collector)

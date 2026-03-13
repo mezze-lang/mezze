@@ -680,7 +680,6 @@ class SubstitutionApplier(
             is IntLiteral -> applyToIntLiteral(expr)
             is NatLiteral -> applyToNatLiteral(expr)
             is FloatLiteral -> applyToFloatLiteral(expr)
-            is BooleanLiteral -> applyToBooleanLiteral(expr)
             is FractionLiteral -> applyToFractionLiteral(expr)
             is StringLiteral -> applyToStringLiteral(expr)
             is SeqLiteral -> applyToSeqLiteral(expr)
@@ -742,17 +741,6 @@ class SubstitutionApplier(
     private fun applyToFloatLiteral(expr: FloatLiteral): FloatLiteral {
         // CRITICAL FIX: Compute type based on expression structure
         val updatedType = substitution.apply(MezzeType.FloatType)
-        return expr.copy(inferredType = updatedType)
-    }
-
-    private fun applyToBooleanLiteral(expr: BooleanLiteral): BooleanLiteral {
-        // CRITICAL FIX: Compute type based on expression structure
-        // Bool is a variant type: | True, False |
-        val boolType = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        val updatedType = substitution.apply(boolType)
         return expr.copy(inferredType = updatedType)
     }
 
@@ -1001,7 +989,6 @@ class SubstitutionApplier(
         val updatedValue = expr.value?.let { applyToExpression(it) }
 
         // CRITICAL FIX: Compute type for variant constructors when inferredType is null
-        // This is similar to how we handle BooleanLiteral in applyToBooleanLiteral
         // Without this, True/False constructors would have null inferredType which breaks codec generation
         val existingType = expr.inferredType
         val updatedType = if (existingType != null) {

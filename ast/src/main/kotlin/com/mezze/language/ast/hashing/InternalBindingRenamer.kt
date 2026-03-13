@@ -81,7 +81,6 @@ class InternalBindingRenamer {
         is StringLiteral -> expr.copy(
             parts = expr.parts?.map { renameStringPart(it) }
         )
-        is BooleanLiteral -> expr
         is FractionLiteral -> expr
 
         // Identifiers - rename if internal binding

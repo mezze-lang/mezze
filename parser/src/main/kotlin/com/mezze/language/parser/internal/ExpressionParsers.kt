@@ -550,7 +550,7 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
                     when (elements) {
                         is ParseResult.Success -> {
                             // Validate spread position: spreads must come before regular elements
-                            validateSeqSpreadPosition(elements.value, seqLocation)
+                            validateSeqSpreadPosition(elements.value, seqLocation, currentSource, currentFile)
 
                             val stream2 = skipNewlines(elements.remaining)
                             val rbracket2 = tok(TokenType.RBRACKET)(stream2)
@@ -579,7 +579,7 @@ internal val MezzeParser.arrayLiteral: Parser<Expression>
  * Valid: [...xs, a, b, c] or [...xs]
  * Invalid: [a, ...xs] or [a, ...xs, b]
  */
-private fun validateSeqSpreadPosition(elements: List<SeqElement>, location: SourceLocation?) {
+private fun validateSeqSpreadPosition(elements: List<SeqElement>, location: SourceLocation?, source: String?, file: String?) {
     var seenRegular = false
     for (element in elements) {
         when (element) {
@@ -587,10 +587,13 @@ private fun validateSeqSpreadPosition(elements: List<SeqElement>, location: Sour
             is SeqSpreadElement -> {
                 if (seenRegular) {
                     throw ParseException(
-                        "Seq spread must come before regular elements. Use [...seq, elem1, elem2] syntax.",
+                        "Spread (...) must come before regular elements in seq literals. " +
+                        "Use [...existing, new1, new2] to prepend elements to an existing seq.",
                         position = 0,
                         line = location?.line ?: 0,
-                        column = location?.column ?: 0
+                        column = location?.column ?: 0,
+                        sourceCode = source,
+                        file = file
                     )
                 }
             }
@@ -2224,10 +2227,6 @@ internal val MezzeParser.literalExpression: Parser<Expression>
                     )
                 }
             }
-            TokenType.BOOLEAN -> ParseResult.Success(
-                BooleanLiteral(token.text == "true", sourceLocation = location),
-                stream.advance()
-            )
             else -> stream.failure("Expected a literal (number, string, or boolean), but got ${tokenGotDescription(token)}")
         }
     }

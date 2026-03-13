@@ -650,7 +650,6 @@ class ASTToTruffleConverterV2(
             is FloatLiteral -> FloatLiteralNode(expr.value)
             is FractionLiteral -> FracLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> convertStringLiteral(expr)
-            is BooleanLiteral -> BoolLiteralNode(expr.value)
             is Identifier -> convertIdentifier(expr)
             is IfExpression -> convertIfExpression(expr)
             is MatchExpression -> convertMatchExpression(expr)
@@ -1782,8 +1781,7 @@ class ASTToTruffleConverterV2(
         fun visit(e: Expression) {
             when (e) {
                 is Identifier -> variables.add(e.toBindingKey().toKeyString())
-                is IntLiteral, is NatLiteral, is FloatLiteral, is FractionLiteral,
-                is BooleanLiteral -> Unit
+                is IntLiteral, is NatLiteral, is FloatLiteral, is FractionLiteral -> Unit
                 is StringLiteral -> {
                     if (e.isInterpolated) {
                         e.parts?.forEach { part ->
@@ -2352,7 +2350,6 @@ class ASTToTruffleConverterV2(
         return when (expr) {
             is IntLiteral, is NatLiteral -> ReadLocalNode.KIND_LONG
             is FloatLiteral, is FractionLiteral -> ReadLocalNode.KIND_DOUBLE
-            is BooleanLiteral -> ReadLocalNode.KIND_BOOLEAN
             else -> ReadLocalNode.KIND_OBJECT
         }
     }
@@ -2407,6 +2404,11 @@ class ASTToTruffleConverterV2(
             "__native_continuation_get_collected" -> ContinuationGetCollectedNode.create(convertExpression(args))
             "__native_continuation_take_collected" -> ContinuationTakeCollectedNode.create(convertExpression(args))
             "__native_continuation_collected_count" -> ContinuationCollectedCountNode.create(convertExpression(args))
+
+            // Continuation serialization/snapshot operations
+            "__native_continuation_snapshot" -> ContinuationSnapshotNode.create(convertExpression(args))
+            "__native_continuation_restore" -> ContinuationRestoreNode.create(convertExpression(args))
+            "__native_continuation_is_serializable" -> ContinuationIsSerializableNode.create(convertExpression(args))
 
             // Built-in crash function for program termination with error
             "crash" -> NativeDispatch.create("crash", convertExpression(args))

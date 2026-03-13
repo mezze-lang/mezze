@@ -25,6 +25,8 @@ class ModuleSystemTest {
     fun setup() {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         TypeChecker.clearCache()  // Clear typed module cache and effect handler caches
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()  // Clear global typed module cache
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()  // Clear type-checking stack
         parser = MezzeParser()
         typeChecker = TypeChecker()
     }
@@ -274,44 +276,60 @@ class ModuleSystemTest {
     }
     
     @Test
-    fun testCircularDependency() {
+    fun testCircularDependencyWithBothModules() {
         val srcDir = tempDir.resolve("src")
         Files.createDirectories(srcDir)
-        
+
         // Module A imports B
         val moduleA = """
             use b::{funcB}
-            
-            pub let funcA = { x } -> funcB { x = x }
+
+            pub let funcA: {x: Int} -> Int = {x} -> funcB {x = x}
         """.trimIndent()
-        
-        // Module B imports A
+
+        // Module B imports A - creates circular dependency
         val moduleB = """
             use a::{funcA}
-            
-            pub let funcB = { x } -> funcA { x = x }
+
+            pub let funcB: {x: Int} -> Int = {x} -> funcA {x = x}
         """.trimIndent()
-        
+
         Files.writeString(srcDir.resolve("a.mz"), moduleA)
-        // Don't create module B to force a ModuleNotFound exception
-        // Files.writeString(srcDir.resolve("b.mz"), moduleB)
-        
+        Files.writeString(srcDir.resolve("b.mz"), moduleB)
+
         val program = parser.parse(moduleA)
-        
-        // Should throw ModuleNotFound since module B doesn't exist
-        try {
+
+        // Should throw CircularDependency since A -> B -> A forms a cycle
+        // Note: The exception comes from the top-level ModuleError (typechecker package)
+        val exception = assertThrows(com.mezze.language.typechecker.ModuleError.CircularDependency::class.java) {
             typeChecker.typeCheck(program, tempDir).program
-            fail("Should have thrown an exception for missing module")
-        } catch (e: ModuleError.ModuleNotFound) {
-            // Expected - module B not found
-            assertNotNull(e.message)
-            assertTrue(e.message!!.contains("b"))
-        } catch (e: ModuleError.CircularDependency) {
-            // Also acceptable - circular dependency detected
-            assertNotNull(e.message)
-        } catch (e: Exception) {
-            // Other module errors are also acceptable for now
-            assertTrue(e.message?.contains("Module") == true || e.message?.contains("Export") == true)
+        }
+        assertNotNull(exception.message)
+        assertTrue(exception.message!!.contains("Circular"))
+        // The cycle should mention the involved modules
+        assertTrue(exception.cycle.contains("b") || exception.cycle.contains("a"))
+    }
+
+    @Test
+    fun testCircularDependencyMissingModule() {
+        val srcDir = tempDir.resolve("src")
+        Files.createDirectories(srcDir)
+
+        // Module A imports B which doesn't exist
+        val moduleA = """
+            use b::{funcB}
+
+            pub let funcA = {x} -> funcB {x = x}
+        """.trimIndent()
+
+        Files.writeString(srcDir.resolve("a.mz"), moduleA)
+        // Don't create module B
+
+        val program = parser.parse(moduleA)
+
+        // Should throw ModuleNotFound since module B doesn't exist
+        assertThrows(ModuleError.ModuleNotFound::class.java) {
+            typeChecker.typeCheck(program, tempDir).program
         }
     }
     
