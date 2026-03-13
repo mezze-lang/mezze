@@ -277,4 +277,75 @@ public final class HashSetStorage implements SetStorage {
         }
         return result;
     }
+
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this storage.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public HashSetStorage copyToMutable() {
+        return new HashSetStorage(table.clone(), size, capacity);
+    }
+
+    /**
+     * In-place add - mutates the underlying table.
+     * Only safe within LocalMut context.
+     * Returns true if element was new, false if already present.
+     */
+    @TruffleBoundary
+    public boolean mutAdd(Object elem) {
+        if (contains(elem)) {
+            return false;
+        }
+
+        if (size >= capacity * LOAD_FACTOR) {
+            throw new IllegalStateException("Mutable set capacity exceeded - use larger initial capacity");
+        }
+
+        int hash = hash(elem);
+        int index = hash & (capacity - 1);
+
+        while (table[index] != null && table[index] != DELETED) {
+            index = (index + 1) & (capacity - 1);
+        }
+
+        table[index] = elem;
+        // Note: size is final, so we can't track size changes in mutable mode
+        return true;
+    }
+
+    /**
+     * In-place remove - mutates the underlying table.
+     * Only safe within LocalMut context.
+     * Returns true if element was found and removed.
+     */
+    @TruffleBoundary
+    public boolean mutRemove(Object elem) {
+        int hash = hash(elem);
+        int index = hash & (capacity - 1);
+
+        for (int i = 0; i < capacity; i++) {
+            Object e = table[index];
+            if (e == null) {
+                return false;  // Not found
+            }
+            if (e != DELETED && Objects.equals(e, elem)) {
+                table[index] = DELETED;
+                return true;
+            }
+            index = (index + 1) & (capacity - 1);
+        }
+
+        return false;
+    }
+
+    /**
+     * In-place clear - mutates the underlying table.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClear() {
+        java.util.Arrays.fill(table, null);
+    }
 }

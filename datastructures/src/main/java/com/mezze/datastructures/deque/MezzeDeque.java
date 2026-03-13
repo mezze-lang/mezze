@@ -463,6 +463,103 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
         return result;
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this deque.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    @TruffleBoundary
+    public MezzeDeque<A> copyToMutable() {
+        // Linearize into a new buffer for easy mutation
+        Object[] newBuffer = new Object[buffer.length];
+        for (int i = 0; i < size; i++) {
+            newBuffer[i] = get(i);
+        }
+        return new MezzeDeque<>(newBuffer, 0, size, size, true);
+    }
+
+    /**
+     * In-place set - mutates the underlying buffer.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, A value) {
+        if (index < 0 || index >= size) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+        }
+        int bufferIndex = (head + index) & mask;
+        buffer[bufferIndex] = value;
+    }
+
+    /**
+     * In-place push to front - mutates the underlying buffer.
+     * Only safe within LocalMut context.
+     * Returns false if buffer is full.
+     */
+    @TruffleBoundary
+    public boolean mutPushFront(A element) {
+        if (size >= buffer.length) {
+            return false; // Buffer full, can't grow in mutable mode
+        }
+        int newHead = (head - 1) & mask;
+        buffer[newHead] = element;
+        // Note: head/tail/size are final - caller must track
+        return true;
+    }
+
+    /**
+     * In-place push to back - mutates the underlying buffer.
+     * Only safe within LocalMut context.
+     * Returns false if buffer is full.
+     */
+    @TruffleBoundary
+    public boolean mutPushBack(A element) {
+        if (size >= buffer.length) {
+            return false; // Buffer full, can't grow in mutable mode
+        }
+        buffer[tail] = element;
+        // Note: head/tail/size are final - caller must track
+        return true;
+    }
+
+    /**
+     * In-place swap - mutates the underlying buffer.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        if (i < 0 || i >= size || j < 0 || j >= size) {
+            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + size);
+        }
+        int idxI = (head + i) & mask;
+        int idxJ = (head + j) & mask;
+        Object tmp = buffer[idxI];
+        buffer[idxI] = buffer[idxJ];
+        buffer[idxJ] = tmp;
+    }
+
+    /**
+     * In-place reverse - mutates the underlying buffer.
+     * Only safe within LocalMut context.
+     */
+    public void mutReverse() {
+        int left = 0;
+        int right = size - 1;
+        while (left < right) {
+            mutSwap(left, right);
+            left++;
+            right--;
+        }
+    }
+
+    /**
+     * In-place clear - sets all elements to null.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClear() {
+        Arrays.fill(buffer, null);
+    }
+
     // ===== INTERNAL =====
 
     @TruffleBoundary

@@ -294,4 +294,81 @@ public final class LongSeqStorage implements SeqStorage {
     public int hashCode() {
         return Arrays.hashCode(data);
     }
+
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this storage.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public LongSeqStorage copyToMutable() {
+        return new LongSeqStorage(Arrays.copyOf(data, length));
+    }
+
+    /**
+     * In-place set - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, long value) {
+        data[index] = value;
+    }
+
+    /**
+     * In-place swap - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        long tmp = data[i];
+        data[i] = data[j];
+        data[j] = tmp;
+    }
+
+    /**
+     * In-place increment - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutIncr(int index, long delta) {
+        data[index] += delta;
+    }
+
+    /**
+     * In-place sort - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutSort() {
+        Arrays.sort(data);
+    }
+
+    /**
+     * In-place reverse - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutReverse() {
+        int left = 0;
+        int right = length - 1;
+        while (left < right) {
+            long tmp = data[left];
+            data[left] = data[right];
+            data[right] = tmp;
+            left++;
+            right--;
+        }
+    }
+
+    /**
+     * In-place fill - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFill(long value) {
+        Arrays.fill(data, value);
+    }
+
+    /**
+     * In-place fill range - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFillRange(int start, int end, long value) {
+        Arrays.fill(data, start, end, value);
+    }
 }

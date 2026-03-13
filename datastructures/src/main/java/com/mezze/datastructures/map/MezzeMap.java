@@ -476,6 +476,84 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         return result;
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this map.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    @TruffleBoundary
+    public MezzeMap<K, V> copyToMutable() {
+        if (storage instanceof HashMapStorage hashStorage) {
+            return new MezzeMap<>(hashStorage.copyToMutable());
+        }
+        // For other storage types, convert to HashMap first
+        return new MezzeMap<>(HashMapStorage.fromMap(toJavaMap()).copyToMutable());
+    }
+
+    /**
+     * Creates a mutable map with given initial capacity.
+     * Use this when you know the approximate final size.
+     */
+    @TruffleBoundary
+    public static <K, V> MezzeMap<K, V> mutableWithCapacity(int capacity) {
+        // Pre-create a HashMapStorage with enough room
+        java.util.HashMap<Object, Object> temp = new java.util.HashMap<>(capacity);
+        return new MezzeMap<>(HashMapStorage.fromMap(temp).copyToMutable());
+    }
+
+    /**
+     * In-place put - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     * Returns true if key was new, false if updated.
+     */
+    @TruffleBoundary
+    public boolean mutPut(K key, V value) {
+        if (storage instanceof HashMapStorage hashStorage) {
+            return hashStorage.mutPut(key, value);
+        }
+        throw new UnsupportedOperationException("mutPut requires HashMapStorage - use copyToMutable() first");
+    }
+
+    /**
+     * In-place remove - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     * Returns true if key was found and removed.
+     */
+    @TruffleBoundary
+    public boolean mutRemove(K key) {
+        if (storage instanceof HashMapStorage hashStorage) {
+            return hashStorage.mutRemove(key);
+        }
+        throw new UnsupportedOperationException("mutRemove requires HashMapStorage - use copyToMutable() first");
+    }
+
+    /**
+     * In-place update - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     * Returns true if key was found and updated.
+     */
+    @TruffleBoundary
+    public boolean mutUpdate(K key, V value) {
+        if (storage instanceof HashMapStorage hashStorage) {
+            return hashStorage.mutUpdate(key, value);
+        }
+        throw new UnsupportedOperationException("mutUpdate requires HashMapStorage - use copyToMutable() first");
+    }
+
+    /**
+     * In-place clear - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClear() {
+        if (storage instanceof HashMapStorage hashStorage) {
+            hashStorage.mutClear();
+        } else {
+            throw new UnsupportedOperationException("mutClear requires HashMapStorage - use copyToMutable() first");
+        }
+    }
+
     // ===== INTERNAL =====
 
     /**

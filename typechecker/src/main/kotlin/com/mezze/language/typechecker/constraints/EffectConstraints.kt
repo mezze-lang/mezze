@@ -138,45 +138,4 @@ class EffectConstraintGenerator {
             context = context
         )
     }
-
-    /**
-     * Common built-in effects.
-     */
-    object BuiltInEffects {
-        const val IO = "IO"
-        const val STATE = "State"
-        const val ERROR = "Error"
-        const val LOG = "Log"
-        const val RANDOM = "Random"
-        const val TIME = "Time"
-        const val ASYNC = "Async"
-
-        /**
-         * Check if effect is a built-in effect.
-         */
-        fun isBuiltIn(effectName: String): Boolean {
-            return when (effectName) {
-                IO, STATE, ERROR, LOG, RANDOM, TIME, ASYNC -> true
-                else -> false
-            }
-        }
-
-        /**
-         * Get effect operations for built-in effects.
-         *
-         * This is used during validation to check if operations exist.
-         */
-        fun getOperations(effectName: String): List<String> {
-            return when (effectName) {
-                IO -> listOf("read", "write", "readFile", "writeFile")
-                STATE -> listOf("get", "set", "modify")
-                ERROR -> listOf("throw", "catch")
-                LOG -> listOf("log", "debug", "info", "warn", "error")
-                RANDOM -> listOf("random", "randomInt", "randomFloat")
-                TIME -> listOf("now", "sleep")
-                ASYNC -> listOf("async", "await")
-                else -> emptyList()
-            }
-        }
-    }
 }

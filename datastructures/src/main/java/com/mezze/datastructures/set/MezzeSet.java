@@ -530,6 +530,75 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         throw new UnsupportedOperationException("toLongArray requires Long elements");
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this set.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    @TruffleBoundary
+    public MezzeSet<A> copyToMutable() {
+        if (storage instanceof HashSetStorage hashStorage) {
+            return new MezzeSet<>(hashStorage.copyToMutable());
+        }
+        // For other storage types, convert to HashSetStorage first
+        java.util.HashSet<Object> temp = new java.util.HashSet<>();
+        for (A elem : this) {
+            temp.add(elem);
+        }
+        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
+    }
+
+    /**
+     * Creates a mutable set with given initial capacity.
+     * Use this when you know the approximate final size.
+     */
+    @TruffleBoundary
+    public static <A> MezzeSet<A> mutableWithCapacity(int capacity) {
+        // Pre-create a HashSetStorage with enough room
+        java.util.HashSet<Object> temp = new java.util.HashSet<>(capacity);
+        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
+    }
+
+    /**
+     * In-place add - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     * Returns true if element was new, false if already present.
+     */
+    @TruffleBoundary
+    public boolean mutAdd(A elem) {
+        if (storage instanceof HashSetStorage hashStorage) {
+            return hashStorage.mutAdd(elem);
+        }
+        throw new UnsupportedOperationException("mutAdd requires HashSetStorage - use copyToMutable() first");
+    }
+
+    /**
+     * In-place remove - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     * Returns true if element was found and removed.
+     */
+    @TruffleBoundary
+    public boolean mutRemove(A elem) {
+        if (storage instanceof HashSetStorage hashStorage) {
+            return hashStorage.mutRemove(elem);
+        }
+        throw new UnsupportedOperationException("mutRemove requires HashSetStorage - use copyToMutable() first");
+    }
+
+    /**
+     * In-place clear - mutates the underlying storage.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClear() {
+        if (storage instanceof HashSetStorage hashStorage) {
+            hashStorage.mutClear();
+        } else {
+            throw new UnsupportedOperationException("mutClear requires HashSetStorage - use copyToMutable() first");
+        }
+    }
+
     // ===== INTERNAL =====
 
     /**

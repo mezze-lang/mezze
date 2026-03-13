@@ -603,6 +603,50 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         return (A[]) elements.clone();
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this sorted set.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    @TruffleBoundary
+    public MezzeSortedSet<A> copyToMutable() {
+        return new MezzeSortedSet<>(elements.clone(), comparator);
+    }
+
+    /**
+     * Returns the internal elements array (for building mutable sorted sets).
+     * Only for internal use within LocalMut context.
+     */
+    public Object[] getElementsInternal() {
+        return elements;
+    }
+
+    /**
+     * In-place set at index - replaces element at given position.
+     * Note: Does NOT maintain sort order - caller is responsible for that.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, A value) {
+        if (index < 0 || index >= elements.length) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + elements.length);
+        }
+        elements[index] = value;
+    }
+
+    /**
+     * In-place swap elements at indices i and j.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        if (i < 0 || i >= elements.length || j < 0 || j >= elements.length) {
+            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + elements.length);
+        }
+        Object tmp = elements[i];
+        elements[i] = elements[j];
+        elements[j] = tmp;
+    }
+
     // ===== OBJECT METHODS =====
 
     @Override

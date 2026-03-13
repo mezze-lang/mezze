@@ -324,4 +324,121 @@ public final class HashMapStorage implements MapStorage {
         }
         return result;
     }
+
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this storage.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public HashMapStorage copyToMutable() {
+        return new HashMapStorage(table.clone(), size, capacity);
+    }
+
+    /**
+     * In-place put - mutates the underlying table.
+     * Only safe within LocalMut context.
+     * Returns true if key was new, false if updated.
+     */
+    @TruffleBoundary
+    public boolean mutPut(Object key, Object value) {
+        // Check if we need to grow (not supported for mutable - preallocate capacity)
+        if (size >= capacity * LOAD_FACTOR) {
+            throw new IllegalStateException("Mutable map capacity exceeded - use larger initial capacity");
+        }
+
+        int hash = hash(key);
+        int index = (hash & (capacity - 1)) * 2;
+        int insertIndex = -1;
+
+        for (int i = 0; i < capacity; i++) {
+            Object k = table[index];
+            if (k == null || k == DELETED) {
+                if (insertIndex < 0) {
+                    insertIndex = index;
+                }
+                if (k == null) {
+                    // Key not found, insert at first available slot
+                    table[insertIndex] = key;
+                    table[insertIndex + 1] = value;
+                    // Note: size is final, so we can't track size changes in mutable mode
+                    // The caller must track size if needed
+                    return true;
+                }
+            } else if (Objects.equals(k, key)) {
+                // Update existing
+                table[index + 1] = value;
+                return false;
+            }
+            index = (index + 2) & ((capacity * 2) - 1);
+        }
+
+        if (insertIndex >= 0) {
+            table[insertIndex] = key;
+            table[insertIndex + 1] = value;
+            return true;
+        }
+
+        throw new IllegalStateException("Hash table full");
+    }
+
+    /**
+     * In-place remove - mutates the underlying table.
+     * Only safe within LocalMut context.
+     * Returns true if key was found and removed.
+     */
+    @TruffleBoundary
+    public boolean mutRemove(Object key) {
+        int hash = hash(key);
+        int index = (hash & (capacity - 1)) * 2;
+
+        for (int i = 0; i < capacity; i++) {
+            Object k = table[index];
+            if (k == null) {
+                return false;  // Not found
+            }
+            if (k != DELETED && Objects.equals(k, key)) {
+                table[index] = DELETED;
+                table[index + 1] = null;
+                return true;
+            }
+            index = (index + 2) & ((capacity * 2) - 1);
+        }
+
+        return false;
+    }
+
+    /**
+     * In-place update value for existing key - mutates the underlying table.
+     * Only safe within LocalMut context.
+     * Returns true if key was found and updated.
+     */
+    @TruffleBoundary
+    public boolean mutUpdate(Object key, Object value) {
+        int hash = hash(key);
+        int index = (hash & (capacity - 1)) * 2;
+
+        for (int i = 0; i < capacity; i++) {
+            Object k = table[index];
+            if (k == null) {
+                return false;  // Not found
+            }
+            if (k != DELETED && Objects.equals(k, key)) {
+                table[index + 1] = value;
+                return true;
+            }
+            index = (index + 2) & ((capacity * 2) - 1);
+        }
+
+        return false;
+    }
+
+    /**
+     * In-place clear - mutates the underlying table.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClear() {
+        Arrays.fill(table, null);
+    }
 }

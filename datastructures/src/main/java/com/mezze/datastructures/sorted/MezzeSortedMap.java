@@ -472,6 +472,73 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         };
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this sorted map.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    @TruffleBoundary
+    public MezzeSortedMap<K, V> copyToMutable() {
+        return new MezzeSortedMap<>(keys.clone(), values.clone(), comparator);
+    }
+
+    /**
+     * In-place put - mutates the underlying arrays.
+     * Only works for updating existing keys (not insertion).
+     * For insertion, use the mutable builder approach.
+     * Only safe within LocalMut context.
+     * Returns true if key was found and updated.
+     */
+    @TruffleBoundary
+    public boolean mutUpdate(K key, V value) {
+        int idx = binarySearch(key);
+        if (idx >= 0) {
+            values[idx] = value;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * In-place update by key (raw type).
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public boolean mutUpdateObject(Object key, Object value) {
+        int idx = binarySearchObject(key);
+        if (idx >= 0) {
+            values[idx] = value;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * In-place clear - sets all values to null.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutClearValues() {
+        Arrays.fill(values, null);
+    }
+
+    /**
+     * Returns the internal keys array (for building mutable sorted maps).
+     * Only for internal use within LocalMut context.
+     */
+    public Object[] getKeysInternal() {
+        return keys;
+    }
+
+    /**
+     * Returns the internal values array (for building mutable sorted maps).
+     * Only for internal use within LocalMut context.
+     */
+    public Object[] getValuesInternal() {
+        return values;
+    }
+
     // ===== OBJECT METHODS =====
 
     @Override

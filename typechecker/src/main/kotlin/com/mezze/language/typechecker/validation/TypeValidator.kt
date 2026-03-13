@@ -2511,11 +2511,11 @@ class TypeValidator(
                     // Check if this effect has associated types
                     val effectDecl = effectDeclarations[effectName]
                     if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
-                        // For Exception effect, look for 'throw' operation
-                        if (effectName == "Exception" && operationName == "throw") {
-                            extractThrownErrorType(e.arguments)?.let { errorType ->
-                                val effectMap = result.getOrPut(effectName) { mutableMapOf() }
-                                unifyThrownType(effectMap, "'error", errorType)
+                        // Find the operation and extract associated type values
+                        extractAssociatedTypeValues(effectDecl, operationName, e.arguments)?.let { typeMap ->
+                            val effectMap = result.getOrPut(effectName) { mutableMapOf() }
+                            for ((assocTypeName, extractedType) in typeMap) {
+                                unifyThrownType(effectMap, assocTypeName, extractedType)
                             }
                         }
                     }
@@ -2537,11 +2537,11 @@ class TypeValidator(
                         if (effectName != null) {
                             val effectDecl = effectDeclarations[effectName]
                             if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
-                                if (effectName == "Exception" && operationName == "throw") {
-                                    val errorType = extractThrownErrorType(e.arguments)
-                                    errorType?.let {
-                                        val effectMap = result.getOrPut(effectName) { mutableMapOf() }
-                                        unifyThrownType(effectMap, "'error", it)
+                                // Find the operation and extract associated type values
+                                extractAssociatedTypeValues(effectDecl, operationName, e.arguments)?.let { typeMap ->
+                                    val effectMap = result.getOrPut(effectName) { mutableMapOf() }
+                                    for ((assocTypeName, extractedType) in typeMap) {
+                                        unifyThrownType(effectMap, assocTypeName, extractedType)
                                     }
                                 }
                             }
@@ -2639,7 +2639,94 @@ class TypeValidator(
     }
 
     /**
+     * Extract associated type values from an effect operation call.
+     *
+     * For an effect like `effect Exception having 'error where { throw: {error: 'error} -> 'a }`,
+     * when we see a call to `throw {error = SomeError}`, this extracts the mapping
+     * from "'error" to the type of SomeError.
+     *
+     * This generalizes the previous hardcoded Exception/throw handling to work with
+     * any effect that has associated types.
+     *
+     * @param effectDecl The effect declaration
+     * @param operationName The name of the operation being called
+     * @param args The arguments passed to the operation
+     * @return A map from associated type names (e.g., "'error") to the extracted types
+     */
+    private fun extractAssociatedTypeValues(
+        effectDecl: EffectDeclaration,
+        operationName: String,
+        args: Expression
+    ): Map<String, MezzeType>? {
+        // Find the operation in the effect declaration
+        val operation = effectDecl.operations.find { it.name == operationName } ?: return null
+
+        // Get the parameter type annotation
+        val paramTypeAnnotation = operation.paramType
+
+        // We need to find which fields in the parameter type use associated types
+        // Associated types are stored with the ' prefix already (e.g., "'error", "'state")
+        val associatedTypeNames = effectDecl.associatedTypes.toSet()
+
+        // Parse the parameter type annotation to find field -> associated type mappings
+        val fieldToAssocType = findAssociatedTypeFields(paramTypeAnnotation, associatedTypeNames)
+
+        if (fieldToAssocType.isEmpty()) return null
+
+        // Extract the argument values for those fields
+        if (args !is RecordLiteral) return null
+
+        val result = mutableMapOf<String, MezzeType>()
+        for ((fieldName, assocTypeName) in fieldToAssocType) {
+            val fieldEntry = args.entries.filterIsInstance<RecordFieldEntry>()
+                .find { it.name == fieldName }
+
+            val fieldValue = fieldEntry?.value ?: continue
+
+            // Get the type of the field value
+            val fieldType = fieldValue.inferredType ?: constructTypeFromExpression(fieldValue) ?: continue
+
+            result[assocTypeName] = fieldType
+        }
+
+        return if (result.isNotEmpty()) result else null
+    }
+
+    /**
+     * Find fields in a type annotation that reference associated types.
+     *
+     * For a type like `{error: 'error, value: Int}`, this returns {"error" -> "'error"}.
+     */
+    private fun findAssociatedTypeFields(
+        typeAnnotation: TypeAnnotation,
+        associatedTypeNames: Set<String>
+    ): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+
+        when (typeAnnotation) {
+            is RecordTypeAnnotation -> {
+                for (entry in typeAnnotation.entries) {
+                    // Check if the field type is a type variable that matches an associated type
+                    // Type variables in annotations are IdentifierTypeAnnotation with names like 'error
+                    if (entry.type is IdentifierTypeAnnotation) {
+                        val typeName = (entry.type as IdentifierTypeAnnotation).name
+                        if (typeName in associatedTypeNames) {
+                            result[entry.name] = typeName
+                        }
+                    }
+                }
+            }
+            else -> {
+                // Other type annotations (e.g., single type var) - not handled for now
+            }
+        }
+
+        return result
+    }
+
+    /**
      * Extract the error type from a throw call's arguments.
+     * @deprecated Use extractAssociatedTypeValues instead - this is kept for reference
      */
     private fun extractThrownErrorType(args: Expression): MezzeType? {
         if (args !is RecordLiteral) {
@@ -2702,19 +2789,24 @@ class TypeValidator(
                 MezzeType.RecordType(fields, null)
             }
             is VariantConstruction -> {
-                val payloadType = constructTypeFromExpression(expr.value)
-                MezzeType.VariantType(
-                    constructors = mapOf(expr.constructor to payloadType),
-                    rowVar = RowVar.fresh()
-                )
+                // True and False are Bool type (optimized in interpreter)
+                if (expr.constructor == "True" || expr.constructor == "False") {
+                    MezzeType.BoolType
+                } else {
+                    val payloadType = constructTypeFromExpression(expr.value)
+                    MezzeType.VariantType(
+                        constructors = mapOf(expr.constructor to payloadType),
+                        rowVar = RowVar.fresh()
+                    )
+                }
             }
             is StringLiteral -> MezzeType.StringType
             is IntLiteral -> MezzeType.IntType
             is FloatLiteral -> MezzeType.FloatType
             is Identifier -> {
-                // For identifiers, we don't know the type without context
-                // Return a fresh type variable
-                MezzeType.VarType(TypeVar.fresh())
+                // For identifiers without inferredType, we can't determine the type
+                // Return null to skip extraction for this expression
+                null
             }
             else -> null
         }
@@ -2823,8 +2915,21 @@ class TypeValidator(
             return true
         }
 
+        // BoolType is compatible with the Bool variant [True, False]
+        if (handlerType is MezzeType.BoolType && exprType is MezzeType.VariantType) {
+            return isBoolVariant(exprType)
+        }
+        if (exprType is MezzeType.BoolType && handlerType is MezzeType.VariantType) {
+            return isBoolVariant(handlerType)
+        }
+
         // For variant types, check if handler accepts all expr variants
         if (handlerType is MezzeType.VariantType && exprType is MezzeType.VariantType) {
+            // Both are Bool variants
+            if (isBoolVariant(handlerType) && isBoolVariant(exprType)) {
+                return true
+            }
+
             val handlerVariantNames = handlerType.constructors.keys
             val exprVariantNames = exprType.constructors.keys
 
@@ -2839,6 +2944,13 @@ class TypeValidator(
 
         // For other types, they must be exactly equal
         return handlerType == exprType
+    }
+
+    /**
+     * Check if a variant type is the Bool variant: | True, False |
+     */
+    private fun isBoolVariant(type: MezzeType.VariantType): Boolean {
+        return type.constructors.keys == setOf("True", "False")
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
 
 /**
@@ -249,18 +250,22 @@ object STMTypes {
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_stm_atomic: {f: {} -> 'a <STM>} -> 'a <STM>
+        // __native_stm_atomic: {f: {} -> 'a <e>} -> 'a <e>
         // Executes a function atomically with automatic retry on conflict
+        // Effect-polymorphic: the effect row variable 'e' is shared between input and output,
+        // so whatever effects 'f' has, the result has the same effects.
+        // The STM constraint is enforced by the stdlib effect declaration.
+        val stmRowVar = RowVar.fresh()
         context["__native_stm_atomic"] = MezzeType.FunctionType(
             paramType = MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(
                     paramType = MezzeType.RecordType(emptyMap()),
                     returnType = MezzeType.VarType(TypeVar("a")),
-                    effects = MezzeType.EffectRow(setOf("STM"))
+                    effects = MezzeType.EffectRow.simple(emptySet(), stmRowVar, performed = false)
                 )
             )),
             returnType = MezzeType.VarType(TypeVar("a")),
-            effects = MezzeType.EffectRow(setOf("STM"))
+            effects = MezzeType.EffectRow.simple(emptySet(), stmRowVar, performed = false)
         )
 
         // __native_stm_commit: {} -> Bool

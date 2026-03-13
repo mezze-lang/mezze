@@ -226,4 +226,73 @@ public final class ObjectSeqStorage implements SeqStorage {
     public int hashCode() {
         return Arrays.hashCode(data);
     }
+
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this storage.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public ObjectSeqStorage copyToMutable() {
+        return new ObjectSeqStorage(data.clone());
+    }
+
+    /**
+     * In-place set - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, Object value) {
+        data[index] = value;
+    }
+
+    /**
+     * In-place swap - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        Object tmp = data[i];
+        data[i] = data[j];
+        data[j] = tmp;
+    }
+
+    /**
+     * In-place reverse - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutReverse() {
+        int left = 0;
+        int right = data.length - 1;
+        while (left < right) {
+            Object tmp = data[left];
+            data[left] = data[right];
+            data[right] = tmp;
+            left++;
+            right--;
+        }
+    }
+
+    /**
+     * In-place fill - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFill(Object value) {
+        Arrays.fill(data, value);
+    }
+
+    /**
+     * In-place fill range - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFillRange(int start, int end, Object value) {
+        Arrays.fill(data, start, end, value);
+    }
+
+    /**
+     * In-place sort using comparator - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutSortWith(Comparator<Object> comparator) {
+        Arrays.sort(data, comparator);
+    }
 }

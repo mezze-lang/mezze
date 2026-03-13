@@ -380,6 +380,95 @@ public final class MezzeBytes implements TruffleObject {
         return sb.toString();
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this bytes.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public MezzeBytes copyToMutable() {
+        return new MezzeBytes(data.clone());
+    }
+
+    /**
+     * In-place set - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, byte value) {
+        data[index] = value;
+    }
+
+    /**
+     * In-place set unsigned (0-255) - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSetUnsigned(int index, int value) {
+        data[index] = (byte) value;
+    }
+
+    /**
+     * In-place swap - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        byte tmp = data[i];
+        data[i] = data[j];
+        data[j] = tmp;
+    }
+
+    /**
+     * In-place reverse - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutReverse() {
+        int left = 0;
+        int right = data.length - 1;
+        while (left < right) {
+            byte tmp = data[left];
+            data[left] = data[right];
+            data[right] = tmp;
+            left++;
+            right--;
+        }
+    }
+
+    /**
+     * In-place fill - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFill(byte value) {
+        Arrays.fill(data, value);
+    }
+
+    /**
+     * In-place fill range - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutFillRange(int start, int end, byte value) {
+        Arrays.fill(data, start, end, value);
+    }
+
+    /**
+     * In-place copy from another bytes - mutates the underlying array.
+     * Copies src[srcOffset..srcOffset+length) to this[destOffset..destOffset+length).
+     * Only safe within LocalMut context.
+     */
+    public void mutCopyFrom(MezzeBytes src, int srcOffset, int destOffset, int length) {
+        System.arraycopy(src.data, srcOffset, data, destOffset, length);
+    }
+
+    /**
+     * In-place XOR with another bytes - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutXor(MezzeBytes other) {
+        int len = Math.min(data.length, other.data.length);
+        for (int i = 0; i < len; i++) {
+            data[i] ^= other.data[i];
+        }
+    }
+
     // ===== OBJECT METHODS =====
 
     @Override

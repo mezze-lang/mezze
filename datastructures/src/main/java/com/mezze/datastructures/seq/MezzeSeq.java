@@ -1154,6 +1154,118 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
         return size();
     }
 
+    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+
+    /**
+     * Creates a mutable copy of this sequence.
+     * Used by to_mut to get a fresh copy that can be mutated.
+     */
+    public MezzeSeq<A> copyToMutable() {
+        if (storage instanceof LongSeqStorage longStorage) {
+            return new MezzeSeq<>(longStorage.copyToMutable());
+        }
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            return new MezzeSeq<>(doubleStorage.copyToMutable());
+        }
+        if (storage instanceof ObjectSeqStorage objStorage) {
+            return new MezzeSeq<>(objStorage.copyToMutable());
+        }
+        if (storage instanceof EmptySeqStorage) {
+            return this; // Empty is immutable anyway
+        }
+        if (storage instanceof BooleanSeqStorage) {
+            // BooleanSeqStorage doesn't have mutable ops yet - convert to object
+            Object[] arr = toArray();
+            return new MezzeSeq<>(new ObjectSeqStorage(arr));
+        }
+        throw new IllegalStateException("Unknown storage type: " + storage.getClass());
+    }
+
+    /**
+     * In-place set - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSet(int index, A value) {
+        if (storage instanceof LongSeqStorage longStorage && value instanceof Long l) {
+            longStorage.mutSet(index, l);
+        } else if (storage instanceof DoubleSeqStorage doubleStorage && value instanceof Double d) {
+            doubleStorage.mutSet(index, d);
+        } else if (storage instanceof ObjectSeqStorage objStorage) {
+            objStorage.mutSet(index, value);
+        } else {
+            throw new UnsupportedOperationException("mutSet not supported for storage: " + storage.getClass());
+        }
+    }
+
+    /**
+     * In-place set for unboxed long.
+     */
+    public void mutSetLong(int index, long value) {
+        if (storage instanceof LongSeqStorage longStorage) {
+            longStorage.mutSet(index, value);
+        } else {
+            throw new UnsupportedOperationException("mutSetLong requires LongSeqStorage");
+        }
+    }
+
+    /**
+     * In-place set for unboxed double.
+     */
+    public void mutSetDouble(int index, double value) {
+        if (storage instanceof DoubleSeqStorage doubleStorage) {
+            doubleStorage.mutSet(index, value);
+        } else {
+            throw new UnsupportedOperationException("mutSetDouble requires DoubleSeqStorage");
+        }
+    }
+
+    /**
+     * In-place swap - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutSwap(int i, int j) {
+        if (storage instanceof LongSeqStorage longStorage) {
+            longStorage.mutSwap(i, j);
+        } else if (storage instanceof DoubleSeqStorage doubleStorage) {
+            doubleStorage.mutSwap(i, j);
+        } else if (storage instanceof ObjectSeqStorage objStorage) {
+            objStorage.mutSwap(i, j);
+        } else {
+            throw new UnsupportedOperationException("mutSwap not supported for storage: " + storage.getClass());
+        }
+    }
+
+    /**
+     * In-place sort - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    @TruffleBoundary
+    public void mutSort() {
+        if (storage instanceof LongSeqStorage longStorage) {
+            longStorage.mutSort();
+        } else if (storage instanceof DoubleSeqStorage doubleStorage) {
+            doubleStorage.mutSort();
+        } else {
+            throw new UnsupportedOperationException("mutSort not supported for storage: " + storage.getClass());
+        }
+    }
+
+    /**
+     * In-place reverse - mutates the underlying array.
+     * Only safe within LocalMut context.
+     */
+    public void mutReverse() {
+        if (storage instanceof LongSeqStorage longStorage) {
+            longStorage.mutReverse();
+        } else if (storage instanceof DoubleSeqStorage doubleStorage) {
+            doubleStorage.mutReverse();
+        } else if (storage instanceof ObjectSeqStorage objStorage) {
+            objStorage.mutReverse();
+        } else {
+            throw new UnsupportedOperationException("mutReverse not supported for storage: " + storage.getClass());
+        }
+    }
+
     // ===== INTERNAL =====
 
     /**
