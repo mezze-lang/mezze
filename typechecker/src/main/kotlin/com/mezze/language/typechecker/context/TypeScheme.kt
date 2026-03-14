@@ -163,7 +163,15 @@ private fun applySubstitutionToType(
                 paramType = applySubstitutionToType(type.paramType, substitution),
                 returnType = applySubstitutionToType(type.returnType, substitution),
                 effects = type.effects,
-                abilityConstraints = type.abilityConstraints
+                // CRITICAL FIX: Apply substitution to ability constraints as well
+                // This ensures that when a polymorphic function is instantiated,
+                // the ability constraints refer to the fresh type variables
+                abilityConstraints = type.abilityConstraints.map { constraint ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { applySubstitutionToType(it, substitution) }
+                    )
+                }
             )
         }
         is MezzeType.RecordType -> {
