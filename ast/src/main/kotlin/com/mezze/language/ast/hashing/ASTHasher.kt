@@ -199,7 +199,7 @@ object ASTHasher {
                 builder.appendList(spreadEntries) { entry ->
                     hashExpressionInto(entry.expression, this)
                 }
-                builder.appendNullable(expr.restField) { append(it) }
+                builder.appendBoolean(expr.isOpen)
             }
 
             is MemberAccess -> {
@@ -529,7 +529,7 @@ object ASTHasher {
             append(entry.name)
             hashTypeAnnotationInto(entry.type, this)
         }
-        builder.appendNullable(record.restField) { append(it) }
+        builder.appendBoolean(record.isOpen)
     }
 
     private fun hashEffectRowAnnotationInto(effects: EffectRowAnnotation, builder: MezzeHashBuilder) {

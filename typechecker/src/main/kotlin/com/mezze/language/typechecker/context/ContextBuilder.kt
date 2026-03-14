@@ -841,7 +841,7 @@ class ContextBuilder {
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotationInternal(entry.type)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is VariantTypeAnnotation -> {

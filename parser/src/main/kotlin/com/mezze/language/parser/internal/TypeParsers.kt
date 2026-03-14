@@ -570,13 +570,9 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<TypeAnnotation>
                             }
 
                             // Check for ellipsis (open record marker: ...)
-                            val restField = if (afterComma.current()?.type == TokenType.ELLIPSIS) {
-                                "..."  // Marker for open record
-                            } else {
-                                null  // Closed record
-                            }
+                            val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
 
-                            val stream3 = if (restField != null) {
+                            val stream3 = if (isOpen) {
                                 skipNewlines(afterComma.advance())  // Skip the ellipsis token
                             } else {
                                 afterComma
@@ -586,7 +582,7 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<TypeAnnotation>
 
                             when (rbrace) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    RecordTypeAnnotation(entries.value, restField),
+                                    RecordTypeAnnotation(entries.value, isOpen),
                                     rbrace.remaining
                                 )
                                 is ParseResult.Failure -> {

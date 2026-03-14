@@ -43,7 +43,7 @@ object StandaloneHelper {
             // Add a call to main() at the end of the program
             val mainCall = FunctionCall(
                 function = Identifier("main", null, null),
-                arguments = RecordLiteral(emptyList(), null, null, null),
+                arguments = RecordLiteral(emptyList(), false, null, null),
                 inferredType = null,
                 sourceLocation = null
             )
@@ -77,7 +77,7 @@ object StandaloneHelper {
         // Add a call to main() at the end of the program
         val mainCall = FunctionCall(
             function = Identifier("main", null, null),
-            arguments = RecordLiteral(emptyList(), null, null, null),
+            arguments = RecordLiteral(emptyList(), false, null, null),
             inferredType = null,
             sourceLocation = null
         )

@@ -3785,7 +3785,7 @@ class ConstraintSolver(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotation(entry.type, typeParamSubst)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is VariantTypeAnnotation -> {

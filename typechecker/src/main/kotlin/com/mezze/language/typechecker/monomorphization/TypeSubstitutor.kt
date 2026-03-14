@@ -317,7 +317,7 @@ class TypeSubstitutor(
                 fields = annotation.entries.associate { entry ->
                     entry.name to convertTypeAnnotationToMezzeType(entry.type)
                 },
-                rowVar = annotation.restField?.let { RowVar(it) }
+                rowVar = if (annotation.isOpen) RowVar.userOpen() else null
             )
             is FunctionTypeAnnotation -> MezzeType.FunctionType(
                 paramType = convertTypeAnnotationToMezzeType(annotation.paramType),
@@ -353,7 +353,7 @@ class TypeSubstitutor(
                 entries = type.fields.map { (name, fieldType) ->
                     RecordTypeEntry(name, convertMezzeTypeToAnnotation(fieldType))
                 },
-                restField = type.rowVar?.name
+                isOpen = type.rowVar != null
             )
             is MezzeType.FunctionType -> FunctionTypeAnnotation(
                 paramType = convertMezzeTypeToAnnotation(type.paramType),

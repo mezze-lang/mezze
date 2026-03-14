@@ -581,7 +581,7 @@ class PrettyPrinter {
     }
 
     private fun printRecordLiteral(expr: RecordLiteral) {
-        if (expr.entries.isEmpty() && expr.restField == null) {
+        if (expr.entries.isEmpty() && !expr.isOpen) {
             append("{}")
             return
         }
@@ -595,10 +595,9 @@ class PrettyPrinter {
                 first = false
                 printRecordLiteralEntry(entry)
             }
-            expr.restField?.let {
+            if (expr.isOpen) {
                 if (!first) append(", ")
                 append("...")
-                append(it)
             }
             append(" }")
         } else {
@@ -608,15 +607,14 @@ class PrettyPrinter {
                 for ((index, entry) in expr.entries.withIndex()) {
                     printIndent()
                     printRecordLiteralEntry(entry)
-                    if (config.TRAILING_COMMA_IN_MULTILINE || index < expr.entries.size - 1 || expr.restField != null) {
+                    if (config.TRAILING_COMMA_IN_MULTILINE || index < expr.entries.size - 1 || expr.isOpen) {
                         append(",")
                     }
                     newLine()
                 }
-                expr.restField?.let {
+                if (expr.isOpen) {
                     printIndent()
                     append("...")
-                    append(it)
                     newLine()
                 }
             }
@@ -1114,7 +1112,7 @@ class PrettyPrinter {
     }
 
     private fun printRecordTypeAnnotation(type: RecordTypeAnnotation) {
-        if (type.entries.isEmpty() && type.restField == null) {
+        if (type.entries.isEmpty() && !type.isOpen) {
             append("{}")
             return
         }
@@ -1130,10 +1128,9 @@ class PrettyPrinter {
                 append(": ")
                 printTypeAnnotation(entry.type)
             }
-            type.restField?.let {
+            if (type.isOpen) {
                 if (type.entries.isNotEmpty()) append(", ")
                 append("...")
-                append(it)
             }
             append(" }")
         } else {
@@ -1145,15 +1142,14 @@ class PrettyPrinter {
                     append(entry.name)
                     append(": ")
                     printTypeAnnotation(entry.type)
-                    if (config.TRAILING_COMMA_IN_MULTILINE || index < type.entries.size - 1 || type.restField != null) {
+                    if (config.TRAILING_COMMA_IN_MULTILINE || index < type.entries.size - 1 || type.isOpen) {
                         append(",")
                     }
                     newLine()
                 }
-                type.restField?.let {
+                if (type.isOpen) {
                     printIndent()
                     append("...")
-                    append(it)
                     newLine()
                 }
             }

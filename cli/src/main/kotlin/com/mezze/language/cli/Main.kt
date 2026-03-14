@@ -1160,7 +1160,7 @@ private fun handleExecCommand(args: List<String>) {
     // Add a call to main() at the end of the program
     val mainCall = com.mezze.language.ast.FunctionCall(
         function = com.mezze.language.ast.Identifier("main", null, null),
-        arguments = com.mezze.language.ast.RecordLiteral(emptyList(), null, null),
+        arguments = com.mezze.language.ast.RecordLiteral(emptyList(), false, null),
         inferredType = null,
         sourceLocation = null
     )

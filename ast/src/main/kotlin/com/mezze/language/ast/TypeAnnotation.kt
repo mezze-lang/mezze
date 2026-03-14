@@ -55,7 +55,7 @@ data class TypeApplicationAnnotation(
 @Serializable
 data class RecordTypeAnnotation(
     val entries: List<RecordTypeEntry>,
-    val restField: String? = null
+    val isOpen: Boolean = false
 ) : TypeAnnotation
 
 @Serializable
@@ -217,20 +217,17 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
             val fieldTypes = annotation.entries.associate { entry ->
                 entry.name to convertTypeAnnotation(entry.type)
             }
-            // If restField is present (e.g., {x: Int, ...}), create open record with row variable
-            val rowVar = if (annotation.restField != null) {
-                RowVar(annotation.restField)
-            } else {
-                null
-            }
+            // If isOpen is true (e.g., {x: Int, ...}), create open record with row variable
+            // Use userOpen() for user-specified openness in type annotations
+            val rowVar = if (annotation.isOpen) RowVar.userOpen() else null
             MezzeType.RecordType(fieldTypes, rowVar)
         }
         is VariantTypeAnnotation -> {
             val constructorTypes = annotation.constructors.associate { constructor ->
                 constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
             }
-            // If isOpen is true (| A, B, ... | syntax), create open variant with fresh row variable
-            val rowVar = if (annotation.isOpen) RowVar.fresh() else null
+            // If isOpen is true (| A, B, ... | syntax), create open variant with user-specified row variable
+            val rowVar = if (annotation.isOpen) RowVar.userOpen() else null
             MezzeType.VariantType(constructorTypes, rowVar)
         }
         is TypeApplicationAnnotation -> {

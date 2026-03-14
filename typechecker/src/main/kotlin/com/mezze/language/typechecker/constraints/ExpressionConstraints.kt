@@ -639,10 +639,10 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        val restFieldValue = expr.restField
         val recordType = MezzeType.RecordType(
             fields = fields,
-            rowVar = if (restFieldValue != null) RowVar(restFieldValue) else null
+            // Use userOpen() to mark user-specified openness (won't be closed by closeGeneratedRowVars)
+            rowVar = if (expr.isOpen) RowVar.userOpen() else null
         )
 
         return ConstraintResult(
@@ -1950,7 +1950,7 @@ class ExpressionConstraintGenerator {
 
                         if (constructor != null && constructor.dataType is RecordTypeAnnotation) {
                             val expectedRecordType = constructor.dataType as RecordTypeAnnotation
-                            val isOpen = expectedRecordType.restField != null
+                            val isOpen = expectedRecordType.isOpen
 
                             // Get fields from literal
                             val literalFields = valueExpr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
@@ -2049,7 +2049,7 @@ class ExpressionConstraintGenerator {
             is TypedParameters -> {
                 // Typed parameters: use the annotated types
                 // Check if the pattern is open (has ...)
-                isOpenPattern = params.recordType.restField != null
+                isOpenPattern = params.recordType.isOpen
                 paramNames = params.recordType.entries.map { it.name }
                 // CRITICAL: Convert annotated types using ContextBuilder instead of fresh vars!
                 // This ensures parameter types like `opt: Option Int` actually use `Option Int`
@@ -3975,7 +3975,7 @@ class ExpressionConstraintGenerator {
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertFieldType(entry.type)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is FunctionTypeAnnotation -> {
@@ -4001,7 +4001,7 @@ class ExpressionConstraintGenerator {
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { convertFieldType(it) }
                     },
-                    rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
                     // Use synthetic typeName for closed inline annotations to enable validation.
                     // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
                     // Open annotations don't need this since they explicitly allow additional constructors.

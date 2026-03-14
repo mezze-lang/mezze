@@ -757,9 +757,8 @@ internal val MezzeParser.recordTypeParser: Parser<TypeDefinition> get() = { stre
                     val fields = value.entries.map { entry ->
                         RecordFieldDef(entry.name, entry.type)
                     }
-                    val isOpen = value.restField != null
                     ParseResult.Success(
-                        RecordDefinition(fields, isOpen),
+                        RecordDefinition(fields, value.isOpen),
                         recordType.remaining
                     )
                 } else {
@@ -1041,8 +1040,8 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
                                 when (impl) {
                                     is ParseResult.Success -> {
                                         // Use placeholder types - will be inferred by typechecker
-                                        val placeholderParamType = RecordTypeAnnotation(emptyList(), null)
-                                        val placeholderReturnType = RecordTypeAnnotation(emptyList(), null)
+                                        val placeholderParamType = RecordTypeAnnotation(emptyList(), false)
+                                        val placeholderReturnType = RecordTypeAnnotation(emptyList(), false)
 
                                         ParseResult.Success(
                                             PerformerOperation(

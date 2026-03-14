@@ -338,7 +338,7 @@ class ContinuationTransformer {
                     // suspend without value - use unit-like value
                     RecordLiteral(
                         entries = emptyList(),
-                        restField = null,
+                        isOpen = false,
                         inferredType = null,
                         sourceLocation = null
                     )
@@ -377,7 +377,7 @@ class ContinuationTransformer {
         // Wrap in a DoExpression that binds and returns unit
         val unitExpr = RecordLiteral(
             entries = emptyList(),
-            restField = null,
+            isOpen = false,
             inferredType = null,
             sourceLocation = null
         )
@@ -409,7 +409,7 @@ class ContinuationTransformer {
                 // This way, x is properly bound when the state executes
                 val unitExpr = RecordLiteral(
                     entries = emptyList(),
-                    restField = null,
+                    isOpen = false,
                     inferredType = null,
                     sourceLocation = null
                 )

@@ -356,7 +356,7 @@ internal val MezzeParser.typedLambdaParams: Parser<LambdaParameters>
                             val finalType = typeAnnotation ?: IdentifierTypeAnnotation("'${name}")
                             RecordTypeEntry(name, finalType)
                         }
-                        val recordType = RecordTypeAnnotation(recordEntries, null)
+                        val recordType = RecordTypeAnnotation(recordEntries, false)
                         ParseResult.Success(TypedParameters(recordType), entries.remaining)
                     } else {
                         // All parameters are untyped, fail so we can try untyped parser
@@ -451,7 +451,7 @@ internal val MezzeParser.recordLiteral: Parser<Expression>
 
                         when (rbrace) {
                             is ParseResult.Success -> ParseResult.Success(
-                                RecordLiteral(entries.value, if (isOpen) "..." else null, sourceLocation = recordLocation),
+                                RecordLiteral(entries.value, isOpen, sourceLocation = recordLocation),
                                 rbrace.remaining
                             )
                             is ParseResult.Failure -> rbrace

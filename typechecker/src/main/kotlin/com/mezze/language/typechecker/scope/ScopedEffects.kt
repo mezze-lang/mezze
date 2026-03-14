@@ -279,7 +279,7 @@ fun validateScopedEffectSignatures(info: ScopedEffectInfo): List<ScopedEffectVal
 private fun isEmptyRecordAnnotation(annotation: TypeAnnotation): Boolean {
     return annotation is RecordTypeAnnotation &&
             annotation.entries.isEmpty() &&
-            annotation.restField == null
+            !annotation.isOpen
 }
 
 /**

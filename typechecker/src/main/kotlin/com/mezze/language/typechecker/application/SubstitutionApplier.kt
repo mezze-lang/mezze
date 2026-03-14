@@ -2352,7 +2352,7 @@ class SubstitutionApplier(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotation(entry.type)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is VariantTypeAnnotation -> {
@@ -2405,9 +2405,9 @@ class SubstitutionApplier(
 
         return when (type) {
             is MezzeType.RecordType -> {
-                // Close the row variable if it's a generated one (starts with "row")
+                // Close the row variable if it's a generated one (starts with "row" but NOT "userOpen_")
                 val existingRowVar = type.rowVar
-                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row")) {
+                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row") && !existingRowVar.isUserSpecified()) {
                     null  // Close it
                 } else {
                     existingRowVar  // Keep it (user annotation)
@@ -2434,9 +2434,9 @@ class SubstitutionApplier(
                 val shouldStayOpen = existingRowVar != null && effectiveMustBeOpenRowVars.contains(existingRowVar)
 
                 // Close the row variable only if:
-                // 1. It's a generated one (starts with "row")
+                // 1. It's a generated one (starts with "row" but NOT "userOpen_")
                 // 2. AND the type doesn't need to stay open
-                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row") && !shouldStayOpen) {
+                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row") && !existingRowVar.isUserSpecified() && !shouldStayOpen) {
                     null  // Close it
                 } else {
                     existingRowVar  // Keep it (user annotation or must stay open)
@@ -2544,7 +2544,7 @@ class SubstitutionApplier(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotationWithMapping(entry.type, typeParamMapping)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is FunctionTypeAnnotation -> {

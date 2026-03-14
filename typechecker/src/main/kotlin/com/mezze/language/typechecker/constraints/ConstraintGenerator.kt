@@ -1044,7 +1044,7 @@ class ConstraintGenerator(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotationInternal(entry.type)
                     },
-                    rowVar = annotation.restField?.let { RowVar(it) }
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
             is VariantTypeAnnotation -> {
@@ -1052,7 +1052,7 @@ class ConstraintGenerator(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
                     },
-                    rowVar = if (annotation.isOpen) RowVar.fresh() else null,
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
                     // Use synthetic typeName for closed inline annotations to enable validation.
                     // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
                     typeName = if (!annotation.isOpen) "<inline>" else null
@@ -1417,7 +1417,7 @@ class ConstraintGenerator(
             // validation, letting the body type inference handle type checking.
             val implParamTypeAnnotation = implOp.paramType
             val isPlaceholderParamType = implParamTypeAnnotation is RecordTypeAnnotation &&
-                implParamTypeAnnotation.entries.isEmpty() && implParamTypeAnnotation.restField == null
+                implParamTypeAnnotation.entries.isEmpty() && !implParamTypeAnnotation.isOpen
 
             if (implParamTypeAnnotation != null && !isPlaceholderParamType) {
                 val implParamType = convertTypeAnnotation(implParamTypeAnnotation)
@@ -1442,7 +1442,7 @@ class ConstraintGenerator(
 
             val implReturnTypeAnnotation = implOp.returnType
             val isPlaceholderReturnType = implReturnTypeAnnotation is RecordTypeAnnotation &&
-                implReturnTypeAnnotation.entries.isEmpty() && implReturnTypeAnnotation.restField == null
+                implReturnTypeAnnotation.entries.isEmpty() && !implReturnTypeAnnotation.isOpen
 
             if (implReturnTypeAnnotation != null && !isPlaceholderReturnType) {
                 val implReturnType = convertTypeAnnotation(implReturnTypeAnnotation)

@@ -118,12 +118,32 @@ data class RowVar(val name: String) {
     companion object {
         private var counter = 0
 
+        /**
+         * Create a fresh row variable with an auto-generated name.
+         * These may be closed by closeGeneratedRowVars during type inference finalization.
+         */
         fun fresh(): RowVar {
             val name = "row${counter}"
             counter++
             return RowVar(name)
         }
+
+        /**
+         * Create a user-specified open row variable.
+         * These have a "userOpen_" prefix and will NOT be closed by closeGeneratedRowVars,
+         * preserving user-specified openness in type annotations like {x: Int, ...}.
+         */
+        fun userOpen(): RowVar {
+            val name = "userOpen_row${counter}"
+            counter++
+            return RowVar(name)
+        }
     }
+
+    /**
+     * Whether this row variable was explicitly specified by the user (won't be auto-closed).
+     */
+    fun isUserSpecified(): Boolean = name.startsWith("userOpen_")
 }
 
 // ============================================================================

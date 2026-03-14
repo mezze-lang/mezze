@@ -273,7 +273,7 @@ data class ParenthesizedExpression(
 @Serializable
 data class RecordLiteral(
     val entries: List<RecordLiteralEntry>,
-    val restField: String? = null,
+    val isOpen: Boolean = false,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression {
