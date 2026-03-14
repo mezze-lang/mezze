@@ -345,7 +345,7 @@ class TypeSubstitutor(
 
     private fun convertMezzeTypeToAnnotation(type: MezzeType): TypeAnnotation {
         // Use centralized registry for primitive types
-        PrimitiveTypes.toName(type)?.let { return IdentifierTypeAnnotation(it) }
+        PrimitiveTypes.toAnnotation(type)?.let { return it }
 
         return when (type) {
             is MezzeType.VarType -> IdentifierTypeAnnotation(type.variable.name)

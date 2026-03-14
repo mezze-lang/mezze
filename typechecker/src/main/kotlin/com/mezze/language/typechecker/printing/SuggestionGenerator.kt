@@ -373,12 +373,7 @@ object SuggestionGenerator {
         return suggestions
     }
 
-    private fun isNumericType(type: MezzeType): Boolean {
-        return type is MezzeType.IntType ||
-                type is MezzeType.FloatType ||
-                type is MezzeType.NatType ||
-                type is MezzeType.FracType
-    }
+    private fun isNumericType(type: MezzeType): Boolean = PrimitiveTypes.isNumericType(type)
 
     private fun formatSimpleType(type: MezzeType): String {
         // Use centralized registry for primitive types

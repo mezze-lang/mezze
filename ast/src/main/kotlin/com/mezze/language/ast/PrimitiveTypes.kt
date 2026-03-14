@@ -73,4 +73,38 @@ object PrimitiveTypes {
      * All primitive MezzeTypes.
      */
     val allTypes: Set<MezzeType> = typeToName.keys
+
+    /**
+     * Convert an internal MezzeType to an IdentifierTypeAnnotation.
+     * Returns null if the type is not a primitive type.
+     *
+     * This is a convenience method that combines toName() with IdentifierTypeAnnotation creation.
+     * Example: toAnnotation(MezzeType.StringType) -> IdentifierTypeAnnotation("Str")
+     */
+    fun toAnnotation(type: MezzeType): IdentifierTypeAnnotation? =
+        toName(type)?.let { IdentifierTypeAnnotation(it) }
+
+    // ========================================================================
+    // TYPE CATEGORIES
+    // ========================================================================
+
+    /**
+     * Numeric types that support arithmetic operations.
+     */
+    private val numericTypes: Set<MezzeType> = setOf(
+        MezzeType.IntType,
+        MezzeType.FloatType,
+        MezzeType.NatType,
+        MezzeType.FracType,
+    )
+
+    /**
+     * Check if a type is a numeric type (Int, Float, Nat, Frac).
+     */
+    fun isNumericType(type: MezzeType): Boolean = type in numericTypes
+
+    /**
+     * All numeric type names.
+     */
+    val numericTypeNames: Set<String> = numericTypes.mapNotNull { toName(it) }.toSet()
 }
