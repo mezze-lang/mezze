@@ -155,7 +155,7 @@ sealed class ConcreteType {
 
     /** Mezze String type */
     data object MzString : ConcreteType() {
-        override fun toCanonicalString() = "String"
+        override fun toCanonicalString() = "Str"
     }
 
     /** Mezze Bool type */

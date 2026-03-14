@@ -107,4 +107,23 @@ object PrimitiveTypes {
      * All numeric type names.
      */
     val numericTypeNames: Set<String> = numericTypes.mapNotNull { toName(it) }.toSet()
+
+    // ========================================================================
+    // TYPE MATCHING
+    // ========================================================================
+
+    /**
+     * Check if a type name matches a MezzeType.
+     *
+     * This is useful for checking if a type annotation name (e.g., "Int") corresponds
+     * to a specific MezzeType (e.g., MezzeType.IntType).
+     *
+     * Example: matches("Str", MezzeType.StringType) -> true
+     * Example: matches("Int", MezzeType.StringType) -> false
+     * Example: matches("CustomType", MezzeType.IntType) -> false
+     */
+    fun matches(name: String, type: MezzeType): Boolean {
+        val primitiveType = nameToType[name] ?: return false
+        return primitiveType == type
+    }
 }
