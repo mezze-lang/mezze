@@ -60,4 +60,50 @@ public final class MutableSet {
     public void clear() {
         data.clear();
     }
+
+    /**
+     * Get all elements as an array.
+     */
+    @TruffleBoundary
+    public Object[] elements() {
+        return data.toArray();
+    }
+
+    /**
+     * Add all elements from another set.
+     */
+    @TruffleBoundary
+    public void addAll(MutableSet other) {
+        data.addAll(other.data);
+    }
+
+    /**
+     * Remove all elements from another set.
+     */
+    @TruffleBoundary
+    public void removeAll(MutableSet other) {
+        data.removeAll(other.data);
+    }
+
+    /**
+     * Keep only elements that are also in another set (intersection).
+     */
+    @TruffleBoundary
+    public void retainAll(MutableSet other) {
+        data.retainAll(other.data);
+    }
+
+    /**
+     * Toggle element - add if not present, remove if present.
+     * Returns true if element is now in the set.
+     */
+    public boolean toggle(Object elem) {
+        if (data.contains(elem)) {
+            data.remove(elem);
+            return false;
+        } else {
+            data.add(elem);
+            return true;
+        }
+    }
 }

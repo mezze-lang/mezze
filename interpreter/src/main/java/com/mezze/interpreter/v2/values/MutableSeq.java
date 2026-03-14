@@ -132,4 +132,97 @@ public final class MutableSeq {
         data[i] = data[j];
         data[j] = temp;
     }
+
+    /**
+     * Push an element to the end of the sequence.
+     * Grows the array if necessary.
+     */
+    @TruffleBoundary
+    public void push(Object value) {
+        ensureCapacity(size + 1);
+        data[size++] = value;
+    }
+
+    /**
+     * Pop and return the last element.
+     * Returns null if empty.
+     */
+    public Object pop() {
+        if (size == 0) {
+            return null;
+        }
+        Object value = data[--size];
+        data[size] = null; // Help GC
+        return value;
+    }
+
+    /**
+     * Get element at index, returning null if out of bounds.
+     * This is the safe version for Option return.
+     */
+    public Object getSafe(int index) {
+        if (index < 0 || index >= size) {
+            return null;
+        }
+        return data[index];
+    }
+
+    /**
+     * Set element at index, returning true if successful.
+     */
+    public boolean setSafe(int index, Object value) {
+        if (index < 0 || index >= size) {
+            return false;
+        }
+        data[index] = value;
+        return true;
+    }
+
+    /**
+     * Clear all elements.
+     */
+    public void clear() {
+        Arrays.fill(data, 0, size, null);
+        size = 0;
+    }
+
+    /**
+     * Insert element at index, shifting elements right.
+     */
+    @TruffleBoundary
+    public boolean insert(int index, Object value) {
+        if (index < 0 || index > size) {
+            return false;
+        }
+        ensureCapacity(size + 1);
+        System.arraycopy(data, index, data, index + 1, size - index);
+        data[index] = value;
+        size++;
+        return true;
+    }
+
+    /**
+     * Remove element at index, shifting elements left.
+     * Returns the removed element or null if out of bounds.
+     */
+    @TruffleBoundary
+    public Object remove(int index) {
+        if (index < 0 || index >= size) {
+            return null;
+        }
+        Object value = data[index];
+        System.arraycopy(data, index + 1, data, index, size - index - 1);
+        data[--size] = null;
+        return value;
+    }
+
+    /**
+     * Ensure the array has at least the given capacity.
+     */
+    private void ensureCapacity(int minCapacity) {
+        if (minCapacity > data.length) {
+            int newCapacity = Math.max(data.length * 2, minCapacity);
+            data = Arrays.copyOf(data, newCapacity);
+        }
+    }
 }

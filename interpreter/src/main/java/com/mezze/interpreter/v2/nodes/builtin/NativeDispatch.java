@@ -1,5 +1,6 @@
 package com.mezze.interpreter.v2.nodes.builtin;
 
+import com.mezze.datastructures.bytes.MezzeBytes;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.map.MezzeMap;
@@ -3034,8 +3035,16 @@ public final class NativeDispatch extends MezzeNode {
         // Bytes conversions
         HANDLERS.put("__native_bytes_to_mut", (r, c) -> {
             Object bytesObj = getField(r, "bytes");
-            if (!(bytesObj instanceof byte[] bytes)) {
-                throw new RuntimeException("__native_bytes_to_mut expects Bytes");
+            byte[] bytes;
+            if (bytesObj instanceof byte[] b) {
+                bytes = b;
+            } else if (bytesObj instanceof MezzeBytes mb) {
+                bytes = mb.getData();
+            } else if (bytesObj instanceof BytesNatives.MezzeBytes bnb) {
+                bytes = bnb.getData();
+            } else {
+                throw new RuntimeException("__native_bytes_to_mut expects Bytes, got: " +
+                    (bytesObj == null ? "null" : bytesObj.getClass().getName()));
             }
             return MutableBytes.fromImmutable(bytes);
         });
@@ -3181,6 +3190,105 @@ public final class NativeDispatch extends MezzeNode {
             return MezzeRecord.empty();
         });
 
+        HANDLERS.put("__native_mut_int_mul", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long factor = getLong(r, "factor");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_mul expects MutableInt");
+            }
+            mutInt.multiply(factor);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_int_div", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long divisor = getLong(r, "divisor");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_div expects MutableInt");
+            }
+            mutInt.divide(divisor);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_int_mod", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long divisor = getLong(r, "divisor");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_mod expects MutableInt");
+            }
+            mutInt.mod(divisor);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_int_cas", (r, c) -> {
+            Object nObj = getField(r, "n");
+            long expected = getLong(r, "expected");
+            long newValue = getLong(r, "new_val");
+            if (!(nObj instanceof MutableInt mutInt)) {
+                throw new RuntimeException("__native_mut_int_cas expects MutableInt");
+            }
+            return mutInt.compareAndSwap(expected, newValue);
+        });
+
+        // MutFloat extended operations
+        HANDLERS.put("__native_mut_float_read", (r, c) -> {
+            Object nObj = getField(r, "n");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_read expects MutableFloat");
+            }
+            return mutFloat.get();
+        });
+
+        HANDLERS.put("__native_mut_float_write", (r, c) -> {
+            Object nObj = getField(r, "n");
+            double v = getDouble(r, "v");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_write expects MutableFloat");
+            }
+            mutFloat.set(v);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_float_add", (r, c) -> {
+            Object nObj = getField(r, "n");
+            double delta = getDouble(r, "delta");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_add expects MutableFloat");
+            }
+            mutFloat.add(delta);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_float_sub", (r, c) -> {
+            Object nObj = getField(r, "n");
+            double delta = getDouble(r, "delta");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_sub expects MutableFloat");
+            }
+            mutFloat.subtract(delta);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_float_mul", (r, c) -> {
+            Object nObj = getField(r, "n");
+            double factor = getDouble(r, "factor");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_mul expects MutableFloat");
+            }
+            mutFloat.multiply(factor);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_float_div", (r, c) -> {
+            Object nObj = getField(r, "n");
+            double divisor = getDouble(r, "divisor");
+            if (!(nObj instanceof MutableFloat mutFloat)) {
+                throw new RuntimeException("__native_mut_float_div expects MutableFloat");
+            }
+            mutFloat.divide(divisor);
+            return MezzeRecord.empty();
+        });
+
         // Looping constructs
         HANDLERS.put("__native_for_range", (r, c) -> {
             long start = getLong(r, "start");
@@ -3204,6 +3312,519 @@ public final class NativeDispatch extends MezzeNode {
             }
             whileLoop(cond, body, c);
             return MezzeRecord.empty();
+        });
+
+        // MutSeq dynamic operations
+        HANDLERS.put("__native_mut_seq_push", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            Object value = getField(r, "v");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_push expects MutableSeq");
+            }
+            mutSeq.push(value);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_pop", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_pop expects MutableSeq");
+            }
+            Object value = mutSeq.pop();
+            // Return Option: Some {val} or None
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_seq_get", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long index = getLong(r, "i");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_get expects MutableSeq");
+            }
+            Object value = mutSeq.getSafe((int) index);
+            // Return Option: Some {val} or None
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_seq_set", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long index = getLong(r, "i");
+            Object value = getField(r, "v");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_set expects MutableSeq");
+            }
+            boolean success = mutSeq.setSafe((int) index, value);
+            return success;
+        });
+
+        HANDLERS.put("__native_mut_seq_len", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_len expects MutableSeq");
+            }
+            return (long) mutSeq.size();
+        });
+
+        HANDLERS.put("__native_mut_seq_clear", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_clear expects MutableSeq");
+            }
+            mutSeq.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_seq_insert", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long index = getLong(r, "i");
+            Object value = getField(r, "v");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_insert expects MutableSeq");
+            }
+            return mutSeq.insert((int) index, value);
+        });
+
+        HANDLERS.put("__native_mut_seq_remove", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long index = getLong(r, "i");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_remove expects MutableSeq");
+            }
+            Object value = mutSeq.remove((int) index);
+            // Return Option: Some {val} or None
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_seq_swap", (r, c) -> {
+            Object seqObj = getField(r, "seq");
+            long i = getLong(r, "i");
+            long j = getLong(r, "j");
+            if (!(seqObj instanceof MutableSeq mutSeq)) {
+                throw new RuntimeException("__native_mut_seq_swap expects MutableSeq");
+            }
+            try {
+                mutSeq.swap((int) i, (int) j);
+                return true;
+            } catch (IndexOutOfBoundsException e) {
+                return false;
+            }
+        });
+
+        // MutMap operations
+        HANDLERS.put("__native_mut_map_get", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            Object key = getField(r, "key");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_get expects MutableMap");
+            }
+            Object value = mutMap.get(key);
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_map_put", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            Object key = getField(r, "key");
+            Object value = getField(r, "value");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_put expects MutableMap");
+            }
+            mutMap.put(key, value);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_map_remove", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            Object key = getField(r, "key");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_remove expects MutableMap");
+            }
+            mutMap.remove(key);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_map_contains", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            Object key = getField(r, "key");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_contains expects MutableMap");
+            }
+            return mutMap.containsKey(key);
+        });
+
+        HANDLERS.put("__native_mut_map_size", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_size expects MutableMap");
+            }
+            return (long) mutMap.size();
+        });
+
+        HANDLERS.put("__native_mut_map_clear", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_clear expects MutableMap");
+            }
+            mutMap.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_map_keys", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_keys expects MutableMap");
+            }
+            return MezzeSeq.fromArray(mutMap.keys());
+        });
+
+        HANDLERS.put("__native_mut_map_values", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_values expects MutableMap");
+            }
+            return MezzeSeq.fromArray(mutMap.values());
+        });
+
+        HANDLERS.put("__native_mut_map_entries", (r, c) -> {
+            Object mapObj = getField(r, "map");
+            if (!(mapObj instanceof MutableMap mutMap)) {
+                throw new RuntimeException("__native_mut_map_entries expects MutableMap");
+            }
+            return MezzeSeq.fromArray(mutMap.entries());
+        });
+
+        // MutSet operations
+        HANDLERS.put("__native_mut_set_add", (r, c) -> {
+            Object setObj = getField(r, "set");
+            Object elem = getField(r, "elem");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_add expects MutableSet");
+            }
+            mutSet.add(elem);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_set_remove", (r, c) -> {
+            Object setObj = getField(r, "set");
+            Object elem = getField(r, "elem");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_remove expects MutableSet");
+            }
+            mutSet.remove(elem);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_set_contains", (r, c) -> {
+            Object setObj = getField(r, "set");
+            Object elem = getField(r, "elem");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_contains expects MutableSet");
+            }
+            return mutSet.contains(elem);
+        });
+
+        HANDLERS.put("__native_mut_set_size", (r, c) -> {
+            Object setObj = getField(r, "set");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_size expects MutableSet");
+            }
+            return (long) mutSet.size();
+        });
+
+        HANDLERS.put("__native_mut_set_clear", (r, c) -> {
+            Object setObj = getField(r, "set");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_clear expects MutableSet");
+            }
+            mutSet.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_set_elements", (r, c) -> {
+            Object setObj = getField(r, "set");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_elements expects MutableSet");
+            }
+            return MezzeSeq.fromArray(mutSet.elements());
+        });
+
+        HANDLERS.put("__native_mut_set_toggle", (r, c) -> {
+            Object setObj = getField(r, "set");
+            Object elem = getField(r, "elem");
+            if (!(setObj instanceof MutableSet mutSet)) {
+                throw new RuntimeException("__native_mut_set_toggle expects MutableSet");
+            }
+            return mutSet.toggle(elem);
+        });
+
+        // MutBytes operations
+        HANDLERS.put("__native_mut_bytes_get", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long index = getLong(r, "i");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_get expects MutableBytes");
+            }
+            int value = mutBytes.getSafe((int) index);
+            if (value == -1) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some((long) value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_bytes_set", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long index = getLong(r, "i");
+            long value = getLong(r, "v");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_set expects MutableBytes");
+            }
+            return mutBytes.setSafe((int) index, (int) value);
+        });
+
+        HANDLERS.put("__native_mut_bytes_len", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_len expects MutableBytes");
+            }
+            return (long) mutBytes.length();
+        });
+
+        HANDLERS.put("__native_mut_bytes_fill", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long value = getLong(r, "v");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_fill expects MutableBytes");
+            }
+            mutBytes.fill((byte) value);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bytes_fill_range", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long start = getLong(r, "start");
+            long end = getLong(r, "end");
+            long value = getLong(r, "v");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_fill_range expects MutableBytes");
+            }
+            mutBytes.fillRange((int) start, (int) end, (byte) value);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bytes_slice", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long start = getLong(r, "start");
+            long end = getLong(r, "end");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_slice expects MutableBytes");
+            }
+            return mutBytes.slice((int) start, (int) end);
+        });
+
+        HANDLERS.put("__native_mut_bytes_resize", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long newSize = getLong(r, "size");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_resize expects MutableBytes");
+            }
+            mutBytes.resize((int) newSize);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bytes_swap", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            long i = getLong(r, "i");
+            long j = getLong(r, "j");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_swap expects MutableBytes");
+            }
+            return mutBytes.swap((int) i, (int) j);
+        });
+
+        HANDLERS.put("__native_mut_bytes_reverse", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_reverse expects MutableBytes");
+            }
+            mutBytes.reverse();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bytes_clear", (r, c) -> {
+            Object bytesObj = getField(r, "bytes");
+            if (!(bytesObj instanceof MutableBytes mutBytes)) {
+                throw new RuntimeException("__native_mut_bytes_clear expects MutableBytes");
+            }
+            mutBytes.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bytes_copy", (r, c) -> {
+            Object destObj = getField(r, "dest");
+            Object srcObj = getField(r, "src");
+            long srcOffset = getLong(r, "src_offset");
+            long destOffset = getLong(r, "dest_offset");
+            long length = getLong(r, "length");
+            if (!(destObj instanceof MutableBytes destBytes)) {
+                throw new RuntimeException("__native_mut_bytes_copy expects MutableBytes for dest");
+            }
+            if (!(srcObj instanceof MutableBytes srcBytes)) {
+                throw new RuntimeException("__native_mut_bytes_copy expects MutableBytes for src");
+            }
+            destBytes.copyFromMutable(srcBytes, (int) srcOffset, (int) destOffset, (int) length);
+            return MezzeRecord.empty();
+        });
+
+        // MutDeque operations
+        HANDLERS.put("__native_deque_to_mut", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MezzeDeque deque)) {
+                throw new RuntimeException("__native_deque_to_mut expects MezzeDeque");
+            }
+            return MutableDeque.fromImmutable(deque);
+        });
+
+        HANDLERS.put("__native_deque_to_immut", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_deque_to_immut expects MutableDeque");
+            }
+            return mutDeque.toImmutable();
+        });
+
+        HANDLERS.put("__native_mut_deque_with_capacity", (r, c) -> {
+            long capacity = getLong(r, "capacity");
+            return MutableDeque.withCapacity((int) capacity);
+        });
+
+        HANDLERS.put("__native_mut_deque_push_front", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            Object elem = getField(r, "elem");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_push_front expects MutableDeque");
+            }
+            mutDeque.pushFront(elem);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_deque_push_back", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            Object elem = getField(r, "elem");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_push_back expects MutableDeque");
+            }
+            mutDeque.pushBack(elem);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_deque_pop_front", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_pop_front expects MutableDeque");
+            }
+            Object value = mutDeque.popFront();
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_deque_pop_back", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_pop_back expects MutableDeque");
+            }
+            Object value = mutDeque.popBack();
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_deque_peek_front", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_peek_front expects MutableDeque");
+            }
+            Object value = mutDeque.peekFront();
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_deque_peek_back", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_peek_back expects MutableDeque");
+            }
+            Object value = mutDeque.peekBack();
+            if (value == null) {
+                return MezzeVariant.none();
+            } else {
+                return MezzeVariant.some(value);
+            }
+        });
+
+        HANDLERS.put("__native_mut_deque_size", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_size expects MutableDeque");
+            }
+            return (long) mutDeque.size();
+        });
+
+        HANDLERS.put("__native_mut_deque_is_empty", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_is_empty expects MutableDeque");
+            }
+            return mutDeque.isEmpty();
+        });
+
+        HANDLERS.put("__native_mut_deque_clear", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_clear expects MutableDeque");
+            }
+            mutDeque.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_deque_reverse", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_reverse expects MutableDeque");
+            }
+            mutDeque.reverse();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_deque_to_seq", (r, c) -> {
+            Object dequeObj = getField(r, "deque");
+            if (!(dequeObj instanceof MutableDeque mutDeque)) {
+                throw new RuntimeException("__native_mut_deque_to_seq expects MutableDeque");
+            }
+            return MezzeSeq.fromArray(mutDeque.toArray());
         });
     }
 

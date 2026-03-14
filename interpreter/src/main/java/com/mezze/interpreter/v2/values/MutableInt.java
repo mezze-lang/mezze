@@ -36,4 +36,27 @@ public final class MutableInt {
     public long incrementAndGet() {
         return ++value;
     }
+
+    public void multiply(long factor) {
+        this.value *= factor;
+    }
+
+    public void divide(long divisor) {
+        this.value /= divisor;
+    }
+
+    public void mod(long divisor) {
+        this.value %= divisor;
+    }
+
+    /**
+     * Compare and swap. Returns true if value was equal to expected and was set to newValue.
+     */
+    public boolean compareAndSwap(long expected, long newValue) {
+        if (this.value == expected) {
+            this.value = newValue;
+            return true;
+        }
+        return false;
+    }
 }
