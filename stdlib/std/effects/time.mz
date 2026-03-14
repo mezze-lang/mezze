@@ -23,10 +23,10 @@ effect Time where {
     current_second: {} -> Int <Time>,
 
     # Format timestamp to string
-    format_timestamp: { timestamp: Int, format: String } -> String <Time>,
+    format_timestamp: { timestamp: Int, format: Str } -> Str <Time>,
 
     # Parse string to timestamp
-    parse_timestamp: { date_string: String, format: String } -> Int <Time>
+    parse_timestamp: { date_string: Str, format: Str } -> Int <Time>
 }
 
 # System time implementation using system clock
@@ -142,16 +142,16 @@ pub let days_in_month: { year: Int, month: Int } -> Int = { year, month } ->
         _ -> 0
 
 # Format timestamp with common formats
-pub let format_iso8601: { timestamp: Int } -> String <Time> = { timestamp } ->
+pub let format_iso8601: { timestamp: Int } -> Str <Time> = { timestamp } ->
     Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd'T'HH:mm:ss'Z'" }
 
-pub let format_date: { timestamp: Int } -> String <Time> = { timestamp } ->
+pub let format_date: { timestamp: Int } -> Str <Time> = { timestamp } ->
     Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd" }
 
-pub let format_time_only: { timestamp: Int } -> String <Time> = { timestamp } ->
+pub let format_time_only: { timestamp: Int } -> Str <Time> = { timestamp } ->
     Time.format_timestamp { timestamp = timestamp, format = "HH:mm:ss" }
 
-pub let format_datetime: { timestamp: Int } -> String <Time> = { timestamp } ->
+pub let format_datetime: { timestamp: Int } -> Str <Time> = { timestamp } ->
     Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd HH:mm:ss" }
 
 # Get elapsed time since timestamp

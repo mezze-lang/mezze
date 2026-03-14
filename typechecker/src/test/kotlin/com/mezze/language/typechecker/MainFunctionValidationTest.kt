@@ -37,7 +37,7 @@ class MainFunctionValidationTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -61,7 +61,7 @@ class MainFunctionValidationTest {
                 next: {} -> 'val
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -87,7 +87,7 @@ class MainFunctionValidationTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -148,7 +148,7 @@ class MainFunctionValidationTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -172,7 +172,7 @@ class MainFunctionValidationTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -231,7 +231,7 @@ class MainFunctionValidationTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 

@@ -444,7 +444,7 @@ pub let ends_with: { xs: ['a], suffix: ['a] } -> Bool = {xs, suffix} -> __native
 
 # Join string elements with separator
 # Example: join { xs = ["a", "b", "c"], sep = ", " } -> "a, b, c"
-pub let join: { xs: [String], sep: String } -> String = {xs, sep} -> __native_seq_join {xs = xs, sep = sep}
+pub let join: { xs: [Str], sep: Str } -> Str = {xs, sep} -> __native_seq_join {xs = xs, sep = sep}
 
 # ============================================================================
 # Advanced Zip Operations

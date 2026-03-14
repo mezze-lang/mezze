@@ -42,7 +42,7 @@ class AbilityConstraintTest {
             use std::codec::core::{Encode, CodecConfig, default_config}
             use std::codec::json::{Json, to_str}
 
-            let encode_to_json: { body: 'a } -> String with Encode Json 'a = { body } -> do
+            let encode_to_json: { body: 'a } -> Str with Encode Json 'a = { body } -> do
                 let result = Encode.encode { val = body, config = default_config }
                 match result is
                     Ok { val } -> to_str { json = val }
@@ -60,7 +60,7 @@ class AbilityConstraintTest {
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, post_body}
 
-            type User = { name: String, age: Int }
+            type User = { name: Str, age: Int }
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
@@ -75,7 +75,7 @@ class AbilityConstraintTest {
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, put_body}
 
-            type User = { name: String, age: Int }
+            type User = { name: Str, age: Int }
 
             let test = {} -> do
                 let user: User = { name = "Alice", age = 30 }
@@ -90,7 +90,7 @@ class AbilityConstraintTest {
         val error = typeCheck("""
             use std::effects::http::{Http, HttpClient, patch_body}
 
-            type UserPatch = { name: Option String }
+            type UserPatch = { name: Option Str }
 
             let test = {} -> do
                 let patch: UserPatch = { name = Some { val = "Bob" } }

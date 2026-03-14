@@ -2179,8 +2179,8 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
                 typeStr.contains("|") -> "🏷️"  // Variant
                 typeStr.contains("{") -> "📦" // Record
                 typeStr == "Int" || typeStr == "Float" || typeStr == "Nat" || typeStr == "Frac" -> "🔢"
-                typeStr == "String" -> "📝"
-                typeStr == "Boolean" -> "✅"
+                typeStr == "Str" -> "📝"
+                typeStr == "Bool" -> "✅"
                 else -> "📋"
             }
 

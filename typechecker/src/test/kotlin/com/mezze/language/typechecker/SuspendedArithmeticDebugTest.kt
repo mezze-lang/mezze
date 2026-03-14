@@ -9,11 +9,11 @@ class SuspendedArithmeticDebugTest {
     fun `minimal suspended arithmetic`() {
         val code = """
             effect Log where {
-              print: {msg: String} -> {} <Log>
+              print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print: {msg: String} -> {} = {msg} -> {}
+              print: {msg: Str} -> {} = {msg} -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do

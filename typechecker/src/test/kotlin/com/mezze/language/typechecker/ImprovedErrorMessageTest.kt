@@ -44,7 +44,7 @@ class ImprovedErrorMessageTest {
     @Test
     fun `test type annotation error mentions binding name`() {
         val source = """
-            let myVariable: String = 42
+            let myVariable: Str = 42
             myVariable
         """.trimIndent()
 
@@ -68,7 +68,7 @@ class ImprovedErrorMessageTest {
         assertNotNull(error, "Expected type error")
         // Should mention the types
         assertTrue(
-            error!!.contains("Int") && error.contains("String"),
+            error!!.contains("Int") && error.contains("Str"),
             "Error should mention both expected (Int) and actual (String) types: $error"
         )
     }
@@ -147,11 +147,11 @@ class ImprovedErrorMessageTest {
         """.trimIndent()
 
         val error = getErrorMessage(source)
-        // Note: String interpolation might auto-convert or might require Show ability
+        // Note: Str interpolation might auto-convert or might require Show ability
         // The test checks that if there's an error, it's informative
         if (error != null) {
             assertTrue(
-                error.contains("String") || error.contains("interpolation") || error.contains("mismatch"),
+                error.contains("Str") || error.contains("interpolation") || error.contains("mismatch"),
                 "Error should mention String type requirement: $error"
             )
         }
@@ -167,7 +167,7 @@ class ImprovedErrorMessageTest {
         // Test passing a function with wrong argument type
         val source = """
             let apply = {f, x} -> f {val = x}
-            let wrongFunc = {val: String} -> val
+            let wrongFunc = {val: Str} -> val
             let result = apply {f = wrongFunc, x = 42}
             result
         """.trimIndent()
@@ -176,7 +176,7 @@ class ImprovedErrorMessageTest {
         assertNotNull(error, "Expected type error")
         // Should indicate type mismatch
         assertTrue(
-            error!!.contains("mismatch") || error.contains("expected") || error.contains("String") || error.contains("Int"),
+            error!!.contains("mismatch") || error.contains("expected") || error.contains("Str") || error.contains("Int"),
             "Error should indicate type mismatch: $error"
         )
     }
@@ -184,7 +184,7 @@ class ImprovedErrorMessageTest {
     @Test
     fun `test pattern match type error shows pattern context`() {
         val source = """
-            type Result = | Ok { val: Int }, Err { msg: String } |
+            type Result = | Ok { val: Int }, Err { msg: Str } |
             let check = {x: Result} -> do
                 match x is
                     Ok { val } -> val
@@ -198,7 +198,7 @@ class ImprovedErrorMessageTest {
         assertNotNull(error, "Expected type error for mismatched match branches")
         // Should indicate type mismatch between branches
         assertTrue(
-            error!!.contains("mismatch") || error.contains("String") || error.contains("Int"),
+            error!!.contains("mismatch") || error.contains("Str") || error.contains("Int"),
             "Error should indicate branch type mismatch: $error"
         )
     }

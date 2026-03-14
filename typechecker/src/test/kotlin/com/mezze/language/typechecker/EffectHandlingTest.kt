@@ -34,11 +34,11 @@ class EffectHandlingTest {
     fun testSingleEffectHandling() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let effectfulFunc = {x} -> Log.print {msg = "test"}
@@ -73,7 +73,7 @@ class EffectHandlingTest {
             use std::int
 
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -81,11 +81,11 @@ class EffectHandlingTest {
             }
 
             effect FileIO where {
-              writeFile : {path: String, content: String} -> {} <FileIO>
+              writeFile : {path: Str, content: Str} -> {} <FileIO>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -93,7 +93,7 @@ class EffectHandlingTest {
             }
 
             impl FileIO for SystemFileIO where {
-              writeFile : {path: String, content: String} -> {} = {path, content} -> {}
+              writeFile : {path: Str, content: Str} -> {} = {path, content} -> {}
             }
 
             let multiEffectFunc = {x, y} -> do
@@ -127,7 +127,7 @@ class EffectHandlingTest {
     fun testProgressiveEffectHandling() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -135,7 +135,7 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -178,7 +178,7 @@ class EffectHandlingTest {
     fun testHandleMultipleEffectsAtOnce() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -186,7 +186,7 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -225,7 +225,7 @@ class EffectHandlingTest {
     fun testPartialEffectHandling() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -233,7 +233,7 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -270,11 +270,11 @@ class EffectHandlingTest {
     fun testEffectHandlingWithDoExpressionConstraints() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
             
             let effectfulCalc = {x, y} -> do
@@ -314,7 +314,7 @@ class EffectHandlingTest {
     fun testUnhandledEffectRemains() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
             
             effect Random where {
@@ -322,7 +322,7 @@ class EffectHandlingTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
             
             let dualEffectFunc = {x} -> do
@@ -351,7 +351,7 @@ class EffectHandlingTest {
     fun testEffectComposition() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
             
             effect Random where {
@@ -359,7 +359,7 @@ class EffectHandlingTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Random for SystemRandom where {

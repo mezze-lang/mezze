@@ -281,23 +281,23 @@ class PunnedRecordClosureTest {
     @Test
     fun `test FileLogger pattern - punned path in record passed to effect op`() {
         // This is the exact pattern that was failing:
-        // impl Log for FileLogger {path: String} where {
+        // impl Log for FileLogger {path: Str} where {
         //     info = { msg } -> FileSystem.write_file {path, content = msg}
         // }
         val source = """
             effect Writer where {
-                write: {path: String, content: String} -> {} <Writer>
+                write: {path: Str, content: Str} -> {} <Writer>
             }
 
             effect Logger where {
-                log: {msg: String} -> {} <Logger>
+                log: {msg: Str} -> {} <Logger>
             }
 
             impl Writer for MemoryWriter where {
                 write = {path, content} -> {}
             }
 
-            impl Logger for PathLogger {path: String} where {
+            impl Logger for PathLogger {path: Str} where {
                 log = {msg} -> Writer.write {path, content = msg}
             }
 
@@ -315,10 +315,10 @@ class PunnedRecordClosureTest {
     fun `test multiple performer params all captured via punning`() {
         val source = """
             effect Formatter where {
-                format: {value: Int} -> String <Formatter>
+                format: {value: Int} -> Str <Formatter>
             }
 
-            impl Formatter for PrefixSuffixFormatter {prefix: String, suffix: String} where {
+            impl Formatter for PrefixSuffixFormatter {prefix: Str, suffix: Str} where {
                 format = {value} -> do
                     let mid = Inspect.to_str {val = value}
                     "$(prefix)$(mid)$(suffix)"
@@ -337,10 +337,10 @@ class PunnedRecordClosureTest {
     fun `test punned param used multiple times in impl body`() {
         val source = """
             effect Repeater where {
-                repeat: {} -> String <Repeater>
+                repeat: {} -> Str <Repeater>
             }
 
-            impl Repeater for DoubleRepeater {text: String} where {
+            impl Repeater for DoubleRepeater {text: Str} where {
                 repeat = {} -> "$(text)$(text)"
             }
 
@@ -357,10 +357,10 @@ class PunnedRecordClosureTest {
     fun `test punned string param with interpolation in impl body`() {
         val source = """
             effect Greeter where {
-                greet: {name: String} -> String <Greeter>
+                greet: {name: Str} -> Str <Greeter>
             }
 
-            impl Greeter for PrefixGreeter {prefix: String} where {
+            impl Greeter for PrefixGreeter {prefix: Str} where {
                 greet = {name} -> "$(prefix) $(name)!"
             }
 

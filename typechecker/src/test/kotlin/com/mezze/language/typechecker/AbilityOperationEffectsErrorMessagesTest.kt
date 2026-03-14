@@ -26,7 +26,7 @@ class AbilityOperationEffectsErrorMessagesTest {
     fun `error message for polymorphic effects mentions the operation name and ability`() {
         val source = """
             ability BadAbility 'a where {
-                bad_operation: {val: 'a} -> String <...>
+                bad_operation: {val: 'a} -> Str <...>
             }
         """.trimIndent()
 
@@ -52,7 +52,7 @@ class AbilityOperationEffectsErrorMessagesTest {
     fun `error message for performed marker mentions the operation name and ability`() {
         val source = """
             ability BadAbility 'a where {
-                bad_operation: {val: 'a} -> String <*>
+                bad_operation: {val: 'a} -> Str <*>
             }
         """.trimIndent()
 
@@ -77,12 +77,12 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `error message for effect with polymorphic tail is clear`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability BadAbility 'a where {
-                bad_op: {val: 'a} -> String <Mutation, ...>
+                bad_op: {val: 'a} -> Str <Mut, ...>
             }
         """.trimIndent()
 
@@ -104,12 +104,12 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `error message for effect with performed marker is clear`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability BadAbility 'a where {
-                bad_op: {val: 'a} -> String <Mutation, *>
+                bad_op: {val: 'a} -> Str <Mut, *>
             }
         """.trimIndent()
 
@@ -132,11 +132,11 @@ class AbilityOperationEffectsErrorMessagesTest {
     fun `error identifies which operation has invalid effects in multi-op ability`() {
         val source = """
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             ability MixedAbility 'a where {
-                good_op1: {val: 'a} -> String,
+                good_op1: {val: 'a} -> Str,
                 good_op2: {val: 'a} -> Int <Log>,
                 the_bad_one: {val: 'a} -> Bool <...>,
                 good_op3: {val: 'a} -> Float
@@ -166,16 +166,16 @@ class AbilityOperationEffectsErrorMessagesTest {
     fun `impl with no type annotation uses ability effect signature`() {
         // When impl doesn't specify type, it inherits from ability
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
-                # No explicit type - should inherit <Mutation> from ability
+                # No explicit type - should inherit <Mut> from ability
                 set = {c, i} -> True
             }
 
@@ -191,17 +191,17 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `impl can specify explicit matching effect signature`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
                 # Explicit matching signature
-                set: {c: [Int], i: Int} -> Bool <Mutation> = {c, i} -> True
+                set: {c: [Int], i: Int} -> Bool <Mut> = {c, i} -> True
             }
 
             Mutable.set {c = [1, 2, 3], i = 0}
@@ -219,20 +219,20 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `impl with wrong effect should ideally fail`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
-                # WRONG: declares <Log> but ability says <Mutation>
+                # WRONG: declares <Log> but ability says <Mut>
                 set: {c: [Int], i: Int} -> Bool <Log> = {c, i} -> True
             }
         """.trimIndent()
@@ -248,7 +248,7 @@ class AbilityOperationEffectsErrorMessagesTest {
             // Don't fail the test - document this as known limitation
         } catch (e: TypeCheckError) {
             println("Good: Impl with wrong effect correctly failed: ${e.message}")
-            assertTrue(e.message?.contains("effect") == true || e.message?.contains("Mutation") == true) {
+            assertTrue(e.message?.contains("effect") == true || e.message?.contains("Mut") == true) {
                 "Error should mention effect mismatch: ${e.message}"
             }
         }
@@ -257,16 +257,16 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `impl with pure signature when ability has effect should ideally fail`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
-                # WRONG: declares pure <> but ability says <Mutation>
+                # WRONG: declares pure <> but ability says <Mut>
                 set: {c: [Int], i: Int} -> Bool <> = {c, i} -> True
             }
         """.trimIndent()
@@ -285,16 +285,16 @@ class AbilityOperationEffectsErrorMessagesTest {
     fun `impl with effect when ability is pure should ideally fail`() {
         val source = """
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             ability Show 'a where {
-                show: {val: 'a} -> String  # Pure - no effects
+                show: {val: 'a} -> Str  # Pure - no effects
             }
 
             impl Show Int where {
                 # WRONG: declares <Log> but ability is pure
-                show: {val: Int} -> String <Log> = {val} -> "number"
+                show: {val: Int} -> Str <Log> = {val} -> "number"
             }
         """.trimIndent()
 

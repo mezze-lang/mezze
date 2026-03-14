@@ -155,16 +155,10 @@ data class VariantTypeConstructor(
 fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
     return when (annotation) {
         is IdentifierTypeAnnotation -> {
-            when (annotation.name) {
-                "Int" -> MezzeType.IntType
-                "Float" -> MezzeType.FloatType
-                "String" -> MezzeType.StringType
-                "Boolean" -> MezzeType.BoolType
-                "Nat" -> MezzeType.NatType
-                "Frac" -> MezzeType.FracType
-                "Ordering" -> MezzeType.OrderingType
-                else -> MezzeType.VarType(TypeVar(annotation.name))
-            }
+            // Check primitive types first
+            PrimitiveTypes.fromName(annotation.name)?.let { return it }
+            // Fallback to type variable
+            MezzeType.VarType(TypeVar(annotation.name))
         }
         is FunctionTypeAnnotation -> {
             // Validate that parameter type is a RecordTypeAnnotation

@@ -1008,26 +1008,11 @@ class ModuleResolver(
     private fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Boolean" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
-                    "Bool" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    "Ordering" -> MezzeType.OrderingType
-                    else -> MezzeType.VarType(TypeVar.fresh())
-                }
+                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                // Not a primitive type - treat as type variable
+                MezzeType.VarType(TypeVar.fresh())
             }
             is FunctionTypeAnnotation -> {
                 val effectRow = annotation.effects?.let { effectRowAnnotation ->

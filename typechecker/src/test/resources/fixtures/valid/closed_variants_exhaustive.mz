@@ -9,7 +9,7 @@ let handleBool = {b} -> match b is
 let handleTrafficLight = {light} -> match light is
   Red -> "stop"
   Yellow -> "caution"
-  Green -> "go"                                                 # expected: handleTrafficLight : { light: | Red, Yellow, Green | } -> String
+  Green -> "go"                                                 # expected: handleTrafficLight : { light: | Red, Yellow, Green | } -> Str
 
 # Exhaustive with data fields - closed
 let handleOption = {opt} -> match opt is

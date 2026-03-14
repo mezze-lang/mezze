@@ -134,7 +134,7 @@ class AbilityAssociatedTypesTest {
                 add = {collection, element} -> collection,
             }
 
-            impl Collection [String] having 'item = String where {
+            impl Collection [Str] having 'item = Str where {
                 empty = {} -> [],
                 add = {collection, element} -> collection,
             }
@@ -315,10 +315,10 @@ class AbilityAssociatedTypesTest {
     fun `test error when impl has binding but ability doesn't`() {
         val source = """
             ability Show 't where {
-                show: {value: 't} -> String,
+                show: {value: 't} -> Str,
             }
 
-            impl Show Int having 'extra = String where {
+            impl Show Int having 'extra = Str where {
                 show = {value} -> "42",
             }
         """.trimIndent()
@@ -384,7 +384,7 @@ class AbilityAssociatedTypesTest {
                 tryConvert: {value: 'from} -> (Result 'to 'error),
             }
 
-            impl Convert String having 'to = Int, 'error = String where {
+            impl Convert String having 'to = Int, 'error = Str where {
                 convert = {value} -> 42,
                 tryConvert = {value} -> Ok { val = 42 },
             }
@@ -407,7 +407,7 @@ class AbilityAssociatedTypesTest {
                 third: {triple: 't} -> 'c,
             }
 
-            impl Triple {x: Int, y: String, z: Bool} having 'a = Int, 'b = String, 'c = Bool where {
+            impl Triple {x: Int, y: Str, z: Bool} having 'a = Int, 'b = Str, 'c = Bool where {
                 first = {triple} -> triple.x,
                 second = {triple} -> triple.y,
                 third = {triple} -> triple.z,
@@ -499,7 +499,7 @@ class AbilityAssociatedTypesTest {
                 convert: {value: 'from} -> 'to,
             }
 
-            impl Convert String having 'to = Int, 'wrong = String where {
+            impl Convert String having 'to = Int, 'wrong = Str where {
                 convert = {value} -> 42,
             }
         """.trimIndent()
@@ -522,7 +522,7 @@ class AbilityAssociatedTypesTest {
                 getSecond: {pair: 'p} -> 'second,
             }
 
-            impl Pair {x: Int, y: String} having 'first = Int, 'second = String where {
+            impl Pair {x: Int, y: Str} having 'first = Int, 'second = Str where {
                 getFirst = {pair} -> pair.x,
                 getSecond = {pair} -> pair.y,
             }
@@ -547,7 +547,7 @@ class AbilityAssociatedTypesTest {
                 getState: {input: 'input} -> 'state,
             }
 
-            impl Convert String having 'to = Int, 'error = String where {
+            impl Convert String having 'to = Int, 'error = Str where {
                 convert = {value} -> 42,
             }
 
@@ -574,7 +574,7 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Converter 'from having 'to, 'error with Eq 'from, Show 'error where {
                 convert: {value: 'from} -> 'to,
-                describe: {error: 'error} -> String,
+                describe: {error: 'error} -> Str,
             }
         """.trimIndent()
 
@@ -593,15 +593,15 @@ class AbilityAssociatedTypesTest {
                 convert: {value: 'from} -> 'to,
             }
 
-            impl Convert String having 'to = Int, 'error = String where {
+            impl Convert String having 'to = Int, 'error = Str where {
                 convert = {value} -> 42,
             }
 
-            impl Convert Bool having 'to = Int, 'error = String where {
+            impl Convert Bool having 'to = Int, 'error = Str where {
                 convert = {value} -> 1,
             }
 
-            impl Convert Float having 'to = String, 'error = Bool where {
+            impl Convert Float having 'to = Str, 'error = Bool where {
                 convert = {value} -> "3.14",
             }
         """.trimIndent()
@@ -689,12 +689,12 @@ class AbilityAssociatedTypesTest {
                 getValue: {container: 'c} -> 'value,
             }
 
-            impl BiContainer {k: Int, v: String} having 'key = Int, 'value = String where {
+            impl BiContainer {k: Int, v: Str} having 'key = Int, 'value = Str where {
                 getKey = {container} -> container.k,
                 getValue = {container} -> container.v,
             }
 
-            let container: {k: Int, v: String} = {k = 42, v = "hello"}
+            let container: {k: Int, v: Str} = {k = 42, v = "hello"}
             let key = BiContainer.getKey {container = container}
             let value = BiContainer.getValue {container = container}
         """.trimIndent()

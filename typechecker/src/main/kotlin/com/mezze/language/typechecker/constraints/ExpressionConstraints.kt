@@ -1719,7 +1719,7 @@ class ExpressionConstraintGenerator {
                 when (annotation.name) {
                     "Int" -> constraintType is MezzeType.IntType
                     "Float" -> constraintType is MezzeType.FloatType
-                    "String" -> constraintType is MezzeType.StringType
+                    "Str" -> constraintType is MezzeType.StringType
                     "Bool" -> constraintType is MezzeType.BoolType || isBoolVariant(constraintType)
                     "Nat" -> constraintType is MezzeType.NatType
                     "Frac" -> constraintType is MezzeType.FracType
@@ -3960,28 +3960,14 @@ class ExpressionConstraintGenerator {
     private fun convertFieldType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Ordering" -> MezzeType.OrderingType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    else -> {
-                        // Type variable or type constructor
-                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                            MezzeType.VarType(TypeVar(annotation.name))
-                        } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList())
-                        }
-                    }
+                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                // Type variable or type constructor
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    MezzeType.VarType(TypeVar(annotation.name))
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList())
                 }
             }
             is RecordTypeAnnotation -> {

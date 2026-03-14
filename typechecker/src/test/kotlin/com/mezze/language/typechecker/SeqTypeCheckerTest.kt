@@ -52,7 +52,7 @@ class SeqTypeCheckerTest {
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
         
-        // Should infer [String]
+        // Should infer [Str]
         assertTrue(inferredType.elementType is MezzeType.StringType)
     }
     
@@ -169,7 +169,7 @@ class SeqTypeCheckerTest {
         val numbersType = numbersBinding.inferredType as MezzeType.SeqType
         assertTrue(numbersType.elementType is MezzeType.IntType)
         
-        // strings should be [String]
+        // strings should be [Str]
         val stringsBinding = bindings.find { it.variableName == "strings" }!!
         assertNotNull(stringsBinding.inferredType)
         assertTrue(stringsBinding.inferredType is MezzeType.SeqType)

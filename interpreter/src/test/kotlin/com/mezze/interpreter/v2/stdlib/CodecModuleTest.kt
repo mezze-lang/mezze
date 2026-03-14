@@ -315,7 +315,7 @@ class CodecModuleTest {
         val result = eval("""
             use std::codec::core::{Entry}
 
-            let entry: Entry Int {name: String} = {key = 1, value = {name = "Alice"}}
+            let entry: Entry Int {name: Str} = {key = 1, value = {name = "Alice"}}
             entry.value.name
         """)
         assertEquals("Alice", result)

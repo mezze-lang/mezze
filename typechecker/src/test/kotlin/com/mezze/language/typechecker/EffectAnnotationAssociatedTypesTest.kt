@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 /**
  * Tests for effect associated type ANNOTATIONS in function type signatures.
  *
- * This tests the new syntax: <Exception having 'error = String>
+ * This tests the new syntax: <Exception having 'error = Str>
  * in function type annotations, not in effect/impl declarations.
  */
 class EffectAnnotationAssociatedTypesTest {
@@ -87,7 +87,7 @@ class EffectAnnotationAssociatedTypesTest {
         // So the type signature should be pure (no effects declared).
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State having 'state where {
@@ -123,7 +123,7 @@ class EffectAnnotationAssociatedTypesTest {
                 fail: {error: 'err} -> 'err <Operation>
             }
 
-            let getOp: {} -> Int <Operation having 'ok = Int, 'err = String> = {} ->
+            let getOp: {} -> Int <Operation having 'ok = Int, 'err = Str> = {} ->
                 Operation.succeed { value = 42 }
         """.trimIndent()
 
@@ -140,7 +140,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            let getRecordState: {} -> {x: Int, y: String} <State having 'state = {x: Int, y: String}> = {} ->
+            let getRecordState: {} -> {x: Int, y: Str} <State having 'state = {x: Int, y: Str}> = {} ->
                 State.get {}
         """.trimIndent()
 
@@ -177,7 +177,7 @@ class EffectAnnotationAssociatedTypesTest {
                 ask: {} -> 'env <Reader>
             }
 
-            let combined: {} -> Int <State having 'state = Int, Reader having 'env = String> = {} ->
+            let combined: {} -> Int <State having 'state = Int, Reader having 'env = Str> = {} ->
                 do
                     let _ = Reader.ask {}
                     State.get {}
@@ -220,7 +220,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            let putString: {s: String} -> {} <State> = {s} -> State.put { value = s }
+            let putString: {s: Str} -> {} <State> = {s} -> State.put { value = s }
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -245,7 +245,7 @@ class EffectAnnotationAssociatedTypesTest {
 
             let combined: {} -> Int <State, Reader> = {} ->
                 do
-                    let env: String = Reader.ask {}
+                    let env: Str = Reader.ask {}
                     State.get {}
         """.trimIndent()
 
@@ -318,7 +318,7 @@ class EffectAnnotationAssociatedTypesTest {
 
             let mixed: {} -> Int <State having 'state = Int, Reader> = {} ->
                 do
-                    let env: String = Reader.ask {}
+                    let env: Str = Reader.ask {}
                     State.get {}
         """.trimIndent()
 
@@ -334,10 +334,10 @@ class EffectAnnotationAssociatedTypesTest {
     fun `test simple effect without associated types works without having`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
-            let logSomething: {msg: String} -> {} <Log> = {msg} -> Log.info { msg = msg }
+            let logSomething: {msg: Str} -> {} <Log> = {msg} -> Log.info { msg = msg }
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -360,7 +360,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            let getState: {} -> String <State having 'state = Int> = {} -> State.get {}
+            let getState: {} -> Str <State having 'state = Int> = {} -> State.get {}
         """.trimIndent()
 
         val program = parser.parse(code)
@@ -379,7 +379,7 @@ class EffectAnnotationAssociatedTypesTest {
 
             let mismatch: {} -> {} <State having 'state = Int> = {} ->
                 do
-                    let x: String = State.get {}
+                    let x: Str = State.get {}
                     State.put { value = x }
         """.trimIndent()
 
@@ -435,7 +435,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            let getState: {} -> String <State having 'state = Int> = {} -> State.get {}
+            let getState: {} -> Str <State having 'state = Int> = {} -> State.get {}
         """.trimIndent()
 
         val program = parser.parse(code)
@@ -443,10 +443,10 @@ class EffectAnnotationAssociatedTypesTest {
             typeChecker.typeCheck(program).program
         }
 
-        // Error message should mention the type mismatch (Int vs String)
+        // Error message should mention the type mismatch (Int vs Str)
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String"),
+            message.contains("Int") || message.contains("Str"),
             "Error message should mention the conflicting types: $message"
         )
     }
@@ -459,7 +459,7 @@ class EffectAnnotationAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            let getState: {} -> {x: Int} <State having 'state = {x: String}> = {} -> State.get {}
+            let getState: {} -> {x: Int} <State having 'state = {x: Str}> = {} -> State.get {}
         """.trimIndent()
 
         val program = parser.parse(code)
@@ -470,7 +470,7 @@ class EffectAnnotationAssociatedTypesTest {
         // Error should indicate type mismatch
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String") || message.contains("mismatch") || message.contains("expected"),
+            message.contains("Int") || message.contains("Str") || message.contains("mismatch") || message.contains("expected"),
             "Error message should indicate type mismatch: $message"
         )
     }
@@ -483,7 +483,7 @@ class EffectAnnotationAssociatedTypesTest {
                 fail: {error: 'err} -> 'err <Operation>
             }
 
-            let wrongTypes: {} -> String <Operation having 'ok = Int, 'err = Bool> = {} ->
+            let wrongTypes: {} -> Str <Operation having 'ok = Int, 'err = Bool> = {} ->
                 Operation.succeed { value = 42 }
         """.trimIndent()
 
@@ -495,7 +495,7 @@ class EffectAnnotationAssociatedTypesTest {
         // Error should indicate type mismatch
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String"),
+            message.contains("Int") || message.contains("Str"),
             "Error message should mention conflicting types: $message"
         )
     }

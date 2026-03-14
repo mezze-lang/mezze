@@ -46,7 +46,7 @@ pub let new: {} -> CancellationToken = token
 #
 # Example:
 #   cancel {token = ct, reason = "Operation timed out"}
-pub let cancel: {token: CancellationToken, reason: String} -> {} =
+pub let cancel: {token: CancellationToken, reason: Str} -> {} =
     {token, reason} -> __native_cancellation_token_cancel {token = token, reason = reason}
 
 # Cancel with a default reason
@@ -78,7 +78,7 @@ pub let is_cancelled: {token: CancellationToken} -> Bool =
 #   match get_reason {token = ct} is
 #       Some {val = reason} -> print {s = "Cancelled: " ++ reason},
 #       None -> print {s = "Still running"}
-pub let get_reason: {token: CancellationToken} -> Option String =
+pub let get_reason: {token: CancellationToken} -> Option Str =
     {token} -> __native_cancellation_token_get_reason {token = token}
 
 # =============================================================================
@@ -115,17 +115,17 @@ pub let throw_if_cancelled: {token: CancellationToken} -> {} = check_cancelled
 #   let id = on_cancel {token = ct, callback = {} -> cleanup_resources {}}
 #   # ... later ...
 #   remove_callback {token = ct, id = id}
-pub let on_cancel: {token: CancellationToken, callback: {} -> {}} -> String =
+pub let on_cancel: {token: CancellationToken, callback: {} -> {}} -> Str =
     {token, callback} -> __native_cancellation_token_on_cancellation {token = token, callback = callback}
 
 # Alias for on_cancel
-pub let on_cancellation: {token: CancellationToken, callback: {} -> {}} -> String = on_cancel
+pub let on_cancellation: {token: CancellationToken, callback: {} -> {}} -> Str = on_cancel
 
 # Remove a previously registered callback
 #
 # Example:
 #   remove_callback {token = ct, id = callback_id}
-pub let remove_callback: {token: CancellationToken, id: String} -> {} =
+pub let remove_callback: {token: CancellationToken, id: Str} -> {} =
     {token, id} -> __native_cancellation_token_remove_callback {token = token, id = id}
 
 # =============================================================================

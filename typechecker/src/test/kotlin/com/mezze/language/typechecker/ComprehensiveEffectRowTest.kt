@@ -23,7 +23,7 @@ class ComprehensiveEffectRowTest {
     fun `test single effect call returns effectful computation type`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             let program = Log.info {msg = "Hello"}
@@ -47,7 +47,7 @@ class ComprehensiveEffectRowTest {
     fun `test do block with single effect propagates effect`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             let program = do
@@ -73,11 +73,11 @@ class ComprehensiveEffectRowTest {
     fun `test do block with multiple different effects accumulates all effects`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             let program = do
@@ -105,11 +105,11 @@ class ComprehensiveEffectRowTest {
     fun `test nested do blocks accumulate effects`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Error where {
-              throw : {msg: String} -> 'a <Error>
+              throw : {msg: Str} -> 'a <Error>
             }
 
             let nestedProgram = do
@@ -139,11 +139,11 @@ class ComprehensiveEffectRowTest {
         // Wrap in function to avoid top-level <*> restriction
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             let program = do
@@ -179,15 +179,15 @@ class ComprehensiveEffectRowTest {
     fun `test perform expression with partial effect handling`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Define program as a function
@@ -225,19 +225,19 @@ class ComprehensiveEffectRowTest {
     fun `test sequential effect handling`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Define program as a function
@@ -283,15 +283,15 @@ class ComprehensiveEffectRowTest {
         // Wrap in functions to avoid top-level <*> restriction
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for FileLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             let program = Log.info {msg = "Hello"}
@@ -331,18 +331,18 @@ class ComprehensiveEffectRowTest {
     fun `test complex effect composition with let bindings`() {
         val source = """
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
             
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             effect Cache where {
-              get : {key: String} -> String <Cache>
+              get : {key: Str} -> Str <Cache>
             }
             
-            let fetchUser = {id: String} -> do
+            let fetchUser = {id: Str} -> do
               Log.info {msg = "Fetching user $(id)"}
               Cache.get {key = "user:$(id)"}
               Database.query {sql = "SELECT * FROM users WHERE id = $(id)"}
@@ -373,7 +373,7 @@ class ComprehensiveEffectRowTest {
         val fetchUserType = fetchUserBinding.inferredType
         println("DEBUG: fetchUserType = $fetchUserType")
         assertTrue(fetchUserType is MezzeType.FunctionType)
-        // fetchUser should be: {id: String} -> String <Database, Log, Cache>
+        // fetchUser should be: {id: Str} -> Str <Database, Log, Cache>
         assertEquals(MezzeType.StringType, fetchUserType.returnType)
         assertNotNull(fetchUserType.effects)
         assertEquals(setOf("Database", "Log", "Cache"), fetchUserType.effects!!.effects)
@@ -410,7 +410,7 @@ class ComprehensiveEffectRowTest {
     fun `test mixed pure and effectful statements`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             let mixedProgram = do

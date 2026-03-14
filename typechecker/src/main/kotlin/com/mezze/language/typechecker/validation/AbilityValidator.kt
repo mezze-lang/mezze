@@ -34,7 +34,7 @@ object AbilityValidator {
                 throw TypeCheckError(
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have polymorphic effects (<...>). " +
                     "Ability operations must declare concrete effects to define a clear contract. " +
-                    "Use specific effects like <Mutation> or no effects for pure operations.",
+                    "Use specific effects like <Mut> or no effects for pure operations.",
                     ability.sourceLocation
                 )
             }

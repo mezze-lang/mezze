@@ -216,7 +216,7 @@ class NonFunctionCallTypeErrorTest {
     fun `function call result in do block called again should fail`() {
         // This models the original bug in impl blocks
         val source = """
-            let write = { content: String } -> {}
+            let write = { content: Str } -> {}
             let x = do
                 write { content = "hello" } {}
         """.trimIndent()
@@ -348,7 +348,7 @@ class NonFunctionCallTypeErrorTest {
             use std::effects::log
             use std::effects::filesystem::{ FileSystem }
 
-            impl log::Log for FileLogger { path: String } where {
+            impl log::Log for FileLogger { path: Str } where {
                 log = { level, msg } -> do
                     FileSystem.write_file { path, content = msg } {}
             }
@@ -367,7 +367,7 @@ class NonFunctionCallTypeErrorTest {
             use std::int
 
             ability Show 'a where {
-                show: { val: 'a } -> String
+                show: { val: 'a } -> Str
             }
 
             impl Show Int where {

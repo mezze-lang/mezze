@@ -742,18 +742,11 @@ class AbilityResolver(
     }
 
     private fun formatType(type: MezzeType): String {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return it }
+
         return when (type) {
             is MezzeType.VarType -> type.variable.toString()
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.CharType -> "Char"
-            is MezzeType.OrderingType -> "Ordering"
-            is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
             else -> type.toString()
         }
     }
@@ -936,7 +929,7 @@ class AbilityResolver(
                 when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
-                    "String" -> type is MezzeType.StringType
+                    "Str" -> type is MezzeType.StringType
                     "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType

@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.codec
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.PrimitiveTypes
 
 /**
  * CodecGenerator - Generates Encode/Decode ability implementations automatically.
@@ -2005,17 +2006,10 @@ class CodecGenerator {
      * Convert MezzeType to TypeAnnotation for use in ImplAbilityDeclaration.
      */
     private fun mezzeTypeToAnnotation(type: MezzeType): TypeAnnotation {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return IdentifierTypeAnnotation(it) }
+
         return when (type) {
-            is MezzeType.IntType -> IdentifierTypeAnnotation("Int")
-            is MezzeType.FloatType -> IdentifierTypeAnnotation("Float")
-            is MezzeType.StringType -> IdentifierTypeAnnotation("String")
-            is MezzeType.BoolType -> IdentifierTypeAnnotation("Bool")
-            is MezzeType.NatType -> IdentifierTypeAnnotation("Nat")
-            is MezzeType.FracType -> IdentifierTypeAnnotation("Frac")
-            is MezzeType.CharType -> IdentifierTypeAnnotation("Char")
-            is MezzeType.OrderingType -> IdentifierTypeAnnotation("Ordering")
-            is MezzeType.BytesType -> IdentifierTypeAnnotation("Bytes")
-            is MezzeType.ByteBufferType -> IdentifierTypeAnnotation("ByteBuffer")
             is MezzeType.VarType -> IdentifierTypeAnnotation(type.variable.name)
             is MezzeType.RecordType -> RecordTypeAnnotation(
                 entries = type.fields.map { (name, fieldType) ->

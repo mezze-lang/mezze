@@ -23,14 +23,14 @@ class BasicEffectPropagationTest {
     fun testEffectWithNestedEffects() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
-            let useDatabase : {query: String} -> String <Database> = {query} ->
+            let useDatabase : {query: Str} -> Str <Database> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
 
@@ -56,10 +56,10 @@ class BasicEffectPropagationTest {
     fun testSimpleEffectCall() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
-            let logSomething : {msg: String} -> {} <Log> = {msg} ->
+            let logSomething : {msg: Str} -> {} <Log> = {msg} ->
               Log.log {msg = msg}
         """.trimIndent()
 

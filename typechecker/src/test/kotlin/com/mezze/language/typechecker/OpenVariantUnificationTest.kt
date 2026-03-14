@@ -97,7 +97,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type Level = | Low, Medium, High, ... |
 
-            let processLevel: { level: Level } -> String = { level } ->
+            let processLevel: { level: Level } -> Str = { level } ->
                 match level is
                     Low -> "low"
                     Medium -> "medium"
@@ -114,7 +114,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type Status = | Pending, Running, Done, ... |
 
-            let describe: { s: Status } -> String = { s } ->
+            let describe: { s: Status } -> Str = { s } ->
                 match s is
                     Pending -> "waiting"
                     Running -> "in progress"
@@ -133,7 +133,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type LogLevel = | Error, Warn, Info, Debug, ... |
 
-            type LogEntry = { level: LogLevel, msg: String }
+            type LogEntry = { level: LogLevel, msg: Str }
 
             # Creating a record with a bare variant should work
             let entry: LogEntry = { level = Info, msg = "hello" }
@@ -198,7 +198,7 @@ class OpenVariantUnificationTest {
         assertTypeCheckFails("""
             type Color = | Red, Green, Blue |
 
-            let describeColor: { c: Color } -> String = { c } ->
+            let describeColor: { c: Color } -> Str = { c } ->
                 match c is
                     Red -> "red"
                     Green -> "green"
@@ -218,7 +218,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type Status = | Active, Inactive, ... |
 
-            let process: { s: Status } -> String = { s } ->
+            let process: { s: Status } -> Str = { s } ->
                 match s is
                     Active -> "active"
                     Inactive -> "inactive"
@@ -260,7 +260,7 @@ class OpenVariantUnificationTest {
             type OpenAB = | A, B, ... |
 
             # Function takes an open variant
-            let process: { x: OpenAB } -> String = { x } ->
+            let process: { x: OpenAB } -> Str = { x } ->
                 match x is
                     A -> "a"
                     B -> "b"
@@ -284,7 +284,7 @@ class OpenVariantUnificationTest {
 
             let myLevel = High  # Should be inferred as closed | High |
 
-            let useLevel: { l: Level } -> String = { l } ->
+            let useLevel: { l: Level } -> Str = { l } ->
                 match l is
                     Low -> "low"
                     _ -> "other"
@@ -304,7 +304,7 @@ class OpenVariantUnificationTest {
             type Priority = | Low, Medium, High, ... |
 
             effect Logger where {
-                log: { priority: Priority, msg: String } -> {} <Logger>
+                log: { priority: Priority, msg: Str } -> {} <Logger>
             }
 
             impl Logger for TestLogger where {
@@ -325,9 +325,9 @@ class OpenVariantUnificationTest {
     @Test
     fun `if-then-else with different variant constructors should merge`() {
         val program = parseAndTypeCheck("""
-            type MyResult = | Success { value: Int }, Failure { error: String } |
+            type MyResult = | Success { value: Int }, Failure { error: Str } |
 
-            let createResult = { success: Bool, value: Int, error: String } ->
+            let createResult = { success: Bool, value: Int, error: Str } ->
                 if success
                 then Success { value = value }
                 else Failure { error = error }
@@ -343,9 +343,9 @@ class OpenVariantUnificationTest {
     @Test
     fun `if-then-else variant result should be matchable`() {
         assertTypeChecks("""
-            type MyResult = | Success { value: Int }, Failure { error: String } |
+            type MyResult = | Success { value: Int }, Failure { error: Str } |
 
-            let createResult = { success: Bool, value: Int, error: String } ->
+            let createResult = { success: Bool, value: Int, error: Str } ->
                 if success
                 then Success { value = value }
                 else Failure { error = error }
@@ -389,7 +389,7 @@ class OpenVariantUnificationTest {
     fun `inline open variant accepts additional constructors`() {
         // Open variant should accept constructors not in the annotation
         assertTypeChecks("""
-            let processStatus: { status: | Success, Error, ... | } -> String = { status } ->
+            let processStatus: { status: | Success, Error, ... | } -> Str = { status } ->
                 match status is
                     Success -> "ok"
                     _ -> "other"
@@ -420,7 +420,7 @@ class OpenVariantUnificationTest {
     @Test
     fun `function with inline variant parameter type`() {
         assertTypeChecks("""
-            let describeColor: { c: | Red, Green, Blue | } -> String = { c } ->
+            let describeColor: { c: | Red, Green, Blue | } -> Str = { c } ->
                 match c is
                     Red -> "red"
                     Green -> "green"
@@ -522,7 +522,7 @@ class OpenVariantUnificationTest {
     fun `nested variant in record field`() {
         assertTypeChecks("""
             type Status = | Active, Inactive |
-            type User = { name: String, status: Status }
+            type User = { name: Str, status: Status }
 
             let user: User = { name = "Alice", status = Active }
 
@@ -542,7 +542,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type MyResult 'a 'e = | MyOk { val: 'a }, MyErr { error: 'e } |
 
-            let divide: { a: Int, b: Int } -> MyResult Int String = { a, b } ->
+            let divide: { a: Int, b: Int } -> MyResult Int Str = { a, b } ->
                 if b == 0
                 then MyErr { error = "division by zero" }
                 else MyOk { val = a / b }
@@ -558,7 +558,7 @@ class OpenVariantUnificationTest {
         assertTypeChecks("""
             type Level = | Low, Medium, High, ... |
 
-            let describe: { l: Level } -> String = { l } ->
+            let describe: { l: Level } -> Str = { l } ->
                 match l is
                     Low -> "low"
                     Medium -> "medium"

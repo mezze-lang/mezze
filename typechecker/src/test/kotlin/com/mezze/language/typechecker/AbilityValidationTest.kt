@@ -26,16 +26,16 @@ class AbilityValidationTest {
     fun `test simple ability implementation with all operations`() {
         val source = """
             # Define a helper function to compare strings
-            let stringEquals = {a: String, b: String} -> a == b
+            let stringEquals = {a: Str, b: Str} -> a == b
 
             ability Eq 'a where {
               eq: {l: 'a, r: 'a} -> Bool,
               neq: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Eq String where {
-              eq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r},
-              neq: {l: String, r: String} -> Bool = {l, r} -> !(stringEquals {a = l, b = r})
+            impl Eq Str where {
+              eq: {l: Str, r: Str} -> Bool = {l, r} -> stringEquals {a = l, b = r},
+              neq: {l: Str, r: Str} -> Bool = {l, r} -> !(stringEquals {a = l, b = r})
 
             }
 
@@ -56,11 +56,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -83,14 +83,14 @@ class AbilityValidationTest {
               convert: {value: 'from} -> 'to
             }
 
-            impl Convert String Int where {
-              convert: {value: String} -> Int = {value} ->
+            impl Convert Str Int where {
+              convert: {value: Str} -> Int = {value} ->
                 match int::from_string {s = value} is
                   Some {val} -> val
                   None -> 0
             }
 
-            let transform: {value: String} -> Int = {value} -> Convert.convert {value = value}
+            let transform: {value: Str} -> Int = {value} -> Convert.convert {value = value}
 
             transform {value = "123"}
         """.trimIndent()
@@ -107,11 +107,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Display 'a where {
-              display: {val: 'a} -> {text: String}
+              display: {val: 'a} -> {text: Str}
             }
 
             impl Display Int where {
-              display: {val: Int} -> {text: String} = {val} -> {text = int::to_str {n = val}}
+              display: {val: Int} -> {text: Str} = {val} -> {text = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -129,7 +129,7 @@ class AbilityValidationTest {
     fun `test ability with dependencies`() {
         val source = """
             # Define a helper function to compare strings
-            let stringEquals = {a: String, b: String} -> a == b
+            let stringEquals = {a: Str, b: Str} -> a == b
 
             ability Eq 'a where {
               eq: {l: 'a, r: 'a} -> Bool
@@ -141,14 +141,14 @@ class AbilityValidationTest {
               gt: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Eq String where {
-              eq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r}
+            impl Eq Str where {
+              eq: {l: Str, r: Str} -> Bool = {l, r} -> stringEquals {a = l, b = r}
             }
 
-            impl Ord String where {
-              compare: {l: String, r: String} -> Int = {l, r} -> if stringEquals {a = l, b = r} then 0 else if l < r then -1 else 1,
-              lt: {l: String, r: String} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) < 0,
-              gt: {l: String, r: String} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) > 0
+            impl Ord Str where {
+              compare: {l: Str, r: Str} -> Int = {l, r} -> if stringEquals {a = l, b = r} then 0 else if l < r then -1 else 1,
+              lt: {l: Str, r: Str} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) < 0,
+              gt: {l: Str, r: Str} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) > 0
             }
 
             let isLess = {x, y} -> Ord.lt {l = x, r = y}
@@ -166,7 +166,7 @@ class AbilityValidationTest {
     fun `test ability with associated types for generic containers`() {
         val source = """
             ability Container 'c having 'item where {
-              show: {container: 'c} -> String,
+              show: {container: 'c} -> Str,
               get: {container: 'c, index: Int} -> 'item
             }
 
@@ -175,7 +175,7 @@ class AbilityValidationTest {
               get = {container, index} -> 42
             }
 
-            impl Container [String] having 'item = String where {
+            impl Container [Str] having 'item = Str where {
               show = {container} -> "array of strings",
               get = {container, index} -> "hello"
             }
@@ -200,8 +200,8 @@ class AbilityValidationTest {
               neq: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Eq String where {
-              eq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r}
+            impl Eq Str where {
+              eq: {l: Str, r: Str} -> Bool = {l, r} -> stringEquals {a = l, b = r}
             }
 
             let areEqual = {x, y} -> Eq.eq {l = x, r = y}
@@ -223,9 +223,9 @@ class AbilityValidationTest {
               eq: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Eq String where {
-              eq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r},
-              compare: {l: String, r: String} -> Int = {l, r} -> stringCompare {a = l, b = r}
+            impl Eq Str where {
+              eq: {l: Str, r: Str} -> Bool = {l, r} -> stringEquals {a = l, b = r},
+              compare: {l: Str, r: Str} -> Int = {l, r} -> stringCompare {a = l, b = r}
             }
 
             let areEqual = {x, y} -> Eq.eq {l = x, r = y}
@@ -246,11 +246,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: 'a} -> String = {val} -> int::to_str {n = val}
+              show: {val: 'a} -> Str = {val} -> int::to_str {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -272,8 +272,8 @@ class AbilityValidationTest {
               eq: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Eq String where {
-              eq: {l: String, r: Int} -> Bool = {l, r} -> False
+            impl Eq Str where {
+              eq: {l: Str, r: Int} -> Bool = {l, r} -> False
             }
 
             let areEqual = {x, y} -> Eq.eq {l = x, r = y}
@@ -292,7 +292,7 @@ class AbilityValidationTest {
     fun `test return type mismatch should fail`() {
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
@@ -306,7 +306,7 @@ class AbilityValidationTest {
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Should fail: Return type should be String, not Int") {
+        assertThrows<TypeCheckError>("Should fail: Return type should be Str, not Int") {
             typeChecker.typeCheck(program).program
         }
     }
@@ -317,11 +317,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Display 'a where {
-              display: {val: 'a} -> {text: String}
+              display: {val: 'a} -> {text: Str}
             }
 
             impl Display Int where {
-              display: {val: Int} -> {message: String} = {val} -> {message = int::to_str {n = val}}
+              display: {val: Int} -> {message: Str} = {val} -> {message = int::to_str {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -343,8 +343,8 @@ class AbilityValidationTest {
               convert: {value: 'from} -> 'to
             }
 
-            impl Convert String where {
-              convert: {value: String} -> Int = {value} -> parseInt {str = value}
+            impl Convert Str where {
+              convert: {value: Str} -> Int = {value} -> parseInt {str = value}
             }
 
             let transform = {value} -> Convert.convert {value = value}
@@ -365,11 +365,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Process 'a where {
-              process: {value: 'a} -> String
+              process: {value: 'a} -> Str
             }
 
             impl Process Int where {
-              process: {val: Int} -> String = {val} -> int::to_str {n = val}
+              process: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             let run = {value} -> Process.process {value = value}
@@ -390,14 +390,14 @@ class AbilityValidationTest {
     fun `test constraint validation at call site - missing implementation should fail`() {
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> "number"
+              show: {val: Int} -> Str = {val} -> "number"
             }
 
-            let display: {val: 'a} -> String with Show 'a = {val} ->
+            let display: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             display {val = 3.14}
@@ -416,18 +416,18 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Show Float where {
-              show: {val: Float} -> String = {val} -> "float"
+              show: {val: Float} -> Str = {val} -> "float"
             }
 
-            let display: {val: 'a} -> String with Show 'a = {val} ->
+            let display: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             display {val = 3.14}
@@ -443,7 +443,7 @@ class AbilityValidationTest {
     fun `test constraint validation in pipe operator - should fail`() {
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do
@@ -467,7 +467,7 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             ability Eq 'a where {
@@ -475,14 +475,14 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Eq Int where {
               eq: {l: Int, r: Int} -> Bool = {l, r} -> l == r
             }
 
-            let compare: {x: 'a, y: 'a} -> String with Show 'a, Eq 'a = {x, y} ->
+            let compare: {x: 'a, y: 'a} -> Str with Show 'a, Eq 'a = {x, y} ->
               if Eq.eq {l = x, r = y} then
                 "Equal: $(Show.show {val = x})"
               else
@@ -501,20 +501,20 @@ class AbilityValidationTest {
     fun `test constraint validation with multiple constraints - one missing`() {
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             ability Eq 'a where {
               eq: {l: 'a, r: 'a} -> Bool
             }
 
-            impl Show String where {
-              show: {val: String} -> String = {val} -> val
+            impl Show Str where {
+              show: {val: Str} -> Str = {val} -> val
             }
 
             # Missing Eq String implementation
 
-            let compare: {x: String, y: String} -> String with Show String, Eq String = {x, y} ->
+            let compare: {x: Str, y: Str} -> Str with Show Str, Eq String = {x, y} ->
               if Eq.eq {l = x, r = y} then
                 "Equal: $(Show.show {val = x})"
               else
@@ -525,7 +525,7 @@ class AbilityValidationTest {
 
         val program = parser.parse(source)
 
-        assertThrows<TypeCheckError>("Should fail: String does not implement Eq") {
+        assertThrows<TypeCheckError>("Should fail: Str does not implement Eq") {
             typeChecker.typeCheck(program).program
         }
     }
@@ -536,17 +536,17 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let display: {val: 'a} -> String with Show 'a = {val} ->
+            let display: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
-            let format: {x: 'a} -> String with Show 'a = {x} ->
+            let format: {x: 'a} -> Str with Show 'a = {x} ->
               "[$(display {val = x})]"
 
             format {x = 42}
@@ -567,8 +567,8 @@ class AbilityValidationTest {
               convert: {value: 'from} -> 'to
             }
 
-            impl Convert String Int where {
-              convert: {value: String} -> Int = {value} -> 0
+            impl Convert Str Int where {
+              convert: {value: Str} -> Int = {value} -> 0
             }
 
             let transform: {val: Float} -> Int with Convert Float Int = {val} ->
@@ -591,14 +591,14 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let display: {val: 'a} -> String with Show 'a = {val} ->
+            let display: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             # This should pass - Int has Show implementation
@@ -624,15 +624,15 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             # Single-parameter constraint: Show 'a
-            let format: {x: 'a} -> String with Show 'a = {x} ->
+            let format: {x: 'a} -> Str with Show 'a = {x} ->
               "Value: $(Show.show {val = x})"
 
             # Should find impl Show Int, not look for impl Show Int Int
@@ -648,21 +648,21 @@ class AbilityValidationTest {
     @Test
     fun `test multi-parameter ability constraint preserves type order`() {
         // Test that "with Convert String Int" correctly checks for
-        // "impl Convert String Int" with types in the right order
+        // "impl Convert Str Int" with types in the right order
         val source = """
             ability Convert 'from 'to where {
               convert: {value: 'from} -> 'to
             }
 
-            impl Convert String Int where {
-              convert: {value: String} -> Int = {value} -> 0
+            impl Convert Str Int where {
+              convert: {value: Str} -> Int = {value} -> 0
             }
 
-            # Multi-parameter constraint: Convert 'a 'b with 'a=String, 'b=Int
+            # Multi-parameter constraint: Convert 'a 'b with 'a=Str, 'b=Int
             let parse: {s: 'a} -> 'b with Convert 'a 'b = {s} ->
               Convert.convert {value = s}
 
-            # Should find impl Convert String Int
+            # Should find impl Convert Str Int
             parse {s = "42"}
         """.trimIndent()
 
@@ -679,21 +679,21 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            impl Show String where {
-              show: {val: String} -> String = {val} -> val
+            impl Show Str where {
+              show: {val: Str} -> Str = {val} -> val
             }
 
-            let wrap: {x: 'a} -> String with Show 'a = {x} ->
+            let wrap: {x: 'a} -> Str with Show 'a = {x} ->
               "[$(Show.show {val = x})]"
 
-            let doubleWrap: {x: 'a} -> String with Show 'a = {x} ->
+            let doubleWrap: {x: 'a} -> Str with Show 'a = {x} ->
               "<<$(wrap {x = x})>>"
 
             # Should propagate Show constraint through both functions
@@ -712,7 +712,7 @@ class AbilityValidationTest {
         val source = """
             use std::int
 
-            type Json = { raw: String }
+            type Json = { raw: Str }
 
             ability Encode 'format 'data where {
               encode: {val: 'data} -> 'format
@@ -743,7 +743,7 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             ability Eq 'a where {
@@ -751,7 +751,7 @@ class AbilityValidationTest {
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Eq Int where {
@@ -759,7 +759,7 @@ class AbilityValidationTest {
             }
 
             # Multiple constraints on same type parameter
-            let showIfEqual: {a: 'x, b: 'x} -> String with Show 'x, Eq 'x = {a, b} ->
+            let showIfEqual: {a: 'x, b: 'x} -> Str with Show 'x, Eq 'x = {a, b} ->
               if Eq.eq {l = a, r = b} then
                 Show.show {val = a}
               else
@@ -779,12 +779,12 @@ class AbilityValidationTest {
         // Verify that missing impl for constrained type still produces good error
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             # No impl Show Float defined!
 
-            let format: {x: 'a} -> String with Show 'a = {x} ->
+            let format: {x: 'a} -> Str with Show 'a = {x} ->
               Show.show {val = x}
 
             # Should fail - no impl Show Float
@@ -805,15 +805,15 @@ class AbilityValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> int::to_str {n = val}
+              show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             # Higher-order: takes a function that requires Show constraint
-            let applyAndShow: {f: {x: 'a} -> 'a, val: 'a} -> String with Show 'a = {f, val} -> do
+            let applyAndShow: {f: {x: 'a} -> 'a, val: 'a} -> Str with Show 'a = {f, val} -> do
               let result = f {x = val}
               Show.show {val = result}
 

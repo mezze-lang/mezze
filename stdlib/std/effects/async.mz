@@ -32,7 +32,7 @@ pub newtype Scope 'a = Scope __NativeScope
 # - AsyncFailed: Task failed with an exception
 # - AsyncCancelled: Task was cancelled
 # - AsyncTimedOut: Task timed out after ms milliseconds
-pub type AsyncError = | AsyncFailed { msg: String }, AsyncCancelled, AsyncTimedOut { ms: Int } |
+pub type AsyncError = | AsyncFailed { msg: Str }, AsyncCancelled, AsyncTimedOut { ms: Int } |
 
 # Async effect - unified async operations
 # Note: Callback parameters use <...> for effect polymorphism - they accept any effects

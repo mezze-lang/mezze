@@ -577,7 +577,7 @@ class VariantTypeRulesTest {
     @Test
     fun `J1 - constructor with payload in closed variant`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             let x: Result = Ok { value = 42 }
         """.trimIndent()
@@ -587,7 +587,7 @@ class VariantTypeRulesTest {
     @Test
     fun `J2 - constructor with payload inferred correctly`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             let x = Ok { value = 42 }
             let y = Err { message = "failed" }
@@ -598,7 +598,7 @@ class VariantTypeRulesTest {
     @Test
     fun `J3 - pattern match extracts payload`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             let f = { r } -> match r is
                 Ok { value } -> value
@@ -622,7 +622,7 @@ class VariantTypeRulesTest {
     @Test
     fun `J5 - open variant with payload accepts new constructor`() {
         val code = """
-            type Response = | Success { data: String }, Failure { code: Int }, ... |
+            type Response = | Success { data: Str }, Failure { code: Int }, ... |
 
             let x: Response = Unknown
         """.trimIndent()
@@ -853,7 +853,7 @@ class VariantTypeRulesTest {
             type Option 'a = | Some { value: 'a }, None |
 
             let x: Option Int = Some { value = 42 }
-            let y: Option String = Some { value = "hello" }
+            let y: Option Str = Some { value = "hello" }
         """.trimIndent()
         assertTypeCheckPasses(code)
     }

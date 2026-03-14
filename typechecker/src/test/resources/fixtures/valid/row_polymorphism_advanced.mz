@@ -38,7 +38,7 @@ let sameFields = {v} -> match v is
 # Open variant with string operations
 let concatVariant = {v, suffix} -> match v is
   Text {str} -> "$(str)$(suffix)"
-  _ -> suffix                                                   # expected: concatVariant : { v: | Text { str: String }, ... |, suffix: String } -> String
+  _ -> suffix                                                   # expected: concatVariant : { v: | Text { str: Str }, ... |, suffix: Str } -> Str
 
 # Row polymorphism with boolean operations
 let boolVariant = {v} -> match v is

@@ -34,7 +34,7 @@ public class UserDefinedAbilityTest {
         // Just declaring an ability should not throw
         assertDoesNotThrow(() -> MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             {}
@@ -45,8 +45,8 @@ public class UserDefinedAbilityTest {
     void testAbilityWithMultipleOperations() {
         assertDoesNotThrow(() -> MezzeTestHelper.run("""
             ability Show 'a where {
-                show: {val: 'a} -> String,
-                debug: {val: 'a} -> String
+                show: {val: 'a} -> Str,
+                debug: {val: 'a} -> Str
             }
 
             {}
@@ -61,11 +61,11 @@ public class UserDefinedAbilityTest {
     void testImplAbilityForInt() {
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
             Encoder.encode {val = 42}
@@ -77,11 +77,11 @@ public class UserDefinedAbilityTest {
     void testImplAbilityForString() {
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> val
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> val
             }
 
             Encoder.encode {val = "hello"}
@@ -94,15 +94,15 @@ public class UserDefinedAbilityTest {
         // Test Int impl
         Object intResult = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
             Encoder.encode {val = 42}
@@ -112,15 +112,15 @@ public class UserDefinedAbilityTest {
         // Test String impl
         Object stringResult = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
             Encoder.encode {val = "hello"}
@@ -132,13 +132,13 @@ public class UserDefinedAbilityTest {
     void testImplWithMultipleOperations() {
         Object result = MezzeTestHelper.run("""
             ability Show 'a where {
-                show: {val: 'a} -> String,
-                debug: {val: 'a} -> String
+                show: {val: 'a} -> Str,
+                debug: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> "shown",
-                debug: {val: Int} -> String = {val} -> "debugged"
+                show: {val: Int} -> Str = {val} -> "shown",
+                debug: {val: Int} -> Str = {val} -> "debugged"
             }
 
             Show.debug {val = 42}
@@ -154,11 +154,11 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInLet() {
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "encoded"
+                encode: {val: Int} -> Str = {val} -> "encoded"
             }
 
             let x = 42
@@ -172,11 +172,11 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInFunction() {
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "encoded"
+                encode: {val: Int} -> Str = {val} -> "encoded"
             }
 
             let encode_int = {x} -> Encoder.encode {val = x}
@@ -189,11 +189,11 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInDoBlock() {
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "in_do"
+                encode: {val: Int} -> Str = {val} -> "in_do"
             }
 
             do
@@ -278,11 +278,11 @@ public class UserDefinedAbilityTest {
             use std::int
 
             ability Serializer 'a where {
-                serialize: {val: 'a} -> String
+                serialize: {val: 'a} -> Str
             }
 
             impl Serializer Int where {
-                serialize: {val: Int} -> String = {val} -> int::to_str {n = val}
+                serialize: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             Serializer.serialize {val = 123}
@@ -296,11 +296,11 @@ public class UserDefinedAbilityTest {
             type Point = { x: Int, y: Int }
 
             ability Stringify 'a where {
-                to_str: {val: 'a} -> String
+                to_str: {val: 'a} -> Str
             }
 
             impl Stringify Point where {
-                to_str: {val: Point} -> String = {val} -> "point"
+                to_str: {val: Point} -> Str = {val} -> "point"
             }
 
             let p: Point = {x = 1, y = 2}
@@ -315,11 +315,11 @@ public class UserDefinedAbilityTest {
             type Maybe 'a = | Nothing, Just {val: 'a} |
 
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder (Maybe Int) where {
-                encode: {val: Maybe Int} -> String = {val} ->
+                encode: {val: Maybe Int} -> Str = {val} ->
                     match val is
                         Nothing -> "nothing"
                         Just {val = x} -> "just"
@@ -343,18 +343,18 @@ public class UserDefinedAbilityTest {
         // - When called with Int, the Encoder Int impl is passed as dictionary
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int_encoded"
+                encode: {val: Int} -> Str = {val} -> "int_encoded"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string_encoded"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string_encoded"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             encode_value {x = 42}
@@ -367,14 +367,14 @@ public class UserDefinedAbilityTest {
         // Test that the polymorphic function works correctly with Int
         Object resultInt = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             encode_value {x = 42}
@@ -384,14 +384,14 @@ public class UserDefinedAbilityTest {
         // Test that the polymorphic function works correctly with String
         Object resultStr = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             encode_value {x = "hello"}
@@ -405,7 +405,7 @@ public class UserDefinedAbilityTest {
         // Each constraint needs its dictionary passed
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             ability Comparer 'a where {
@@ -413,14 +413,14 @@ public class UserDefinedAbilityTest {
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "encoded"
+                encode: {val: Int} -> Str = {val} -> "encoded"
             }
 
             impl Comparer Int where {
                 compare: {l: Int, r: Int} -> Bool = {l, r} -> l == r
             }
 
-            let encode_if_equal: {x: 'a, y: 'a} -> String with Encoder 'a, Comparer 'a =
+            let encode_if_equal: {x: 'a, y: 'a} -> Str with Encoder 'a, Comparer 'a =
                 {x, y} -> if Comparer.compare {l = x, r = y}
                     then Encoder.encode {val = x}
                     else "not equal"
@@ -436,17 +436,17 @@ public class UserDefinedAbilityTest {
         // Dictionaries need to be propagated through the call chain
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int_value"
+                encode: {val: Int} -> Str = {val} -> "int_value"
             }
 
-            let inner_encode: {x: 'a} -> String with Encoder 'a =
+            let inner_encode: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
-            let outer_encode: {x: 'a} -> String with Encoder 'a =
+            let outer_encode: {x: 'a} -> Str with Encoder 'a =
                 {x} -> inner_encode {x = x}
 
             outer_encode {x = 42}
@@ -459,14 +459,14 @@ public class UserDefinedAbilityTest {
         // Polymorphic function passed as argument
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "encoded_int"
+                encode: {val: Int} -> Str = {val} -> "encoded_int"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             let apply_encoder = {f, val} -> f {x = val}
@@ -481,14 +481,14 @@ public class UserDefinedAbilityTest {
         // Simple test: call polymorphic function once at top level
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             encode_value {x = 42}
@@ -501,14 +501,14 @@ public class UserDefinedAbilityTest {
         // Test: call polymorphic function once inside do block
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             do
@@ -523,14 +523,14 @@ public class UserDefinedAbilityTest {
         // Test: call polymorphic function twice with same type
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             do
@@ -547,18 +547,18 @@ public class UserDefinedAbilityTest {
         // Just return a simple string to check if typechecking passes
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             do
@@ -575,18 +575,18 @@ public class UserDefinedAbilityTest {
         // This is the minimal failing case
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             do
@@ -603,18 +603,18 @@ public class UserDefinedAbilityTest {
         // should be callable with different types in the same scope
         Object result = MezzeTestHelper.run("""
             ability Encoder 'a where {
-                encode: {val: 'a} -> String
+                encode: {val: 'a} -> Str
             }
 
             impl Encoder Int where {
-                encode: {val: Int} -> String = {val} -> "int"
+                encode: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Encoder String where {
-                encode: {val: String} -> String = {val} -> "string"
+            impl Encoder Str where {
+                encode: {val: Str} -> Str = {val} -> "string"
             }
 
-            let encode_value: {x: 'a} -> String with Encoder 'a =
+            let encode_value: {x: 'a} -> Str with Encoder 'a =
                 {x} -> Encoder.encode {val = x}
 
             do

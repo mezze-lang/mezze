@@ -10,7 +10,7 @@ let handleColor1 = {c} -> match c is
 let handleColor2 = {c} -> match c is
   Red -> "red"
   Green -> "green"
-  _ -> "other"                                                  # expected: handleColor2 : { c: | Red, Green, ... | } -> String
+  _ -> "other"                                                  # expected: handleColor2 : { c: | Red, Green, ... | } -> Str
 
 # Closed variant (all constructors covered)
 let handleColor3 = {c} -> match c is
@@ -53,7 +53,7 @@ let extendColors = {c} -> match c is
   Red -> "primary"
   Blue -> "primary"
   Yellow -> "primary"
-  _ -> "other"                                                  # expected: extendColors : { c: | Red, Blue, Yellow, ... | } -> String
+  _ -> "other"                                                  # expected: extendColors : { c: | Red, Blue, Yellow, ... | } -> Str
 
 # Open variant allows future extension
 let handleFuture = {v} -> match v is

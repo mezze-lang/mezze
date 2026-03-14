@@ -210,7 +210,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `file extension detection`() {
         val code = """
-            let classify_file = {name: String} ->
+            let classify_file = {name: Str} ->
                 match name is
                     "$(base).txt" -> "text"
                     "$(base).json" -> "json"
@@ -331,7 +331,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `URL parsing`() {
         val code = """
-            let parse_url = {url: String} ->
+            let parse_url = {url: Str} ->
                 match url is
                     "https://$(domain)/$(path)" -> { secure = True, domain = domain, path = path }
                     "http://$(domain)/$(path)" -> { secure = False, domain = domain, path = path }
@@ -349,7 +349,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `email parsing`() {
         val code = """
-            let parse_email = {email: String} ->
+            let parse_email = {email: Str} ->
                 match email is
                     "$(local)@$(domain)" -> Some {val = { local = local, domain = domain }}
                     _ -> None
@@ -368,7 +368,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `log parsing with level classification`() {
         val code = """
-            let classify_log = {line: String} ->
+            let classify_log = {line: Str} ->
                 match line is
                     "[DEBUG] $(msg)" -> { level = "debug", message = msg }
                     "[INFO] $(msg)" -> { level = "info", message = msg }
@@ -387,7 +387,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `command line parsing`() {
         val code = """
-            let parse_cmd = {input: String} ->
+            let parse_cmd = {input: Str} ->
                 match input is
                     "help" -> "show help"
                     "version" -> "show version"
@@ -405,7 +405,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `configuration key-value parsing`() {
         val code = """
-            let parse_config = {line: String} ->
+            let parse_config = {line: Str} ->
                 match line is
                     "# $(comment)" -> { kind = "comment", key = "", value = comment }
                     "$(key) = $(value)" -> { kind = "setting", key = key, value = value }
@@ -428,7 +428,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `function using string pattern in match`() {
         val code = """
-            let extract_name = {greeting: String} ->
+            let extract_name = {greeting: Str} ->
                 match greeting is
                     "Hello, $(name)!" -> name
                     "Hi, $(name)!" -> name
@@ -444,12 +444,12 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `chained function calls with string patterns`() {
         val code = """
-            let get_domain = {email: String} ->
+            let get_domain = {email: Str} ->
                 match email is
                     "$(user)@$(domain)" -> domain
                     _ -> ""
 
-            let get_tld = {domain: String} ->
+            let get_tld = {domain: Str} ->
                 match domain is
                     "$(base).$(tld)" -> tld
                     _ -> ""
@@ -506,7 +506,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `API path routing`() {
         val code = """
-            let route = {path: String} ->
+            let route = {path: Str} ->
                 match path is
                     "/api/v1/users/$(userId)" -> { endpoint = "user", id = userId }
                     "/api/v1/posts/$(postId)" -> { endpoint = "post", id = postId }
@@ -524,7 +524,7 @@ class StringInterpolationPatternInterpreterTest {
     @Test
     fun `semantic version parsing`() {
         val code = """
-            let parse_version = {ver: String} ->
+            let parse_version = {ver: Str} ->
                 match ver is
                     "$(major).$(minor).$(patch)" -> { major = major, minor = minor, patch = patch }
                     "$(major).$(minor)" -> { major = major, minor = minor, patch = "0" }

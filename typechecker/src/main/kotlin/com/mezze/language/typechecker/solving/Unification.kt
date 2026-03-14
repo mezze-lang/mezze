@@ -1009,17 +1009,17 @@ private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.Susp
  * effects to be unified.
  */
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): UnificationResult {
-    // HERMETIC EFFECT CHECK: Mutation cannot coexist with other effects
+    // HERMETIC EFFECT CHECK: Mut cannot coexist with other effects
     // This ensures data-race freedom by preventing interleaving of mutation with other effects
     val allEffects1 = eff1.allEffectNames
     val allEffects2 = eff2.allEffectNames
     val combinedEffects = allEffects1 + allEffects2
 
-    if ("Mutation" in combinedEffects && combinedEffects.size > 1) {
-        val otherEffects = (combinedEffects - "Mutation").joinToString(", ")
+    if ("Mut" in combinedEffects && combinedEffects.size > 1) {
+        val otherEffects = (combinedEffects - "Mut").joinToString(", ")
         return UnificationResult.Failure(
-            message = "Mutation effect is hermetic: cannot coexist with other effects ($otherEffects). " +
-                "Mutation must be the only effect in scope to prevent data races. " +
+            message = "Mut effect is hermetic: cannot coexist with other effects ($otherEffects). " +
+                "Mut must be the only effect in scope to prevent data races. " +
                 "Either handle the other effects before entering the mutation scope, " +
                 "or restructure the code to separate mutation from other effectful operations.",
             type1 = eff1,
@@ -1084,18 +1084,11 @@ private fun formatType(type: MezzeType): String {
 
 // Keep original implementation for internal use if needed
 private fun formatTypeRaw(type: MezzeType): String {
+    // Use centralized registry for primitive types
+    PrimitiveTypes.toName(type)?.let { return it }
+
     return when (type) {
         is MezzeType.VarType -> type.variable.name
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "String"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.ByteBufferType -> "ByteBuffer"
-        is MezzeType.CharType -> "Char"
         is MezzeType.FunctionType -> "{...} -> ..."
         is MezzeType.RecordType -> "{${type.fields.entries.take(3).joinToString { "${it.key}: ${formatType(it.value)}" }}${if (type.fields.size > 3) ", ..." else ""}}"
         is MezzeType.VariantType -> {
@@ -1113,6 +1106,7 @@ private fun formatTypeRaw(type: MezzeType): String {
         is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
         is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
         is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}${if (type.effects.size > 3) ", ..." else ""}>"
+        else -> type.toString()
     }
 }
 

@@ -1,5 +1,5 @@
 let x: Int = 42
-let y: String = "hello"
+let y: Str = "hello"
 let z: Bool = True
 let f: {n: Int} -> Int = {n} -> n + 1
 

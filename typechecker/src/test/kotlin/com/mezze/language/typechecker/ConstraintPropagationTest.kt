@@ -61,12 +61,9 @@ class ConstraintPropagationTest {
         // Both results should be Boolean
         val result1Binding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result1" }
         val result2Binding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result2" }
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, result1Binding.inferredType)
-        assertEquals(boolVariant, result2Binding.inferredType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, result1Binding.inferredType)
+        assertEquals(boolType, result2Binding.inferredType)
     }
     
     @Test
@@ -105,11 +102,8 @@ class ConstraintPropagationTest {
         
         // Result should be Boolean
         val resultBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, resultBinding.inferredType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, resultBinding.inferredType)
     }
     
     @Test
@@ -130,11 +124,8 @@ class ConstraintPropagationTest {
         val addAndCheckBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "addAndCheck" }
         assertTrue(addAndCheckBinding.inferredType is MezzeType.FunctionType)
         val functionType = addAndCheckBinding.inferredType as MezzeType.FunctionType
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, functionType.returnType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, functionType.returnType)
     }
     
     @Test

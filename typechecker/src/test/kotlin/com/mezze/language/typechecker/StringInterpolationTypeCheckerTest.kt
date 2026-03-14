@@ -72,7 +72,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test interpolation with string returning function`() {
         assertTypeChecks("""
-            let greet = {name: String} -> "Hello $(name)"
+            let greet = {name: Str} -> "Hello $(name)"
             let result = "Message: $(greet {name = "Alice"})"
             result
         """.trimIndent())
@@ -84,7 +84,7 @@ class StringInterpolationTypeCheckerTest {
             let num = 42
             let msg = "Number: $(num)"
             msg
-        """.trimIndent(), "String")
+        """.trimIndent(), "Str")
     }
 
     // ==================== Abilities with String Interpolation ====================
@@ -93,11 +93,11 @@ class StringInterpolationTypeCheckerTest {
     fun `test Show ability used in interpolation`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             let display = {x: Int} -> "Value: $(Show.show {val = x})"
@@ -109,17 +109,17 @@ class StringInterpolationTypeCheckerTest {
     fun `test polymorphic function with Show constraint using interpolation`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let display: {val: 'a} -> String with Show 'a = {val} ->
+            let display: {val: 'a} -> Str with Show 'a = {val} ->
                 Show.show {val = val}
 
-            let format: {x: 'a} -> String with Show 'a = {x} ->
+            let format: {x: 'a} -> Str with Show 'a = {x} ->
                 "[$(display {val = x})]"
 
             format {x = 42}
@@ -130,18 +130,18 @@ class StringInterpolationTypeCheckerTest {
     fun `test nested ability calls in interpolation`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            impl Show String where {
-                show: {val: String} -> String = {val} -> "\"$(val)\""
+            impl Show Str where {
+                show: {val: Str} -> Str = {val} -> "\"$(val)\""
             }
 
-            let showBoth: {a: 'x, b: 'y} -> String with Show 'x, Show 'y = {a, b} ->
+            let showBoth: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->
                 "$(Show.show {val = a}), $(Show.show {val = b})"
 
             showBoth {a = 42, b = "hello"}
@@ -152,17 +152,17 @@ class StringInterpolationTypeCheckerTest {
     fun `test ability constraint propagation through interpolation`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let wrap: {val: 'a} -> String with Show 'a = {val} ->
+            let wrap: {val: 'a} -> Str with Show 'a = {val} ->
                 "<$(Show.show {val = val})>"
 
-            let doubleWrap: {val: 'a} -> String with Show 'a = {val} ->
+            let doubleWrap: {val: 'a} -> Str with Show 'a = {val} ->
                 "[[$(wrap {val = val})]]"
 
             doubleWrap {val = 42}
@@ -188,7 +188,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test match with data extraction in interpolation context`() {
         assertTypeChecks("""
-            type Result = | Success { message: String }, Failure { error: String } |
+            type Result = | Success { message: Str }, Failure { error: Str } |
 
             let getMessage = {r: Result} -> match r is
                 Success { message } -> message
@@ -216,7 +216,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test wildcard pattern in match with interpolation`() {
         assertTypeChecks("""
-            type Color = | Red {}, Green {}, Blue {}, Custom { name: String } |
+            type Color = | Red {}, Green {}, Blue {}, Custom { name: Str } |
 
             let colorName = {c: Color} -> match c is
                 Red {} -> "red"
@@ -247,7 +247,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test do expression with intermediate string building`() {
         assertTypeChecks("""
-            let buildMessage = {name: String, action: String} -> do
+            let buildMessage = {name: Str, action: Str} -> do
                 let greeting = "Hello $(name)"
                 let message = "$(greeting), you should $(action)"
                 message
@@ -262,14 +262,14 @@ class StringInterpolationTypeCheckerTest {
     fun `test effect call result in interpolation`() {
         assertTypeChecks("""
             effect FileSystem where {
-                readFile : {path: String} -> String <FileSystem>
+                readFile : {path: Str} -> Str <FileSystem>
             }
 
             impl FileSystem for MockFS where {
-                readFile : {path: String} -> String = {path} -> "file content"
+                readFile : {path: Str} -> Str = {path} -> "file content"
             }
 
-            let displayFile: {path: String} -> String <FileSystem> = {path} ->
+            let displayFile: {path: Str} -> Str <FileSystem> = {path} ->
                 "Content: $(FileSystem.readFile {path = path})"
 
             perform MockFS in displayFile {path = "/test.txt"}
@@ -280,14 +280,14 @@ class StringInterpolationTypeCheckerTest {
     fun `test log effect with interpolated message`() {
         assertTypeChecks("""
             effect Log where {
-                print : {msg: String} -> {} <Log>
+                print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> {}
+                print : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let logMessage: {prefix: String, message: String} -> {} <Log> = {prefix, message} ->
+            let logMessage: {prefix: Str, message: Str} -> {} <Log> = {prefix, message} ->
                 Log.print {msg = "$(prefix): $(message)"}
 
             perform Console in logMessage {prefix = "INFO", message = "Hello"}
@@ -298,14 +298,14 @@ class StringInterpolationTypeCheckerTest {
     fun `test effect call in interpolation without annotation`() {
         assertTypeChecks("""
             effect FileSystem where {
-                readFile : {path: String} -> String <FileSystem>
+                readFile : {path: Str} -> Str <FileSystem>
             }
 
             impl FileSystem for MockFS where {
-                readFile : {path: String} -> String = {path} -> "file content"
+                readFile : {path: Str} -> Str = {path} -> "file content"
             }
 
-            let displayFile = {path: String} ->
+            let displayFile = {path: Str} ->
                 "Content: $(FileSystem.readFile {path = path})"
 
             perform MockFS in displayFile {path = "/test.txt"}
@@ -316,14 +316,14 @@ class StringInterpolationTypeCheckerTest {
     fun `test log effect in interpolation without annotation`() {
         assertTypeChecks("""
             effect Log where {
-                print : {msg: String} -> {} <Log>
+                print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> {}
+                print : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let logMessage = {prefix: String, message: String} ->
+            let logMessage = {prefix: Str, message: Str} ->
                 Log.print {msg = "$(prefix): $(message)"}
 
             perform Console in logMessage {prefix = "INFO", message = "Hello"}
@@ -387,7 +387,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test lambda returning interpolated string`() {
         assertTypeChecks("""
-            let makeGreeting = {name: String} -> "Hello, $(name)!"
+            let makeGreeting = {name: Str} -> "Hello, $(name)!"
             let greet = makeGreeting {name = "World"}
             greet
         """.trimIndent())
@@ -396,8 +396,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test higher-order function with interpolation`() {
         assertTypeChecks("""
-            let apply = {f: {x: String} -> String, x: String} -> f {x = x}
-            let wrapper = {x: String} -> "[$(x)]"
+            let apply = {f: {x: Str} -> Str, x: Str} -> f {x = x}
+            let wrapper = {x: Str} -> "[$(x)]"
             let result = apply {f = wrapper, x = "content"}
             result
         """.trimIndent())
@@ -408,7 +408,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test type alias record used in interpolation`() {
         assertTypeChecks("""
-            type Person = { name: String, title: String }
+            type Person = { name: Str, title: Str }
 
             let greet = {person: Person} -> "Hello $(person.name), $(person.title)"
             greet {person = {name = "Alice", title = "Engineer"}}
@@ -420,7 +420,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test polymorphic function body using interpolation`() {
         assertTypeChecks("""
-            let wrap: {prefix: String, suffix: String, middle: String} -> String =
+            let wrap: {prefix: Str, suffix: Str, middle: Str} -> Str =
                 {prefix, suffix, middle} -> "$(prefix)$(middle)$(suffix)"
 
             wrap {prefix = "<", suffix = ">", middle = "content"}
@@ -430,7 +430,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test constrained polymorphic with interpolation and Inspect`() {
         assertTypeChecks("""
-            let debug: {label: String, val: 'a} -> String with Inspect 'a = {label, val} ->
+            let debug: {label: Str, val: 'a} -> Str with Inspect 'a = {label, val} ->
                 "$(label): $(Inspect.to_str {val = val})"
 
             debug {label = "number", val = 42}
@@ -563,14 +563,14 @@ class StringInterpolationTypeCheckerTest {
     fun `test effectful string in interpolation`() {
         assertTypeChecks("""
             effect FileSystem where {
-                readFile : {path: String} -> String <FileSystem>
+                readFile : {path: Str} -> Str <FileSystem>
             }
 
             impl FileSystem for MockFS where {
-                readFile : {path: String} -> String = {path} -> "content"
+                readFile : {path: Str} -> Str = {path} -> "content"
             }
 
-            let getContent: {path: String} -> String <FileSystem> = {path} ->
+            let getContent: {path: Str} -> Str <FileSystem> = {path} ->
                 "File: $(FileSystem.readFile {path = path})"
 
             perform MockFS in getContent {path = "/test"}
@@ -583,28 +583,28 @@ class StringInterpolationTypeCheckerTest {
     fun `test complex scenario with abilities effects and pattern matching`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             effect Log where {
-                print : {msg: String} -> {} <Log>
+                print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> {}
+                print : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let processResult: {r: Result} -> String = {r} -> match r is
+            let processResult: {r: Result} -> Str = {r} -> match r is
                 Ok { value } -> "Success: $(Show.show {val = value})"
                 Err { message } -> "Error: $(message)"
 
-            let logAndProcess: {r: Result} -> String <Log> = {r} -> do
+            let logAndProcess: {r: Result} -> Str <Log> = {r} -> do
                 let msg = processResult {r = r}
                 Log.print {msg = "Processing: $(msg)"}
                 msg
@@ -617,21 +617,21 @@ class StringInterpolationTypeCheckerTest {
     fun `test multiple ability constraints with interpolation in lambda chain`() {
         assertTypeChecks("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            impl Show String where {
-                show: {val: String} -> String = {val} -> "\"$(val)\""
+            impl Show Str where {
+                show: {val: Str} -> Str = {val} -> "\"$(val)\""
             }
 
-            let showPair: {a: 'x, b: 'y} -> String with Show 'x, Show 'y = {a, b} ->
+            let showPair: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->
                 "($(Show.show {val = a}), $(Show.show {val = b}))"
 
-            let formatPairs: {p1a: 'x, p1b: 'y, p2a: 'x, p2b: 'y} -> String with Show 'x, Show 'y = {p1a, p1b, p2a, p2b} ->
+            let formatPairs: {p1a: 'x, p1b: 'y, p2a: 'x, p2b: 'y} -> Str with Show 'x, Show 'y = {p1a, p1b, p2a, p2b} ->
                 "Pair1: $(showPair {a = p1a, b = p1b}), Pair2: $(showPair {a = p2a, b = p2b})"
 
             formatPairs {p1a = 1, p1b = "hello", p2a = 2, p2b = "world"}

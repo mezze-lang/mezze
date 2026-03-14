@@ -262,7 +262,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let sum = int_to_mut { n = 0 }
-                    for_range { start = 1, end = 6, body = {i} ->
+                    for_range { start = 1, end = 6, step = 1, body = {i} ->
                         incr { n = sum, delta = i }
                     }
                     read_int { n = sum }
@@ -281,7 +281,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let sum = int_to_mut { n = 42 }
-                    for_range { start = 5, end = 5, body = {i} ->
+                    for_range { start = 5, end = 5, step = 1, body = {i} ->
                         incr { n = sum, delta = i }
                     }
                     read_int { n = sum }
@@ -300,7 +300,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let sum = int_to_mut { n = 0 }
-                    for_range { start = 1, end = 101, body = {i} ->
+                    for_range { start = 1, end = 101, step = 1, body = {i} ->
                         incr { n = sum, delta = i }
                     }
                     read_int { n = sum }
@@ -352,7 +352,7 @@ class MutationRuntimeTest {
                 # Calculate 1^2 + 2^2 + 3^2 + 4^2 + 5^2 = 55
                 let sum = perform LocalMut in do
                     let acc = int_to_mut { n = 0 }
-                    for_range { start = 1, end = 6, body = {i} ->
+                    for_range { start = 1, end = 6, step = 1, body = {i} ->
                         incr { n = acc, delta = i * i }
                     }
                     read_int { n = acc }
@@ -1198,5 +1198,405 @@ class MutationRuntimeTest {
             main {}
         """.trimIndent()
         assertEquals(3L, eval(code))
+    }
+
+    // ==========================================================================
+    // MutBool Operations
+    // ==========================================================================
+
+    @Test
+    fun `test MutBool read and write`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, bool_to_mut, read_bool, write_bool}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let b = bool_to_mut { b = True }
+                    let v1 = read_bool { b = b }
+                    write_bool { b = b, v = False }
+                    let v2 = read_bool { b = b }
+                    if v1 then (if v2 then 0 else 1) else 0
+
+            main {}
+        """.trimIndent()
+        // v1=true, v2=false -> 1
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test MutBool toggle`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, bool_to_mut, read_bool, toggle_bool}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let b = bool_to_mut { b = False }
+                    toggle_bool { b = b }
+                    let v1 = read_bool { b = b }
+                    toggle_bool { b = b }
+                    let v2 = read_bool { b = b }
+                    if v1 then (if v2 then 0 else 1) else 0
+
+            main {}
+        """.trimIndent()
+        // false->toggle->true, true->toggle->false, v1=true, v2=false -> 1
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test MutBool set_true and set_false`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, bool_to_mut, read_bool, set_true, set_false}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let b = bool_to_mut { b = False }
+                    set_true { b = b }
+                    let v1 = read_bool { b = b }
+                    set_false { b = b }
+                    let v2 = read_bool { b = b }
+                    if v1 then (if v2 then 0 else 1) else 0
+
+            main {}
+        """.trimIndent()
+        // v1=true, v2=false -> 1
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test MutBool to_immut`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, bool_to_mut, bool_to_immut, toggle_bool}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let b = bool_to_mut { b = False }
+                    toggle_bool { b = b }
+                    let result = bool_to_immut { b = b }
+                    if result then 1 else 0
+
+            main {}
+        """.trimIndent()
+        assertEquals(1L, eval(code))
+    }
+
+    // ==========================================================================
+    // MutString Operations
+    // ==========================================================================
+
+    @Test
+    fun `test MutString to_mut and to_immut`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_to_immut}
+            use std::string
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "hello" }
+                    let result = string_to_immut { s = s }
+                    string::length { s = result }
+
+            main {}
+        """.trimIndent()
+        assertEquals(5L, eval(code))
+    }
+
+    @Test
+    fun `test MutString read and write`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, read_string, write_string}
+            use std::string
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "hello" }
+                    let v1 = read_string { s = s }
+                    write_string { s = s, v = "world" }
+                    let v2 = read_string { s = s }
+                    string::length { s = v1 } * 10 + string::length { s = v2 }
+
+            main {}
+        """.trimIndent()
+        // "hello"=5, "world"=5, 5*10 + 5 = 55
+        assertEquals(55L, eval(code))
+    }
+
+    @Test
+    fun `test MutString len and is_empty`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_len, string_is_empty, string_clear}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "hello" }
+                    let len = string_len { s = s }
+                    let empty1 = string_is_empty { s = s }
+                    string_clear { s = s }
+                    let empty2 = string_is_empty { s = s }
+                    let result = len
+                    if empty1 then 0 else (if empty2 then result else 0)
+
+            main {}
+        """.trimIndent()
+        // len=5, empty1=false, empty2=true -> 5
+        assertEquals(5L, eval(code))
+    }
+
+    @Test
+    fun `test MutString append and prepend`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_append, string_prepend, read_string}
+            use std::string
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "world" }
+                    string_prepend { s = s, prefix = "hello " }
+                    string_append { s = s, suffix = "!" }
+                    let result = read_string { s = s }
+                    string::length { s = result }
+
+            main {}
+        """.trimIndent()
+        // "hello " + "world" + "!" = "hello world!" = 12 characters
+        assertEquals(12L, eval(code))
+    }
+
+    @Test
+    fun `test MutString reverse`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_reverse, read_string}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "abc" }
+                    string_reverse { s = s }
+                    let result = read_string { s = s }
+                    result
+
+            main {}
+        """.trimIndent()
+        assertEquals("cba", eval(code))
+    }
+
+    @Test
+    fun `test MutString insert and delete`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_insert, string_delete, read_string}
+            use std::string
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "helloworld" }
+                    string_insert { s = s, i = 5, text = " " }
+                    let v1 = read_string { s = s }
+                    string_delete { s = s, start = 0, end = 6 }
+                    let v2 = read_string { s = s }
+                    string::length { s = v1 } * 10 + string::length { s = v2 }
+
+            main {}
+        """.trimIndent()
+        // "hello world"=11, "world"=5, 11*10 + 5 = 115
+        assertEquals(115L, eval(code))
+    }
+
+    @Test
+    fun `test MutString char_at`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_char_at}
+            use std::char
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "abc" }
+                    let ch = string_char_at { s = s, i = 1 }
+                    match ch is
+                        Some { val = c } -> char::to_int { c = c }
+                        None -> -1
+
+            main {}
+        """.trimIndent()
+        // 'b' = 98
+        assertEquals(98L, eval(code))
+    }
+
+    @Test
+    fun `test MutString set_char_at`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_to_mut, string_set_char_at, read_string}
+            use std::char
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_to_mut { s = "abc" }
+                    match char::from_int { code = 88 } is
+                        Some { val = x } -> do
+                            string_set_char_at { s = s, i = 1, c = x }
+                            read_string { s = s }
+                        None -> "error"
+
+            main {}
+        """.trimIndent()
+        assertEquals("aXc", eval(code))
+    }
+
+    @Test
+    fun `test MutString with_capacity`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, string_with_capacity, string_append, string_len, read_string}
+
+            let main = {} ->
+                perform LocalMut in do
+                    let s = string_with_capacity { capacity = 100 }
+                    string_append { s = s, suffix = "hello" }
+                    string_append { s = s, suffix = " world" }
+                    string_len { s = s }
+
+            main {}
+        """.trimIndent()
+        assertEquals(11L, eval(code))
+    }
+
+    // ==========================================================================
+    // MutChar Operations
+    // ==========================================================================
+
+    @Test
+    fun `test MutChar to_mut and to_immut`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, char_to_immut}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 97 } is
+                    Some { val = a } -> perform LocalMut in do
+                        let c = char_to_mut { c = a }
+                        let result = char_to_immut { c = c }
+                        char::to_int { c = result }
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // 'a' = 97
+        assertEquals(97L, eval(code))
+    }
+
+    @Test
+    fun `test MutChar read and write`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, read_char, write_char}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 97 } is
+                    Some { val = a } -> match char::from_int { code = 122 } is
+                        Some { val = z } -> perform LocalMut in do
+                            let c = char_to_mut { c = a }
+                            let v1 = read_char { c = c }
+                            write_char { c = c, v = z }
+                            let v2 = read_char { c = c }
+                            char::to_int { c = v1 } + char::to_int { c = v2 }
+                        None -> -1
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // 'a'=97, 'z'=122, 97+122=219
+        assertEquals(219L, eval(code))
+    }
+
+    @Test
+    fun `test MutChar to_upper and to_lower`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, read_char, char_to_upper, char_to_lower}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 97 } is
+                    Some { val = a } -> perform LocalMut in do
+                        let c = char_to_mut { c = a }
+                        char_to_upper { c = c }
+                        let upper = read_char { c = c }
+                        char_to_lower { c = c }
+                        let lower = read_char { c = c }
+                        char::to_int { c = upper } * 1000 + char::to_int { c = lower }
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // 'A'=65, 'a'=97, 65*1000 + 97 = 65097
+        assertEquals(65097L, eval(code))
+    }
+
+    @Test
+    fun `test MutChar is_digit`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, char_is_digit, write_char}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 53 } is
+                    Some { val = five } -> match char::from_int { code = 120 } is
+                        Some { val = x } -> perform LocalMut in do
+                            let c = char_to_mut { c = five }
+                            let d1 = char_is_digit { c = c }
+                            write_char { c = c, v = x }
+                            let d2 = char_is_digit { c = c }
+                            if d1 then (if d2 then 0 else 1) else 0
+                        None -> -1
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // d1=true (digit '5'), d2=false (letter 'x') -> 1
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test MutChar is_letter`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, char_is_letter, write_char}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 97 } is
+                    Some { val = a } -> match char::from_int { code = 49 } is
+                        Some { val = one } -> perform LocalMut in do
+                            let c = char_to_mut { c = a }
+                            let l1 = char_is_letter { c = c }
+                            write_char { c = c, v = one }
+                            let l2 = char_is_letter { c = c }
+                            if l1 then (if l2 then 0 else 1) else 0
+                        None -> -1
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // l1=true (letter 'a'), l2=false (digit '1') -> 1
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test MutChar is_whitespace`() {
+        val code = """
+            use std::effects::mutation::{LocalMut, char_to_mut, char_is_whitespace, write_char}
+            use std::char
+
+            let main = {} ->
+                match char::from_int { code = 32 } is
+                    Some { val = space } -> match char::from_int { code = 97 } is
+                        Some { val = a } -> perform LocalMut in do
+                            let c = char_to_mut { c = space }
+                            let w1 = char_is_whitespace { c = c }
+                            write_char { c = c, v = a }
+                            let w2 = char_is_whitespace { c = c }
+                            if w1 then (if w2 then 0 else 1) else 0
+                        None -> -1
+                    None -> -1
+
+            main {}
+        """.trimIndent()
+        // w1=true (space), w2=false (letter 'a') -> 1
+        assertEquals(1L, eval(code))
     }
 }

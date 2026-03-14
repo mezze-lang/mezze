@@ -423,7 +423,7 @@ class ExceptionEffectTest {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            type MyError = | NotFound {key: String}, InvalidInput {msg: String} |
+            type MyError = | NotFound {key: Str}, InvalidInput {msg: Str} |
 
             let lookup = {key} ->
                 if key == "" then

@@ -94,7 +94,7 @@ class SeqSpreadTypeCheckTest {
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
 
-        // Result should be [String]
+        // Result should be [Str]
         val resultType = result.program.items.last().let {
             (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
         }

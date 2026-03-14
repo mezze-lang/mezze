@@ -212,7 +212,7 @@ class DoExpressionConstraintTest {
         // should fail when no impl Show Bool exists
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do
@@ -235,7 +235,7 @@ class DoExpressionConstraintTest {
         // Using explicit field value {val = diff} where diff is polymorphic
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do
@@ -259,7 +259,7 @@ class DoExpressionConstraintTest {
         // When the type is truly polymorphic, it should add a constraint and succeed
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let polyShow = {val} -> do
@@ -326,11 +326,8 @@ class DoExpressionConstraintTest {
         assertNotNull(returnType.fields["diff"])
 
         // isPositive should be Bool (variant)
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, returnType.fields["isPositive"])
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, returnType.fields["isPositive"])
 
         // doubleSum should have same type as sum
         assertNotNull(returnType.fields["doubleSum"])
@@ -360,7 +357,7 @@ class DoExpressionConstraintTest {
         // are correctly propagated to the enclosing lambda
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do

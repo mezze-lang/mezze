@@ -29,11 +29,11 @@ class EffectHandlerUsageValidationTest {
     fun `test direct effect handler call in expression should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             let result = BasicLogger.info {msg = "This should fail"}
@@ -52,11 +52,11 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call in do block should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             let program = do
@@ -77,14 +77,14 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call in function should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
-            let myFunction = {msg: String} -> BasicLogger.info {msg = msg}
+            let myFunction = {msg: Str} -> BasicLogger.info {msg = msg}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -100,11 +100,11 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call inside perform should succeed when wrapped in function`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             let result = {} -> perform BasicLogger in Log.info {msg = "This should work"}
@@ -120,18 +120,18 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call inside same type impl should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>,
-              debug : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>,
+              debug : {msg: Str} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {},
-              debug : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {},
+              debug : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"},
-              debug : {msg: String} -> {} = {msg} -> BasicLogger.debug {msg = "[DEBUG] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"},
+              debug : {msg: Str} -> {} = {msg} -> BasicLogger.debug {msg = "[DEBUG] $(msg)"}
             }
         """.trimIndent()
 
@@ -145,23 +145,23 @@ class EffectHandlerUsageValidationTest {
     fun `test cross-effect handler call inside impl should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Log for BadLogger where {
-              info : {msg: String} -> {} = {msg} -> Terminal.print {msg = msg}  # This should fail
+              info : {msg: Str} -> {} = {msg} -> Terminal.print {msg = msg}  # This should fail
             }
         """.trimIndent()
 
@@ -182,19 +182,19 @@ class EffectHandlerUsageValidationTest {
     fun `test abstract effect call inside impl should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
             
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
         """.trimIndent()
 
@@ -209,15 +209,15 @@ class EffectHandlerUsageValidationTest {
     fun `test nested effect handler calls should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
-            let outerFunction = {msg: String} -> do
-              let innerFunction = {innerMsg: String} -> BasicLogger.info {msg = innerMsg}
+            let outerFunction = {msg: Str} -> do
+              let innerFunction = {innerMsg: Str} -> BasicLogger.info {msg = innerMsg}
               innerFunction {innerMsg = msg}
         """.trimIndent()
 
@@ -234,14 +234,14 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler in conditional should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
-            let conditionalLog = {condition: Bool, msg: String} -> 
+            let conditionalLog = {condition: Bool, msg: Str} -> 
               if condition then BasicLogger.info {msg = msg} else {}
         """.trimIndent()
 
@@ -258,16 +258,16 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler in match expression should fail`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             type LogLevel = | Info, Debug |
             
-            let matchLog = {level: LogLevel, msg: String} -> match level is
+            let matchLog = {level: LogLevel, msg: Str} -> match level is
               Info -> BasicLogger.info {msg = msg}
               Debug -> {}
         """.trimIndent()
@@ -285,19 +285,19 @@ class EffectHandlerUsageValidationTest {
     fun `test multiple effect handlers of same type should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Log for FileLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Log for CompositeLogger where {
-              info : {msg: String} -> {} = {msg} -> do
+              info : {msg: Str} -> {} = {msg} -> do
                 BasicLogger.info {msg = "[BASIC] $(msg)"}
                 FileLogger.info {msg = "[FILE] $(msg)"}
             }
@@ -314,14 +314,14 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call with perform syntax should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
-            let logMessage = {msg: String} -> perform BasicLogger in Log.info {msg = msg}
+            let logMessage = {msg: Str} -> perform BasicLogger in Log.info {msg = msg}
 
             # Wrap in function to avoid top-level <*> restriction
             let testFn = {} -> do
@@ -340,19 +340,19 @@ class EffectHandlerUsageValidationTest {
     fun `test complex nested perform should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
             
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
             
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
             
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Wrap in function to avoid top-level <*> restriction

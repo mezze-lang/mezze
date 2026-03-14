@@ -3,7 +3,7 @@
 type Color = | Red, Blue { val: Int }, Green |
 
 # This should FAIL - missing Green case
-let processColor: {color: Color} -> String = {color} -> match color is
+let processColor: {color: Color} -> Str = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"
 

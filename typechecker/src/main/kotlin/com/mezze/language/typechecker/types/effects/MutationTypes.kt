@@ -801,56 +801,6 @@ object MutationTypes {
         }
 
         // =================================================================
-        // Looping constructs
-        // =================================================================
-
-        // __native_for_range: {start: Int, end: Int, body: {i: Int} -> {} <...>} -> {} <...>
-        // Effect-polymorphic: propagates effects from body
-        run {
-            val effectRowVar = RowVar.fresh()
-            val effectRow = MezzeType.EffectRow.simple(emptySet(), effectRowVar, performed = false)
-            val bodyType = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("i" to MezzeType.IntType)),
-                MezzeType.RecordType(emptyMap()),
-                effects = effectRow
-            )
-            context["__native_for_range"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "start" to MezzeType.IntType,
-                    "end" to MezzeType.IntType,
-                    "body" to bodyType
-                )),
-                MezzeType.RecordType(emptyMap()),
-                effects = effectRow
-            )
-        }
-
-        // __native_while: {cond: {} -> Bool <...>, body: {} -> {} <...>} -> {} <...>
-        // Effect-polymorphic: propagates effects from cond and body
-        run {
-            val effectRowVar = RowVar.fresh()
-            val effectRow = MezzeType.EffectRow.simple(emptySet(), effectRowVar, performed = false)
-            val condType = MezzeType.FunctionType(
-                MezzeType.RecordType(emptyMap()),
-                MezzeType.BoolType,
-                effects = effectRow
-            )
-            val bodyType = MezzeType.FunctionType(
-                MezzeType.RecordType(emptyMap()),
-                MezzeType.RecordType(emptyMap()),
-                effects = effectRow
-            )
-            context["__native_while"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "cond" to condType,
-                    "body" to bodyType
-                )),
-                MezzeType.RecordType(emptyMap()),
-                effects = effectRow
-            )
-        }
-
-        // =================================================================
         // MutDeque operations
         // =================================================================
 
@@ -1001,13 +951,356 @@ object MutationTypes {
         }
 
         // =================================================================
-        // Debug mutation marker
+        // MutBool operations
         // =================================================================
 
-        // __native_debug_mutation_marker: {} -> {}
-        context["__native_debug_mutation_marker"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.RecordType(emptyMap())
-        )
+        // __native_mut_bool_read: {b: MutBool} -> Bool
+        run {
+            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            context["__native_mut_bool_read"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("b" to mutBoolType)),
+                MezzeType.BoolType
+            )
+        }
+
+        // __native_mut_bool_write: {b: MutBool, v: Bool} -> {}
+        run {
+            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            context["__native_mut_bool_write"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("b" to mutBoolType, "v" to MezzeType.BoolType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_bool_toggle: {b: MutBool} -> {}
+        run {
+            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            context["__native_mut_bool_toggle"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("b" to mutBoolType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_bool_set_true: {b: MutBool} -> {}
+        run {
+            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            context["__native_mut_bool_set_true"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("b" to mutBoolType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_bool_set_false: {b: MutBool} -> {}
+        run {
+            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            context["__native_mut_bool_set_false"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("b" to mutBoolType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // =================================================================
+        // MutString conversions and operations
+        // =================================================================
+
+        // __native_string_to_mut: {s: String} -> MutString
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_string_to_mut"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+                mutStringType
+            )
+        }
+
+        // __native_string_with_capacity: {capacity: Int} -> MutString
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_string_with_capacity"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
+                mutStringType
+            )
+        }
+
+        // __native_string_to_immut: {s: MutString} -> String
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_string_to_immut"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.StringType
+            )
+        }
+
+        // __native_mut_string_read: {s: MutString} -> String
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_read"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.StringType
+            )
+        }
+
+        // __native_mut_string_write: {s: MutString, v: String} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_write"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType, "v" to MezzeType.StringType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_len: {s: MutString} -> Int
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_len"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.IntType
+            )
+        }
+
+        // __native_mut_string_is_empty: {s: MutString} -> Bool
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_is_empty"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.BoolType
+            )
+        }
+
+        // __native_mut_string_append: {s: MutString, suffix: String} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_append"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType, "suffix" to MezzeType.StringType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_prepend: {s: MutString, prefix: String} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_prepend"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType, "prefix" to MezzeType.StringType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_clear: {s: MutString} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_clear"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_reverse: {s: MutString} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_reverse"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_insert: {s: MutString, i: Int, text: String} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_insert"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "s" to mutStringType,
+                    "i" to MezzeType.IntType,
+                    "text" to MezzeType.StringType
+                )),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_delete: {s: MutString, start: Int, end: Int} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_delete"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "s" to mutStringType,
+                    "start" to MezzeType.IntType,
+                    "end" to MezzeType.IntType
+                )),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_string_char_at: {s: MutString, i: Int} -> Option Char
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val optionCharType = MezzeType.TypeApplication("Option", listOf(MezzeType.CharType))
+            context["__native_mut_string_char_at"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("s" to mutStringType, "i" to MezzeType.IntType)),
+                optionCharType
+            )
+        }
+
+        // __native_mut_string_set_char_at: {s: MutString, i: Int, c: Char} -> {}
+        run {
+            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            context["__native_mut_string_set_char_at"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "s" to mutStringType,
+                    "i" to MezzeType.IntType,
+                    "c" to MezzeType.CharType
+                )),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // =================================================================
+        // MutChar conversions and operations
+        // =================================================================
+
+        // __native_char_to_mut: {c: Char} -> MutChar
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_char_to_mut"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
+                mutCharType
+            )
+        }
+
+        // __native_char_to_immut: {c: MutChar} -> Char
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_char_to_immut"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.CharType
+            )
+        }
+
+        // __native_mut_char_read: {c: MutChar} -> Char
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_read"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.CharType
+            )
+        }
+
+        // __native_mut_char_write: {c: MutChar, v: Char} -> {}
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_write"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType, "v" to MezzeType.CharType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_char_to_upper: {c: MutChar} -> {}
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_to_upper"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_char_to_lower: {c: MutChar} -> {}
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_to_lower"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // __native_mut_char_is_digit: {c: MutChar} -> Bool
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_is_digit"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.BoolType
+            )
+        }
+
+        // __native_mut_char_is_letter: {c: MutChar} -> Bool
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_is_letter"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.BoolType
+            )
+        }
+
+        // __native_mut_char_is_whitespace: {c: MutChar} -> Bool
+        run {
+            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            context["__native_mut_char_is_whitespace"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("c" to mutCharType)),
+                MezzeType.BoolType
+            )
+        }
+
+        // =================================================================
+        // Loop native for LocalMut
+        // =================================================================
+
+        // __native_mutation_loop: {cond: {} -> Bool <Mutation>, body: {} -> {} <Mutation>} -> {}
+        // This is the loop implementation for LocalMut
+        // The cond and body functions can perform mutations
+        run {
+            val mutationEffect = MezzeType.EffectRow(
+                effects = setOf("Mut")
+            )
+            val condType = MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                MezzeType.BoolType,
+                mutationEffect
+            )
+            val bodyType = MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                MezzeType.RecordType(emptyMap()),
+                mutationEffect
+            )
+            context["__native_mutation_loop"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("cond" to condType, "body" to bodyType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
+
+        // =================================================================
+        // Debug mutation natives for DebugMut
+        // =================================================================
+
+        // __native_debug_mutation_mutate: {act: {} -> 'a} -> 'a
+        // This is the mutate implementation for DebugMut with logging
+        run {
+            val resultType = MezzeType.VarType(TypeVar("a"))
+            val actType = MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                resultType
+            )
+            context["__native_debug_mutation_mutate"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("act" to actType)),
+                resultType
+            )
+        }
+
+        // __native_debug_mutation_loop: {cond: {} -> Bool <Mutation>, body: {} -> {} <Mutation>} -> {}
+        // This is the loop implementation for DebugMut with logging
+        run {
+            val mutationEffect = MezzeType.EffectRow(
+                effects = setOf("Mut")
+            )
+            val condType = MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                MezzeType.BoolType,
+                mutationEffect
+            )
+            val bodyType = MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                MezzeType.RecordType(emptyMap()),
+                mutationEffect
+            )
+            context["__native_debug_mutation_loop"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("cond" to condType, "body" to bodyType)),
+                MezzeType.RecordType(emptyMap())
+            )
+        }
     }
 }

@@ -13,7 +13,7 @@ pub let from_int = { n: Int } ->
 pub let from_float = { n: Float } ->
     __native_nat_from_float { n = n }
 
-pub let from_string = { s: String } ->
+pub let from_string = { s: Str } ->
     __native_nat_from_string { s = s }
 
 # Utility functions

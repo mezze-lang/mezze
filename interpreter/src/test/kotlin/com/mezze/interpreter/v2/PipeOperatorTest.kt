@@ -87,7 +87,7 @@ class PipeOperatorTest {
     fun `test pipe with record operations`() {
         val code = """
             let person = {name = "Alice", age = 30}
-            let getName: {p: {name: String, ...}} -> String = {p} -> p.name
+            let getName: {p: {name: Str, ...}} -> Str = {p} -> p.name
             let greet = {name} -> "Hello, $(name)!"
             person |> getName {p = @} |> greet {name = @}
         """
@@ -107,7 +107,7 @@ class PipeOperatorTest {
     @Test
     fun `test pipe with record updates`() {
         val code = """
-            let updateAge: {person: {name: String, age: Int}, newAge: Int} -> {name: String, age: Int} = {person, newAge} -> {...person, age = newAge}
+            let updateAge: {person: {name: Str, age: Int}, newAge: Int} -> {name: Str, age: Int} = {person, newAge} -> {...person, age = newAge}
             let person = {name = "Bob", age = 25}
             let result = person |> updateAge {person = @, newAge = 30}
             result.age

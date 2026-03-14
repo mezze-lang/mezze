@@ -46,7 +46,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `if let with constructor pattern extracts bound variables`() {
         val code = """
-            let lookup: {key: Int} -> | Some {val: String}, None | = {key} ->
+            let lookup: {key: Int} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     1 -> Some {val = "one"}
                     _ -> None
@@ -84,7 +84,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `if let with nested record in option`() {
         val code = """
-            let getPerson: {id: Int} -> | Some {val: {name: String, age: Int}}, None | = {id} ->
+            let getPerson: {id: Int} -> | Some {val: {name: Str, age: Int}}, None | = {id} ->
                 match id is
                     1 -> Some {val = {name = "Alice", age = 30}}
                     _ -> None
@@ -139,7 +139,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `if let binding variable has correct type`() {
         val code = """
-            let lookup: {key: Int} -> | Some {val: String}, None | = {key} ->
+            let lookup: {key: Int} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     1 -> Some {val = "one"}
                     _ -> None
@@ -487,7 +487,7 @@ class IfLetGuardTypeCheckerTest {
     @Test
     fun `if let binding variable type error has source location`() {
         val code = """
-            let lookup: {key: Int} -> | Some {val: String}, None | = {key} ->
+            let lookup: {key: Int} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     1 -> Some {val = "one"}
                     _ -> None

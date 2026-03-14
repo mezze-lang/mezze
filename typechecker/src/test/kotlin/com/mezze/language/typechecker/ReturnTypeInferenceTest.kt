@@ -47,7 +47,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let check_value : {x: Int} -> String = {x} ->
+            pub let check_value : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
@@ -124,7 +124,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let classify : {x: Int} -> String = {x} ->
+            pub let classify : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "negative"}
@@ -151,7 +151,7 @@ class ReturnTypeInferenceTest {
                 return: {val: 'result} -> 'a <Return>
             }
 
-            type Status = | Success {msg: String}, Failed {error: String} |
+            type Status = | Success {msg: Str}, Failed {error: Str} |
 
             impl Return for StatusReturn having 'result = Status where {
                 return = {val} -> val
@@ -186,7 +186,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let color_name : {c: Color} -> String = {c} ->
+            pub let color_name : {c: Color} -> Str = {c} ->
                 perform WithReturn in
                     match c is
                         Red -> Return.return {val = "red"}
@@ -213,14 +213,14 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let inner : {x: Int} -> String = {x} ->
+            pub let inner : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "inner negative"}
                     else
                         "inner ok"
 
-            pub let outer : {x: Int} -> String = {x} ->
+            pub let outer : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     let result = inner {x = x}
                     if result == "inner ok" then
@@ -248,7 +248,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let get_user : {id: Int} -> {name: String, age: Int} = {id} ->
+            pub let get_user : {id: Int} -> {name: Str, age: Int} = {id} ->
                 perform WithReturn in do
                     if id == 0 then
                         Return.return {val = {name = "Admin", age = 0}}
@@ -302,7 +302,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let validate : {name: String, age: Int} -> String = {name, age} ->
+            pub let validate : {name: Str, age: Int} -> Str = {name, age} ->
                 perform WithReturn in do
                     if name == "" then
                         Return.return {val = "Name required"}
@@ -357,7 +357,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let process : {x: Int} -> String = {x} ->
+            pub let process : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     if x < 0 then
                         Return.return {val = "early"}
@@ -385,7 +385,7 @@ class ReturnTypeInferenceTest {
                 return = {val} -> val
             }
 
-            pub let check : {a: Int, b: Int, c: Int} -> String = {a, b, c} ->
+            pub let check : {a: Int, b: Int, c: Int} -> Str = {a, b, c} ->
                 perform WithReturn in do
                     if a < 0 then
                         Return.return {val = "a negative"}
@@ -424,7 +424,7 @@ class ReturnTypeInferenceTest {
                 else
                     {}
 
-            pub let validate : {x: Int} -> String = {x} ->
+            pub let validate : {x: Int} -> Str = {x} ->
                 perform WithReturn in do
                     return_if {condition = x < 0, val = "negative"}
                     return_if {condition = x == 0, val = "zero"}
@@ -444,7 +444,7 @@ class ReturnTypeInferenceTest {
     fun `test effect without associated types is not checked`() {
         val code = """
             effect Log where {
-                log: {msg: String} -> {} <Log>
+                log: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {

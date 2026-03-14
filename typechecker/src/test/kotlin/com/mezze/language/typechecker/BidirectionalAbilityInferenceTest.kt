@@ -23,7 +23,7 @@ class BidirectionalAbilityInferenceTest {
         // Case 1: Parse.decode should infer as Int from usage context
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Int where {
@@ -62,7 +62,7 @@ class BidirectionalAbilityInferenceTest {
         // Case 2: Parse.decode tries to infer as Float but no implementation exists
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Int where {
@@ -87,7 +87,7 @@ class BidirectionalAbilityInferenceTest {
         // Then the second usage (10.4 + x) should fail because x is Int, not Float
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Int where {
@@ -116,7 +116,7 @@ class BidirectionalAbilityInferenceTest {
         // Verify that using x as Int multiple times works
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Int where {
@@ -149,7 +149,7 @@ class BidirectionalAbilityInferenceTest {
         // Verify that Float usage works when there's a Float implementation
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Float where {
@@ -177,7 +177,7 @@ class BidirectionalAbilityInferenceTest {
         // When there's no usage context, x should remain polymorphic
         val code = """
             ability Parse 'a where {
-                decode: { val: String } -> 'a
+                decode: { val: Str } -> 'a
             }
 
             impl Parse Int where {

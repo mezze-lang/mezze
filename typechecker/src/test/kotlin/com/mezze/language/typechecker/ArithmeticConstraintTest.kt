@@ -78,11 +78,8 @@ class ArithmeticConstraintTest {
             val functionType = compareBinding.inferredType as MezzeType.FunctionType
             
             // Return type should be Boolean for comparison
-            val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, functionType.returnType)
+            val boolType = MezzeType.BoolType
+        assertEquals(boolType, functionType.returnType)
             
         } catch (e: Exception) {
             fail("Type checking should succeed for valid comparison function: ${e.message}")

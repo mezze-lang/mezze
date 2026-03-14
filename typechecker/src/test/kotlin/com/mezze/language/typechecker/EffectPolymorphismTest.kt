@@ -144,7 +144,7 @@ class EffectPolymorphismTest {
         // Test that parser handles effect extension syntax
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
@@ -164,7 +164,7 @@ class EffectPolymorphismTest {
         // Test that parser handles closed effect row syntax
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             let f: { x: Int } -> Int <Log> = { x } -> x + 1
@@ -183,7 +183,7 @@ class EffectPolymorphismTest {
     fun `test multiple polymorphic effect parameters parse correctly`() {
         // Test that parser handles multiple polymorphic effect parameters
         val code = """
-            let both : { f: {} -> Int <...>, g: {} -> String <...> } -> Int =
+            let both : { f: {} -> Int <...>, g: {} -> Str <...> } -> Int =
                 { f, g } -> 42
         """.trimIndent()
 
@@ -207,11 +207,11 @@ class EffectPolymorphismTest {
     fun `test effect extension with multiple concrete effects parses correctly`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect Console where {
-                print: {msg: String} -> {} <Console>
+                print: {msg: Str} -> {} <Console>
             }
 
             let f: { x: Int } -> Int <Log, Console, ...> = { x } -> x + 1
@@ -268,7 +268,7 @@ class EffectPolymorphismTest {
     fun `test effect polymorphism doesn't break existing effectful functions`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger {} where {
@@ -312,7 +312,7 @@ class EffectPolymorphismTest {
         // The pure implementation is a valid subtype of an effectful type
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
@@ -358,7 +358,7 @@ class EffectPolymorphismTest {
         // that accept callbacks with any effects
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger {} where {

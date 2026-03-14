@@ -23,25 +23,25 @@ class EffectPropagationTest {
     fun testBasicEffectPropagation() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Database for Postgres where {
-              query : {sql: String} -> String = {sql} -> do
+              query : {sql: Str} -> Str = {sql} -> do
                 Log.log {msg = "Executing: $(sql)"}
                 "result"
             }
 
-            # This function should have type: {query: String} -> String <Database>
-            let useDatabase : {query: String} -> String <Database> = {query} ->
+            # This function should have type: {query: Str} -> Str <Database>
+            let useDatabase : {query: Str} -> Str <Database> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
 
@@ -67,36 +67,36 @@ class EffectPropagationTest {
     fun testNestedEffectPropagation() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Auth where {
-              checkPermission : {resource: String} -> Boolean <Auth>
+              checkPermission : {resource: Str} -> Bool <Auth>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Auth for SimpleAuth where {
-              checkPermission : {resource: String} -> Boolean = {resource} -> do
+              checkPermission : {resource: Str} -> Bool = {resource} -> do
                 Log.log {msg = "Checking permission for $(resource)"}
                 True
             }
 
             impl Database for SecureDB where {
-              query : {sql: String} -> String = {sql} -> do
+              query : {sql: Str} -> Str = {sql} -> do
                 let hasPermission = Auth.checkPermission {resource = "database"}
                 Log.log {msg = "Executing query: $(sql)"}
                 "secure_result"
             }
 
             # This should propagate only Database effect
-            let secureQuery : {sql: String} -> String <Database> = {sql} ->
+            let secureQuery : {sql: Str} -> Str <Database> = {sql} ->
               Database.query {sql = sql}
         """.trimIndent()
 
@@ -122,7 +122,7 @@ class EffectPropagationTest {
     fun testEffectPropagationInDoExpressions() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -130,7 +130,7 @@ class EffectPropagationTest {
             }
 
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for MathRandom where {
@@ -169,28 +169,28 @@ class EffectPropagationTest {
     fun testEffectPropagationWithMultipleReturnTypes() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Error where {
-              throw : {msg: String} -> {} <Error>
+              throw : {msg: Str} -> {} <Error>
             }
 
             effect FileSystem where {
-              readFile : {path: String} -> String <FileSystem>,
-              writeFile : {path: String, content: String} -> {} <FileSystem>
+              readFile : {path: Str} -> Str <FileSystem>,
+              writeFile : {path: Str, content: Str} -> {} <FileSystem>
             }
 
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Error for SimpleError where {
-              throw : {msg: String} -> {} = {msg} -> {}
+              throw : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl FileSystem for LocalFS where {
-              readFile : {path: String} -> String = {path} ->
+              readFile : {path: Str} -> Str = {path} ->
                 if path == "missing" then do
                   Log.log {msg = "Reading file: $(path)"}
                   Error.throw {msg = "File not found"}
@@ -198,13 +198,13 @@ class EffectPropagationTest {
                 else do
                   Log.log {msg = "Reading file: $(path)"}
                   "file content",
-              writeFile : {path: String, content: String} -> {} = {path, content} -> do
+              writeFile : {path: Str, content: Str} -> {} = {path, content} -> do
                 Log.log {msg = "Writing to file: $(path)"}
                 {}
             }
 
             # Function that uses both operations with different effect signatures
-            let copyFile : {from: String, to: String} -> {} <FileSystem> = {from, to} -> do
+            let copyFile : {from: Str, to: Str} -> {} <FileSystem> = {from, to} -> do
               let content = FileSystem.readFile {path = from}
               FileSystem.writeFile {path = to, content = content}
               {}
@@ -232,30 +232,30 @@ class EffectPropagationTest {
     fun testEffectPropagationWithHandlers() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Database for TestDB where {
-              query : {sql: String} -> String = {sql} -> do
+              query : {sql: Str} -> Str = {sql} -> do
                 Log.log {msg = "Test query: $(sql)"}
                 "test_result"
             }
 
             # Function that calls Database.query
-            let queryWithLog : {sql: String} -> String <Database> = {sql} ->
+            let queryWithLog : {sql: Str} -> Str <Database> = {sql} ->
               Database.query {sql = sql}
 
             # Function that handles Database effect but TestDB adds Log effect
             # So we still have Log effect after handling Database
-            let partiallyHandledQuery : {sql: String} -> String <Log> = {sql} ->
+            let partiallyHandledQuery : {sql: Str} -> Str <Log> = {sql} ->
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 
@@ -282,7 +282,7 @@ class EffectPropagationTest {
     fun testNoEffectPropagationForPureFunctions() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             ability Math 'a where {
@@ -362,7 +362,7 @@ class EffectPropagationTest {
         // The logging_fn calls Log.info directly (not handled), so it has <Log> effects
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger {} where {
@@ -399,11 +399,11 @@ class EffectPropagationTest {
         // Test that different polymorphic effect parameters are independent
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect DB where {
-                query: {sql: String} -> {} <DB>
+                query: {sql: Str} -> {} <DB>
             }
 
             impl Log for ConsoleLogger {} where {

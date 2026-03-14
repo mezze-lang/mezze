@@ -2,7 +2,7 @@
 
 # Basic open record inference
 let inferredOpen = {x = 42, y = "hello", ...}
-# expected: inferredOpen : { x: Int, y: String, ... }
+# expected: inferredOpen : { x: Int, y: Str, ... }
 
 # DISABLED: Cannot add new fields to open records - this should fail type checking
 # let updateResult = {...inferredOpen, z = true}
@@ -10,7 +10,7 @@ let inferredOpen = {x = 42, y = "hello", ...}
 
 # Open record inference with spread
 let testOpen = {name = "test", value = 123, ...}
-# expected: testOpen : { name: String, value: Int, ... }
+# expected: testOpen : { name: Str, value: Int, ... }
 
 # DISABLED: Cannot add new fields to open records - this should fail type checking
 # let mixedFunc = {closed, open} -> {...open, fromClosed = closed.name}

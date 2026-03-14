@@ -55,7 +55,7 @@ class OpenRecordTest {
     @Test
     fun `test open record with different extra field types - String`() {
         val source = """
-            let processUser: {name: String, age: Int, ...} -> String = {name, age} -> name
+            let processUser: {name: Str, age: Int, ...} -> Str = {name, age} -> name
 
             processUser {name = "Alice", age = 30, city = "NYC"}
         """.trimIndent()
@@ -69,7 +69,7 @@ class OpenRecordTest {
     @Test
     fun `test open record with different extra field types - Boolean`() {
         val source = """
-            let processUser: {name: String, age: Int, ...} -> String = {name, age} -> name
+            let processUser: {name: Str, age: Int, ...} -> Str = {name, age} -> name
 
             processUser {name = "Bob", age = 25, active = True}
         """.trimIndent()
@@ -83,7 +83,7 @@ class OpenRecordTest {
     @Test
     fun `test open record with different extra field types - Float`() {
         val source = """
-            let processUser: {name: String, age: Int, ...} -> String = {name, age} -> name
+            let processUser: {name: Str, age: Int, ...} -> Str = {name, age} -> name
 
             processUser {name = "Charlie", age = 35, score = 95.5}
         """.trimIndent()
@@ -97,7 +97,7 @@ class OpenRecordTest {
     @Test
     fun `test open record with multiple extra fields`() {
         val source = """
-            let processUser: {name: String, ...} -> String = {name} -> name
+            let processUser: {name: Str, ...} -> Str = {name} -> name
 
             processUser {name = "Alice", age = 30, city = "NYC", active = True, score = 100.0}
         """.trimIndent()
@@ -154,7 +154,7 @@ class OpenRecordTest {
     @Test
     fun `test nested open and closed records mixed`() {
         val source = """
-            let my_func: {a: {x: Int, y: Int, ...}, b: {p: String, q: String}} -> Int = {a, b} -> a.x + a.y
+            let my_func: {a: {x: Int, y: Int, ...}, b: {p: Str, q: Str}} -> Int = {a, b} -> a.x + a.y
 
             my_func {a = {x = 1, y = 0, z = ""}, b = {p = "hello", q = "world"}}
         """.trimIndent()
@@ -168,7 +168,7 @@ class OpenRecordTest {
     @Test
     fun `test nested closed record in open record rejects extra fields`() {
         val source = """
-            let my_func: {a: {x: Int, y: Int, ...}, b: {p: String, q: String}} -> Int = {a, b} -> a.x + a.y
+            let my_func: {a: {x: Int, y: Int, ...}, b: {p: Str, q: Str}} -> Int = {a, b} -> a.x + a.y
 
             my_func {a = {x = 1, y = 0, z = ""}, b = {p = "hello", q = "world", r = True}}
         """.trimIndent()
@@ -212,7 +212,7 @@ class OpenRecordTest {
     fun `test multiple open records in sequence`() {
         val source = """
             let func1: {x: Int, ...} -> Int = {x} -> x
-            let func2: {y: String, ...} -> String = {y} -> y
+            let func2: {y: Str, ...} -> Str = {y} -> y
 
             let result1 = func1 {x = 42, extra = "test"}
             let result2 = func2 {y = "hello", extra = 100}

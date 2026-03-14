@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.printing
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.PrimitiveTypes
 
 /**
  * Pretty printer for type differences.
@@ -60,18 +61,11 @@ object TypeDiffPrinter {
      * This is the main type formatting function used everywhere.
      */
     fun formatType(type: MezzeType, indent: Int = 0): String {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return it }
+
         return when (type) {
             is MezzeType.VarType -> type.variable.name
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.OrderingType -> "Ordering"
-            is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
-            is MezzeType.CharType -> "Char"
             is MezzeType.FunctionType -> formatFunctionType(type, indent)
             is MezzeType.RecordType -> formatRecordType(type, indent)
             is MezzeType.VariantType -> formatVariantType(type, indent)
@@ -84,6 +78,7 @@ object TypeDiffPrinter {
             is MezzeType.MapType -> "Map ${formatType(type.keyType, indent)} ${formatType(type.valueType, indent)}"
             is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType, indent)}>"
             is MezzeType.EffectRow -> formatEffectRow(type)
+            else -> type.toString()
         }
     }
 

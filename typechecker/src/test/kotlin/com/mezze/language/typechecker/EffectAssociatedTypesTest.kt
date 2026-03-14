@@ -73,7 +73,7 @@ class EffectAssociatedTypesTest {
                 put: {value: 'state} -> {} <State>
             }
 
-            impl State for ListState having 'state = (List String) where {
+            impl State for ListState having 'state = (List Str) where {
                 get = {} -> Nil,
                 put = {value} -> {}
             }
@@ -109,7 +109,7 @@ class EffectAssociatedTypesTest {
     fun `test error when impl has binding but effect doesn't`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger having 'state = Int where {
@@ -182,7 +182,7 @@ class EffectAssociatedTypesTest {
                 ask: {} -> 'env <Reader>
             }
 
-            impl Reader for StringReader having 'env = String where {
+            impl Reader for StringReader having 'env = Str where {
                 ask = {} -> "hello"
             }
 
@@ -214,7 +214,7 @@ class EffectAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            impl Reader for StringReader having 'env = String where {
+            impl Reader for StringReader having 'env = Str where {
                 ask = {} -> "hello"
             }
 
@@ -249,13 +249,14 @@ class EffectAssociatedTypesTest {
         val funcType = binding.inferredType as MezzeType.FunctionType
         val actualType = funcType.returnType
         val typeClass = actualType?.javaClass?.simpleName
-        val typeString = actualType?.let { prettyPrintType(it) }
-        // Bool in Mezze is a variant type with True/False constructors
+        val typeStr = actualType?.let { prettyPrintType(it) }
+        // Bool in Mezze is represented as BoolType internally (or VariantType with True/False)
         assertTrue(
-            actualType is MezzeType.VariantType &&
-            actualType.constructors.containsKey("True") &&
-            actualType.constructors.containsKey("False"),
-            "Expected Bool (VariantType with True/False) but got: $typeClass ($typeString)"
+            actualType is MezzeType.BoolType ||
+            (actualType is MezzeType.VariantType &&
+             actualType.constructors.containsKey("True") &&
+             actualType.constructors.containsKey("False")),
+            "Expected Bool but got: $typeClass ($typeStr)"
         )
     }
 
@@ -293,7 +294,7 @@ class EffectAssociatedTypesTest {
             typeCheck(code)
         }
 
-        assertTrue(exception.message?.contains("type") == true || exception.message?.contains("String") == true)
+        assertTrue(exception.message?.contains("type") == true || exception.message?.contains("Str") == true)
     }
 
     @Test
@@ -303,7 +304,7 @@ class EffectAssociatedTypesTest {
                 transform: {input: 'a} -> 'a <Transform>
             }
 
-            impl Transform for StringTransform having 'a = String where {
+            impl Transform for StringTransform having 'a = Str where {
                 transform = {input} -> input
             }
 
@@ -345,7 +346,7 @@ class EffectAssociatedTypesTest {
                 get: {} -> {value: 'state, count: Int} <State>
             }
 
-            impl State for RecordState having 'state = String where {
+            impl State for RecordState having 'state = Str where {
                 get = {} -> {value = "hello", count = 1}
             }
 
@@ -414,7 +415,7 @@ class EffectAssociatedTypesTest {
                 getAll: {} -> (List 'item) <Collection>
             }
 
-            impl Collection for StringCollection having 'item = String where {
+            impl Collection for StringCollection having 'item = Str where {
                 getAll = {} -> Nil
             }
 
@@ -492,7 +493,7 @@ class EffectAssociatedTypesTest {
                 fail: {error: 'err} -> {} <Operation>
             }
 
-            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = Str where {
                 succeed = {value} -> {},
                 fail = {error} -> {}
             }
@@ -511,7 +512,7 @@ class EffectAssociatedTypesTest {
                 getThird: {} -> 'c <Triple>
             }
 
-            impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
+            impl Triple for IntStringBoolTriple having 'a = Int, 'b = Str, 'c = Bool where {
                 getFirst = {} -> 42,
                 getSecond = {} -> "hello",
                 getThird = {} -> True
@@ -530,7 +531,7 @@ class EffectAssociatedTypesTest {
                 fail: {error: 'err} -> 'err <Operation>
             }
 
-            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -571,7 +572,8 @@ class EffectAssociatedTypesTest {
 
         val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getSuccessResult" }
         val successFuncType = successBinding.inferredType as MezzeType.FunctionType
-        assertTrue(successFuncType.returnType is MezzeType.VariantType)
+        // Bool is represented as BoolType internally (not VariantType)
+        assertTrue(successFuncType.returnType is MezzeType.BoolType || successFuncType.returnType is MezzeType.VariantType)
 
         val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getFailResult" }
         val failFuncType = failBinding.inferredType as MezzeType.FunctionType
@@ -633,7 +635,7 @@ class EffectAssociatedTypesTest {
                 succeed: {value: 'ok} -> {} <Operation>
             }
 
-            impl Operation for BadOperation having 'ok = Int, 'wrong = String where {
+            impl Operation for BadOperation having 'ok = Int, 'wrong = Str where {
                 succeed = {value} -> {}
             }
         """.trimIndent()
@@ -654,7 +656,7 @@ class EffectAssociatedTypesTest {
                 fail: {error: 'err} -> {} <Operation>
             }
 
-            impl Operation for ComplexOperation having 'ok = [Int], 'err = {code: Int, message: String} where {
+            impl Operation for ComplexOperation having 'ok = [Int], 'err = {code: Int, message: Str} where {
                 succeed = {value} -> {},
                 fail = {error} -> {}
             }
@@ -672,7 +674,7 @@ class EffectAssociatedTypesTest {
                 fail: {error: 'err} -> 'err <Operation>
             }
 
-            impl Operation for ConfigurableOperation {defaultOk: Int, defaultErr: String} having 'ok = Int, 'err = String where {
+            impl Operation for ConfigurableOperation {defaultOk: Int, defaultErr: Str} having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -701,7 +703,7 @@ class EffectAssociatedTypesTest {
                 update: {delta: 'change} -> {} <State>
             }
 
-            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -736,11 +738,11 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToResult {} having 'error = String where {
+            impl Exception for ToResult {} having 'error = Str where {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFail: {} -> (Result Int String) = {} ->
+            let mayFail: {} -> (Result Int Str) = {} ->
                 perform ToResult in do
                     Exception.throw { error = "something went wrong" }
                     Ok { val = 42 }
@@ -765,7 +767,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFailWithCode: {} -> (Result String Int) = {} ->
+            let mayFailWithCode: {} -> (Result Str Int) = {} ->
                 perform ToIntResult in do
                     Exception.throw { error = 404 }
                     Ok { val = "success" }
@@ -782,11 +784,11 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToRecordResult {} having 'error = {code: Int, message: String} where {
+            impl Exception for ToRecordResult {} having 'error = {code: Int, message: Str} where {
                 throw = {error} -> Err { error = error }
             }
 
-            let mayFailWithDetails: {} -> (Result Int {code: Int, message: String}) = {} ->
+            let mayFailWithDetails: {} -> (Result Int {code: Int, message: Str}) = {} ->
                 perform ToRecordResult in do
                     Exception.throw { error = {code = 500, message = "Internal error"} }
                     Ok { val = 42 }
@@ -803,7 +805,7 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToOption {} having 'error = String where {
+            impl Exception for ToOption {} having 'error = Str where {
                 throw = {error} -> None
             }
 
@@ -824,7 +826,7 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToStringResult {} having 'error = String where {
+            impl Exception for ToStringResult {} having 'error = Str where {
                 throw = {error} -> Err { error = error }
             }
 
@@ -832,7 +834,7 @@ class EffectAssociatedTypesTest {
                 throw = {error} -> Err { error = error }
             }
 
-            let nested: {} -> (Result (Result Int Int) String) = {} ->
+            let nested: {} -> (Result (Result Int Int) Str) = {} ->
                 perform ToStringResult in do
                     Exception.throw { error = "outer error" }
                     let inner = perform ToIntResult in do
@@ -852,16 +854,16 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            let throwIfZero: {n: Int} -> Int <Exception having 'error = String> = {n} ->
+            let throwIfZero: {n: Int} -> Int <Exception having 'error = Str> = {n} ->
                 match n == 0 is
                     True -> Exception.throw { error = "cannot be zero" }
                     False -> n
 
-            impl Exception for ToResult {} having 'error = String where {
+            impl Exception for ToResult {} having 'error = Str where {
                 throw = {error} -> Err { error = error }
             }
 
-            let safeDiv: {a: Int, b: Int} -> (Result Int String) = {a, b} ->
+            let safeDiv: {a: Int, b: Int} -> (Result Int Str) = {a, b} ->
                 perform ToResult in do
                     Exception.throw { error = "test" }
                     Ok { val = a / b }
@@ -878,7 +880,7 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            let stringError: {} -> Int <Exception having 'error = String> = {} ->
+            let stringError: {} -> Int <Exception having 'error = Str> = {} ->
                 do
                     Exception.throw { error = "error message" }
                     42
@@ -895,7 +897,7 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            let wrongErrorType: {} -> Int <Exception having 'error = String> = {} ->
+            let wrongErrorType: {} -> Int <Exception having 'error = Str> = {} ->
                 do
                     Exception.throw { error = 42 }
                     0
@@ -914,11 +916,11 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToResult {} having 'error = String where {
+            impl Exception for ToResult {} having 'error = Str where {
                 throw = {error} -> Err { error = error }
             }
 
-            let multipleThrows: {} -> (Result Int String) = {} ->
+            let multipleThrows: {} -> (Result Int Str) = {} ->
                 perform ToResult in do
                     Exception.throw { error = "first error" }
                     Exception.throw { error = "second error" }
@@ -936,11 +938,11 @@ class EffectAssociatedTypesTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for ToResult {} having 'error = String where {
+            impl Exception for ToResult {} having 'error = Str where {
                 throw = {error} -> Err { error = error }
             }
 
-            let inconsistentThrows: {} -> (Result Int String) = {} ->
+            let inconsistentThrows: {} -> (Result Int Str) = {} ->
                 perform ToResult in do
                     Exception.throw { error = "string error" }
                     Exception.throw { error = 42 }

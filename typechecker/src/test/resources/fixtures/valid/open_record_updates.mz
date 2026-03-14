@@ -2,31 +2,31 @@
 
 # Basic record creation and spread with field overrides
 let baseRecord = {name = "Alice", age = 30, city = "Boston"}
-# expected: baseRecord : { name: String, age: Int, city: String }
+# expected: baseRecord : { name: Str, age: Int, city: Str }
 
 let updatedAge = {...baseRecord, age = 31}
-# expected: updatedAge : { name: String, age: Int, city: String }
+# expected: updatedAge : { name: Str, age: Int, city: Str }
 
 let multipleUpdates = {...baseRecord, age = 32, city = "NYC"}
-# expected: multipleUpdates : { name: String, age: Int, city: String }
+# expected: multipleUpdates : { name: Str, age: Int, city: Str }
 
 # Closed record spread (only existing fields can be overridden)
 let closedRecord = {name = "Bob", age = 25}
-# expected: closedRecord : { name: String, age: Int }
+# expected: closedRecord : { name: Str, age: Int }
 
 let closedUpdated = {...closedRecord, name = "Robert", age = 26}
-# expected: closedUpdated : { name: String, age: Int }
+# expected: closedUpdated : { name: Str, age: Int }
 
 # Spread without overrides (copy)
 let copyRecord = {...baseRecord}
-# expected: copyRecord : { name: String, age: Int, city: String }
+# expected: copyRecord : { name: Str, age: Int, city: Str }
 
 # Nested record spread
 let nestedRecord = {user = {name = "Carol", age = 28}, department = "Engineering"}
-# expected: nestedRecord : { user: { name: String, age: Int }, department: String }
+# expected: nestedRecord : { user: { name: Str, age: Int }, department: Str }
 
 let nestedUpdated = {...nestedRecord, department = "Marketing"}
-# expected: nestedUpdated : { user: { name: String, age: Int }, department: String }
+# expected: nestedUpdated : { user: { name: Str, age: Int }, department: Str }
 
 # Complex record spread
 let configRecord = {timeout = 30, retries = 3, debug = False}

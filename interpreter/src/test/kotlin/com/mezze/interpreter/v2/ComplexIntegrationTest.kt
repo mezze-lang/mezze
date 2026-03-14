@@ -100,8 +100,8 @@ class ComplexIntegrationTest {
     @Test
     fun `test complex record manipulation with functions`() {
         val code = """
-            type Person = {name: String, age: Int}
-            type Changes = {updateName: Bool, newName: String, updateAge: Bool, newAge: Int}
+            type Person = {name: Str, age: Int}
+            type Changes = {updateName: Bool, newName: Str, updateAge: Bool, newAge: Int}
 
             let updatePerson = {person: Person, changes: Changes} ->
                 {...person,

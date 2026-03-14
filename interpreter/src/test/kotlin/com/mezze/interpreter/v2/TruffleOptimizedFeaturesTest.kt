@@ -331,11 +331,11 @@ class TruffleOptimizedFeaturesTest {
     fun testSimpleEffectHandler() {
         val code = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print: {msg: String} -> {} = {msg} -> {}
+                print: {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "test"}
@@ -390,7 +390,7 @@ class TruffleOptimizedFeaturesTest {
             }
 
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Math for Calculator where {
@@ -398,7 +398,7 @@ class TruffleOptimizedFeaturesTest {
             }
 
             impl Log for Console where {
-                print: {msg: String} -> {} = {msg} -> {}
+                print: {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Calculator, Console in do

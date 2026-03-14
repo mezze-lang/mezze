@@ -22,15 +22,15 @@ class PerformerConflictTest {
         // This should FAIL: BasicLogger (rightmost) expects to handle Log, but EnhancedLogger (leftmost) already consumed it
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform BasicLogger, EnhancedLogger in Log.info {msg = "Test"}
@@ -49,19 +49,19 @@ class PerformerConflictTest {
         // This should PASS: Different effects, no conflict
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              save : {data: String} -> {} <Database>
+              save : {data: Str} -> {} <Database>
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> {}
+              save : {data: Str} -> {} = {data} -> {}
             }
 
             perform DbHandler, Logger in do
@@ -80,11 +80,11 @@ class PerformerConflictTest {
         // Single performer should always work
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform BasicLogger in Log.info {msg = "Test"}
@@ -101,19 +101,19 @@ class PerformerConflictTest {
         // Multiple performers handling different effects should work
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              save : {data: String} -> {} <Database>
+              save : {data: Str} -> {} <Database>
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> {}
+              save : {data: Str} -> {} = {data} -> {}
             }
 
             perform DbHandler, Logger in do

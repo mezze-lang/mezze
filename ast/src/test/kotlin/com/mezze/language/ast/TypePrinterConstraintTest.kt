@@ -95,7 +95,7 @@ class TypePrinterConstraintTest {
         assertTrue(result.contains("'item"))
         assertTrue(result.contains("Int"))
         assertTrue(result.contains("'result"))
-        assertTrue(result.contains("String"))
+        assertTrue(result.contains("Str"))
     }
 
     @Test
@@ -178,7 +178,7 @@ class TypePrinterConstraintTest {
         assertTrue(result.contains("having"))
         assertTrue(result.contains("'state"))
         assertTrue(result.contains("List"))
-        assertTrue(result.contains("String"))
+        assertTrue(result.contains("Str"))
     }
 
     @Test

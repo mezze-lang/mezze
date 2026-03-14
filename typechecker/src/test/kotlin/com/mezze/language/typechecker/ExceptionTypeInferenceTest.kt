@@ -43,7 +43,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            impl Exception for StringHandler having 'error = String where {
+            impl Exception for StringHandler having 'error = Str where {
                 throw = {error} -> error
             }
 
@@ -72,9 +72,9 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type ValidationError = | FieldRequired {field: String} |
+            type ValidationError = | FieldRequired {field: Str} |
 
-            impl Exception for StringHandler having 'error = String where {
+            impl Exception for StringHandler having 'error = Str where {
                 throw = {error} -> error
             }
 
@@ -92,7 +92,7 @@ class ExceptionTypeInferenceTest {
 
         assertTrue(exception.message?.contains("Handler type mismatch") == true)
         assertTrue(exception.message?.contains("StringHandler") == true)
-        assertTrue(exception.message?.contains("String") == true)
+        assertTrue(exception.message?.contains("Str") == true)
     }
 
     // ========================================================================
@@ -106,7 +106,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type ValidationError = | FieldRequired {field: String} |
+            type ValidationError = | FieldRequired {field: Str} |
 
             impl Exception for ValidationHandler having 'error = ValidationError where {
                 throw = {error} ->
@@ -135,7 +135,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type ApiError = | BadRequest {msg: String}, NotFound {id: String}, ServerError {reason: String} |
+            type ApiError = | BadRequest {msg: Str}, NotFound {id: Str}, ServerError {reason: Str} |
 
             impl Exception for ApiHandler having 'error = ApiError where {
                 throw = {error} ->
@@ -145,7 +145,7 @@ class ExceptionTypeInferenceTest {
                         ServerError {reason} -> {status = 500}
             }
 
-            pub let api_call : {id: String} -> {} <Exception> = {id} ->
+            pub let api_call : {id: Str} -> {} <Exception> = {id} ->
                 if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
                 else if id == "404" then
@@ -171,7 +171,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type PartialError = | BadRequest {msg: String} |
+            type PartialError = | BadRequest {msg: Str} |
 
             impl Exception for PartialHandler having 'error = PartialError where {
                 throw = {error} ->
@@ -179,7 +179,7 @@ class ExceptionTypeInferenceTest {
                         BadRequest {msg} -> {status = 400}
             }
 
-            pub let api_call : {id: String} -> {} <Exception> = {id} ->
+            pub let api_call : {id: Str} -> {} <Exception> = {id} ->
                 if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
                 else if id == "404" then
@@ -219,7 +219,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type ValidationError = | FieldRequired {field: String}, FieldTooShort {field: String} |
+            type ValidationError = | FieldRequired {field: Str}, FieldTooShort {field: Str} |
 
             impl Exception for ValidationHandler having 'error = ValidationError where {
                 throw = {error} ->
@@ -246,7 +246,7 @@ class ExceptionTypeInferenceTest {
     fun `test effect without associated types is not checked`() {
         val code = """
             effect Log where {
-                log: {msg: String} -> {} <Log>
+                log: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -439,7 +439,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type DatabaseError = | ConnectionFailed, QueryFailed {query: String} |
+            type DatabaseError = | ConnectionFailed, QueryFailed {query: Str} |
             type NetworkError = | Timeout, ConnectionRefused |
 
             impl Exception for DbHandler having 'error = DatabaseError where {
@@ -475,7 +475,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type ApiError = | BadRequest {msg: String}, NotFound {id: String}, ServerError {reason: String}, Unauthorized |
+            type ApiError = | BadRequest {msg: Str}, NotFound {id: Str}, ServerError {reason: Str}, Unauthorized |
 
             impl Exception for ApiHandler having 'error = ApiError where {
                 throw = {error} ->
@@ -486,7 +486,7 @@ class ExceptionTypeInferenceTest {
                         Unauthorized -> {status = 401}
             }
 
-            pub let handle_request : {id: String, auth: Bool} -> {} <Exception> = {id, auth} ->
+            pub let handle_request : {id: Str, auth: Bool} -> {} <Exception> = {id, auth} ->
                 if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
@@ -516,7 +516,7 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type PartialError = | BadRequest {msg: String}, NotFound {id: String} |
+            type PartialError = | BadRequest {msg: Str}, NotFound {id: Str} |
 
             impl Exception for PartialHandler having 'error = PartialError where {
                 throw = {error} ->
@@ -525,7 +525,7 @@ class ExceptionTypeInferenceTest {
                         NotFound {id} -> {status = 404}
             }
 
-            pub let handle_request : {id: String, auth: Bool} -> {} <Exception> = {id, auth} ->
+            pub let handle_request : {id: Str, auth: Bool} -> {} <Exception> = {id, auth} ->
                 if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
@@ -606,8 +606,8 @@ class ExceptionTypeInferenceTest {
                 throw: {error: 'error} -> 'a <Exception>
             }
 
-            type DatabaseError = | ConnectionFailed, QueryFailed {query: String} |
-            type ValidationError = | InvalidInput {field: String} |
+            type DatabaseError = | ConnectionFailed, QueryFailed {query: Str} |
+            type ValidationError = | InvalidInput {field: Str} |
 
             impl Exception for DbHandler having 'error = DatabaseError where {
                 throw = {error} ->
@@ -622,13 +622,13 @@ class ExceptionTypeInferenceTest {
                         InvalidInput {field} -> {status = "validation_error"}
             }
 
-            pub let validate_input : {input: String} -> {} <Exception> = {input} ->
+            pub let validate_input : {input: Str} -> {} <Exception> = {input} ->
                 if input == "" then
                     Exception.throw {error = InvalidInput {field = "input"}}
                 else
                     {}
 
-            pub let save_to_db : {data: String} -> {} <Exception> = {data} -> do
+            pub let save_to_db : {data: Str} -> {} <Exception> = {data} -> do
                 let getValidated = {} -> perform ValidationHandler in validate_input {input = data}
                 if data == "fail" then
                     Exception.throw {error = QueryFailed {query = "INSERT"}}

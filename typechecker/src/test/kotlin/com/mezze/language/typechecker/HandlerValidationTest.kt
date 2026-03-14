@@ -51,7 +51,7 @@ class HandlerValidationTest {
     fun `duplicate handlers for same effect should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -80,7 +80,7 @@ class HandlerValidationTest {
     fun `handler for pure expression should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -104,11 +104,11 @@ class HandlerValidationTest {
     fun `handler not matching any effect should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Network where {
-              send: { data: String } -> {} <Network>
+              send: { data: Str } -> {} <Network>
             }
 
             impl Log for ConsoleLogger where {
@@ -139,11 +139,11 @@ class HandlerValidationTest {
     fun `single unnecessary handler should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Network where {
-              send: { data: String } -> {} <Network>
+              send: { data: Str } -> {} <Network>
             }
 
             impl Log for ConsoleLogger where {
@@ -164,7 +164,7 @@ class HandlerValidationTest {
             # partiallyHandled is a function with <Network, *>
             # But we try to handle FileSystem which is not present
             effect FileSystem where {
-              write: { path: String } -> {} <FileSystem>
+              write: { path: Str } -> {} <FileSystem>
             }
 
             impl FileSystem for DiskFS where {
@@ -187,15 +187,15 @@ class HandlerValidationTest {
     fun `handlers applied in correct order - rightmost first`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect FileSystem where {
-              write: { path: String, content: String } -> {} <FileSystem>
+              write: { path: Str, content: Str } -> {} <FileSystem>
             }
 
             effect Network where {
-              send: { endpoint: String, data: String } -> {} <Network>
+              send: { endpoint: Str, data: Str } -> {} <Network>
             }
 
             impl FileSystem for DiskFS where {
@@ -208,7 +208,7 @@ class HandlerValidationTest {
 
             # CompositeLogger handles Log but ADDS FileSystem and Network effects
             impl Log for CompositeLogger where {
-              info: { msg: String } -> {} <FileSystem, Network> = { msg } -> do
+              info: { msg: Str } -> {} <FileSystem, Network> = { msg } -> do
                 FileSystem.write { path = "/log.txt", content = msg }
                 Network.send { endpoint = "log-server", data = msg }
             }
@@ -259,11 +259,11 @@ class HandlerValidationTest {
     fun `nested performs with unnecessary outer handler should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Network where {
-              send: { data: String } -> {} <Network>
+              send: { data: Str } -> {} <Network>
             }
 
             impl Log for ConsoleLogger where {
@@ -293,11 +293,11 @@ class HandlerValidationTest {
     fun `nested performs with correct handlers should pass`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Network where {
-              send: { data: String } -> {} <Network>
+              send: { data: Str } -> {} <Network>
             }
 
             impl Log for ConsoleLogger where {
@@ -329,7 +329,7 @@ class HandlerValidationTest {
     fun `top-level value with performed effects should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -353,7 +353,7 @@ class HandlerValidationTest {
     fun `top-level function with performed effects should pass`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {

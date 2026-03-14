@@ -486,11 +486,11 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             effect Logger where {
-                log: {msg: String} -> {} <Logger>
+                log: {msg: Str} -> {} <Logger>
             }
 
             impl Logger for NoOpLogger where {
-                log: {msg: String} -> {} = {msg} -> {}
+                log: {msg: Str} -> {} = {msg} -> {}
             }
 
             let processItem = {item} ->

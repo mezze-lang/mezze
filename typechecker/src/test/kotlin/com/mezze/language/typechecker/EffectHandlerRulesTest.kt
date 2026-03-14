@@ -33,11 +33,11 @@ class EffectHandlerRulesTest {
     fun `test handler types must match effect declaration exactly`() {
         val source = """
             effect Database where {
-              query: { sql: String } -> [String] <Database>
+              query: { sql: Str } -> [Str] <Database>
             }
 
             impl Database for PostgresDB where {
-              query: { sql: String } -> [String] = { sql } -> ["result1", "result2"]
+              query: { sql: Str } -> [Str] = { sql } -> ["result1", "result2"]
             }
 
             let runQuery = { sql } -> Database.query { sql = sql }
@@ -55,19 +55,19 @@ class EffectHandlerRulesTest {
     fun `test handler can add effects that propagate`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect FileSystem where {
-              write: { path: String, content: String } -> {} <FileSystem>
+              write: { path: Str, content: Str } -> {} <FileSystem>
             }
 
             impl FileSystem for DiskFS where {
-              write: { path: String, content: String } -> {} = { path, content } -> {}
+              write: { path: Str, content: Str } -> {} = { path, content } -> {}
             }
 
             impl Log for FileLogger where {
-              info: { msg: String } -> {} <FileSystem> = { msg } ->
+              info: { msg: Str } -> {} <FileSystem> = { msg } ->
                 FileSystem.write { path = "/var/log/app.log", content = msg }
             }
 
@@ -87,15 +87,15 @@ class EffectHandlerRulesTest {
     fun `test all methods must be implemented`() {
         val source = """
             effect Cache where {
-              get: { key: String } -> String <Cache>,
-              set: { key: String, value: String } -> {} <Cache>,
-              delete: { key: String } -> {} <Cache>
+              get: { key: Str } -> Str <Cache>,
+              set: { key: Str, value: Str } -> {} <Cache>,
+              delete: { key: Str } -> {} <Cache>
             }
 
             impl Cache for MemCache where {
-              get: { key: String } -> String = { key } -> "cached_value",
-              set: { key: String, value: String } -> {} = { key, value } -> {},
-              delete: { key: String } -> {} = { key } -> {}
+              get: { key: Str } -> Str = { key } -> "cached_value",
+              set: { key: Str, value: Str } -> {} = { key, value } -> {},
+              delete: { key: Str } -> {} = { key } -> {}
             }
 
             let useCache = { key } -> do
@@ -119,19 +119,19 @@ class EffectHandlerRulesTest {
             use std::collections::seq
 
             effect Database where {
-              query: { sql: String } -> [String] <Database>
+              query: { sql: Str } -> [Str] <Database>
             }
 
             effect Auth where {
-              check: { token: String } -> Boolean <Auth>
+              check: { token: Str } -> Bool <Auth>
             }
 
             impl Database for PostgresDB where {
-              query: { sql: String } -> [String] = { sql } -> ["valid_token"]
+              query: { sql: Str } -> [Str] = { sql } -> ["valid_token"]
             }
 
             impl Auth for DatabaseAuth where {
-              check: { token: String } -> Boolean <Database> = { token } -> do
+              check: { token: Str } -> Bool <Database> = { token } -> do
                 let results = Database.query { sql = "SELECT * FROM tokens" }
                 seq::length {xs = results} > 0
             }
@@ -151,19 +151,19 @@ class EffectHandlerRulesTest {
     fun `test partial effect handling`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Cache where {
-              get: { key: String } -> String <Cache>
+              get: { key: Str } -> Str <Cache>
             }
 
             impl Log for Console where {
-              info: { msg: String } -> {} = { msg } -> {}
+              info: { msg: Str } -> {} = { msg } -> {}
             }
 
             impl Cache for MemCache where {
-              get: { key: String } -> String = { key } -> "cached"
+              get: { key: Str } -> Str = { key } -> "cached"
             }
 
             let fetchData = { id } -> do
@@ -186,27 +186,27 @@ class EffectHandlerRulesTest {
     fun `test handler adds multiple effects`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect FileSystem where {
-              write: { path: String, content: String } -> {} <FileSystem>
+              write: { path: Str, content: Str } -> {} <FileSystem>
             }
 
             effect Network where {
-              send: { endpoint: String, data: String } -> {} <Network>
+              send: { endpoint: Str, data: Str } -> {} <Network>
             }
 
             impl FileSystem for DiskFS where {
-              write: { path: String, content: String } -> {} = { path, content } -> {}
+              write: { path: Str, content: Str } -> {} = { path, content } -> {}
             }
 
             impl Network for HttpClient where {
-              send: { endpoint: String, data: String } -> {} = { endpoint, data } -> {}
+              send: { endpoint: Str, data: Str } -> {} = { endpoint, data } -> {}
             }
 
             impl Log for CompositeLogger where {
-              info: { msg: String } -> {} <FileSystem, Network> = { msg } -> do
+              info: { msg: Str } -> {} <FileSystem, Network> = { msg } -> do
                 FileSystem.write { path = "/var/log/app.log", content = msg }
                 Network.send { endpoint = "log-server", data = msg }
             }
@@ -228,11 +228,11 @@ class EffectHandlerRulesTest {
     fun `test output type mismatch should fail`() {
         val source = """
             effect Database where {
-              query: { sql: String } -> [String] <Database>
+              query: { sql: Str } -> [Str] <Database>
             }
 
             impl Database for BadDB where {
-              query: { sql: String } -> String = { sql } -> "wrong type"
+              query: { sql: Str } -> Str = { sql } -> "wrong type"
             }
 
             let runQuery = { sql } -> Database.query { sql = sql }
@@ -252,11 +252,11 @@ class EffectHandlerRulesTest {
         // Define effect and impl inline instead of using stdlib imports
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              info: { msg: String } -> {} = { msg } -> {}
+              info: { msg: Str } -> {} = { msg } -> {}
             }
 
             let pureFunction = { x } -> x + 1
@@ -275,19 +275,19 @@ class EffectHandlerRulesTest {
     fun `test wrong effect handler should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             effect Database where {
-              query: { sql: String } -> [String] <Database>
+              query: { sql: Str } -> [Str] <Database>
             }
 
             impl Log for Logger where {
-              info: { msg: String } -> {} = { msg } -> {}
+              info: { msg: Str } -> {} = { msg } -> {}
             }
 
             impl Database for PostgresDB where {
-              query: { sql: String } -> [String] = { sql } -> ["result"]
+              query: { sql: Str } -> [Str] = { sql } -> ["result"]
             }
 
             let logMessage = { text } -> Log.info { msg = text }
@@ -306,15 +306,15 @@ class EffectHandlerRulesTest {
     fun `test double handler for same effect should fail`() {
         val source = """
             effect Log where {
-              info: { msg: String } -> {} <Log>
+              info: { msg: Str } -> {} <Log>
             }
 
             impl Log for BasicLogger where {
-              info: { msg: String } -> {} = { msg } -> {}
+              info: { msg: Str } -> {} = { msg } -> {}
             }
 
             impl Log for EnhancedLogger where {
-              info: { msg: String } -> {} = { msg } -> {}
+              info: { msg: Str } -> {} = { msg } -> {}
             }
 
             let logMessage = { text } -> Log.info { msg = text }

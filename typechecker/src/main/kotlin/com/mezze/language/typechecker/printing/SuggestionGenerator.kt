@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.printing
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.validation.ValidationError
 import com.mezze.language.typechecker.util.StringDistance
@@ -380,15 +381,9 @@ object SuggestionGenerator {
     }
 
     private fun formatSimpleType(type: MezzeType): String {
-        return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            else -> TypeDiffPrinter.formatType(type)
-        }
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return it }
+        return TypeDiffPrinter.formatType(type)
     }
 
     private fun getTypeName(type: MezzeType): String {

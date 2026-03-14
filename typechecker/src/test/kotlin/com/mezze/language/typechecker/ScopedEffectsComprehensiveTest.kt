@@ -63,7 +63,7 @@ class ScopedEffectsComprehensiveTest {
     fun `effects from initialize_scope propagate to perform site`() {
         val source = """
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for Console where {
@@ -71,7 +71,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -111,7 +111,7 @@ class ScopedEffectsComprehensiveTest {
     fun `effects from finalize_scope propagate to perform site`() {
         val source = """
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for Console where {
@@ -119,7 +119,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -149,7 +149,7 @@ class ScopedEffectsComprehensiveTest {
     fun `effects from both initialize_scope and finalize_scope combine`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -157,7 +157,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect Metrics where {
-                increment: { counter: String } -> {} <Metrics>
+                increment: { counter: Str } -> {} <Metrics>
             }
 
             impl Metrics for StatsD where {
@@ -165,7 +165,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -199,7 +199,7 @@ class ScopedEffectsComprehensiveTest {
     fun `effects from operations also propagate`() {
         val source = """
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for Console where {
@@ -207,7 +207,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -236,7 +236,7 @@ class ScopedEffectsComprehensiveTest {
     fun `all three sources of effects combine correctly`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -244,7 +244,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect Metrics where {
-                increment: { counter: String } -> {} <Metrics>
+                increment: { counter: Str } -> {} <Metrics>
             }
 
             impl Metrics for StatsD where {
@@ -252,7 +252,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect IO where {
-                write: { data: String } -> {} <IO>
+                write: { data: Str } -> {} <IO>
             }
 
             impl IO for FileIO where {
@@ -260,7 +260,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -303,7 +303,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope variable is available in operations`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> Int <DB>
+                query: { sql: Str } -> Int <DB>
             }
 
             impl DB for PostgresDB where {
@@ -322,7 +322,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope variable is available in finalize_scope`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -344,7 +344,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope variable is NOT available in initialize_scope`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -369,7 +369,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope variable is NOT available without initialize_scope`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -394,7 +394,7 @@ class ScopedEffectsComprehensiveTest {
         val source = """
             effect DB where {
                 get_id: {} -> Int <DB>,
-                get_name: {} -> String <DB>
+                get_name: {} -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -418,7 +418,7 @@ class ScopedEffectsComprehensiveTest {
     fun `initialize_scope requires finalize_scope`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -439,7 +439,7 @@ class ScopedEffectsComprehensiveTest {
     fun `finalize_scope requires initialize_scope`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -460,7 +460,7 @@ class ScopedEffectsComprehensiveTest {
     fun `initialize_scope must return record type - with explicit annotation`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -483,7 +483,7 @@ class ScopedEffectsComprehensiveTest {
     fun `finalize_scope must return unit - with explicit annotation`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -548,7 +548,7 @@ class ScopedEffectsComprehensiveTest {
         // - The lifecycle effects (IO from initialize/finalize) are added
         val source = """
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for Console where {
@@ -556,7 +556,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
             impl DB for PostgresDB where {
@@ -596,10 +596,10 @@ class ScopedEffectsComprehensiveTest {
     fun `scoped effect with state parameters`() {
         val source = """
             effect DB where {
-                query: { sql: String } -> String <DB>
+                query: { sql: Str } -> Str <DB>
             }
 
-            impl DB for PostgresDB { connection_string: String } where {
+            impl DB for PostgresDB { connection_string: Str } where {
                 initialize_scope = {} -> { url = connection_string },
                 finalize_scope = {} -> {},
                 query = { sql } -> scope.url
@@ -635,8 +635,8 @@ class ScopedEffectsComprehensiveTest {
     fun `multiple operations can access scope`() {
         val source = """
             effect Cache where {
-                get: { key: String } -> Int <Cache>,
-                set: { key: String, value: Int } -> {} <Cache>,
+                get: { key: Str } -> Int <Cache>,
+                set: { key: Str, value: Int } -> {} <Cache>,
                 clear: {} -> {} <Cache>
             }
 
@@ -723,7 +723,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope field typo in finalize_scope produces error with suggestion`() {
         val source = """
             effect Pool where {
-                query: { sql: String } -> String <Pool>
+                query: { sql: Str } -> Str <Pool>
             }
 
             impl Pool for PgPool where {
@@ -753,7 +753,7 @@ class ScopedEffectsComprehensiveTest {
     fun `scope field completely wrong name shows available fields`() {
         val source = """
             effect Cache where {
-                get: { key: String } -> Int <Cache>
+                get: { key: Str } -> Int <Cache>
             }
 
             impl Cache for MemoryCache where {
@@ -783,7 +783,7 @@ class ScopedEffectsComprehensiveTest {
         val source = """
             effect DB where {
                 get_pool: {} -> Int <DB>,
-                get_connection: {} -> String <DB>
+                get_connection: {} -> Str <DB>
             }
 
             impl DB for PostgresDB where {

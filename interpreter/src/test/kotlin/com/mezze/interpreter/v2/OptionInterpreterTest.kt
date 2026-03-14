@@ -282,7 +282,7 @@ class OptionInterpreterTest {
         val code = """
             use std::option
             let a: (Option Int) = Some { val = 1 }
-            let b: (Option String) = Some { val = "x" }
+            let b: (Option Str) = Some { val = "x" }
             let result = option::zip { a = a, b = b }
             option::is_some { opt = result }
         """
@@ -295,7 +295,7 @@ class OptionInterpreterTest {
         val code = """
             use std::option
             let a: (Option Int) = None
-            let b: (Option String) = Some { val = "x" }
+            let b: (Option Str) = Some { val = "x" }
             let result = option::zip { a = a, b = b }
             option::is_none { opt = result }
         """

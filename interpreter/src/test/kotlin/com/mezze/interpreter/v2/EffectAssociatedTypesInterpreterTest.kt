@@ -47,7 +47,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get: {} -> 'state <State>
             }
 
-            impl State for StringState having 'state = String where {
+            impl State for StringState having 'state = Str where {
                 get = {} -> "hello world"
             }
 
@@ -85,7 +85,7 @@ class EffectAssociatedTypesInterpreterTest {
                 ask: {} -> 'env <Reader>
             }
 
-            impl Reader for StringReader having 'env = String where {
+            impl Reader for StringReader having 'env = Str where {
                 ask = {} -> "config value"
             }
 
@@ -234,7 +234,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> 42
             }
 
-            impl Reader for StringReader having 'env = String where {
+            impl Reader for StringReader having 'env = Str where {
                 ask = {} -> "hello"
             }
 
@@ -257,7 +257,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get: {} -> 'state <State>
             }
 
-            impl State for RecordState having 'state = {name: String, age: Int} where {
+            impl State for RecordState having 'state = {name: Str, age: Int} where {
                 get = {} -> {name = "Alice", age = 30}
             }
 
@@ -374,7 +374,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get = {} -> 10
             }
 
-            impl Reader for StringReader having 'env = String where {
+            impl Reader for StringReader having 'env = Str where {
                 ask = {} -> "config"
             }
 
@@ -531,7 +531,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get: {} -> {value: 'state, id: Int} <State>
             }
 
-            impl State for RecordState having 'state = String where {
+            impl State for RecordState having 'state = Str where {
                 get = {} -> {value = "data", id = 123}
             }
 
@@ -578,7 +578,7 @@ class EffectAssociatedTypesInterpreterTest {
                 get: {} -> 'state <State>
             }
 
-            impl State for StringState having 'state = String where {
+            impl State for StringState having 'state = Str where {
                 get = {} -> "from function"
             }
 
@@ -633,7 +633,7 @@ class EffectAssociatedTypesInterpreterTest {
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -660,7 +660,7 @@ class EffectAssociatedTypesInterpreterTest {
                 getThird: {} -> 'c <Triple>
             }
 
-            impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
+            impl Triple for IntStringBoolTriple having 'a = Int, 'b = Str, 'c = Bool where {
                 getFirst = {} -> 100,
                 getSecond = {} -> "hello",
                 getThird = {} -> True
@@ -714,7 +714,7 @@ class EffectAssociatedTypesInterpreterTest {
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Outcome for StringIntResult having 'ok = String, 'err = Int where {
+            impl Outcome for StringIntResult having 'ok = Str, 'err = Int where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -740,7 +740,7 @@ class EffectAssociatedTypesInterpreterTest {
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Outcome for ComplexResult having 'ok = Int, 'err = {code: Int, message: String} where {
+            impl Outcome for ComplexResult having 'ok = Int, 'err = {code: Int, message: Str} where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -774,7 +774,7 @@ class EffectAssociatedTypesInterpreterTest {
                 update: {delta: 'change} -> 'state <State>
             }
 
-            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -805,7 +805,7 @@ class EffectAssociatedTypesInterpreterTest {
                 getError: {} -> 'error <State>
             }
 
-            impl State for ConfigurableState {initialState: Int, defaultError: String} having 'state = Int, 'error = String where {
+            impl State for ConfigurableState {initialState: Int, defaultError: Str} having 'state = Int, 'error = Str where {
                 get = {} -> initialState,
                 getError = {} -> defaultError
             }
@@ -831,7 +831,7 @@ class EffectAssociatedTypesInterpreterTest {
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }
@@ -857,7 +857,7 @@ class EffectAssociatedTypesInterpreterTest {
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Outcome for BoolStringResult having 'ok = Bool, 'err = String where {
+            impl Outcome for BoolStringResult having 'ok = Bool, 'err = Str where {
                 succeed = {value} -> value,
                 fail = {error} -> error
             }

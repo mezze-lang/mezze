@@ -23,7 +23,7 @@ class SimpleEffectPropagationTest {
     fun testSimpleEffectDeclaration() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
         """.trimIndent()
         
@@ -39,11 +39,11 @@ class SimpleEffectPropagationTest {
     fun testBasicEffectWithReturnEffect() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
         """.trimIndent()
 
@@ -69,7 +69,7 @@ class SimpleEffectPropagationTest {
     fun testDebugProgramStructure() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             let testFunction : {x: Int} -> Int = {x} -> x

@@ -186,7 +186,7 @@ class RestrictiveSpreadTest {
     fun `should spread type alias with nested types`() {
         val code = """
             type Inner = { value: Int }
-            type Outer = { name: String, inner: Inner }
+            type Outer = { name: Str, inner: Inner }
             let default_outer: Outer = { name = "test", inner = { value = 42 } }
             let updated: Outer = { ...default_outer, name = "updated" }
         """.trimIndent()

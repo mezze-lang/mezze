@@ -1,0 +1,94 @@
+use std::effects::mutation::{
+    LocalMut, DebugLocalMut,
+    seq_to_mut, seq_to_immut,
+    get, set, swap, len,
+    int_to_mut, read_int, incr,
+    while
+}
+use std::effects::log::{Log, Console, println}
+
+# Partition helper: partitions array around pivot (last element)
+# Returns the pivot index after partitioning
+let partition: {arr: MutSeq Int, low: Int, high: Int} -> Int <Mutation> = {arr, low, high} -> do
+    # Use last element as pivot
+    let pivot_val = match get { seq = arr, i = high } is
+        Some { val } -> val
+        None -> 0  # Should not happen if indices are valid
+
+    # i tracks the boundary of elements <= pivot
+    let i = int_to_mut { n = low - 1 }
+
+    # j iterates from low to high-1
+    let j = int_to_mut { n = low }
+    while {
+        cond = {} -> read_int { n = j } < high,
+        body = {} -> do
+            let j_val = read_int { n = j }
+            let elem = match get { seq = arr, i = j_val } is
+                Some { val } -> val
+                None -> 0
+
+            # If current element <= pivot, swap it with element at i+1
+            if elem <= pivot_val then do
+                incr { n = i, delta = 1 }
+                let i_val = read_int { n = i }
+                let _ = swap { seq = arr, i = i_val, j = j_val }
+                {}
+            else {}
+
+            incr { n = j, delta = 1 }
+    }
+
+    # Place pivot in its correct position
+    let i_val = read_int { n = i }
+    let pivot_idx = i_val + 1
+    let _ = swap { seq = arr, i = pivot_idx, j = high }
+    pivot_idx
+
+# Quicksort helper that sorts arr[low..high] inclusive
+let quicksort_range: {arr: MutSeq Int, low: Int, high: Int} -> {} <Mutation> = {arr, low, high} ->
+    if low < high then do
+        let pivot_idx = partition { arr = arr, low = low, high = high }
+        quicksort_range { arr = arr, low = low, high = pivot_idx - 1 }
+        quicksort_range { arr = arr, low = pivot_idx + 1, high = high }
+    else {}
+
+# Main quicksort function
+let quicksort: {arr: MutSeq Int} -> {} <Mutation> = {arr} -> do
+    let length = len { seq = arr }
+    if length > 1 then
+        quicksort_range { arr = arr, low = 0, high = length - 1 }
+    else {}
+
+# Test with LocalMut
+let test_local_mut = {} -> do
+    let unsorted = [5, 2, 9, 1, 7, 6, 3, 8, 4]
+    println { msg = "Testing with LocalMut:" }
+    println { msg = "  Input:  $(Inspect.to_str {val = unsorted})" }
+    let sorted = perform LocalMut in do
+        let arr = seq_to_mut { seq = unsorted }
+        quicksort { arr = arr }
+        seq_to_immut { seq = arr }
+    println { msg = "  Output: $(Inspect.to_str {val = sorted})" }
+    println { msg = "" }
+
+# Test with DebugLocalMut (shows loop iteration counts)
+let test_debug_mut = {} -> do
+    let unsorted = [5, 2, 9, 1, 7, 6, 3, 8, 4]
+    println { msg = "Testing with DebugLocalMut:" }
+    println { msg = "  Input:  $(Inspect.to_str {val = unsorted})" }
+    let sorted = perform DebugLocalMut in do
+        let arr = seq_to_mut { seq = unsorted }
+        quicksort { arr = arr }
+        seq_to_immut { seq = arr }
+    println { msg = "  Output: $(Inspect.to_str {val = sorted})" }
+    println { msg = "" }
+
+# Run both tests
+let main = {} ->
+    perform Console in do
+        println { msg = "=== Quicksort Demo ===" }
+        println { msg = "" }
+        test_local_mut {}
+        test_debug_mut {}
+        println { msg = "=== Done ===" }

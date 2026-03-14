@@ -83,7 +83,7 @@ pub let await_agent_timeout: {agent: Agent 'a, timeout_ms: Int} -> Bool =
 #   match agent_error {agent = counter} is
 #       Some {val} -> "Agent failed: " ++ val
 #       None -> "Agent is healthy"
-pub let agent_error: {agent: Agent 'a} -> Option String =
+pub let agent_error: {agent: Agent 'a} -> Option Str =
     {agent} -> __native_agent_error {agent = agent}
 
 # Check if the agent is in error state (boolean)
@@ -108,5 +108,5 @@ pub let restart_agent: {agent: Agent 'a, value: 'a} -> {} =
 #       agent = counter,
 #       handler = {agent, error} -> log {msg = "Agent error: " ++ error}
 #   }
-pub let set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: String} -> {}} -> {} =
+pub let set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: Str} -> {}} -> {} =
     {agent, handler} -> __native_agent_set_error_handler {agent = agent, handler = handler}

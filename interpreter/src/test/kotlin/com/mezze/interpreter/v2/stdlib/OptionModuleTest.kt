@@ -524,7 +524,7 @@ class OptionModuleTest {
         val source = """
             use std::option
             let a = Some { val = 1 }
-            let b: Option String = None
+            let b: Option Str = None
             let result = option::zip { a = a, b = b }
             match result is
                 Some { val } -> 1

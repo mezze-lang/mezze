@@ -33,7 +33,7 @@ class RecordPatternTypeCheckingTest {
 
     @Test
     fun `should accept single field record pattern`() {
-        // Pattern { name } is exhaustive for record { name: String }
+        // Pattern { name } is exhaustive for record { name: Str }
         val code = """
             let get_name = {person} ->
                 match person is
@@ -61,7 +61,7 @@ class RecordPatternTypeCheckingTest {
 
     @Test
     fun `should accept record pattern with explicit bindings`() {
-        // Pattern { name, age } is exhaustive for record { name: String, age: Int }
+        // Pattern { name, age } is exhaustive for record { name: Str, age: Int }
         val code = """
             let describe = {data} ->
                 match data is
@@ -263,7 +263,7 @@ class RecordPatternTypeCheckingTest {
 
     @Test
     fun `should handle config style matching`() {
-        // Pattern { port, host } is exhaustive for record { port: Int, host: String }
+        // Pattern { port, host } is exhaustive for record { port: Int, host: Str }
         val code = """
             let get_port = {config} ->
                 match config is

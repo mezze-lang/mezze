@@ -16,7 +16,7 @@ import kotlin.test.assertContains
  * Tests cover:
  * - Basic string interpolation patterns
  * - Multiple captures in a single pattern
- * - Capture variable type inference (all String)
+ * - Capture variable type inference (all Str)
  * - Pattern matching with guards
  * - Error cases: type mismatches, invalid scrutinee types
  * - Exhaustiveness checking
@@ -59,7 +59,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `basic string pattern - prefix capture suffix`() {
         val code = """
-            let extract_middle = {s: String} ->
+            let extract_middle = {s: Str} ->
                 match s is
                     "prefix-$(middle)-suffix" -> middle
                     _ -> "no match"
@@ -73,7 +73,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `basic string pattern - capture at start`() {
         val code = """
-            let extract_name = {s: String} ->
+            let extract_name = {s: Str} ->
                 match s is
                     "$(name): some text" -> name
                     _ -> "unknown"
@@ -87,7 +87,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `basic string pattern - capture at end`() {
         val code = """
-            let extract_extension = {s: String} ->
+            let extract_extension = {s: Str} ->
                 match s is
                     "file.$(ext)" -> ext
                     _ -> "unknown"
@@ -101,7 +101,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `basic string pattern - capture only`() {
         val code = """
-            let identity = {s: String} ->
+            let identity = {s: Str} ->
                 match s is
                     "$(all)" -> all
             let result = identity {s = "anything"}
@@ -118,7 +118,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `multiple captures - two captures with separator`() {
         val code = """
-            let extract_pair = {s: String} ->
+            let extract_pair = {s: Str} ->
                 match s is
                     "$(first)-$(second)" -> { first = first, second = second }
                     _ -> { first = "", second = "" }
@@ -132,7 +132,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `multiple captures - three captures`() {
         val code = """
-            let parse_date = {s: String} ->
+            let parse_date = {s: Str} ->
                 match s is
                     "$(year)-$(month)-$(day)" -> { year = year, month = month, day = day }
                     _ -> { year = "", month = "", day = "" }
@@ -146,7 +146,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `multiple captures - with prefix and suffix`() {
         val code = """
-            let parse_log = {s: String} ->
+            let parse_log = {s: Str} ->
                 match s is
                     "[$(level)] $(message) @$(timestamp)" -> { level = level, message = message, ts = timestamp }
                     _ -> { level = "", message = "", ts = "" }
@@ -164,7 +164,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `capture variables are String type - used as String`() {
         val code = """
-            let get_greeting = {s: String} ->
+            let get_greeting = {s: Str} ->
                 match s is
                     "Hello, $(name)!" -> "Greeting received from: $(name)"
                     _ -> "No greeting"
@@ -178,10 +178,10 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `capture variables - return String directly`() {
         val code = """
-            let extract = {s: String} ->
+            let extract = {s: Str} ->
                 match s is
                     "$(value)" -> value
-            let result: String = extract {s = "test"}
+            let result: Str = extract {s = "test"}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -191,11 +191,11 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `capture variables - used in record with String field`() {
         val code = """
-            let parse = {s: String} ->
+            let parse = {s: Str} ->
                 match s is
                     "$(key)=$(value)" -> { key = key, value = value }
                     _ -> { key = "", value = "" }
-            let result: { key: String, value: String } = parse {s = "name=test"}
+            let result: { key: Str, value: Str } = parse {s = "name=test"}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -205,7 +205,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `capture variables - concatenation with other strings`() {
         val code = """
-            let format = {s: String} ->
+            let format = {s: Str} ->
                 match s is
                     "$(name)@$(domain)" -> "Email: $(name) at $(domain)"
                     _ -> "Invalid"
@@ -223,7 +223,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string pattern with guard - simple comparison`() {
         val code = """
-            let check_admin = {s: String} ->
+            let check_admin = {s: Str} ->
                 match s is
                     "user:$(name)" if name == "admin" -> "Admin user"
                     "user:$(name)" -> "Regular user: $(name)"
@@ -238,7 +238,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string pattern with guard - using extracted value`() {
         val code = """
-            let classify_level = {s: String} ->
+            let classify_level = {s: Str} ->
                 match s is
                     "[$(level)] $(msg)" if level == "ERROR" -> "Critical: $(msg)"
                     "[$(level)] $(msg)" if level == "WARN" -> "Warning: $(msg)"
@@ -254,7 +254,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string pattern with guard - multiple conditions`() {
         val code = """
-            let validate = {s: String} ->
+            let validate = {s: Str} ->
                 match s is
                     "$(user):$(pass)" if user != "" && pass != "" -> True
                     _ -> False
@@ -272,7 +272,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `multiple string patterns - different prefixes`() {
         val code = """
-            let parse_command = {s: String} ->
+            let parse_command = {s: Str} ->
                 match s is
                     "GET $(path)" -> { method = "GET", path = path }
                     "POST $(path)" -> { method = "POST", path = path }
@@ -288,7 +288,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `multiple string patterns - with wildcard fallback`() {
         val code = """
-            let format_type = {s: String} ->
+            let format_type = {s: Str} ->
                 match s is
                     "$(name).txt" -> "text file: $(name)"
                     "$(name).json" -> "JSON file: $(name)"
@@ -304,7 +304,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string patterns with plain string fallback`() {
         val code = """
-            let describe = {s: String} ->
+            let describe = {s: Str} ->
                 match s is
                     "hello" -> "greeting"
                     "goodbye" -> "farewell"
@@ -330,7 +330,7 @@ class StringInterpolationPatternTypeCheckTest {
                     _ -> "default"
         """.trimIndent()
 
-        assertTypeCheckFails(code, "String")
+        assertTypeCheckFails(code, "Str")
     }
 
     @Test
@@ -389,7 +389,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `error - capture used as Int`() {
         val code = """
-            let bad = {s: String} ->
+            let bad = {s: Str} ->
                 match s is
                     "$(n)" -> n + 1
                     _ -> 0
@@ -401,7 +401,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `error - capture used in arithmetic`() {
         val code = """
-            let bad = {s: String} ->
+            let bad = {s: Str} ->
                 match s is
                     "value: $(n)" -> n * 2
                     _ -> 0
@@ -413,7 +413,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `error - capture returned as Int`() {
         val code = """
-            let bad = {s: String} ->
+            let bad = {s: Str} ->
                 match s is
                     "$(x)" -> x
                     _ -> 42
@@ -429,7 +429,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string patterns are refutable - need fallback`() {
         val code = """
-            let parse = {s: String} ->
+            let parse = {s: Str} ->
                 match s is
                     "hello $(name)" -> name
                     _ -> "default"
@@ -443,7 +443,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `variable pattern is exhaustive for strings`() {
         val code = """
-            let identity = {s: String} ->
+            let identity = {s: Str} ->
                 match s is
                     x -> x
             let result = identity {s = "test"}
@@ -456,7 +456,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `wildcard pattern is exhaustive for strings`() {
         val code = """
-            let constant = {s: String} ->
+            let constant = {s: Str} ->
                 match s is
                     _ -> "constant"
             let result = constant {s = "anything"}
@@ -488,7 +488,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `string patterns in arrays`() {
         val code = """
-            let parse_first = {strs: [String]} ->
+            let parse_first = {strs: [Str]} ->
                 match strs is
                     ["$(first)-$(second)", ...] -> { a = first, b = second }
                     _ -> { a = "", b = "" }
@@ -523,7 +523,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `edge case - literal string pattern (no interpolation)`() {
         val code = """
-            let check = {s: String} ->
+            let check = {s: Str} ->
                 match s is
                     "exact match" -> True
                     _ -> False
@@ -537,7 +537,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `edge case - pattern with escaped dollar`() {
         val code = """
-            let check = {s: String} ->
+            let check = {s: Str} ->
                 match s is
                     "cost: $$$(amount)" -> amount
                     _ -> ""
@@ -551,7 +551,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `edge case - very long pattern`() {
         val code = """
-            let parse_complex = {s: String} ->
+            let parse_complex = {s: Str} ->
                 match s is
                     "BEGIN-$(a)-$(b)-$(c)-$(d)-$(e)-END" ->
                         { a = a, b = b, c = c, d = d, e = e }
@@ -574,7 +574,7 @@ class StringInterpolationPatternTypeCheckTest {
                 match s is
                     "hello $(name)" -> name
                     _ -> "default"
-            let result: String = parse {s = "hello world"}
+            let result: Str = parse {s = "hello world"}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -584,7 +584,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `type inference - infer from return type annotation`() {
         val code = """
-            let extract: {s: String} -> String = {s} ->
+            let extract: {s: Str} -> Str = {s} ->
                 match s is
                     "$(value)" -> value
             let result = extract {s = "test"}
@@ -601,7 +601,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `real world - URL parsing`() {
         val code = """
-            let parse_url = {url: String} ->
+            let parse_url = {url: Str} ->
                 match url is
                     "https://$(domain)/$(path)" -> { protocol = "https", domain = domain, path = path }
                     "http://$(domain)/$(path)" -> { protocol = "http", domain = domain, path = path }
@@ -618,7 +618,7 @@ class StringInterpolationPatternTypeCheckTest {
         val code = """
             type LogLevel = | Debug, Info, Warn, Error |
 
-            let classify_log = {line: String} ->
+            let classify_log = {line: Str} ->
                 match line is
                     "[DEBUG] $(msg)" -> { level = Debug, message = msg }
                     "[INFO] $(msg)" -> { level = Info, message = msg }
@@ -635,7 +635,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `real world - email validation structure`() {
         val code = """
-            let parse_email = {email: String} ->
+            let parse_email = {email: Str} ->
                 match email is
                     "$(local)@$(domain).$(tld)" ->
                         Some {val = { local = local, domain = domain, tld = tld }}
@@ -650,9 +650,9 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `real world - command parsing`() {
         val code = """
-            type Command = | Help, Version, Run { script: String }, Install { pkg: String } |
+            type Command = | Help, Version, Run { script: Str }, Install { pkg: Str } |
 
-            let parse_cmd = {input: String} ->
+            let parse_cmd = {input: Str} ->
                 match input is
                     "help" -> Help
                     "version" -> Version
@@ -669,7 +669,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `real world - configuration parsing`() {
         val code = """
-            let parse_config_line = {line: String} ->
+            let parse_config_line = {line: Str} ->
                 match line is
                     "# $(comment)" -> { kind = "comment", key = "", value = comment }
                     "$(key) = $(value)" -> { kind = "setting", key = key, value = value }
@@ -691,7 +691,7 @@ class StringInterpolationPatternTypeCheckTest {
         val code = """
             use std::collections::seq
 
-            let parse_pairs = {lines: [String]} ->
+            let parse_pairs = {lines: [Str]} ->
                 match lines is
                     [] -> []
                     ["$(key)=$(value)", ...rest] ->
@@ -711,7 +711,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `or pattern - different string patterns`() {
         val code = """
-            let parse_greeting = {s: String} ->
+            let parse_greeting = {s: Str} ->
                 match s is
                     "hello $(name)" | "hi $(name)" | "hey $(name)" -> name
                     _ -> "stranger"
@@ -729,7 +729,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `complex - string pattern with record destructuring`() {
         val code = """
-            let process = {data: { input: String, prefix: String }} ->
+            let process = {data: { input: Str, prefix: Str }} ->
                 match data is
                     { input = "$(start)-$(end)", prefix = p } if start == p ->
                         { matched = True, suffix = end }
@@ -744,7 +744,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `complex - string pattern in do block`() {
         val code = """
-            let analyze = {s: String} -> do
+            let analyze = {s: Str} -> do
                 let parsed = match s is
                     "$(msgType): $(data)" -> { kind = msgType, payload = data }
                     _ -> { kind = "unknown", payload = s }
@@ -760,7 +760,7 @@ class StringInterpolationPatternTypeCheckTest {
     @Test
     fun `complex - chained string matching`() {
         val code = """
-            let parse_path = {path: String} ->
+            let parse_path = {path: Str} ->
                 match path is
                     "/api/v1/$(resource)/$(id)" -> { api = True, version = "v1", resource = resource, id = id }
                     "/api/v2/$(resource)/$(id)" -> { api = True, version = "v2", resource = resource, id = id }

@@ -25,11 +25,11 @@ class RuntimeEffectValidationTest {
     fun testUnhandledEffectReturnsSuspended() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let effectfulFunc : {x: Int} -> Int <Log> = {x} -> do
@@ -59,11 +59,11 @@ class RuntimeEffectValidationTest {
     fun testHandledEffectAllowsExecution() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let effectfulFunc = {x} -> do
@@ -82,7 +82,7 @@ class RuntimeEffectValidationTest {
     fun testMultipleUnhandledEffectsReturnsSuspended() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -90,7 +90,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -127,7 +127,7 @@ class RuntimeEffectValidationTest {
     fun testPartiallyHandledEffectsReturnsSuspended() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -135,7 +135,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -170,7 +170,7 @@ class RuntimeEffectValidationTest {
     fun testFullyHandledEffectsAllowsExecution() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -178,7 +178,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
@@ -214,11 +214,11 @@ class RuntimeEffectValidationTest {
     fun testNestedEffectfulFunctionValidation() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let innerFunc : {x: Int} -> Int <Log> = {x} -> do
@@ -251,11 +251,11 @@ class RuntimeEffectValidationTest {
     fun testEffectValidationInPartialApplication() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let effectfulFunc = {x, y} -> do

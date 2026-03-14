@@ -25,7 +25,7 @@ class VariantInterpreterTest {
     @Test
     fun `test simple variant construction - Success with value`() {
         val code = """
-            type MyResult = | MySuccess { value: Int }, MyFailure { error: String }, MyLoading |
+            type MyResult = | MySuccess { value: Int }, MyFailure { error: Str }, MyLoading |
             let success: MyResult = MySuccess { value = 42 }
             match success is
                 MySuccess { value } -> value
@@ -39,7 +39,7 @@ class VariantInterpreterTest {
     @Test
     fun `test simple variant construction - Failure with error`() {
         val code = """
-            type MyResult = | MySuccess { value: Int }, MyFailure { error: String }, MyLoading |
+            type MyResult = | MySuccess { value: Int }, MyFailure { error: Str }, MyLoading |
             let failure: MyResult = MyFailure { error = "Something went wrong" }
             match failure is
                 MySuccess { value } -> "ok"
@@ -53,7 +53,7 @@ class VariantInterpreterTest {
     @Test
     fun `test simple variant construction - Loading unit variant`() {
         val code = """
-            type MyResult = | MySuccess { value: Int }, MyFailure { error: String }, MyLoading |
+            type MyResult = | MySuccess { value: Int }, MyFailure { error: Str }, MyLoading |
             let loading: MyResult = MyLoading
             match loading is
                 MySuccess { value } -> 1
@@ -71,7 +71,7 @@ class VariantInterpreterTest {
     @Test
     fun `test variant pattern matching with function`() {
         val code = """
-            type Status = | Success { value: Int }, Failure { error: String }, Loading |
+            type Status = | Success { value: Int }, Failure { error: Str }, Loading |
 
             let handleStatus = { status: Status } -> match status is
                 Success { value } -> "Got value"
@@ -88,7 +88,7 @@ class VariantInterpreterTest {
     @Test
     fun `test variant pattern matching returns correct branch for failure`() {
         val code = """
-            type Status = | Success { value: Int }, Failure { error: String }, Loading |
+            type Status = | Success { value: Int }, Failure { error: Str }, Loading |
 
             let handleStatus = { status: Status } -> match status is
                 Success { value } -> "Got value"
@@ -105,7 +105,7 @@ class VariantInterpreterTest {
     @Test
     fun `test variant pattern matching returns correct branch for loading`() {
         val code = """
-            type Status = | Success { value: Int }, Failure { error: String }, Loading |
+            type Status = | Success { value: Int }, Failure { error: Str }, Loading |
 
             let handleStatus = { status: Status } -> match status is
                 Success { value } -> "Got value"
@@ -253,9 +253,9 @@ class VariantInterpreterTest {
     @Test
     fun `test variant construction in function - success case`() {
         val code = """
-            type MyResult = | Success { value: Int }, Failure { error: String } |
+            type MyResult = | Success { value: Int }, Failure { error: Str } |
 
-            let createResult = { success: Bool, value: Int, error: String } ->
+            let createResult = { success: Bool, value: Int, error: Str } ->
                 if success
                 then Success { value = value }
                 else Failure { error = error }
@@ -272,9 +272,9 @@ class VariantInterpreterTest {
     @Test
     fun `test variant construction in function - failure case`() {
         val code = """
-            type MyResult = | Success { value: Int }, Failure { error: String } |
+            type MyResult = | Success { value: Int }, Failure { error: Str } |
 
-            let createResult = { success: Bool, value: Int, error: String } ->
+            let createResult = { success: Bool, value: Int, error: Str } ->
                 if success
                 then Success { value = value }
                 else Failure { error = error }
@@ -361,7 +361,7 @@ class VariantInterpreterTest {
     @Test
     fun `test built-in Result Ok construction`() {
         val code = """
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             match res is
                 Ok { val } -> val
                 Err { error } -> -1
@@ -373,7 +373,7 @@ class VariantInterpreterTest {
     @Test
     fun `test built-in Result Err construction`() {
         val code = """
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             match res is
                 Ok { val } -> "ok"
                 Err { error } -> error

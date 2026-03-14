@@ -33,7 +33,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Ord 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {left: 'a, right: 'a} -> Str
             }
         """.trimIndent()
         
@@ -57,7 +57,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testMultipleDependencies() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
             ability Eq 'a where {
@@ -65,8 +65,8 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Serializable 'a with Show 'a, Eq 'a where {
-                serialize : {val: 'a} -> String,
-                deserialize : {str: String} -> 'a
+                serialize : {val: 'a} -> Str,
+                deserialize : {str: Str} -> 'a
             }
         """.trimIndent()
         
@@ -92,7 +92,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Ord 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {left: 'a, right: 'a} -> Str
             }
             
             ability Bounded 'a with Ord 'a where {
@@ -127,11 +127,11 @@ class AbilityDependencyTypeCheckerTest {
     fun testCircularDependencyDetection() {
         val source = """
             ability A 'a with B 'a where {
-                opA : {val: 'a} -> String
+                opA : {val: 'a} -> Str
             }
             
             ability B 'a with A 'a where {
-                opB : {val: 'a} -> String
+                opB : {val: 'a} -> Str
             }
         """.trimIndent()
         
@@ -147,7 +147,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testSelfDependencyDetection() {
         val source = """
             ability SelfRef 'a with SelfRef 'a where {
-                op : {val: 'a} -> String
+                op : {val: 'a} -> Str
             }
         """.trimIndent()
         
@@ -168,11 +168,11 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
             ability ComplexStore 'a 'b with KVStore 'a 'b, Show 'a where {
-                complexStore : {key: 'a, value: 'b, metadata: String} -> {}
+                complexStore : {key: 'a, value: 'b, metadata: Str} -> {}
             }
         """.trimIndent()
         
@@ -202,7 +202,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Ord 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {left: 'a, right: 'a} -> Str
             }
             
             impl Eq Int where {
@@ -210,7 +210,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             impl Ord Int where {
-                compare : {left: Int, right: Int} -> String = {left, right} -> "equal"
+                compare : {left: Int, right: Int} -> Str = {left, right} -> "equal"
             }
         """.trimIndent()
         
@@ -237,20 +237,20 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
             ability Ord 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {left: 'a, right: 'a} -> Str
             }
             
             ability Debug 'a with Show 'a, Eq 'a where {
-                debug : {val: 'a} -> String
+                debug : {val: 'a} -> Str
             }
             
             ability Serializable 'a with Debug 'a, Ord 'a where {
-                serialize : {val: 'a} -> String,
-                deserialize : {str: String} -> 'a
+                serialize : {val: 'a} -> Str,
+                deserialize : {str: Str} -> 'a
             }
         """.trimIndent()
         
@@ -278,7 +278,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testAbilityWithoutDependencies() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
         """.trimIndent()
         

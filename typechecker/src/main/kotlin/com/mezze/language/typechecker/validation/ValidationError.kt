@@ -572,18 +572,11 @@ sealed class ValidationResult {
  * Format a type for error messages.
  */
 private fun formatType(type: MezzeType): String {
+    // Check primitive types first
+    PrimitiveTypes.toName(type)?.let { return it }
+
     return when (type) {
         is MezzeType.VarType -> type.variable.toString()
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "String"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.ByteBufferType -> "ByteBuffer"
-        is MezzeType.CharType -> "Char"
         is MezzeType.FunctionType -> "{...} -> ..."
         is MezzeType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
         is MezzeType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}]"
@@ -596,5 +589,6 @@ private fun formatType(type: MezzeType): String {
         is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
         is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
         is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}>"
+        else -> type.toString()  // Fallback for any types handled by PrimitiveTypes
     }
 }

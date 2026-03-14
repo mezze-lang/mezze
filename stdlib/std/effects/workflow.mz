@@ -31,13 +31,13 @@ use std::collections::seq
 # Workflow effect - durable computation with checkpointing
 effect Workflow where {
     # Execute a named step - the result is persisted
-    step: {name: String, f: {} -> 'a} -> 'a <Workflow>,
+    step: {name: Str, f: {} -> 'a} -> 'a <Workflow>,
 
     # Sleep for a duration (workflow time, not wall clock)
     sleep: {ms: Int} -> {} <Workflow>,
 
     # Get the current workflow run ID
-    run_id: {} -> String <Workflow>,
+    run_id: {} -> Str <Workflow>,
 
     # Checkpoint the workflow state explicitly
     checkpoint: {} -> {} <Workflow>
@@ -45,7 +45,7 @@ effect Workflow where {
 
 # Workflow state - tracks completed steps
 type WorkflowState = {
-    run_id: String,
+    run_id: Str,
     step_count: Nat
 }
 
@@ -87,14 +87,14 @@ pub let run_local: {workflow: {} -> 'a <Workflow>} -> 'a =
 
 # Retry a step with a maximum number of attempts
 # (Simplified - always succeeds on first try in local mode)
-pub let retry: {name: String, max_attempts: Int, f: {} -> 'a} -> 'a <Workflow> =
+pub let retry: {name: Str, max_attempts: Int, f: {} -> 'a} -> 'a <Workflow> =
     {name, max_attempts, f} -> Workflow.step {name = name, f = f}
 
 # Execute a step with a timeout
 # (Simplified - always succeeds in local mode)
-pub let with_timeout: {name: String, timeout_ms: Int, f: {} -> 'a} -> Option 'a <Workflow> =
+pub let with_timeout: {name: Str, timeout_ms: Int, f: {} -> 'a} -> Option 'a <Workflow> =
     {name, timeout_ms, f} -> Some {val = Workflow.step {name = name, f = f}}
 
 # Execute multiple steps and collect results
-pub let steps: {work: [{name: String, f: {} -> 'a}]} -> ['a] <Workflow> =
+pub let steps: {work: [{name: Str, f: {} -> 'a}]} -> ['a] <Workflow> =
     {work} -> seq::map {xs = work, f = {x} -> Workflow.step {name = x.name, f = x.f}}

@@ -36,7 +36,7 @@ class ScopedEffectsIntegrationTest {
     fun `scope is available in operations when initialize_scope is present`() {
         val source = """
             effect Pool where {
-                query: { sql: String } -> String <Pool>
+                query: { sql: Str } -> Str <Pool>
             }
 
             impl Pool for PgPool where {
@@ -57,7 +57,7 @@ class ScopedEffectsIntegrationTest {
     fun `scope is available in finalize_scope`() {
         val source = """
             effect Pool where {
-                query: { sql: String } -> String <Pool>
+                query: { sql: Str } -> Str <Pool>
             }
 
             impl Pool for PgPool where {
@@ -78,7 +78,7 @@ class ScopedEffectsIntegrationTest {
     fun `scope is NOT available in initialize_scope`() {
         val source = """
             effect Pool where {
-                query: { sql: String } -> String <Pool>
+                query: { sql: Str } -> Str <Pool>
             }
 
             impl Pool for PgPool where {
@@ -105,7 +105,7 @@ class ScopedEffectsIntegrationTest {
     fun `scope is NOT available without initialize_scope`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -139,7 +139,7 @@ class ScopedEffectsIntegrationTest {
                 increment = {} ->
                     do
                         let n: Int = scope.count
-                        let s: String = scope.name
+                        let s: Str = scope.name
                         n + 1
             }
         """.trimIndent()
@@ -160,7 +160,7 @@ class ScopedEffectsIntegrationTest {
                 finalize_scope = {} -> {},
                 increment = {} ->
                     do
-                        let s: String = scope.count
+                        let s: Str = scope.count
                         0
             }
         """.trimIndent()

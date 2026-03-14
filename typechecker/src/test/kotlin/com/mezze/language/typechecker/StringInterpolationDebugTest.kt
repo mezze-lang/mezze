@@ -27,7 +27,7 @@ class StringInterpolationDebugTest {
         try {
             val program = parser.parse(source)
             val typedProgram = typeChecker.typeCheck(program).program
-            println("SUCCESS: String interpolation lambda type checking passed")
+            println("SUCCESS: Str interpolation lambda type checking passed")
 
             val concatBinding = typedProgram.items.find { it is com.mezze.language.ast.LetBinding && it.variableName == "concat" } as com.mezze.language.ast.LetBinding
             println("Concat type: ${com.mezze.language.ast.prettyPrintType(concatBinding.inferredType!!)}")

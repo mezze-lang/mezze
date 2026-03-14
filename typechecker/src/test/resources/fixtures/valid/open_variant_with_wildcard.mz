@@ -4,9 +4,9 @@
 let processColor = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"
-  _ -> "other"                                                       # expected: processColor : { color: | Red, Blue { val: 'a }, ... | } -> String
+  _ -> "other"                                                       # expected: processColor : { color: | Red, Blue { val: 'a }, ... | } -> Str
 
-let result1 = processColor {color = Red}                # expected: result1 : String
-let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : String
+let result1 = processColor {color = Red}                # expected: result1 : Str
+let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : Str
 
 result1

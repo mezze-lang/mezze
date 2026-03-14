@@ -189,7 +189,7 @@ class ConstructorResolutionTest {
         // The resolution is set when the ability name appears in a MemberAccess receiver
         val typedProgram = typeCheckAndGetProgram("""
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             # Lambda that uses the ability (deferred resolution)
@@ -336,7 +336,7 @@ class ConstructorResolutionTest {
             type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |
 
             effect Logger where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             let test = {x} -> do

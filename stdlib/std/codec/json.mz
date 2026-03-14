@@ -29,8 +29,8 @@ use std::codec::core::{EncodeFormat, DecodeFormat, EncodeError, DecodeError, Cod
 
 # The Json type represents any JSON value
 # Note: JArray and JObject use Seq for efficient construction with [...] literals
-# Using anonymous record {key: String, value: Json} for structural compatibility with codec
-pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] }, JObject { fields: [{key: String, value: Json}]} |
+# Using anonymous record {key: Str, value: Json} for structural compatibility with codec
+pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] }, JObject { fields: [{key: Str, value: Json}]} |
 
 # ============================================================================
 # CONFIGURATION
@@ -68,7 +68,7 @@ pub let config = {pretty: Bool, indent: Int, field_transform: FieldTransform, sk
 # ============================================================================
 
 # Get the type name of a Json value (for error messages)
-let json_type_name: {json: Json} -> String = {json} ->
+let json_type_name: {json: Json} -> Str = {json} ->
     match json is
         JNull -> "null"
         JBool {val} -> "boolean"
@@ -83,19 +83,19 @@ let json_type_name: {json: Json} -> String = {json} ->
 # ============================================================================
 
 # Serialize Json to string with config (uses native JSON serializer for speed)
-pub let serialize_to_str: {json: Json, config: JsonConfig} -> String = {json, config} ->
+pub let serialize_to_str: {json: Json, config: JsonConfig} -> Str = {json, config} ->
     match __native_json_serialize {json = json, pretty = config.pretty} is
         Ok {val} -> val
         Err {error} -> ""  # Should not happen for valid Json
 
 # Serialize with default config (uses native JSON serializer for speed)
-pub let to_str: {json: Json} -> String = {json} ->
+pub let to_str: {json: Json} -> Str = {json} ->
     match __native_json_serialize {json = json, pretty = False} is
         Ok {val} -> val
         Err {error} -> ""  # Should not happen for valid Json
 
 # Compact serialization (no whitespace)
-let serialize_compact: {json: Json} -> String = {json} ->
+let serialize_compact: {json: Json} -> Str = {json} ->
     match json is
         JNull -> "null"
         JBool {val} -> if val then "true" else "false"
@@ -113,7 +113,7 @@ let serialize_compact: {json: Json} -> String = {json} ->
             "{$(string::join {strings = inner, separator = ","})}"
 
 # Pretty serialization (with indentation)
-let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {json, indent, indent_size} -> do
+let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> Str = {json, indent, indent_size} -> do
     let indent_str = string::repeat {s = " ", n = indent}
     let next_indent = indent + indent_size
     let next_indent_str = string::repeat {s = " ", n = next_indent}
@@ -147,7 +147,7 @@ let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {j
 # Escape special characters in JSON strings
 # TODO: Implement proper escape when string::replace is available
 # For now, return string as-is (not correct for strings with special chars)
-let escape_string: {s: String} -> String = {s} ->
+let escape_string: {s: Str} -> Str = {s} ->
     s
 
 # ============================================================================
@@ -179,7 +179,7 @@ pub let parse = {bytes} ->
 #   let result = Encode.encode {val = person, config = {field_transform = SnakeCase}}
 
 # Parse a JSON string to Json value
-pub let parse_str = {s: String} ->
+pub let parse_str = {s: Str} ->
     __native_json_parse {s = s}
 
 # ============================================================================
@@ -187,7 +187,7 @@ pub let parse_str = {s: String} ->
 # ============================================================================
 
 # Transform a field name based on the FieldTransform config
-pub let transform_field_name = {name: String, transform: FieldTransform} ->
+pub let transform_field_name = {name: Str, transform: FieldTransform} ->
     match transform is
         Identity -> name
         SnakeCase -> string::to_snake_case {s = name}
@@ -196,7 +196,7 @@ pub let transform_field_name = {name: String, transform: FieldTransform} ->
         ScreamingSnakeCase -> string::to_screaming_snake_case {s = name}
 
 # Inverse transform (for decoding - e.g., snake_case JSON -> camelCase Mezze)
-pub let inverse_transform_field_name = {name: String, transform: FieldTransform} ->
+pub let inverse_transform_field_name = {name: Str, transform: FieldTransform} ->
     match transform is
         Identity -> name
         SnakeCase -> string::to_camel_case {s = name}  # snake_case -> camelCase
@@ -222,7 +222,7 @@ pub let inverse_transform_field_name = {name: String, transform: FieldTransform}
 #
 #   # Decode back (config handles inverse transformation)
 #   let json_input: Json = ...  # {"user_name": "Alice", "created_at": "2024-01-01"}
-#   let decoded: Result {userName: String, createdAt: String} DecodeError =
+#   let decoded: Result {userName: Str, createdAt: Str} DecodeError =
 #       Decode.decode {val = json_input, config = {field_transform = SnakeCase}}
 
 # Transform all field names in a Json value according to the config
@@ -283,7 +283,7 @@ let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t}
 #
 #   # Decode from JSON (requires type annotation)
 #   let json_data = json::parse_str {s = "{\"name\": \"Alice\", \"age\": 30}"}
-#   let person: Result {name: String, age: Int} DecodeError = match json_data is
+#   let person: Result {name: Str, age: Int} DecodeError = match json_data is
 #       Ok {val} -> json::decode {val = val}
 #       Err {error} -> Err {error = {path = [], message = "parse failed", expected = "Json", found = None}}
 
@@ -321,7 +321,7 @@ impl EncodeFormat Json where {
         Ok {val = JString {val = b64}},
 
     encode_record = {fields, path} ->
-        # fields is [{key: String, value: Json}], matching JObject.fields
+        # fields is [{key: Str, value: Json}], matching JObject.fields
         Ok {val = JObject {fields = fields}},
 
     encode_variant = {tag, payload, path} -> do
@@ -504,7 +504,7 @@ impl DecodeFormat Json where {
     decode_map = {val, path} ->
         match val is
             JObject {fields} -> do
-                # Convert object fields [{key: String, value: Json}] to List {key: Json, value: Json}
+                # Convert object fields [{key: Str, value: Json}] to List {key: Json, value: Json}
                 let as_list = list::from_seq {xs = fields}
                 let converted = list::map {xs = as_list, f = {x} ->
                     {key = JString {val = x.key}, value = x.value}

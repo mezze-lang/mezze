@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.cache
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
@@ -300,55 +301,51 @@ object TypeCheckCache {
     /**
      * Convert MezzeType to a deterministic string for hashing.
      */
-    private fun typeToString(type: MezzeType): String = when (type) {
-        MezzeType.IntType -> "Int"
-        MezzeType.NatType -> "Nat"
-        MezzeType.FloatType -> "Float"
-        MezzeType.StringType -> "String"
-        MezzeType.BoolType -> "Bool"
-        MezzeType.FracType -> "Frac"
-        MezzeType.BytesType -> "Bytes"
-        MezzeType.ByteBufferType -> "ByteBuffer"
-        MezzeType.CharType -> "Char"
-        MezzeType.OrderingType -> "Ordering"
-        is MezzeType.VarType -> "'${type.variable.name}"
-        is MezzeType.FunctionType -> {
-            val paramStr = typeToString(type.paramType)
-            val returnStr = typeToString(type.returnType)
-            "($paramStr -> $returnStr)"
-        }
-        is MezzeType.RecordType -> {
-            val fields = type.fields.entries
-                .sortedBy { it.key }
-                .joinToString(", ") { (k, v) -> "$k: ${typeToString(v)}" }
-            "{$fields}"
-        }
-        is MezzeType.VariantType -> {
-            val constructors = type.constructors.entries
-                .sortedBy { it.key }
-                .joinToString(" | ") { (k, v) ->
-                    if (v != null) "$k(${typeToString(v)})" else k
-                }
-            "[$constructors]"
-        }
-        is MezzeType.SeqType -> "Seq<${typeToString(type.elementType)}>"
-        is MezzeType.ListType -> "List<${typeToString(type.elementType)}>"
-        is MezzeType.SetType -> "Set<${typeToString(type.elementType)}>"
-        is MezzeType.SortedSetType -> "SortedSet<${typeToString(type.elementType)}>"
-        is MezzeType.MapType -> "Map<${typeToString(type.keyType)}, ${typeToString(type.valueType)}>"
-        is MezzeType.SortedMapType -> "SortedMap<${typeToString(type.keyType)}, ${typeToString(type.valueType)}>"
-        is MezzeType.TypeApplication -> {
-            val args = type.args.joinToString(", ") { typeToString(it) }
-            "${type.constructor}<$args>"
-        }
-        is MezzeType.SuspendedType -> {
-            val inner = typeToString(type.valueType)
-            val effects = type.effects.effects.sorted().joinToString(", ")
-            "Suspended<$inner, {$effects}>"
-        }
-        is MezzeType.EffectRow -> {
-            val effects = type.effects.sorted().joinToString(", ")
-            "EffectRow<{$effects}>"
+    private fun typeToString(type: MezzeType): String {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return it }
+
+        return when (type) {
+            is MezzeType.VarType -> "'${type.variable.name}"
+            is MezzeType.FunctionType -> {
+                val paramStr = typeToString(type.paramType)
+                val returnStr = typeToString(type.returnType)
+                "($paramStr -> $returnStr)"
+            }
+            is MezzeType.RecordType -> {
+                val fields = type.fields.entries
+                    .sortedBy { it.key }
+                    .joinToString(", ") { (k, v) -> "$k: ${typeToString(v)}" }
+                "{$fields}"
+            }
+            is MezzeType.VariantType -> {
+                val constructors = type.constructors.entries
+                    .sortedBy { it.key }
+                    .joinToString(" | ") { (k, v) ->
+                        if (v != null) "$k(${typeToString(v)})" else k
+                    }
+                "[$constructors]"
+            }
+            is MezzeType.SeqType -> "Seq<${typeToString(type.elementType)}>"
+            is MezzeType.ListType -> "List<${typeToString(type.elementType)}>"
+            is MezzeType.SetType -> "Set<${typeToString(type.elementType)}>"
+            is MezzeType.SortedSetType -> "SortedSet<${typeToString(type.elementType)}>"
+            is MezzeType.MapType -> "Map<${typeToString(type.keyType)}, ${typeToString(type.valueType)}>"
+            is MezzeType.SortedMapType -> "SortedMap<${typeToString(type.keyType)}, ${typeToString(type.valueType)}>"
+            is MezzeType.TypeApplication -> {
+                val args = type.args.joinToString(", ") { typeToString(it) }
+                "${type.constructor}<$args>"
+            }
+            is MezzeType.SuspendedType -> {
+                val inner = typeToString(type.valueType)
+                val effects = type.effects.effects.sorted().joinToString(", ")
+                "Suspended<$inner, {$effects}>"
+            }
+            is MezzeType.EffectRow -> {
+                val effects = type.effects.sorted().joinToString(", ")
+                "EffectRow<{$effects}>"
+            }
+            else -> type.toString()
         }
     }
 

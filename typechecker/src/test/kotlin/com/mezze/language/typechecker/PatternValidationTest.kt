@@ -116,7 +116,7 @@ class PatternValidationTest {
     @Test
     fun `test mixed variants with correct patterns should pass`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String }, Loading |
+            type Result = | Ok { value: Int }, Err { message: Str }, Loading |
 
             let handle = {result} ->
                 match result is
@@ -190,7 +190,7 @@ class PatternValidationTest {
     @Test
     fun `multiple payload variants without destructuring should fail`() {
         val code = """
-            type Result = | Ok { val: Int }, Err { msg: String } |
+            type Result = | Ok { val: Int }, Err { msg: Str } |
 
             let check = {result} ->
                 match result is

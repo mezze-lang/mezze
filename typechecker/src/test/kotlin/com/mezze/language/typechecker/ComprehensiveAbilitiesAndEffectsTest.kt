@@ -30,14 +30,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> Show.show {val = val}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -102,14 +102,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> Show.show {val = val}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -125,14 +125,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            let displayValue: {val: 'a} -> String with Show 'a = {val} ->
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             let result = displayValue {val = 42}
@@ -162,8 +162,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
               convert : {val: 'a} -> 'b
             }
 
-            impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> int::to_str {n = val}
+            impl Convert Int Str where {
+              convert : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             let result = Convert.convert {val = 42}
@@ -191,14 +191,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
 
-            let fetchUser: {id: Int} -> String <Database> = {id} ->
+            let fetchUser: {id: Int} -> Str <Database> = {id} ->
               Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})"}
         """.trimIndent()
 
@@ -224,22 +224,22 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             effect Auth where {
-              authenticate : {token: String} -> Boolean <Auth>
+              authenticate : {token: Str} -> Boolean <Auth>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
 
             effect SecureDatabase where {
-              secureQuery : {sql: String, token: String} -> String <SecureDatabase>
+              secureQuery : {sql: Str, token: Str} -> Str <SecureDatabase>
             }
 
-            let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase> = {id, token} ->
+            let secureUserFetch: {id: Int, token: Str} -> Str <SecureDatabase> = {id, token} ->
               SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})", token = token}
         """.trimIndent()
 
@@ -267,11 +267,11 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             effect Log where {
-              log : {message: String} -> {} <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: String} -> {} = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
 
             let loggedOperation: {value: Int} -> Int <Log> = {value} -> do
@@ -314,18 +314,18 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Show Bool where {
-              show : {val: Bool} -> String = {val} -> if val then "True" else "False"
+              show : {val: Bool} -> Str = {val} -> if val then "True" else "False"
             }
 
-            let showValue: {val: 'a} -> String with Show 'a = {val} ->
+            let showValue: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             let result = showValue {val = True}
@@ -344,22 +344,22 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> {}
+              log : {message: Str} -> Unit = {message} -> {}
             }
 
-            let loggedShow: {val: 'a} -> String <Log> with Show 'a = {val} -> do
+            let loggedShow: {val: 'a} -> Str <Log> with Show 'a = {val} -> do
               let str = Show.show {val = val}
               Log.log {message = "Showing value: $(str)"}
               str

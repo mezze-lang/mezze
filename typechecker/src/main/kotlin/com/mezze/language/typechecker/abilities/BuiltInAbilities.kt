@@ -23,12 +23,11 @@ import com.mezze.language.ast.TypeVar
  */
 object BuiltInAbilities {
     /**
-     * Bool variant type: type Bool = | True, False |
+     * Bool type - use the singleton BoolType for consistency with inferred types.
+     * Note: Bool is technically a variant with True/False constructors in the language,
+     * but internally we use BoolType for efficient comparison and consistency.
      */
-    private val boolType = MezzeType.VariantType(
-        constructors = mapOf("True" to null, "False" to null),
-        rowVar = null
-    )
+    private val boolType = MezzeType.BoolType
     /**
      * Map of ability names to their methods.
      * Each method is a function that takes a type variable and returns the method's function type.
@@ -298,7 +297,7 @@ object BuiltInAbilities {
     /**
      * Get the canonical Bool type.
      */
-    fun getBoolType(): MezzeType.VariantType = boolType
+    fun getBoolType(): MezzeType = boolType
 
     /**
      * Get all method names for an ability.

@@ -2823,15 +2823,7 @@ class TypeValidator(
             is IdentifierTypeAnnotation -> {
                 val name = annotation.name
                 // Check if it's a primitive type
-                when (name) {
-                    "Int" -> return MezzeType.IntType
-                    "Float" -> return MezzeType.FloatType
-                    "String" -> return MezzeType.StringType
-                    "Boolean", "Bool" -> return MezzeType.BoolType
-                    "Nat" -> return MezzeType.NatType
-                    "Frac" -> return MezzeType.FracType
-                    "Ordering" -> return MezzeType.OrderingType
-                }
+                PrimitiveTypes.fromName(name)?.let { return it }
 
                 // Check if it's a user-defined type
                 val typeDecl = typeDeclarations[name]
@@ -2963,7 +2955,7 @@ class TypeValidator(
                 when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
-                    "String" -> type is MezzeType.StringType
+                    "Str" -> type is MezzeType.StringType
                     "Bool" -> type is MezzeType.BoolType
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType

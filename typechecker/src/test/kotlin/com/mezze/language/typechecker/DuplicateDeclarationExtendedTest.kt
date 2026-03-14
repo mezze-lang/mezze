@@ -76,11 +76,11 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate effect declaration should fail`() {
         val code = """
             effect Logger where {
-                log: {msg: String} -> {} <Logger>
+                log: {msg: Str} -> {} <Logger>
             }
 
             effect Logger where {
-                debug: {msg: String} -> {} <Logger>
+                debug: {msg: Str} -> {} <Logger>
             }
         """.trimIndent()
 
@@ -95,11 +95,11 @@ class DuplicateDeclarationExtendedTest {
     fun `test different effect names should pass`() {
         val code = """
             effect Logger where {
-                log: {msg: String} -> {} <Logger>
+                log: {msg: Str} -> {} <Logger>
             }
 
             effect Console where {
-                print: {msg: String} -> {} <Console>
+                print: {msg: Str} -> {} <Console>
             }
         """.trimIndent()
 
@@ -113,15 +113,15 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate performer declaration should fail`() {
         val code = """
             effect Log where {
-                log: {msg: String} -> {} <Log>
+                log: {msg: Str} -> {} <Log>
             }
 
             impl Log for SilentLogger where {
-                log: {msg: String} -> {} = {msg} -> {}
+                log: {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for SilentLogger where {
-                log: {msg: String} -> {} = {msg} -> {}
+                log: {msg: Str} -> {} = {msg} -> {}
             }
         """.trimIndent()
 
@@ -136,15 +136,15 @@ class DuplicateDeclarationExtendedTest {
     fun `test different performer names should pass`() {
         val code = """
             effect Log where {
-                log: {msg: String} -> {} <Log>
+                log: {msg: Str} -> {} <Log>
             }
 
             impl Log for SilentLogger where {
-                log: {msg: String} -> {} = {msg} -> {}
+                log: {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for VerboseLogger where {
-                log: {msg: String} -> {} = {msg} -> {}
+                log: {msg: Str} -> {} = {msg} -> {}
             }
         """.trimIndent()
 
@@ -158,11 +158,11 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate ability declaration should fail`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             ability Show 'a where {
-                display: {val: 'a} -> String
+                display: {val: 'a} -> Str
             }
         """.trimIndent()
 
@@ -177,11 +177,11 @@ class DuplicateDeclarationExtendedTest {
     fun `test different ability names should pass`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             ability Display 'a where {
-                display: {val: 'a} -> String
+                display: {val: 'a} -> Str
             }
         """.trimIndent()
 
@@ -197,15 +197,15 @@ class DuplicateDeclarationExtendedTest {
             use std::int
 
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> "number"
+                show: {val: Int} -> Str = {val} -> "number"
             }
         """.trimIndent()
 
@@ -222,15 +222,15 @@ class DuplicateDeclarationExtendedTest {
             use std::int
 
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> int::to_str {n = val}
+                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            impl Show String where {
-                show: {val: String} -> String = {val} -> val
+            impl Show Str where {
+                show: {val: Str} -> Str = {val} -> val
             }
 
             Show.show {val = 42}
@@ -244,15 +244,15 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate ability implementation for generic type should fail`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show (List Int) where {
-                show: {val: List Int} -> String = {val} -> "list"
+                show: {val: List Int} -> Str = {val} -> "list"
             }
 
             impl Show (List Int) where {
-                show: {val: List Int} -> String = {val} -> "[...]"
+                show: {val: List Int} -> Str = {val} -> "[...]"
             }
         """.trimIndent()
 
@@ -267,15 +267,15 @@ class DuplicateDeclarationExtendedTest {
     fun `test ability implementation for different generic types should pass`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show (List Int) where {
-                show: {val: List Int} -> String = {val} -> "list of ints"
+                show: {val: List Int} -> Str = {val} -> "list of ints"
             }
 
-            impl Show (List String) where {
-                show: {val: List String} -> String = {val} -> "list of strings"
+            impl Show (List Str) where {
+                show: {val: List Str} -> Str = {val} -> "list of strings"
             }
         """.trimIndent()
 
@@ -292,12 +292,12 @@ class DuplicateDeclarationExtendedTest {
                 convert: {value: 'from} -> 'to
             }
 
-            impl Convert String Int where {
-                convert: {value: String} -> Int = {value} -> 0
+            impl Convert Str Int where {
+                convert: {value: Str} -> Int = {value} -> 0
             }
 
-            impl Convert String Int where {
-                convert: {value: String} -> Int = {value} -> 1
+            impl Convert Str Int where {
+                convert: {value: Str} -> Int = {value} -> 1
             }
         """.trimIndent()
 
@@ -317,12 +317,12 @@ class DuplicateDeclarationExtendedTest {
                 convert: {value: 'from} -> 'to
             }
 
-            impl Convert String Int where {
-                convert: {value: String} -> Int = {value} -> 0
+            impl Convert Str Int where {
+                convert: {value: Str} -> Int = {value} -> 0
             }
 
-            impl Convert Int String where {
-                convert: {value: Int} -> String = {value} -> int::to_str {n = value}
+            impl Convert Int Str where {
+                convert: {value: Int} -> Str = {value} -> int::to_str {n = value}
             }
 
             Convert.convert {value = "hello"}

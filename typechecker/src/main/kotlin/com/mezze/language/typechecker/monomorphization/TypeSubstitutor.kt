@@ -309,21 +309,9 @@ class TypeSubstitutor(
 
     private fun convertTypeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> when (annotation.name) {
-                "Int" -> MezzeType.IntType
-                "Float" -> MezzeType.FloatType
-                "String" -> MezzeType.StringType
-                "Bool" -> MezzeType.VariantType(
-                    constructors = mapOf("True" to null, "False" to null),
-                    rowVar = null
-                )
-                "Nat" -> MezzeType.NatType
-                "Frac" -> MezzeType.FracType
-                "Ordering" -> MezzeType.OrderingType
-                "Char" -> MezzeType.CharType
-                "Bytes" -> MezzeType.BytesType
-                "ByteBuffer" -> MezzeType.ByteBufferType
-                else -> MezzeType.VarType(TypeVar(annotation.name))
+            is IdentifierTypeAnnotation -> {
+                // Use PrimitiveTypes registry for consistency
+                PrimitiveTypes.fromName(annotation.name) ?: MezzeType.VarType(TypeVar(annotation.name))
             }
             is RecordTypeAnnotation -> MezzeType.RecordType(
                 fields = annotation.entries.associate { entry ->
@@ -356,17 +344,10 @@ class TypeSubstitutor(
     }
 
     private fun convertMezzeTypeToAnnotation(type: MezzeType): TypeAnnotation {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return IdentifierTypeAnnotation(it) }
+
         return when (type) {
-            is MezzeType.IntType -> IdentifierTypeAnnotation("Int")
-            is MezzeType.FloatType -> IdentifierTypeAnnotation("Float")
-            is MezzeType.StringType -> IdentifierTypeAnnotation("String")
-            is MezzeType.BoolType -> IdentifierTypeAnnotation("Bool")
-            is MezzeType.NatType -> IdentifierTypeAnnotation("Nat")
-            is MezzeType.FracType -> IdentifierTypeAnnotation("Frac")
-            is MezzeType.OrderingType -> IdentifierTypeAnnotation("Ordering")
-            is MezzeType.BytesType -> IdentifierTypeAnnotation("Bytes")
-            is MezzeType.ByteBufferType -> IdentifierTypeAnnotation("ByteBuffer")
-            is MezzeType.CharType -> IdentifierTypeAnnotation("Char")
             is MezzeType.VarType -> IdentifierTypeAnnotation(type.variable.name)
             is MezzeType.RecordType -> RecordTypeAnnotation(
                 entries = type.fields.map { (name, fieldType) ->
@@ -440,6 +421,7 @@ class TypeSubstitutor(
             is MezzeType.SuspendedType -> convertMezzeTypeToAnnotation(type.valueType)
             is MezzeType.VariantType -> IdentifierTypeAnnotation("Variant")
             is MezzeType.EffectRow -> throw IllegalArgumentException("Cannot convert EffectRow to TypeAnnotation")
+            else -> throw IllegalArgumentException("Cannot convert ${type::class.simpleName} to TypeAnnotation")
         }
     }
 }

@@ -14,7 +14,7 @@ pub let from_int = { n: Int } ->
 pub let from_nat = { n: Nat } ->
     __native_float_from_nat { n = n }
 
-pub let from_string = { s: String } ->
+pub let from_string = { s: Str } ->
     __native_float_from_string { s = s }
 
 pub let abs = { n: Float } ->

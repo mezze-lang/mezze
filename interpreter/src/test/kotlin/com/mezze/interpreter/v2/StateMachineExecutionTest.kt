@@ -125,7 +125,7 @@ class StateMachineExecutionTest {
         // Test effect handling with handlers
         val code = """
             effect Log where {
-                log: {message: String} -> {} <Log>
+                log: {message: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLog {} where {
@@ -287,7 +287,7 @@ class StateMachineExecutionTest {
     fun `test computation completion`() {
         // Test that computation reaches terminal state
         val code = """
-            let compute: {n: Int} -> String = {n} ->
+            let compute: {n: Int} -> Str = {n} ->
                 if n <= 0 then "done"
                 else compute {n = n - 1}
 
@@ -423,7 +423,7 @@ class StateMachineExecutionTest {
     fun `test state machine with complex control flow`() {
         // Test complex control flow with multiple branches
         val code = """
-            let classify: {n: Int} -> String = {n} ->
+            let classify: {n: Int} -> Str = {n} ->
                 if n < 0 then "negative"
                 else if n == 0 then "zero"
                 else if n < 10 then "small"

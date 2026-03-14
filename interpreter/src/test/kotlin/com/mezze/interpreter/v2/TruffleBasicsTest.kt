@@ -212,11 +212,11 @@ class TruffleBasicsTest {
     fun testSimpleEffectHandler() {
         val code = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print: {msg: String} -> {} = {msg} -> {}
+                print: {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "test"}

@@ -574,14 +574,14 @@ class ModuleSystemTest {
         // Create a module with effect and implementation
         val logModule = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
-                info: { msg: String } -> {} = { msg } -> {}
+                info: { msg: Str } -> {} = { msg } -> {}
             }
 
-            pub let logInfo: { msg: String } -> {} <Log> = { msg } -> Log.info { msg = msg }
+            pub let logInfo: { msg: Str } -> {} <Log> = { msg } -> Log.info { msg = msg }
         """.trimIndent()
 
         val srcDir = tempDir.resolve("src")

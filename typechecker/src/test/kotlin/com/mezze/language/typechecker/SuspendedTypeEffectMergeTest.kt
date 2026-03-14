@@ -33,7 +33,7 @@ class SuspendedTypeEffectMergeTest {
         // the overall match should have both effects
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -82,7 +82,7 @@ class SuspendedTypeEffectMergeTest {
     fun `if-then-else with effectful then and pure else should have effects from then`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -113,7 +113,7 @@ class SuspendedTypeEffectMergeTest {
     fun `if-then-else with pure then and effectful else should have effects from else`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -144,7 +144,7 @@ class SuspendedTypeEffectMergeTest {
     fun `match with three branches with different effects should have all effects`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -152,7 +152,7 @@ class SuspendedTypeEffectMergeTest {
             }
 
             effect FileSystem where {
-                read: {path: String} -> String <FileSystem>
+                read: {path: Str} -> Str <FileSystem>
             }
 
             impl Log for ConsoleLogger where {

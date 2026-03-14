@@ -1419,22 +1419,10 @@ class ConstraintSolver(
     private fun typeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BoolType
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    "Ordering" -> MezzeType.OrderingType
-                    else -> {
-                        // Type application with no args
-                        MezzeType.TypeApplication(annotation.name, emptyList())
-                    }
-                }
+                // Check primitive types first
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                // Type application with no args
+                MezzeType.TypeApplication(annotation.name, emptyList())
             }
             is TypeApplicationAnnotation -> {
                 MezzeType.TypeApplication(
@@ -1547,7 +1535,7 @@ class ConstraintSolver(
                 when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
-                    "String" -> type is MezzeType.StringType
+                    "Str" -> type is MezzeType.StringType
                     "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
@@ -2360,24 +2348,14 @@ class ConstraintSolver(
      */
     private fun convertAnnotationToType(annotation: TypeAnnotation): MezzeType? {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> when (annotation.name) {
-                "Int" -> MezzeType.IntType
-                "Float" -> MezzeType.FloatType
-                "String" -> MezzeType.StringType
-                "Bool" -> MezzeType.BoolType
-                "Nat" -> MezzeType.NatType
-                "Frac" -> MezzeType.FracType
-                "Char" -> MezzeType.CharType
-                "Ordering" -> MezzeType.OrderingType
-                "Bytes" -> MezzeType.BytesType
-                "ByteBuffer" -> MezzeType.ByteBufferType
-                else -> {
-                    // Check if this is a known type declaration
-                    if (typeDeclarations.containsKey(annotation.name)) {
-                        MezzeType.TypeApplication(annotation.name, emptyList())
-                    } else {
-                        null
-                    }
+            is IdentifierTypeAnnotation -> {
+                // Check primitive types first
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                // Check if this is a known type declaration
+                if (typeDeclarations.containsKey(annotation.name)) {
+                    MezzeType.TypeApplication(annotation.name, emptyList())
+                } else {
+                    null
                 }
             }
             is TypeApplicationAnnotation -> {
@@ -3563,18 +3541,11 @@ class ConstraintSolver(
      * Format a type for error messages.
      */
     private fun formatType(type: MezzeType): String {
+        // Check primitive types first
+        PrimitiveTypes.toName(type)?.let { return it }
+
         return when (type) {
             is MezzeType.VarType -> "'${('a'.code + (type.variable.id % 26)).toChar()}"  // Show as 'a, 'b, etc.
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.OrderingType -> "Ordering"
-            is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
-            is MezzeType.CharType -> "Char"
             is MezzeType.FunctionType -> "{...} -> ..."
             is MezzeType.RecordType -> {
                 // Use typeName if available
@@ -3597,6 +3568,7 @@ class ConstraintSolver(
             is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
             is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
             is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}>"
+            else -> type.toString()  // Fallback for any types handled by PrimitiveTypes
         }
     }
 
@@ -3782,32 +3754,17 @@ class ConstraintSolver(
     ): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null,
-                        typeName = "Bool"
-                    )
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Ordering" -> MezzeType.OrderingType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    else -> {
-                        // Type variable or type constructor
-                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                            // Look up in substitution first
-                            typeParamSubst[annotation.name]
-                                ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
-                                ?: MezzeType.VarType(TypeVar(annotation.name))
-                        } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList())
-                        }
-                    }
+                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                // Type variable or type constructor
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    // Look up in substitution first
+                    typeParamSubst[annotation.name]
+                        ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
+                        ?: MezzeType.VarType(TypeVar(annotation.name))
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList())
                 }
             }
             is FunctionTypeAnnotation -> {

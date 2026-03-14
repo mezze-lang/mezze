@@ -129,7 +129,7 @@ class AbilityEffectErrorsTest {
     @Test
     fun `test effect used but not defined should error`() {
         val source = """
-            let logMessage = {msg: String} -> UnknownLog.log {msg = msg}
+            let logMessage = {msg: Str} -> UnknownLog.log {msg = msg}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -148,11 +148,11 @@ class AbilityEffectErrorsTest {
     fun `test effect propagation from impl body is tracked`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for StdIO where {
@@ -236,7 +236,7 @@ class AbilityEffectErrorsTest {
     fun `test all effects handled results in performed marker`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -319,7 +319,7 @@ class AbilityEffectErrorsTest {
     fun `test user-defined ability method access works`() {
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let f = Show.show
@@ -344,7 +344,7 @@ class AbilityEffectErrorsTest {
     fun `test user-defined ability with wrong method should error`() {
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let f = Show.nonexistent
@@ -368,7 +368,7 @@ class AbilityEffectErrorsTest {
     fun `test unknown performer in perform should error`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             let test = {} ->
@@ -388,7 +388,7 @@ class AbilityEffectErrorsTest {
     fun `test perform with pure expression should error`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -414,11 +414,11 @@ class AbilityEffectErrorsTest {
     fun `test perform handler for wrong effect should error`() {
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             effect IO where {
-                print: { msg: String } -> {} <IO>
+                print: { msg: Str } -> {} <IO>
             }
 
             impl IO for StdIO where {

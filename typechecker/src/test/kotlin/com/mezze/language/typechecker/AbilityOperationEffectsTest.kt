@@ -37,7 +37,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with no effects (pure)`() {
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
@@ -57,7 +57,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with explicit empty effects`() {
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String <>
+                show: {val: 'a} -> Str <>
             }
 
             impl Show Int where {
@@ -76,12 +76,12 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with single effect`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
@@ -101,18 +101,18 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with multiple effects`() {
         val source = """
             effect IO where {
-                read: {} -> String
+                read: {} -> Str
             }
 
             effect Exception where {
-                throw: {msg: String} -> {}
+                throw: {msg: Str} -> {}
             }
 
             ability FileReader 'a where {
-                read_file: {path: String} -> 'a <IO, Exception>
+                read_file: {path: Str} -> 'a <IO, Exception>
             }
 
-            impl FileReader String where {
+            impl FileReader Str where {
                 read_file = {path} -> "file content"
             }
 
@@ -128,14 +128,14 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability with mixed pure and effectful operations`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Container 'c having 'elem where {
                 len: {c: 'c} -> Int,
                 get: {c: 'c, i: Int} -> Option 'elem,
-                set: {c: 'c, i: Int, v: 'elem} -> Bool <Mutation>
+                set: {c: 'c, i: Int, v: 'elem} -> Bool <Mut>
             }
 
             impl Container [Int] having 'elem = Int where {
@@ -160,7 +160,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with polymorphic effects should fail`() {
         val source = """
             ability Processor 'a where {
-                process: {val: 'a} -> String <...>
+                process: {val: 'a} -> Str <...>
             }
         """.trimIndent()
 
@@ -178,12 +178,12 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with effect and polymorphic tail should fail`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation, ...>
+                set: {c: 'c, i: Int} -> Bool <Mut, ...>
             }
         """.trimIndent()
 
@@ -204,7 +204,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with performed marker should fail`() {
         val source = """
             ability Runner 'a where {
-                run: {val: 'a} -> String <*>
+                run: {val: 'a} -> Str <*>
             }
         """.trimIndent()
 
@@ -222,12 +222,12 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with effect and performed marker should fail`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mutation, *>
+                set: {c: 'c, i: Int} -> Bool <Mut, *>
             }
         """.trimIndent()
 
@@ -266,13 +266,13 @@ class AbilityOperationEffectsTest {
     fun `test multiple operations some with invalid effects should fail`() {
         val source = """
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             ability Mixed 'a where {
-                pure_op: {val: 'a} -> String,
-                effectful_op: {val: 'a} -> String <Log>,
-                bad_op: {val: 'a} -> String <...>
+                pure_op: {val: 'a} -> Str,
+                effectful_op: {val: 'a} -> Str <Log>,
+                bad_op: {val: 'a} -> Str <...>
             }
         """.trimIndent()
 
@@ -298,12 +298,12 @@ class AbilityOperationEffectsTest {
         // For now, we just verify the ability with effects can be declared
         // and implemented. Full effect propagation is future work.
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
@@ -325,7 +325,7 @@ class AbilityOperationEffectsTest {
     fun `test calling pure ability operation has no effect`() {
         val source = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             impl Show Int where {
@@ -333,7 +333,7 @@ class AbilityOperationEffectsTest {
             }
 
             # Pure function calling pure ability operation
-            let display: {x: Int} -> String <> = {x} -> Show.show {val = x}
+            let display: {x: Int} -> Str <> = {x} -> Show.show {val = x}
 
             display {x = 42}
         """.trimIndent()
@@ -349,16 +349,16 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test impl must have same effects as ability declaration`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mutation>
+                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
             }
 
             impl Mutable [Int] where {
-                # Implementation should also have <Mutation> effect
+                # Implementation should also have <Mut> effect
                 set = {c, i, v} -> True
             }
 
@@ -376,12 +376,12 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability with associated types and effects`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             ability Iterator 'iter having 'item where {
-                next: {iter: 'iter} -> Option 'item <Mutation>,
+                next: {iter: 'iter} -> Option 'item <Mut>,
                 has_next: {iter: 'iter} -> Bool
             }
 
@@ -408,15 +408,15 @@ class AbilityOperationEffectsTest {
     fun `test ability operation returning function with effects`() {
         val source = """
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
             ability Factory 'a where {
                 # Returns a function that has effects
-                create_logger: {prefix: String} -> ({msg: String} -> {} <Log>)
+                create_logger: {prefix: Str} -> ({msg: Str} -> {} <Log>)
             }
 
-            impl Factory String where {
+            impl Factory Str where {
                 create_logger = {prefix} -> {msg} -> {}
             }
 
@@ -459,22 +459,22 @@ class AbilityOperationEffectsTest {
     fun `test multiple abilities with different effects on same type`() {
         val source = """
             effect Read where {
-                read: {} -> String
+                read: {} -> Str
             }
 
             effect Write where {
-                write: {data: String} -> {}
+                write: {data: Str} -> {}
             }
 
             ability Readable 'a where {
-                read_all: {source: 'a} -> String <Read>
+                read_all: {source: 'a} -> Str <Read>
             }
 
             ability Writable 'a where {
-                write_all: {dest: 'a, data: String} -> {} <Write>
+                write_all: {dest: 'a, data: Str} -> {} <Write>
             }
 
-            type File = { path: String }
+            type File = { path: Str }
 
             impl Readable File where {
                 read_all = {source} -> "content"

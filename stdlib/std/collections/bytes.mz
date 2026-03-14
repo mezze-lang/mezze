@@ -108,7 +108,7 @@ pub let fold = { b, init, f } ->
 
 # === Conversions ===
 
-# Convert to a UTF-8 string, returns Result String String
+# Convert to a UTF-8 string, returns Result Str String
 pub let to_str = { b } ->
     __native_bytes_to_str { b = b }
 

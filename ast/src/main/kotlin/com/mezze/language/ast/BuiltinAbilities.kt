@@ -68,8 +68,8 @@ object BuiltinAbilities {
         // Primitive types
         "Int" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG),
         "Float" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_NEG),
-        "String" to setOf(EQ, ORD, INSPECT),
-        "Boolean" to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT),
+        "Str" to setOf(EQ, ORD, INSPECT),
+        "Bool" to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT),
         "Nat" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
         "Frac" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_NEG),
 
@@ -104,8 +104,8 @@ object BuiltinAbilities {
         return when (type) {
             is MezzeType.IntType -> hasAutomaticImplementation("Int", abilityName)
             is MezzeType.FloatType -> hasAutomaticImplementation("Float", abilityName)
-            is MezzeType.StringType -> hasAutomaticImplementation("String", abilityName)
-            is MezzeType.BoolType -> hasAutomaticImplementation("Boolean", abilityName)
+            is MezzeType.StringType -> hasAutomaticImplementation("Str", abilityName)
+            is MezzeType.BoolType -> hasAutomaticImplementation("Bool", abilityName)
             is MezzeType.NatType -> hasAutomaticImplementation("Nat", abilityName)
             is MezzeType.FracType -> hasAutomaticImplementation("Frac", abilityName)
             is MezzeType.OrderingType -> hasAutomaticImplementation("Ordering", abilityName)
@@ -179,7 +179,7 @@ object BuiltinTypes {
      * Built-in type constructor names
      */
     val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET)
-    val primitiveTypeNames = setOf("Int", "Float", "String", "Boolean", "Nat", "Frac", "Ordering")
+    val primitiveTypeNames = setOf("Int", "Float", "Str", "Bool", "Nat", "Frac", "Ordering")
     val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
 
     // ========================================================================

@@ -241,13 +241,13 @@ class ImportedPerformerTest {
     fun `custom effect with multiple operations should work`() {
         val source = """
             effect Storage where {
-                get: { key: String } -> String <Storage>,
-                set: { key: String, value: String } -> {} <Storage>
+                get: { key: Str } -> Str <Storage>,
+                set: { key: Str, value: Str } -> {} <Storage>
             }
 
             impl Storage for MemoryStorage where {
-                get: { key: String } -> String = { key } -> "value",
-                set: { key: String, value: String } -> {} = { key, value } -> {}
+                get: { key: Str } -> Str = { key } -> "value",
+                set: { key: Str, value: Str } -> {} = { key, value } -> {}
             }
 
             let useStorage = { k, v } -> do
@@ -280,7 +280,7 @@ class ImportedPerformerTest {
     fun `multiple custom effects with multiple handlers should work`() {
         val source = """
             effect Logger where {
-                log: { msg: String } -> {} <Logger>
+                log: { msg: Str } -> {} <Logger>
             }
 
             effect Counter where {
@@ -288,7 +288,7 @@ class ImportedPerformerTest {
             }
 
             impl Logger for ConsoleLogger where {
-                log: { msg: String } -> {} = { msg } -> {}
+                log: { msg: Str } -> {} = { msg } -> {}
             }
 
             impl Counter for SimpleCounter where {
@@ -328,19 +328,19 @@ class ImportedPerformerTest {
         // FileLogger handles Log but adds FileSystem effect
         val source = """
             effect Log where {
-                info: { msg: String } -> {} <Log>
+                info: { msg: Str } -> {} <Log>
             }
 
             effect FileSystem where {
-                write: { path: String, content: String } -> {} <FileSystem>
+                write: { path: Str, content: Str } -> {} <FileSystem>
             }
 
             impl FileSystem for DiskFS where {
-                write: { path: String, content: String } -> {} = { path, content } -> {}
+                write: { path: Str, content: Str } -> {} = { path, content } -> {}
             }
 
             impl Log for FileLogger where {
-                info: { msg: String } -> {} <FileSystem> = { msg } ->
+                info: { msg: Str } -> {} <FileSystem> = { msg } ->
                     FileSystem.write { path = "/log.txt", content = msg }
             }
 
@@ -374,11 +374,11 @@ class ImportedPerformerTest {
     fun `custom ability and impl in same file should work`() {
         val source = """
             ability Show 'a where {
-                show: { val: 'a } -> String
+                show: { val: 'a } -> Str
             }
 
             impl Show Int where {
-                show: { val: Int } -> String = { val } -> "an integer"
+                show: { val: Int } -> Str = { val } -> "an integer"
             }
 
             let result = Show.show { val = 42 }
@@ -399,19 +399,19 @@ class ImportedPerformerTest {
     fun `ability with multiple impls for different types should work`() {
         val source = """
             ability Show 'a where {
-                show: { val: 'a } -> String
+                show: { val: 'a } -> Str
             }
 
             impl Show Int where {
-                show: { val: Int } -> String = { val } -> "an integer"
+                show: { val: Int } -> Str = { val } -> "an integer"
             }
 
-            impl Show String where {
-                show: { val: String } -> String = { val } -> val
+            impl Show Str where {
+                show: { val: Str } -> Str = { val } -> val
             }
 
             impl Show Bool where {
-                show: { val: Bool } -> String = { val } ->
+                show: { val: Bool } -> Str = { val } ->
                     match val is
                         True -> "true"
                         False -> "false"
@@ -446,13 +446,13 @@ class ImportedPerformerTest {
     fun `ability with multiple methods should work`() {
         val source = """
             ability Serializable 'a where {
-                serialize: { val: 'a } -> String,
-                deserialize: { str: String } -> 'a
+                serialize: { val: 'a } -> Str,
+                deserialize: { str: Str } -> 'a
             }
 
             impl Serializable Int where {
-                serialize: { val: Int } -> String = { val } -> "int",
-                deserialize: { str: String } -> Int = { str } -> 0
+                serialize: { val: Int } -> Str = { val } -> "int",
+                deserialize: { str: Str } -> Int = { str } -> 0
             }
 
             let serialized = Serializable.serialize { val = 42 }
@@ -501,11 +501,11 @@ class ImportedPerformerTest {
         // User wrote "show" instead of "Show.show"
         val source = """
             ability Show 'a where {
-                show: { val: 'a } -> String
+                show: { val: 'a } -> Str
             }
 
             impl Show Int where {
-                show: { val: Int } -> String = { val } -> "int"
+                show: { val: Int } -> Str = { val } -> "int"
             }
 
             let result = show { val = 42 }

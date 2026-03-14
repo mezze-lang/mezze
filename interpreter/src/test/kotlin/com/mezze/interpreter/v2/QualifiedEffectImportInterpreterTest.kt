@@ -92,7 +92,7 @@ class QualifiedEffectImportInterpreterTest {
     fun `multiple local effects with different handlers work`() {
         val source = """
             effect Logger where {
-                log_msg: {msg: String} -> {} <Logger>
+                log_msg: {msg: Str} -> {} <Logger>
             }
 
             effect Counter where {
@@ -180,7 +180,7 @@ class QualifiedEffectImportInterpreterTest {
     fun `local effect returning value works`() {
         val source = """
             effect ValueGetter where {
-                get_value: {} -> String <ValueGetter>
+                get_value: {} -> Str <ValueGetter>
             }
 
             impl ValueGetter for StringHolder {} where {

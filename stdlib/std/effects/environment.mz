@@ -2,28 +2,28 @@
 
 effect Environment where {
     # Get environment variable
-    get_env: { name: String } -> Option String <Environment>,
+    get_env: { name: Str } -> Option Str <Environment>,
 
     # Set environment variable (for current process)
-    set_env: { name: String, value: String } -> {} <Environment>,
+    set_env: { name: Str, value: Str } -> {} <Environment>,
 
     # Get all environment variables
-    get_all_env: {} -> [{ key: String, value: String }] <Environment>,
+    get_all_env: {} -> [{ key: Str, value: Str }] <Environment>,
 
     # Get current working directory
-    current_dir: {} -> String <Environment>,
+    current_dir: {} -> Str <Environment>,
 
     # Change current working directory
-    change_dir: { path: String } -> {} <Environment>,
+    change_dir: { path: Str } -> {} <Environment>,
 
     # Get system information
-    os_name: {} -> String <Environment>,
-    os_version: {} -> String <Environment>,
-    arch: {} -> String <Environment>,
+    os_name: {} -> Str <Environment>,
+    os_version: {} -> Str <Environment>,
+    arch: {} -> Str <Environment>,
 
     # Get process information
     process_id: {} -> Int <Environment>,
-    process_args: {} -> [String] <Environment>,
+    process_args: {} -> [Str] <Environment>,
 
     # Exit the process
     exit: { code: Int } -> {} <Environment>
@@ -46,9 +46,9 @@ impl Environment for SystemEnvironment where {
 
 # Mock environment for testing
 impl Environment for MockEnvironment {
-    env_vars: [{ key: String, value: String }],
-    current_directory: String,
-    mock_os: String
+    env_vars: [{ key: Str, value: Str }],
+    current_directory: Str,
+    mock_os: Str
 } where {
     get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
     set_env = { name, value } -> {},  # No-op in mock
@@ -64,9 +64,9 @@ impl Environment for MockEnvironment {
 }
 
 # Convenience functions
-pub let get_env: { name: String } -> Option String <Environment> = { name } -> Environment.get_env { name = name }
-pub let current_dir: {} -> String <Environment> = {} -> Environment.current_dir {}
-pub let os_info: {} -> { name: String, version: String, arch: String } <Environment> = {} -> do
+pub let get_env: { name: Str } -> Option Str <Environment> = { name } -> Environment.get_env { name = name }
+pub let current_dir: {} -> Str <Environment> = {} -> Environment.current_dir {}
+pub let os_info: {} -> { name: Str, version: Str, arch: Str } <Environment> = {} -> do
     let name = Environment.os_name {}
     let version = Environment.os_version {}
     let architecture = Environment.arch {}

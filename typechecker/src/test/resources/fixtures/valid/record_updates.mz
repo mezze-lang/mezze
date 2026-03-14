@@ -3,15 +3,15 @@
 # Basic record spread with field overrides
 let person = {name = "Alice", age = 30, city = "London"}
 let updatedPerson = {...person, age = 31, city = "Paris"}
-# expected: updatedPerson : { name: String, age: Int, city: String }
+# expected: updatedPerson : { name: Str, age: Int, city: Str }
 
 # Single field override
 let singleUpdate = {...person, name = "Bob"}
-# expected: singleUpdate : { name: String, age: Int, city: String }
+# expected: singleUpdate : { name: Str, age: Int, city: Str }
 
 # Spread without any overrides (copy)
 let copyPerson = {...person}
-# expected: copyPerson : { name: String, age: Int, city: String }
+# expected: copyPerson : { name: Str, age: Int, city: Str }
 
 # Record spread with expressions
 let calc = {a = 10, b = 20}

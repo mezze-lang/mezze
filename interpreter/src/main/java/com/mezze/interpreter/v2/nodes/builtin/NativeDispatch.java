@@ -2969,9 +2969,31 @@ public final class NativeDispatch extends MezzeNode {
     // Safe local mutation - all mutations happen in-place on mutable wrappers
 
     private static void registerMutationHandlers() {
-        // Debug mutation marker - prints debug info when DebugMut is used
-        HANDLERS.put("__native_debug_mutation_marker", (r, c) -> {
+        // Loop implementation for LocalMut - efficient while loop
+        HANDLERS.put("__native_mutation_loop", (r, callNode) -> {
+            MezzeFunction cond = (MezzeFunction) getField(r, "cond");
+            MezzeFunction body = (MezzeFunction) getField(r, "body");
+            whileLoop(cond, body, callNode);
+            return MezzeRecord.empty();
+        });
+
+        // DebugMut implementation of mutate - executes act with debug logging
+        HANDLERS.put("__native_debug_mutation_mutate", (r, callNode) -> {
+            MezzeFunction act = (MezzeFunction) getField(r, "act");
             debugMutationMarker();
+            Object[] closureValues = act.getClosureValues();
+            int closureLen = closureValues.length;
+            Object[] callArgs = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+            callArgs[closureLen] = MezzeRecord.empty();
+            return callNode.call(act.getCallTarget(), callArgs);
+        });
+
+        // DebugMut implementation of loop - while loop with debug logging
+        HANDLERS.put("__native_debug_mutation_loop", (r, callNode) -> {
+            MezzeFunction cond = (MezzeFunction) getField(r, "cond");
+            MezzeFunction body = (MezzeFunction) getField(r, "body");
+            debugWhileLoop(cond, body, callNode);
             return MezzeRecord.empty();
         });
 
@@ -3095,6 +3117,274 @@ public final class NativeDispatch extends MezzeNode {
                 throw new RuntimeException("__native_bool_to_immut expects MutableBool");
             }
             return mutBool.get();
+        });
+
+        HANDLERS.put("__native_mut_bool_read", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_mut_bool_read expects MutableBool");
+            }
+            return mutBool.get();
+        });
+
+        HANDLERS.put("__native_mut_bool_write", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_mut_bool_write expects MutableBool");
+            }
+            boolean v = getBool(r, "v");
+            mutBool.set(v);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bool_toggle", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_mut_bool_toggle expects MutableBool");
+            }
+            mutBool.toggle();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bool_set_true", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_mut_bool_set_true expects MutableBool");
+            }
+            mutBool.set(true);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_bool_set_false", (r, c) -> {
+            Object bObj = getField(r, "b");
+            if (!(bObj instanceof MutableBool mutBool)) {
+                throw new RuntimeException("__native_mut_bool_set_false expects MutableBool");
+            }
+            mutBool.set(false);
+            return MezzeRecord.empty();
+        });
+
+        // MutString operations
+        HANDLERS.put("__native_string_to_mut", (r, c) -> {
+            String s = getString(r, "s");
+            return new MutableString(s);
+        });
+
+        HANDLERS.put("__native_string_with_capacity", (r, c) -> {
+            long capacity = getLong(r, "capacity");
+            return new MutableString((int) capacity);
+        });
+
+        HANDLERS.put("__native_string_to_immut", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_string_to_immut expects MutableString");
+            }
+            return mutStr.get();
+        });
+
+        HANDLERS.put("__native_mut_string_read", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_read expects MutableString");
+            }
+            return mutStr.get();
+        });
+
+        HANDLERS.put("__native_mut_string_write", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_write expects MutableString");
+            }
+            String v = getString(r, "v");
+            mutStr.set(v);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_len", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_len expects MutableString");
+            }
+            return (long) mutStr.length();
+        });
+
+        HANDLERS.put("__native_mut_string_is_empty", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_is_empty expects MutableString");
+            }
+            return mutStr.isEmpty();
+        });
+
+        HANDLERS.put("__native_mut_string_append", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_append expects MutableString");
+            }
+            String suffix = getString(r, "suffix");
+            mutStr.append(suffix);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_prepend", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_prepend expects MutableString");
+            }
+            String prefix = getString(r, "prefix");
+            mutStr.prepend(prefix);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_clear", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_clear expects MutableString");
+            }
+            mutStr.clear();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_reverse", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_reverse expects MutableString");
+            }
+            mutStr.reverse();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_insert", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_insert expects MutableString");
+            }
+            int index = (int) getLong(r, "i");
+            String text = getString(r, "text");
+            mutStr.insert(index, text);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_delete", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_delete expects MutableString");
+            }
+            int start = (int) getLong(r, "start");
+            int end = (int) getLong(r, "end");
+            mutStr.delete(start, end);
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_string_char_at", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_char_at expects MutableString");
+            }
+            int index = (int) getLong(r, "i");
+            char ch = mutStr.charAt(index);
+            if (ch == '\0') {
+                return MezzeVariant.none();
+            }
+            // Char type is represented as a single-character String
+            return MezzeVariant.some(String.valueOf(ch));
+        });
+
+        HANDLERS.put("__native_mut_string_set_char_at", (r, c) -> {
+            Object sObj = getField(r, "s");
+            if (!(sObj instanceof MutableString mutStr)) {
+                throw new RuntimeException("__native_mut_string_set_char_at expects MutableString");
+            }
+            int index = (int) getLong(r, "i");
+            // Char type is represented as a single-character String
+            String charStr = getString(r, "c");
+            if (charStr.isEmpty()) {
+                throw new RuntimeException("__native_mut_string_set_char_at: empty string for char");
+            }
+            mutStr.setCharAt(index, charStr.charAt(0));
+            return MezzeRecord.empty();
+        });
+
+        // MutChar operations
+        // Note: Mezze Char type is represented as a single-character String
+        HANDLERS.put("__native_char_to_mut", (r, c) -> {
+            String charStr = getString(r, "c");
+            if (charStr.isEmpty()) {
+                throw new RuntimeException("__native_char_to_mut: empty string");
+            }
+            return new MutableChar(charStr.charAt(0));
+        });
+
+        HANDLERS.put("__native_char_to_immut", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_char_to_immut expects MutableChar");
+            }
+            return String.valueOf(mutChar.get());
+        });
+
+        HANDLERS.put("__native_mut_char_read", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_read expects MutableChar");
+            }
+            return String.valueOf(mutChar.get());
+        });
+
+        HANDLERS.put("__native_mut_char_write", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_write expects MutableChar");
+            }
+            String vStr = getString(r, "v");
+            if (vStr.isEmpty()) {
+                throw new RuntimeException("__native_mut_char_write: empty string");
+            }
+            mutChar.set(vStr.charAt(0));
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_char_to_upper", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_to_upper expects MutableChar");
+            }
+            mutChar.toUpper();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_char_to_lower", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_to_lower expects MutableChar");
+            }
+            mutChar.toLower();
+            return MezzeRecord.empty();
+        });
+
+        HANDLERS.put("__native_mut_char_is_digit", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_is_digit expects MutableChar");
+            }
+            return mutChar.isDigit();
+        });
+
+        HANDLERS.put("__native_mut_char_is_letter", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_is_letter expects MutableChar");
+            }
+            return mutChar.isLetter();
+        });
+
+        HANDLERS.put("__native_mut_char_is_whitespace", (r, c) -> {
+            Object cObj = getField(r, "c");
+            if (!(cObj instanceof MutableChar mutChar)) {
+                throw new RuntimeException("__native_mut_char_is_whitespace expects MutableChar");
+            }
+            return mutChar.isWhitespace();
         });
 
         // MutSeq operations
@@ -3286,31 +3576,6 @@ public final class NativeDispatch extends MezzeNode {
                 throw new RuntimeException("__native_mut_float_div expects MutableFloat");
             }
             mutFloat.divide(divisor);
-            return MezzeRecord.empty();
-        });
-
-        // Looping constructs
-        HANDLERS.put("__native_for_range", (r, c) -> {
-            long start = getLong(r, "start");
-            long end = getLong(r, "end");
-            Object bodyObj = getField(r, "body");
-            if (!(bodyObj instanceof MezzeFunction body)) {
-                throw new RuntimeException("__native_for_range expects body function");
-            }
-            forRange(start, end, body, c);
-            return MezzeRecord.empty();
-        });
-
-        HANDLERS.put("__native_while", (r, c) -> {
-            Object condObj = getField(r, "cond");
-            Object bodyObj = getField(r, "body");
-            if (!(condObj instanceof MezzeFunction cond)) {
-                throw new RuntimeException("__native_while expects cond function");
-            }
-            if (!(bodyObj instanceof MezzeFunction body)) {
-                throw new RuntimeException("__native_while expects body function");
-            }
-            whileLoop(cond, body, c);
             return MezzeRecord.empty();
         });
 
@@ -3842,21 +4107,12 @@ public final class NativeDispatch extends MezzeNode {
                 break;
             }
         }
-        System.out.println("[DebugMut] mutation at: " + location);
+        System.out.println("[DebugLocalMut] mutation at: " + location);
     }
 
     @TruffleBoundary
-    private static void forRange(long start, long end, MezzeFunction body, IndirectCallNode callNode) {
-        Object[] closureValues = body.getClosureValues();
-        int closureLen = closureValues.length;
-        Object[] callArgs = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
-
-        for (long i = start; i < end; i++) {
-            MezzeRecord argRecord = MezzeRecord.fromFields(new String[]{"i"}, new Object[]{i});
-            callArgs[closureLen] = argRecord;
-            callNode.call(body.getCallTarget(), callArgs);
-        }
+    private static void debugMutationLoop(int iteration) {
+        System.out.println("[DebugLocalMut] loop iteration: " + iteration);
     }
 
     @TruffleBoundary
@@ -3879,6 +4135,32 @@ public final class NativeDispatch extends MezzeNode {
                 break;
             }
             callNode.call(body.getCallTarget(), bodyCallArgs);
+        }
+    }
+
+    @TruffleBoundary
+    private static void debugWhileLoop(MezzeFunction cond, MezzeFunction body, IndirectCallNode callNode) {
+        Object[] condClosureValues = cond.getClosureValues();
+        int condClosureLen = condClosureValues.length;
+        Object[] condCallArgs = new Object[condClosureLen + 1];
+        System.arraycopy(condClosureValues, 0, condCallArgs, 0, condClosureLen);
+        condCallArgs[condClosureLen] = MezzeRecord.empty();
+
+        Object[] bodyClosureValues = body.getClosureValues();
+        int bodyClosureLen = bodyClosureValues.length;
+        Object[] bodyCallArgs = new Object[bodyClosureLen + 1];
+        System.arraycopy(bodyClosureValues, 0, bodyCallArgs, 0, bodyClosureLen);
+        bodyCallArgs[bodyClosureLen] = MezzeRecord.empty();
+
+        int iteration = 0;
+        while (true) {
+            debugMutationLoop(iteration);
+            Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
+            if (!(condResult instanceof Boolean b) || !b) {
+                break;
+            }
+            callNode.call(body.getCallTarget(), bodyCallArgs);
+            iteration++;
         }
     }
 

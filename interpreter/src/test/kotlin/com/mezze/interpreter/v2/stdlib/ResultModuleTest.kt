@@ -24,7 +24,7 @@ class ResultModuleTest {
     fun `test result map - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             let mapped = result::map { result = res, f = { val } -> val * 2 }
             match mapped is
                 Ok { val } -> val
@@ -38,7 +38,7 @@ class ResultModuleTest {
     fun `test result map - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             let mapped = result::map { result = res, f = { val } -> val * 2 }
             match mapped is
                 Ok { val } -> "ok"
@@ -54,7 +54,7 @@ class ResultModuleTest {
     fun `test result map_err - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             let mapped = result::map_err { result = res, f = { error } -> "wrapped: " }
             match mapped is
                 Ok { val } -> val
@@ -68,7 +68,7 @@ class ResultModuleTest {
     fun `test result map_err - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             let mapped = result::map_err { result = res, f = { error } -> "wrapped" }
             match mapped is
                 Ok { val } -> "ok"
@@ -84,7 +84,7 @@ class ResultModuleTest {
     fun `test result get_or_else - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 42 }
+            let res: Result Int Str = Ok { val = 42 }
             result::get_or_else { result = res, def = 0 }
         """.trimIndent()
 
@@ -95,7 +95,7 @@ class ResultModuleTest {
     fun `test result get_or_else - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::get_or_else { result = res, def = 99 }
         """.trimIndent()
 
@@ -108,7 +108,7 @@ class ResultModuleTest {
     fun `test result is_ok - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 1 }
+            let res: Result Int Str = Ok { val = 1 }
             result::is_ok { result = res }
         """.trimIndent()
 
@@ -119,7 +119,7 @@ class ResultModuleTest {
     fun `test result is_ok - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::is_ok { result = res }
         """.trimIndent()
 
@@ -130,7 +130,7 @@ class ResultModuleTest {
     fun `test result is_err - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 1 }
+            let res: Result Int Str = Ok { val = 1 }
             result::is_err { result = res }
         """.trimIndent()
 
@@ -141,7 +141,7 @@ class ResultModuleTest {
     fun `test result is_err - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::is_err { result = res }
         """.trimIndent()
 
@@ -154,7 +154,7 @@ class ResultModuleTest {
     fun `test result flat_map - Ok to Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             let chained = result::flat_map { result = res, f = { val } -> Ok { val = val * 2 } }
             match chained is
                 Ok { val } -> val
@@ -168,8 +168,8 @@ class ResultModuleTest {
     fun `test result flat_map - Ok to Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
-            let chained: Result Int String = result::flat_map { result = res, f = { val } -> Err { error = "failed" } }
+            let res: Result Int Str = Ok { val = 5 }
+            let chained: Result Int Str = result::flat_map { result = res, f = { val } -> Err { error = "failed" } }
             match chained is
                 Ok { val } -> "ok"
                 Err { error } -> error
@@ -182,7 +182,7 @@ class ResultModuleTest {
     fun `test result flat_map - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "original" }
+            let res: Result Int Str = Err { error = "original" }
             let chained = result::flat_map { result = res, f = { val } -> Ok { val = val * 2 } }
             match chained is
                 Ok { val } -> "ok"
@@ -198,7 +198,7 @@ class ResultModuleTest {
     fun `test result or_else - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             let recovered = result::or_else { result = res, f = { error } -> Ok { val = 0 } }
             match recovered is
                 Ok { val } -> val
@@ -212,7 +212,7 @@ class ResultModuleTest {
     fun `test result or_else - Err recovered`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             let recovered = result::or_else { result = res, f = { error } -> Ok { val = 99 } }
             match recovered is
                 Ok { val } -> val
@@ -228,7 +228,7 @@ class ResultModuleTest {
     fun `test result to_option - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 42 }
+            let res: Result Int Str = Ok { val = 42 }
             let opt = result::to_option { result = res }
             match opt is
                 Some { val } -> val
@@ -242,7 +242,7 @@ class ResultModuleTest {
     fun `test result to_option - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             let opt = result::to_option { result = res }
             match opt is
                 Some { val } -> val
@@ -288,8 +288,8 @@ class ResultModuleTest {
     fun `test result map2 - both Ok`() {
         val source = """
             use std::result
-            let a: Result Int String = Ok { val = 3 }
-            let b: Result Int String = Ok { val = 4 }
+            let a: Result Int Str = Ok { val = 3 }
+            let b: Result Int Str = Ok { val = 4 }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
             match combined is
                 Ok { val } -> val
@@ -303,8 +303,8 @@ class ResultModuleTest {
     fun `test result map2 - first Err`() {
         val source = """
             use std::result
-            let a: Result Int String = Err { error = "first failed" }
-            let b: Result Int String = Ok { val = 4 }
+            let a: Result Int Str = Err { error = "first failed" }
+            let b: Result Int Str = Ok { val = 4 }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
             match combined is
                 Ok { val } -> "ok"
@@ -318,8 +318,8 @@ class ResultModuleTest {
     fun `test result map2 - second Err`() {
         val source = """
             use std::result
-            let a: Result Int String = Ok { val = 3 }
-            let b: Result Int String = Err { error = "second failed" }
+            let a: Result Int Str = Ok { val = 3 }
+            let b: Result Int Str = Err { error = "second failed" }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
             match combined is
                 Ok { val } -> "ok"
@@ -335,7 +335,7 @@ class ResultModuleTest {
     fun `test result if_ok - Ok executes action`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             result::if_ok { result = res, action = { val } -> {} }
             1
         """.trimIndent()
@@ -347,7 +347,7 @@ class ResultModuleTest {
     fun `test result if_ok - Err does not execute`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::if_ok { result = res, action = { val } -> {} }
             1
         """.trimIndent()
@@ -361,7 +361,7 @@ class ResultModuleTest {
     fun `test result if_err - Err executes action`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::if_err { result = res, action = { error } -> {} }
             1
         """.trimIndent()
@@ -373,7 +373,7 @@ class ResultModuleTest {
     fun `test result if_err - Ok does not execute`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             result::if_err { result = res, action = { error } -> {} }
             1
         """.trimIndent()
@@ -387,7 +387,7 @@ class ResultModuleTest {
     fun `test result fold - Ok`() {
         val source = """
             use std::result
-            let res: Result Int String = Ok { val = 5 }
+            let res: Result Int Str = Ok { val = 5 }
             result::fold {
                 result = res,
                 on_err = { error } -> "error",
@@ -402,7 +402,7 @@ class ResultModuleTest {
     fun `test result fold - Err`() {
         val source = """
             use std::result
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             result::fold {
                 result = res,
                 on_err = { error } -> "error",
@@ -419,8 +419,8 @@ class ResultModuleTest {
     fun `test result flatten - Ok Ok`() {
         val source = """
             use std::result
-            let inner: Result Int String = Ok { val = 42 }
-            let nested: Result (Result Int String) String = Ok { val = inner }
+            let inner: Result Int Str = Ok { val = 42 }
+            let nested: Result (Result Int Str) Str = Ok { val = inner }
             let result = result::flatten { result = nested }
             match result is
                 Ok { val } -> val
@@ -434,8 +434,8 @@ class ResultModuleTest {
     fun `test result flatten - Ok Err`() {
         val source = """
             use std::result
-            let inner: Result Int String = Err { error = "inner error" }
-            let nested: Result (Result Int String) String = Ok { val = inner }
+            let inner: Result Int Str = Err { error = "inner error" }
+            let nested: Result (Result Int Str) Str = Ok { val = inner }
             let result = result::flatten { result = nested }
             match result is
                 Ok { val } -> "ok"
@@ -449,7 +449,7 @@ class ResultModuleTest {
     fun `test result flatten - Err`() {
         val source = """
             use std::result
-            let nested: Result (Result Int String) String = Err { error = "outer error" }
+            let nested: Result (Result Int Str) Str = Err { error = "outer error" }
             let result = result::flatten { result = nested }
             match result is
                 Ok { val } -> "ok"
@@ -466,7 +466,7 @@ class ResultModuleTest {
         val source = """
             use std::result
             use std::collections::seq
-            let res: Result Int String = Ok { val = 42 }
+            let res: Result Int Str = Ok { val = 42 }
             let xs = result::to_list { result = res }
             seq::length { xs = xs }
         """.trimIndent()
@@ -479,7 +479,7 @@ class ResultModuleTest {
         val source = """
             use std::result
             use std::collections::seq
-            let res: Result Int String = Err { error = "oops" }
+            let res: Result Int Str = Err { error = "oops" }
             let xs = result::to_list { result = res }
             seq::length { xs = xs }
         """.trimIndent()
@@ -493,8 +493,8 @@ class ResultModuleTest {
     fun `test result zip - both Ok`() {
         val source = """
             use std::result
-            let a: Result Int String = Ok { val = 1 }
-            let b: Result String String = Ok { val = "x" }
+            let a: Result Int Str = Ok { val = 1 }
+            let b: Result Str Str = Ok { val = "x" }
             let result = result::zip { a = a, b = b }
             match result is
                 Ok { val } -> val.fst
@@ -508,8 +508,8 @@ class ResultModuleTest {
     fun `test result zip - first Err`() {
         val source = """
             use std::result
-            let a: Result Int String = Err { error = "first failed" }
-            let b: Result String String = Ok { val = "x" }
+            let a: Result Int Str = Err { error = "first failed" }
+            let b: Result Str Str = Ok { val = "x" }
             let result = result::zip { a = a, b = b }
             match result is
                 Ok { val } -> "ok"
@@ -523,8 +523,8 @@ class ResultModuleTest {
     fun `test result zip - second Err`() {
         val source = """
             use std::result
-            let a: Result Int String = Ok { val = 1 }
-            let b: Result String String = Err { error = "second failed" }
+            let a: Result Int Str = Ok { val = 1 }
+            let b: Result Str Str = Err { error = "second failed" }
             let result = result::zip { a = a, b = b }
             match result is
                 Ok { val } -> "ok"

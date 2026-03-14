@@ -312,7 +312,7 @@ class InvalidConstructorInMatchTest {
                    exception.message?.contains("Type mismatch") == true ||
                    exception.message?.contains("not compatible") == true ||
                    exception.message?.contains("Int") == true ||
-                   exception.message?.contains("String") == true)
+                   exception.message?.contains("Str") == true)
     }
 
     @Test

@@ -229,18 +229,10 @@ object ContentHashComputer {
      * Uses LRU caching for complex types to avoid repeated computation.
      */
     fun mezzeTypeToString(type: MezzeType): String {
-        // Fast path for primitive types (no caching needed)
+        // Fast path for primitive types using centralized registry (no caching needed)
+        PrimitiveTypes.toName(type)?.let { return it }
+
         return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.CharType -> "Char"
-            is MezzeType.OrderingType -> "Ordering"
-            is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
             is MezzeType.VarType -> type.variable.name  // Keep 'a format for type variables
             is MezzeType.FunctionType -> "Function"
             // Complex types - use cache

@@ -220,7 +220,7 @@ class SeqVsListTypeDistinctionTest {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
-            let process : { val: [Int] } -> String = { val } ->
+            let process : { val: [Int] } -> Str = { val } ->
                 match val is
                     [] -> "empty array"
                     [x] -> "single element array"
@@ -244,7 +244,7 @@ class SeqVsListTypeDistinctionTest {
         val source = """
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
-            let process : { val: (List Int) } -> String = { val } ->
+            let process : { val: (List Int) } -> Str = { val } ->
                 match val is
                     Nil -> "empty list"
                     Cons { head = h, tail = Nil } -> "single element list"

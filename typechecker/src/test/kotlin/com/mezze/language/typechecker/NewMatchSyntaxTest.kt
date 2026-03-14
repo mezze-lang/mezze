@@ -221,7 +221,7 @@ class NewMatchSyntaxTest {
     @Test
     fun `test pattern variables correctly typed in guards`() {
         val code = """
-            type Person = | Adult { age: Int }, Child { name: String } |
+            type Person = | Adult { age: Int }, Child { name: Str } |
             
             let canVote = {person} -> match person is
               Adult { age } if age >= 18 -> True
@@ -303,7 +303,7 @@ class NewMatchSyntaxTest {
     @Test
     fun `test complex nested patterns with guards`() {
         val code = """
-            type User = | User { name: String, age: Int } |
+            type User = | User { name: Str, age: Int } |
             type Status = | Active { user: User }, Inactive |
             
             let canAccess = {status} -> match status is

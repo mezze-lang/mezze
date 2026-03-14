@@ -211,7 +211,7 @@ class StringInterpolationIntegrationTest {
     @Test
     void lambdaReturningStringInInterpolation() {
         Object result = MezzeTestHelper.run("""
-            let greet = {name: String} -> "Hi $(name)"
+            let greet = {name: Str} -> "Hi $(name)"
             "Message: $(greet{name = "Alice"})"
             """);
         assertEquals("Message: Hi Alice", result);

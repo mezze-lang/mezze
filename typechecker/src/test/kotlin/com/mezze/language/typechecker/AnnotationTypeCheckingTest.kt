@@ -73,11 +73,11 @@ class AnnotationTypeCheckingTest {
     fun `test simple String annotation matches inferred type`() {
         assertTypeChecks(
             """
-            let s: String = "hello"
+            let s: Str = "hello"
             s
             """.trimIndent(),
             "s",
-            "String"
+            "Str"
         )
     }
 
@@ -121,7 +121,7 @@ class AnnotationTypeCheckingTest {
     fun `test String annotation with Int value fails`() {
         assertTypeCheckFails(
             """
-            let s: String = 42
+            let s: Str = 42
             s
             """.trimIndent()
         )
@@ -165,11 +165,11 @@ class AnnotationTypeCheckingTest {
     fun `test function annotation with String concatenation`() {
         assertTypeChecks(
             """
-            let concat: { a: String, b: String } -> String = {a, b} -> "$(a)$(b)"
+            let concat: { a: Str, b: Str } -> Str = {a, b} -> "$(a)$(b)"
             concat {a = "hello", b = "world"}
             """.trimIndent(),
             "concat",
-            "{ a: String, b: String } -> String"
+            "{ a: Str, b: Str } -> Str"
         )
     }
 
@@ -215,7 +215,7 @@ class AnnotationTypeCheckingTest {
     fun `test function param type mismatch fails`() {
         assertTypeCheckFails(
             """
-            let f: { x: String } -> Int = {x} -> x + 1
+            let f: { x: Str } -> Int = {x} -> x + 1
             f {x = "test"}
             """.trimIndent()
         )
@@ -259,11 +259,11 @@ class AnnotationTypeCheckingTest {
     fun `test list annotation with String elements`() {
         assertTypeChecks(
             """
-            let words: [String] = ["hello", "world"]
+            let words: [Str] = ["hello", "world"]
             words
             """.trimIndent(),
             "words",
-            "[String]"
+            "[Str]"
         )
     }
 
@@ -295,11 +295,11 @@ class AnnotationTypeCheckingTest {
     fun `test record annotation matches structure`() {
         assertTypeChecks(
             """
-            let person: { name: String, age: Int } = { name = "Alice", age = 30 }
+            let person: { name: Str, age: Int } = { name = "Alice", age = 30 }
             person
             """.trimIndent(),
             "person",
-            "{ name: String, age: Int }"
+            "{ name: Str, age: Int }"
         )
     }
 
@@ -319,7 +319,7 @@ class AnnotationTypeCheckingTest {
     fun `test record field type mismatch fails`() {
         assertTypeCheckFails(
             """
-            let person: { name: String, age: Int } = { name = "Alice", age = "thirty" }
+            let person: { name: Str, age: Int } = { name = "Alice", age = "thirty" }
             person
             """.trimIndent()
         )
@@ -329,7 +329,7 @@ class AnnotationTypeCheckingTest {
     fun `test record missing field with annotation fails`() {
         assertTypeCheckFails(
             """
-            let person: { name: String, age: Int } = { name = "Alice" }
+            let person: { name: Str, age: Int } = { name = "Alice" }
             person
             """.trimIndent()
         )
@@ -389,11 +389,11 @@ class AnnotationTypeCheckingTest {
     fun `test function taking record with annotation`() {
         assertTypeChecks(
             """
-            let getName: { person: { name: String, age: Int } } -> String = {person} -> person.name
+            let getName: { person: { name: Str, age: Int } } -> Str = {person} -> person.name
             getName {person = {name = "Alice", age = 30}}
             """.trimIndent(),
             "getName",
-            "{ person: { name: String, age: Int } } -> String"
+            "{ person: { name: Str, age: Int } } -> Str"
         )
     }
 
@@ -427,11 +427,11 @@ class AnnotationTypeCheckingTest {
     fun `test annotation constrains polymorphic function to concrete type`() {
         assertTypeChecks(
             """
-            let first: { a: Int, b: String } -> Int = {a, b} -> a
+            let first: { a: Int, b: Str } -> Int = {a, b} -> a
             first {a = 1, b = "hello"}
             """.trimIndent(),
             "first",
-            "{ a: Int, b: String } -> Int"
+            "{ a: Int, b: Str } -> Int"
         )
     }
 
@@ -465,11 +465,11 @@ class AnnotationTypeCheckingTest {
     fun `test string concat result with String annotation`() {
         assertTypeChecks(
             """
-            let result: String = "$("hello")$("world")"
+            let result: Str = "$("hello")$("world")"
             result
             """.trimIndent(),
             "result",
-            "String"
+            "Str"
         )
     }
 
@@ -562,7 +562,7 @@ class AnnotationTypeCheckingTest {
         val program = parseAndTypeCheck(
             """
             let x: Int = 42
-            let y: String = "hello"
+            let y: Str = "hello"
             let z: Bool = True
             z
             """.trimIndent()
@@ -574,7 +574,7 @@ class AnnotationTypeCheckingTest {
         assertNotNull(yType)
         assertNotNull(zType)
         assertEquals("Int", prettyPrintType(xType))
-        assertEquals("String", prettyPrintType(yType))
+        assertEquals("Str", prettyPrintType(yType))
         assertEquals("Bool", prettyPrintType(zType))
     }
 
@@ -718,12 +718,12 @@ class AnnotationTypeCheckingTest {
     fun `test variant constructor in annotation guides inference`() {
         assertTypeChecks(
             """
-            let makeResult: { n: Int } -> | Good { val: Int }, Bad { msg: String } | =
+            let makeResult: { n: Int } -> | Good { val: Int }, Bad { msg: Str } | =
               {n} -> if n > 0 then Good {val = n} else Bad {msg = "negative"}
             makeResult {n = 5}
             """.trimIndent(),
             "makeResult",
-            "{ n: Int } -> | Good { val: Int }, Bad { msg: String } |"
+            "{ n: Int } -> | Good { val: Int }, Bad { msg: Str } |"
         )
     }
 
@@ -859,12 +859,12 @@ class AnnotationTypeCheckingTest {
     fun `test variant with multiple payloads annotation`() {
         assertTypeChecks(
             """
-            let result: | Left { val: Int }, Right { msg: String, code: Int } | =
+            let result: | Left { val: Int }, Right { msg: Str, code: Int } | =
               Right { msg = "error", code = 404 }
             result
             """.trimIndent(),
             "result",
-            "| Left { val: Int }, Right { msg: String, code: Int } |"
+            "| Left { val: Int }, Right { msg: Str, code: Int } |"
         )
     }
 
@@ -883,7 +883,7 @@ class AnnotationTypeCheckingTest {
     fun `test variant annotation with wrong payload type fails`() {
         assertTypeCheckFails(
             """
-            let result: | Some { val: String }, None | = Some { val = 42 }
+            let result: | Some { val: Str }, None | = Some { val = 42 }
             result
             """.trimIndent()
         )
@@ -932,7 +932,7 @@ class AnnotationTypeCheckingTest {
     fun `test nested function type mismatch in annotation fails`() {
         assertTypeCheckFails(
             """
-            let f: { x: Int } -> { y: Int } -> String = {x} -> {y} -> x + y
+            let f: { x: Int } -> { y: Int } -> Str = {x} -> {y} -> x + y
             f {x = 1}
             """.trimIndent()
         )
@@ -952,7 +952,7 @@ class AnnotationTypeCheckingTest {
     fun `test record with extra field not in annotation fails`() {
         assertTypeCheckFails(
             """
-            let person: { name: String, age: Int } = { name = "Alice", age = 30, city = "NYC" }
+            let person: { name: Str, age: Int } = { name = "Alice", age = 30, city = "NYC" }
             person
             """.trimIndent()
         )
@@ -964,7 +964,7 @@ class AnnotationTypeCheckingTest {
     fun `test function with single ability constraint annotation`() {
         val program = parseAndTypeCheck(
             """
-            let show: { x: 'a } with Inspect 'a -> String = {x} -> Inspect.to_str {val = x}
+            let show: { x: 'a } with Inspect 'a -> Str = {x} -> Inspect.to_str {val = x}
             show {x = 42}
             """.trimIndent()
         )
@@ -976,7 +976,7 @@ class AnnotationTypeCheckingTest {
     fun `test function with multiple ability constraints annotation`() {
         val program = parseAndTypeCheck(
             """
-            let showSum: { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> String =
+            let showSum: { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> Str =
               {x, y} -> Inspect.to_str {val = x + y}
             showSum {x = 1, y = 2}
             """.trimIndent()
@@ -1049,7 +1049,7 @@ class AnnotationTypeCheckingTest {
     fun `test ability annotation with concrete type`() {
         val program = parseAndTypeCheck(
             """
-            let showInt: { x: Int } with Inspect Int -> String = {x} -> Inspect.to_str {val = x}
+            let showInt: { x: Int } with Inspect Int -> Str = {x} -> Inspect.to_str {val = x}
             showInt {x = 42}
             """.trimIndent()
         )
@@ -1088,7 +1088,7 @@ class AnnotationTypeCheckingTest {
             }
 
             effect Log where {
-              log: { msg: String } -> {} <Log>
+              log: { msg: Str } -> {} <Log>
             }
 
             let logState: {} -> Int <State, Log> = {} -> do
@@ -1141,7 +1141,7 @@ class AnnotationTypeCheckingTest {
             }
 
             effect Log where {
-              log: { msg: String } -> {} <Log>
+              log: { msg: Str } -> {} <Log>
             }
 
             let wrong: {} -> Int <State, Log> = {} -> perform get {}
@@ -1204,7 +1204,7 @@ class AnnotationTypeCheckingTest {
     fun `test variant payload closed record requires exact fields`() {
         assertTypeChecks(
             """
-            type Color = | Blue { foo: String } |
+            type Color = | Blue { foo: Str } |
 
             let color = Blue { foo = "test" }
             color

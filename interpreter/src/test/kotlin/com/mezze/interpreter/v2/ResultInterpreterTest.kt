@@ -25,7 +25,7 @@ class ResultInterpreterTest {
     fun `is_ok returns true for Ok`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             result::is_ok { result = res }
         """
         val result = eval(code)
@@ -36,7 +36,7 @@ class ResultInterpreterTest {
     fun `is_ok returns false for Err`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             result::is_ok { result = res }
         """
         val result = eval(code)
@@ -47,7 +47,7 @@ class ResultInterpreterTest {
     fun `is_err returns true for Err`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             result::is_err { result = res }
         """
         val result = eval(code)
@@ -58,7 +58,7 @@ class ResultInterpreterTest {
     fun `is_err returns false for Ok`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             result::is_err { result = res }
         """
         val result = eval(code)
@@ -73,7 +73,7 @@ class ResultInterpreterTest {
     fun `get_or_else returns value for Ok`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             result::get_or_else { result = res, def = 0 }
         """
         val result = eval(code)
@@ -84,7 +84,7 @@ class ResultInterpreterTest {
     fun `get_or_else returns default for Err`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             result::get_or_else { result = res, def = 99 }
         """
         val result = eval(code)
@@ -99,7 +99,7 @@ class ResultInterpreterTest {
     fun `map transforms Ok value`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 21 }
+            let res: (Result Int Str) = Ok { val = 21 }
             let doubled = result::map { result = res, f = { val } -> val * 2 }
             result::get_or_else { result = doubled, def = 0 }
         """
@@ -111,7 +111,7 @@ class ResultInterpreterTest {
     fun `map preserves Err`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             let doubled = result::map { result = res, f = { val } -> val * 2 }
             result::is_err { result = doubled }
         """
@@ -124,7 +124,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::string
-            let res: (Result Int String) = Err { error = "error" }
+            let res: (Result Int Str) = Err { error = "error" }
             let mapped = result::map_err { result = res, f = { error } -> string::to_upper { s = error } }
             match mapped is
                 Ok { val } -> "ok"
@@ -138,7 +138,7 @@ class ResultInterpreterTest {
     fun `flat_map chains results`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 5 }
+            let res: (Result Int Str) = Ok { val = 5 }
             let chained = result::flat_map { result = res, f = { val } ->
                 if val > 0 then Ok { val = val * 2 } else Err { error = "negative" }
             }
@@ -152,7 +152,7 @@ class ResultInterpreterTest {
     fun `or_else recovers from error`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Err { error = "first error" }
+            let res: (Result Int Str) = Err { error = "first error" }
             let recovered = result::or_else { result = res, f = { error } -> Ok { val = 99 } }
             result::get_or_else { result = recovered, def = 0 }
         """
@@ -168,8 +168,8 @@ class ResultInterpreterTest {
     fun `flatten unwraps nested Ok`() {
         val code = """
             use std::result
-            let inner: (Result Int String) = Ok { val = 42 }
-            let outer: (Result (Result Int String) String) = Ok { val = inner }
+            let inner: (Result Int Str) = Ok { val = 42 }
+            let outer: (Result (Result Int Str) Str) = Ok { val = inner }
             let flat = result::flatten { result = outer }
             result::get_or_else { result = flat, def = 0 }
         """
@@ -181,8 +181,8 @@ class ResultInterpreterTest {
     fun `flatten propagates inner Err`() {
         val code = """
             use std::result
-            let inner: (Result Int String) = Err { error = "inner" }
-            let outer: (Result (Result Int String) String) = Ok { val = inner }
+            let inner: (Result Int Str) = Err { error = "inner" }
+            let outer: (Result (Result Int Str) Str) = Ok { val = inner }
             let flat = result::flatten { result = outer }
             result::is_err { result = flat }
         """
@@ -194,7 +194,7 @@ class ResultInterpreterTest {
     fun `flatten propagates outer Err`() {
         val code = """
             use std::result
-            let outer: (Result (Result Int String) String) = Err { error = "outer" }
+            let outer: (Result (Result Int Str) Str) = Err { error = "outer" }
             let flat = result::flatten { result = outer }
             result::is_err { result = flat }
         """
@@ -211,7 +211,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::option
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             let opt = result::to_option { result = res }
             option::is_some { opt = opt }
         """
@@ -224,7 +224,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::option
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             let opt = result::to_option { result = res }
             option::is_none { opt = opt }
         """
@@ -261,7 +261,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::collections::seq
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             let arr = result::to_list { result = res }
             seq::length { xs = arr }
         """
@@ -274,7 +274,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::collections::seq
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             let arr = result::to_list { result = res }
             seq::length { xs = arr }
         """
@@ -290,8 +290,8 @@ class ResultInterpreterTest {
     fun `zip combines two Oks`() {
         val code = """
             use std::result
-            let a: (Result Int String) = Ok { val = 1 }
-            let b: (Result Int String) = Ok { val = 2 }
+            let a: (Result Int Str) = Ok { val = 1 }
+            let b: (Result Int Str) = Ok { val = 2 }
             let zipped = result::zip { a = a, b = b }
             result::is_ok { result = zipped }
         """
@@ -303,8 +303,8 @@ class ResultInterpreterTest {
     fun `zip returns Err when first is Err`() {
         val code = """
             use std::result
-            let a: (Result Int String) = Err { error = "first" }
-            let b: (Result Int String) = Ok { val = 2 }
+            let a: (Result Int Str) = Err { error = "first" }
+            let b: (Result Int Str) = Ok { val = 2 }
             let zipped = result::zip { a = a, b = b }
             result::is_err { result = zipped }
         """
@@ -320,7 +320,7 @@ class ResultInterpreterTest {
     fun `fold executes on_ok for Ok`() {
         val code = """
             use std::result
-            let res: (Result Int String) = Ok { val = 42 }
+            let res: (Result Int Str) = Ok { val = 42 }
             result::fold {
                 result = res,
                 on_err = { error } -> 0,
@@ -336,7 +336,7 @@ class ResultInterpreterTest {
         val code = """
             use std::result
             use std::string
-            let res: (Result Int String) = Err { error = "failed" }
+            let res: (Result Int Str) = Err { error = "failed" }
             result::fold {
                 result = res,
                 on_err = { error } -> string::length { s = error },
@@ -355,8 +355,8 @@ class ResultInterpreterTest {
     fun `map2 combines two Results with function`() {
         val code = """
             use std::result
-            let a: (Result Int String) = Ok { val = 10 }
-            let b: (Result Int String) = Ok { val = 5 }
+            let a: (Result Int Str) = Ok { val = 10 }
+            let b: (Result Int Str) = Ok { val = 5 }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
             result::get_or_else { result = combined, def = 0 }
         """
@@ -368,8 +368,8 @@ class ResultInterpreterTest {
     fun `map2 returns Err if either is Err`() {
         val code = """
             use std::result
-            let a: (Result Int String) = Ok { val = 10 }
-            let b: (Result Int String) = Err { error = "failed" }
+            let a: (Result Int Str) = Ok { val = 10 }
+            let b: (Result Int Str) = Err { error = "failed" }
             let combined = result::map2 { result_a = a, result_b = b, f = { a, b } -> a + b }
             result::is_err { result = combined }
         """

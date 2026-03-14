@@ -126,7 +126,7 @@ class ArithmeticWithFunctionsTest {
     fun `should reject polymorphic function in arithmetic`() {
         val code = """
             ability Parse 'a where {
-               decode: {val: String} -> 'a
+               decode: {val: Str} -> 'a
             }
 
             impl Parse Int where {

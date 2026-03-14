@@ -795,20 +795,10 @@ class ContextBuilder {
     private fun convertTypeAnnotationInternal(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
+                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
                 when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Ordering" -> MezzeType.OrderingType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    "Char" -> MezzeType.CharType
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
@@ -1048,12 +1038,12 @@ class ContextBuilder {
          * Names of hermetic effects that cannot coexist with other effects.
          * Hermetic effects are isolated for data-race freedom.
          */
-        private val HERMETIC_EFFECTS = setOf("Mutation")
+        private val HERMETIC_EFFECTS = setOf("Mut")
 
         /**
          * Validate that an effect set doesn't violate hermetic effect rules.
          *
-         * Hermetic effects (like Mutation) cannot coexist with other effects
+         * Hermetic effects (like Mut) cannot coexist with other effects
          * to ensure data-race freedom.
          *
          * @param effects The set of effect names

@@ -88,7 +88,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with function type typechecks`() {
         val source = """
-            newtype Handler = Handler { x: Int } -> String
+            newtype Handler = Handler { x: Int } -> Str
 
             let mkHandler = {f} -> Handler {fn = f}
         """.trimIndent()
@@ -103,7 +103,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with array type typechecks`() {
         val source = """
-            newtype Names = Names { list: [String] }
+            newtype Names = Names { list: [Str] }
 
             let mkNames = {ns} -> Names {list = ns}
         """.trimIndent()
@@ -239,7 +239,7 @@ class NewtypeTypeCheckerTest {
     fun `test newtype with nested types typechecks`() {
         val source = """
             newtype UserId = UserId Int
-            newtype User = User { id: UserId, name: String }
+            newtype User = User { id: UserId, name: Str }
 
             let userId = UserId {value = 123}
             let user = User {id = userId, name = "Alice"}

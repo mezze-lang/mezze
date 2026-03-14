@@ -83,7 +83,7 @@ class AbilityEffectNameCollisionTest {
     fun `test user-defined ability cannot be used as value`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let x = Show
@@ -102,7 +102,7 @@ class AbilityEffectNameCollisionTest {
     fun `test user-defined effect cannot be used as value`() {
         val code = """
             effect Console where {
-                print: {msg: String} -> {} <Console>
+                print: {msg: Str} -> {} <Console>
             }
 
             let x = Console
@@ -186,7 +186,7 @@ class AbilityEffectNameCollisionTest {
     fun `test variant constructor cannot conflict with user-defined ability`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             type MyType = | Show, Other |
@@ -203,10 +203,10 @@ class AbilityEffectNameCollisionTest {
     fun `test type name cannot conflict with user-defined ability`() {
         val code = """
             ability Display 'a where {
-                display: {val: 'a} -> String
+                display: {val: 'a} -> Str
             }
 
-            type Display = { text: String }
+            type Display = { text: Str }
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -220,10 +220,10 @@ class AbilityEffectNameCollisionTest {
     fun `test type name cannot conflict with user-defined effect`() {
         val code = """
             effect Logger where {
-                log: {msg: String} -> {} <Logger>
+                log: {msg: Str} -> {} <Logger>
             }
 
-            type Logger = { level: String }
+            type Logger = { level: Str }
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -259,7 +259,7 @@ class AbilityEffectNameCollisionTest {
     fun `test user-defined ability method access still works`() {
         val code = """
             ability Show 'a where {
-                show: {val: 'a} -> String
+                show: {val: 'a} -> Str
             }
 
             let my_show = Show.show

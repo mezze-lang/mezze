@@ -35,7 +35,7 @@ class QualifiedAbilityImplTest {
         // Test that the parser correctly parses qualified ability names
         val source = """
             ability Printable 'a where {
-                print: {value: 'a} -> String
+                print: {value: 'a} -> Str
             }
 
             # Use qualified name in impl (within same module, normally wouldn't but tests parsing)
@@ -59,7 +59,7 @@ class QualifiedAbilityImplTest {
         // Create a module that exports an ability
         val abilityModule = """
             ability Serializable 'a where {
-                serialize: {value: 'a} -> String
+                serialize: {value: 'a} -> Str
             }
         """.trimIndent()
 
@@ -77,7 +77,7 @@ class QualifiedAbilityImplTest {
 
             # Implement using qualified ability name for LOCAL type (valid - not an orphan)
             impl serializer::Serializable MyInt where {
-                serialize: { value: MyInt } -> String = { value } ->
+                serialize: { value: MyInt } -> Str = { value } ->
                     match value is
                         MyInt { val } -> "serialized_int"
             }
@@ -113,7 +113,7 @@ class QualifiedAbilityImplTest {
 
         val codecModule = """
             ability Encoder 'a where {
-                encode: {value: 'a} -> String
+                encode: {value: 'a} -> Str
             }
         """.trimIndent()
 
@@ -125,10 +125,10 @@ class QualifiedAbilityImplTest {
             use codec
 
             # Define a local type
-            type MyData = | MyData { val: String } |
+            type MyData = | MyData { val: Str } |
 
             impl codec::Encoder MyData where {
-                encode: { value: MyData } -> String = { value } ->
+                encode: { value: MyData } -> Str = { value } ->
                     match value is
                         MyData { val } -> "encoded"
             }

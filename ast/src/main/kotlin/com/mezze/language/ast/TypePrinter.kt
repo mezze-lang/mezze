@@ -171,14 +171,11 @@ private fun collectTypeVariables(type: MezzeType): Map<TypeVar, String> {
 /**
  * Pretty print a type using the given type variable mapping
  */
-private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<TypeVar, String>): String = when (type) {
-    is MezzeType.IntType -> "Int"
-    is MezzeType.FloatType -> "Float"
-    is MezzeType.StringType -> "String"
-    is MezzeType.BoolType -> "Bool"
-    is MezzeType.NatType -> "Nat"
-    is MezzeType.FracType -> "Frac"
-    is MezzeType.CharType -> "Char"
+private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<TypeVar, String>): String {
+    // Check if it's a primitive type first
+    PrimitiveTypes.toName(type)?.let { return it }
+
+    return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is MezzeType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -267,10 +264,9 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         // Construct final string: param with constraints -> return effects
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    is MezzeType.OrderingType -> "Ordering"
-    is MezzeType.BytesType -> "Bytes"
-    is MezzeType.ByteBufferType -> "ByteBuffer"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
+    else -> throw IllegalArgumentException("Unexpected type in prettyPrintTypeWithMapping: $type")
+}
 }
 
 /**
@@ -501,14 +497,11 @@ private fun prettyPrintTypeWithAliasesRecursive(
     showExpansion: Boolean,
     typeVarMapping: Map<TypeVar, String>,
     typeDeclarations: List<TypeDeclaration> = emptyList()
-): String = when (type) {
-    is MezzeType.IntType -> "Int"
-    is MezzeType.FloatType -> "Float"
-    is MezzeType.StringType -> "String"
-    is MezzeType.BoolType -> "Bool"
-    is MezzeType.NatType -> "Nat"
-    is MezzeType.FracType -> "Frac"
-    is MezzeType.CharType -> "Char"
+): String {
+    // Check if it's a primitive type first
+    PrimitiveTypes.toName(type)?.let { return it }
+
+    return when (type) {
     is MezzeType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is MezzeType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -582,10 +575,9 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
         "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
-    is MezzeType.OrderingType -> "Ordering"
-    is MezzeType.BytesType -> "Bytes"
-    is MezzeType.ByteBufferType -> "ByteBuffer"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
+    else -> throw IllegalArgumentException("Unexpected type in prettyPrintTypeWithAliasesRecursive: $type")
+}
 }
 
 /**

@@ -74,7 +74,7 @@ class TopLevelEffectRestrictionsTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -101,7 +101,7 @@ class TopLevelEffectRestrictionsTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -156,7 +156,7 @@ class TopLevelEffectRestrictionsTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -219,7 +219,7 @@ class TopLevelEffectRestrictionsTest {
                 next: {} -> 'val
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -248,7 +248,7 @@ class TopLevelEffectRestrictionsTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 

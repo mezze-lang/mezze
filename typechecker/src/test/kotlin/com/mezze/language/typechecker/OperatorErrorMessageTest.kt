@@ -44,14 +44,14 @@ class OperatorErrorMessageTest {
     @Test
     fun `test multiplication operator with wrong result type`() {
         val source = """
-            let x: String = 5 * 3
+            let x: Str = 5 * 3
             x
         """.trimIndent()
 
         val error = getErrorMessage(source)
         assertNotNull(error, "Expected a type error")
         assertTrue(
-            error!!.contains("Type mismatch") || error.contains("String"),
+            error!!.contains("Type mismatch") || error.contains("Str"),
             "Error should mention type mismatch: $error"
         )
     }
@@ -67,7 +67,7 @@ class OperatorErrorMessageTest {
         assertNotNull(error, "Expected ability constraint error")
         // String doesn't implement NumAdd
         assertTrue(
-            error!!.contains("NumAdd") || error.contains("String"),
+            error!!.contains("NumAdd") || error.contains("Str"),
             "Error should mention ability or type: $error"
         )
     }
@@ -91,7 +91,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit NumAdd call shows method name in error`() {
         val source = """
-            let x: String = NumAdd.add {l = 5, r = 3}
+            let x: Str = NumAdd.add {l = 5, r = 3}
             x
         """.trimIndent()
 
@@ -107,7 +107,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit Eq call error`() {
         val source = """
-            let x: String = Eq.eq {l = 5, r = 5}
+            let x: Str = Eq.eq {l = 5, r = 5}
             x
         """.trimIndent()
 
@@ -118,7 +118,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit LogicalAnd call error`() {
         val source = """
-            let x: String = LogicalAnd.and {l = True, r = False}
+            let x: Str = LogicalAnd.and {l = True, r = False}
             x
         """.trimIndent()
 
@@ -133,12 +133,12 @@ class OperatorErrorMessageTest {
     @Test
     fun `test same semantic error produces different messages for operator vs explicit`() {
         val operatorSource = """
-            let x: String = 5 + 3
+            let x: Str = 5 + 3
             x
         """.trimIndent()
 
         val explicitSource = """
-            let x: String = NumAdd.add {l = 5, r = 3}
+            let x: Str = NumAdd.add {l = 5, r = 3}
             x
         """.trimIndent()
 
@@ -224,7 +224,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test chained operators preserve error information`() {
         val source = """
-            let x: String = 1 + 2 + 3 + 4
+            let x: Str = 1 + 2 + 3 + 4
             x
         """.trimIndent()
 
@@ -239,7 +239,7 @@ class OperatorErrorMessageTest {
         val source = """
             let a = 5 + 3
             let b = NumMul.mul {l = a, r = 2}
-            let x: String = b
+            let x: Str = b
             x
         """.trimIndent()
 

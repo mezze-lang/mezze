@@ -249,7 +249,7 @@ class StringModuleTest {
     fun `test string join - empty array`() {
         val source = """
             use std::string
-            let parts: [String] = []
+            let parts: [Str] = []
             string::join { strings = parts, separator = "," }
         """.trimIndent()
 

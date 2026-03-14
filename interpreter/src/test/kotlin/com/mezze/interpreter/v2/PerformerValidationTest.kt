@@ -23,20 +23,20 @@ class PerformerValidationTest {
     fun testPerformNotAllowedInPerformerImplementation() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # This should fail - perform not allowed in performer implementation
             impl Log for BadLogger where {
-              info : {msg: String} -> {} = {msg} -> perform Terminal in Console.print {msg = msg}
+              info : {msg: Str} -> {} = {msg} -> perform Terminal in Console.print {msg = msg}
             }
         """.trimIndent()
 
@@ -58,20 +58,20 @@ class PerformerValidationTest {
     fun testCrossEffectPerformerReuseNotAllowed() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # This should fail - cross-effect reuse not allowed
             impl Log for BadLogger where {
-              info : {msg: String} -> {} = {msg} -> Terminal.print {msg = msg}
+              info : {msg: Str} -> {} = {msg} -> Terminal.print {msg = msg}
             }
         """.trimIndent()
 
@@ -93,20 +93,20 @@ class PerformerValidationTest {
     fun testEffectTransformationAllowed() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # This should work - Log performer can use Console effect
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
 
             perform Terminal, ConsoleLogger in Log.info {msg = "Test"}
@@ -121,11 +121,11 @@ class PerformerValidationTest {
     fun testParameterizedPerformer() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
-            impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> {}
+            impl Log for FileLogger {path: Str} where {
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}
@@ -142,21 +142,21 @@ class PerformerValidationTest {
             use std::int
 
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
-            impl Database for PostgresDB {host: String, port: Int} where {
-              query : {sql: String} -> String <Log> = {sql} -> do
+            impl Database for PostgresDB {host: Str, port: Int} where {
+              query : {sql: Str} -> Str <Log> = {sql} -> do
                 Log.info {msg = "Executing query on $(host):$(int::to_str {n = port})"}
                 "$(host):$(int::to_str {n = port}) -> $(sql)"
             }
 
-            impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> {}
+            impl Log for FileLogger {path: Str} where {
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform FileLogger {path = "db.log"}, PostgresDB {host = "localhost", port = 5432} in Database.query {sql = "SELECT 1"}
@@ -171,19 +171,19 @@ class PerformerValidationTest {
     fun testNestedPerformScopes() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
 
             let outerFunction : {} -> {} <Log> = {} -> Log.info {msg = "outer"}

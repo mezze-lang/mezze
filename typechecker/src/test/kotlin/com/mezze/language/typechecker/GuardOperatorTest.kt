@@ -69,7 +69,7 @@ class GuardOperatorTest {
     @Test
     fun `guard with string comparison`() {
         val code = """
-            let classify = {s: String} ->
+            let classify = {s: Str} ->
                 match s is
                     "$(name)" if name == "admin" || name == "root" -> "privileged"
                     "$(name)" -> "regular: $(name)"
@@ -111,7 +111,7 @@ class GuardOperatorTest {
     @Test
     fun `guard with && and pattern binding`() {
         val code = """
-            let parse_and_validate = {s: String} ->
+            let parse_and_validate = {s: Str} ->
                 match s is
                     "$(key)=$(value)" if key != "" && value != "" -> Some {val = {k = key, v = value}}
                     _ -> None
@@ -124,7 +124,7 @@ class GuardOperatorTest {
     @Test
     fun `guard with || and pattern binding`() {
         val code = """
-            let is_special = {s: String} ->
+            let is_special = {s: Str} ->
                 match s is
                     "$(name)" if name == "admin" || name == "root" || name == "superuser" -> True
                     _ -> False

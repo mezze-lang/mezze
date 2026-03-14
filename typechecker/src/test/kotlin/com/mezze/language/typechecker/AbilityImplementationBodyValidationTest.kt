@@ -32,7 +32,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
@@ -56,7 +56,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Display 'a where {
-              display: {val: 'a} -> {text: String}
+              display: {val: 'a} -> {text: Str}
             }
 
             impl Display Int where {
@@ -122,7 +122,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with conditional should pass`() {
         val source = """
             ability Sign 'a where {
-              sign: {val: 'a} -> String
+              sign: {val: 'a} -> Str
             }
 
             impl Sign Int where {
@@ -192,10 +192,10 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Parse 'a where {
-              parse: {str: String} -> Int
+              parse: {str: Str} -> Int
             }
 
-            impl Parse String where {
+            impl Parse Str where {
               parse = {str} ->
                 match int::from_string {s = str} is
                   Some {val} -> val
@@ -219,7 +219,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong primitive type should fail`() {
         val source = """
             ability Show 'a where {
-              show: {val: 'a} -> String
+              show: {val: 'a} -> Str
             }
 
             impl Show Int where {
@@ -242,7 +242,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong type in conditional should fail`() {
         val source = """
             ability Process 'a where {
-              process: {val: 'a} -> String
+              process: {val: 'a} -> Str
             }
 
             impl Process Int where {
@@ -265,7 +265,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong type in pattern match should fail`() {
         val source = """
             ability Extract 'a where {
-              extract: {opt: Option 'a} -> String
+              extract: {opt: Option 'a} -> Str
             }
 
             impl Extract Int where {
@@ -292,7 +292,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Display 'a where {
-              display: {val: 'a} -> {text: String}
+              display: {val: 'a} -> {text: Str}
             }
 
             impl Display Int where {
@@ -315,7 +315,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body with wrong record field type should fail`() {
         val source = """
             ability Display 'a where {
-              display: {val: 'a} -> {text: String}
+              display: {val: 'a} -> {text: Str}
             }
 
             impl Display Int where {
@@ -362,7 +362,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body with undefined function should fail`() {
         val source = """
             ability Process 'a where {
-              process: {val: 'a} -> String
+              process: {val: 'a} -> Str
             }
 
             impl Process Int where {
@@ -388,11 +388,11 @@ class AbilityImplementationBodyValidationTest {
               length: {val: 'a} -> Int
             }
 
-            impl StringLength String where {
+            impl StringLength Str where {
               length = {val} -> val + val
             }
 
-            let len = {s} -> StringLength.length {val = s}
+            let len = {s} -> StrLength.length {val = s}
 
             len {s = "hello"}
         """.trimIndent()
@@ -456,7 +456,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Transform 'a where {
-              transform: {val: 'a} -> String
+              transform: {val: 'a} -> Str
             }
 
             impl Transform Int where {
@@ -488,7 +488,7 @@ class AbilityImplementationBodyValidationTest {
               identity = {val} -> val
             }
 
-            impl Identity String where {
+            impl Identity Str where {
               identity = {val} -> val
             }
 
@@ -510,7 +510,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Format 'a where {
-              format: {val: 'a} -> String
+              format: {val: 'a} -> Str
             }
 
             impl Format Int where {
@@ -534,7 +534,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Calculate 'a where {
-              calculate: {x: 'a, y: 'a} -> String
+              calculate: {x: 'a, y: 'a} -> Str
             }
 
             impl Calculate Int where {

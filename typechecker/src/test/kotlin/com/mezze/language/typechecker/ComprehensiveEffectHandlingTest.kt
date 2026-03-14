@@ -82,7 +82,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -90,7 +90,7 @@ class ComprehensiveEffectHandlingTest {
             handled
             """.trimIndent(),
             "handled",
-            "{} -> String <*>"  // <*> marks that effects were performed
+            "{} -> Str <*>"  // <*> marks that effects were performed
         )
     }
 
@@ -105,7 +105,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -114,7 +114,7 @@ class ComprehensiveEffectHandlingTest {
             partiallyHandled
             """.trimIndent(),
             "partiallyHandled",
-            "{} -> String <FileSystem, *>"  // FileSystem remains, * marks performed
+            "{} -> Str <FileSystem, *>"  // FileSystem remains, * marks performed
         )
     }
 
@@ -125,7 +125,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -135,7 +135,7 @@ class ComprehensiveEffectHandlingTest {
             step2
             """.trimIndent(),
             "step2",
-            "{} -> String <*>"  // All effects handled, * marks performed
+            "{} -> Str <*>"  // All effects handled, * marks performed
         )
     }
 
@@ -145,7 +145,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -153,7 +153,7 @@ class ComprehensiveEffectHandlingTest {
             myFunc
             """.trimIndent(),
             "myFunc",
-            "{} -> String <Log>"
+            "{} -> Str <Log>"
         )
     }
 
@@ -168,7 +168,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -177,7 +177,7 @@ class ComprehensiveEffectHandlingTest {
                 handled {}
             """.trimIndent(),
             "getResult",
-            "String <*>"
+            "Str <*>"
         )
     }
 
@@ -190,7 +190,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -211,7 +211,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -222,7 +222,7 @@ class ComprehensiveEffectHandlingTest {
                 step2 {}
             """.trimIndent(),
             "getResult",
-            "String <*>"
+            "Str <*>"
         )
     }
 
@@ -236,7 +236,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -247,7 +247,7 @@ class ComprehensiveEffectHandlingTest {
                 step2 {}
             """.trimIndent(),
             "getResult",
-            "String <*>"
+            "Str <*>"
         )
     }
 
@@ -263,7 +263,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -272,7 +272,7 @@ class ComprehensiveEffectHandlingTest {
             called
             """.trimIndent(),
             "called",
-            "String <FileSystem, Log>"
+            "Str <FileSystem, Log>"
         )
     }
 
@@ -284,14 +284,14 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
             let getHandled = {} -> perform Console in myFunc {}
             """.trimIndent(),
             "getHandled",
-            "String <*>"  // Return type is String, function has <*> marker
+            "Str <*>"  // Return type is Str, function has <*> marker
         )
     }
 
@@ -305,7 +305,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -325,7 +325,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -346,7 +346,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -368,7 +368,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -377,7 +377,7 @@ class ComprehensiveEffectHandlingTest {
             partiallyHandled
             """.trimIndent(),
             "partiallyHandled",
-            "{} -> String <FileSystem, *>"
+            "{} -> Str <FileSystem, *>"
         )
     }
 
@@ -391,7 +391,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -399,7 +399,7 @@ class ComprehensiveEffectHandlingTest {
             let getResult = {} -> perform LocalDisk in (perform Console in (myFunc {}))
             """.trimIndent(),
             "getResult",
-            "String <*>"  // Return type is String, function has <*> marker
+            "Str <*>"  // Return type is Str, function has <*> marker
         )
     }
 
@@ -410,11 +410,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let func1: {} -> String <Log> = {} -> do
+            let func1: {} -> Str <Log> = {} -> do
                 println { msg = "Func1" }
                 "Result1"
 
-            let func2: {} -> String <Log> = {} -> do
+            let func2: {} -> Str <Log> = {} -> do
                 println { msg = "Func2" }
                 "Result2"
 
@@ -424,7 +424,7 @@ class ComprehensiveEffectHandlingTest {
                 result1
             """.trimIndent(),
             "getResults",
-            "String <*>"  // Return type is String, function has <*> marker
+            "Str <*>"  // Return type is Str, function has <*> marker
         )
     }
 
@@ -440,14 +440,14 @@ class ComprehensiveEffectHandlingTest {
                 println { msg = "Func1" }
                 42
 
-            let func2: { val: Int } -> String <Log> = {val} -> do
+            let func2: { val: Int } -> Str <Log> = {val} -> do
                 println { msg = "Func2" }
                 "Result"
 
             let getHandled = {} -> perform Console in func2 { val = func1 {} }
             """.trimIndent(),
             "getHandled",
-            "String <*>"  // Return type is String, function has <*> marker
+            "Str <*>"  // Return type is Str, function has <*> marker
         )
     }
 
@@ -459,7 +459,7 @@ class ComprehensiveEffectHandlingTest {
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
-            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+            let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
@@ -477,7 +477,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -486,7 +486,7 @@ class ComprehensiveEffectHandlingTest {
             handled
             """.trimIndent(),
             "handled",
-            "{} -> String <*>"  // <*> marks that effects were performed
+            "{} -> Str <*>"  // <*> marks that effects were performed
         )
     }
 
@@ -502,7 +502,7 @@ class ComprehensiveEffectHandlingTest {
                 println { msg = "Func1" }
                 42
 
-            let func2: { val: Int } -> String <Log> = {val} -> do
+            let func2: { val: Int } -> Str <Log> = {val} -> do
                 println { msg = "Func2" }
                 "Result"
 
@@ -511,7 +511,7 @@ class ComprehensiveEffectHandlingTest {
                 perform Console in (func2 { val = result1 })
             """.trimIndent(),
             "getResult2",
-            "String <*>"  // Return type is String, function has <*> marker
+            "Str <*>"  // Return type is Str, function has <*> marker
         )
     }
 
@@ -524,7 +524,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -532,7 +532,7 @@ class ComprehensiveEffectHandlingTest {
             result
             """.trimIndent(),
             "result",
-            "String <Log>"
+            "Str <Log>"
         )
     }
 
@@ -542,7 +542,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -553,7 +553,7 @@ class ComprehensiveEffectHandlingTest {
             result
             """.trimIndent(),
             "result",
-            "String <Log>"
+            "Str <Log>"
         )
     }
 
@@ -563,7 +563,7 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
 
-            let myFunc: {} -> String <Log> = {} -> do
+            let myFunc: {} -> Str <Log> = {} -> do
                 println { msg = "Hello" }
                 "Done"
 
@@ -572,7 +572,7 @@ class ComprehensiveEffectHandlingTest {
             suspended2
             """.trimIndent(),
             "suspended2",
-            "String <Log>"
+            "Str <Log>"
         )
     }
 }

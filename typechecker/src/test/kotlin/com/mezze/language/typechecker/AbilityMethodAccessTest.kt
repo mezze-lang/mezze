@@ -43,8 +43,8 @@ class AbilityMethodAccessTest {
         """.trimIndent()
 
         val type = getVariableType(code, "x")
-        assertTrue(type.contains("val") && type.contains("String"),
-            "Expected function type { val: 'a } -> String, got: $type")
+        assertTrue(type.contains("val") && type.contains("Str"),
+            "Expected function type { val: 'a } -> Str, got: $type")
     }
 
     @Test
@@ -58,7 +58,7 @@ class AbilityMethodAccessTest {
         assertNotNull(program)
 
         val resultType = getVariableType(code, "result")
-        assertTrue(resultType == "String", "Expected String, got: $resultType")
+        assertTrue(resultType == "Str", "Expected Str, got: $resultType")
     }
 
     // ========== EQ ABILITY ==========

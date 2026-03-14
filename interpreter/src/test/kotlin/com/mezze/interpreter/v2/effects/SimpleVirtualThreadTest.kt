@@ -182,11 +182,11 @@ class SimpleVirtualThreadTest {
         // V2 tests effect handlers
         val code = """
             effect Greet where {
-                greet: {name: String} -> String <Greet>
+                greet: {name: Str} -> Str <Greet>
             }
 
             impl Greet for Greeter where {
-                greet: {name: String} -> String = {name} -> "Hello, Mezze!"
+                greet: {name: Str} -> Str = {name} -> "Hello, Mezze!"
             }
 
             perform Greeter in Greet.greet {name = "Mezze"}

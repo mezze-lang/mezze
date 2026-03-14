@@ -127,7 +127,7 @@ class AbilityConstraintAnnotationsTest {
             }
 
             ability Show 'a where {
-                show: {value: 'a} -> String,
+                show: {value: 'a} -> Str,
             }
 
             impl Show Int where {
@@ -156,7 +156,7 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {container: 'c} -> 'value,
             }
 
-            impl BiContainer {k: Int, v: String} having 'key = Int, 'value = String where {
+            impl BiContainer {k: Int, v: Str} having 'key = Int, 'value = Str where {
                 getKey = {container} -> container.k,
                 getValue = {container} -> container.v,
             }
@@ -177,7 +177,7 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {container: 'c} -> 'value,
             }
 
-            impl BiContainer {k: Int, v: String} having 'key = Int, 'value = String where {
+            impl BiContainer {k: Int, v: Str} having 'key = Int, 'value = Str where {
                 getKey = {container} -> container.k,
                 getValue = {container} -> container.v,
             }
@@ -231,7 +231,7 @@ class AbilityConstraintAnnotationsTest {
             }
 
             ability Show 'a where {
-                show: {value: 'a} -> String,
+                show: {value: 'a} -> Str,
             }
 
             impl Eq Int where {
@@ -242,7 +242,7 @@ class AbilityConstraintAnnotationsTest {
                 show = {value} -> "int",
             }
 
-            let checkAndShow: {a: 'a, b: 'a} -> String with Eq 'a, Show 'a = {a, b} ->
+            let checkAndShow: {a: 'a, b: 'a} -> Str with Eq 'a, Show 'a = {a, b} ->
                 do
                     let isEqual = Eq.eq {a = a, b = b}
                     Show.show {value = a}
@@ -290,7 +290,7 @@ class AbilityConstraintAnnotationsTest {
                 getAll: {container: 'c} -> ['item],
             }
 
-            impl Container {items: [String]} having 'item = String where {
+            impl Container {items: [Str]} having 'item = Str where {
                 getAll = {container} -> container.items,
             }
 
@@ -317,7 +317,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {container, index} -> Some { val = 0 },
             }
 
-            let getFirst: {c: 'c} -> (Option String) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} -> (Option Str) with Container 'c having 'item = Int = {c} ->
                 Container.get {container = c, index = 0}
         """.trimIndent()
 
@@ -362,7 +362,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {container, index} -> Some { val = 0 },
             }
 
-            let getFirst: {c: 'c} -> (Option String) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} -> (Option Str) with Container 'c having 'item = Int = {c} ->
                 Container.get {container = c, index = 0}
         """.trimIndent()
 
@@ -374,7 +374,7 @@ class AbilityConstraintAnnotationsTest {
         // Error message should mention the type mismatch
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String"),
+            message.contains("Int") || message.contains("Str"),
             "Error message should mention the conflicting types: $message"
         )
     }
@@ -390,7 +390,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {container, index} -> 0,
             }
 
-            let getFirst: {c: 'c} -> String with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} -> Str with Container 'c having 'item = Int = {c} ->
                 Container.get {container = c, index = 0}
         """.trimIndent()
 
@@ -402,7 +402,7 @@ class AbilityConstraintAnnotationsTest {
         // Error should indicate type mismatch
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String") || message.contains("mismatch") || message.contains("expected"),
+            message.contains("Int") || message.contains("Str") || message.contains("mismatch") || message.contains("expected"),
             "Error message should indicate type mismatch: $message"
         )
     }
@@ -415,12 +415,12 @@ class AbilityConstraintAnnotationsTest {
                 getValue: {container: 'c} -> 'value,
             }
 
-            impl BiContainer {k: Int, v: String} having 'key = Int, 'value = String where {
+            impl BiContainer {k: Int, v: Str} having 'key = Int, 'value = Str where {
                 getKey = {container} -> container.k,
                 getValue = {container} -> container.v,
             }
 
-            let getWrongKey: {c: 'c} -> String with BiContainer 'c having 'key = Int, 'value = String = {c} ->
+            let getWrongKey: {c: 'c} -> Str with BiContainer 'c having 'key = Int, 'value = Str = {c} ->
                 BiContainer.getKey {container = c}
         """.trimIndent()
 
@@ -432,7 +432,7 @@ class AbilityConstraintAnnotationsTest {
         // Error should indicate type mismatch
         val message = exception.message ?: ""
         assertTrue(
-            message.contains("Int") || message.contains("String"),
+            message.contains("Int") || message.contains("Str"),
             "Error message should mention conflicting types: $message"
         )
     }

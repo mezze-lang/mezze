@@ -23,11 +23,11 @@ class ComprehensiveEffectInterpreterTest {
     fun testBasicEffectExecution() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "Hello from effect test!"}
@@ -65,7 +65,7 @@ class ComprehensiveEffectInterpreterTest {
             use std::int
 
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -73,7 +73,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for MathRandom where {
@@ -101,11 +101,11 @@ class ComprehensiveEffectInterpreterTest {
             use std::int
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Computation with effects in do block
@@ -132,11 +132,11 @@ class ComprehensiveEffectInterpreterTest {
     fun testUseExpressionExecution() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "Hello from use expression!"}
@@ -151,8 +151,8 @@ class ComprehensiveEffectInterpreterTest {
     fun testEffectDeclarationRegistration() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>,
-              debug : {msg: String, level: Int} -> {} <Log>
+              print : {msg: Str} -> {} <Log>,
+              debug : {msg: Str, level: Int} -> {} <Log>
             }
 
             # Just declare the effect, don't use it
@@ -169,11 +169,11 @@ class ComprehensiveEffectInterpreterTest {
     fun testImplDeclarationRegistration() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Just declare the impl, don't use it
@@ -190,15 +190,15 @@ class ComprehensiveEffectInterpreterTest {
     fun testMultipleImplOperationsExecution() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>,
-              error : {msg: String} -> {} <Log>,
-              debug : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>,
+              error : {msg: Str} -> {} <Log>,
+              debug : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> {},
-              error : {msg: String} -> {} = {msg} -> {},
-              debug : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {},
+              error : {msg: Str} -> {} = {msg} -> {},
+              debug : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Test function with multiple log operations
@@ -222,11 +222,11 @@ class ComprehensiveEffectInterpreterTest {
     fun testNestedEffectCallsExecution() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Simple nested effect calls
@@ -333,19 +333,19 @@ let quot = a / b
     fun testHandlerMappingCorrectness() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Debug where {
-              log : {msg: String} -> {} <Debug>
+              log : {msg: Str} -> {} <Debug>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Debug for DebugConsole where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Direct multiple effect calls
@@ -365,11 +365,11 @@ let quot = a / b
         // Note: This test will work once parameterized handler instantiation is implemented
         val source = """
             effect Logging where {
-              log : {msg: String} -> {} <Logging>
+              log : {msg: Str} -> {} <Logging>
             }
 
-            impl Logging for FileLogger {path: String} where {
-              log : {msg: String} -> {} = {msg} -> {}
+            impl Logging for FileLogger {path: Str} where {
+              log : {msg: Str} -> {} = {msg} -> {}
             }
 
             # Test parameterized handler with path parameter

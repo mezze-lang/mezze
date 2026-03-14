@@ -109,7 +109,7 @@ class SimpleFunctionTest {
     @Test
     fun `test function with record manipulation`() {
         val code = """
-            let updateAge: {person: {name: String, age: Int}, newAge: Int} -> {name: String, age: Int} = {person, newAge} -> {...person, age = newAge}
+            let updateAge: {person: {name: Str, age: Int}, newAge: Int} -> {name: Str, age: Int} = {person, newAge} -> {...person, age = newAge}
             let person = {name = "Bob", age = 25}
             updateAge {person = person, newAge = 26}
         """

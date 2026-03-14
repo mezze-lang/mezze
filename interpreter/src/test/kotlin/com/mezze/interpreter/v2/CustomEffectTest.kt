@@ -291,7 +291,7 @@ class CustomEffectTest {
                 raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
             }
 
-            type AppError = {code: Int, message: String}
+            type AppError = {code: Int, message: Str}
 
             let validate = {x} ->
                 if x < 0 then
@@ -444,8 +444,8 @@ class CustomEffectTest {
 
             # Effect with two operations
             effect Logger where {
-                warn: {msg: String} -> {} <Logger>,
-                fail: {msg: String} -> 'a <Logger>
+                warn: {msg: Str} -> {} <Logger>,
+                fail: {msg: Str} -> 'a <Logger>
             }
 
             impl Logger for LoggerToResult where {

@@ -228,7 +228,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JString`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
             let json: Json = JString {val = "hello"}
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -249,7 +249,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JInt`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
             let json: Json = JInt {val = 42}
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -270,7 +270,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JFloat`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
             let json: Json = JFloat {val = 3.14}
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -291,7 +291,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JBool true`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
             let json: Json = JBool {val = True}
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -312,7 +312,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JNull`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str } |
             let json: Json = JNull
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -333,7 +333,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JArray`() {
         val source = """
             # Define Json type locally for testing (with Seq for items)
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] } |
             let items: [Json] = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]
             let json: Json = JArray {items = items}
             let result = __native_json_serialize {json = json, pretty = False}
@@ -355,8 +355,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JObject`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: [Json] }, JObject { fields: [{key: String, value: Json}] } |
-            let fields: [{key: String, value: Json}] = [
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] }, JObject { fields: [{key: Str, value: Json}] } |
+            let fields: [{key: Str, value: Json}] = [
                 {key = "name", value = JString {val = "Alice"}},
                 {key = "age", value = JInt {val = 30}}
             ]

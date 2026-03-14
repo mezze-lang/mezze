@@ -14,7 +14,7 @@ import kotlin.test.assertContains
  * Comprehensive tests for pattern matching in Mezze
  *
  * Covers:
- * 1. Primitive literal patterns (Int, Float, String, Bool)
+ * 1. Primitive literal patterns (Int, Float, Str, Bool)
  * 2. Variant/Constructor patterns
  * 3. Record patterns
  * 4. Wildcard and variable patterns
@@ -167,13 +167,13 @@ class ComprehensivePatternMatchingTest {
     }
 
     // ==========================================================================
-    // SECTION 3: String Literal Patterns
+    // SECTION 3: Str Literal Patterns
     // ==========================================================================
 
     @Test
     fun `string literal pattern - basic matching`() {
         val code = """
-            let greet = {name: String} ->
+            let greet = {name: Str} ->
                 match name is
                   "Alice" -> "Hello, Alice!"
                   "Bob" -> "Hi, Bob!"
@@ -188,7 +188,7 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `string literal pattern - empty string`() {
         val code = """
-            let check_empty = {s: String} ->
+            let check_empty = {s: Str} ->
                 match s is
                   "" -> "empty"
                   _ -> "not empty"
@@ -202,7 +202,7 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `string literal pattern - command parser`() {
         val code = """
-            let parse_command = {cmd: String} ->
+            let parse_command = {cmd: Str} ->
                 match cmd is
                   "help" -> "Showing help..."
                   "quit" | "exit" | "q" -> "Goodbye!"
@@ -218,7 +218,7 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `string literal pattern - yes no parser`() {
         val code = """
-            let parse_yes_no = {input: String} ->
+            let parse_yes_no = {input: Str} ->
                 match input is
                   "y" | "yes" | "Y" | "YES" -> True
                   "n" | "no" | "N" | "NO" -> False
@@ -529,7 +529,7 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `or pattern - literals`() {
         val code = """
-            let is_vowel = {c: String} ->
+            let is_vowel = {c: Str} ->
                 match c is
                   "a" | "e" | "i" | "o" | "u" -> True
                   "A" | "E" | "I" | "O" | "U" -> True
@@ -640,7 +640,7 @@ class ComprehensivePatternMatchingTest {
     @Test
     fun `error - int pattern on string value`() {
         val code = """
-            let bad = {s: String} ->
+            let bad = {s: Str} ->
                 match s is
                   0 -> "zero"
                   _ -> "other"
@@ -780,7 +780,7 @@ class ComprehensivePatternMatchingTest {
                   0 -> "zero"
                   1 -> "one"
                   _ -> "other"
-            let result: String = classify { n = 0 }
+            let result: Str = classify { n = 0 }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

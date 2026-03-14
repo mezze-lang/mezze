@@ -110,7 +110,7 @@ class OrPatternBindingTest {
     @Test
     fun `test or-pattern with extra binding in second alternative should fail`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { code: Int, msg: String } |
+            type Result = | Ok { value: Int }, Err { code: Int, msg: Str } |
 
             let bad = {r} ->
                 match r is

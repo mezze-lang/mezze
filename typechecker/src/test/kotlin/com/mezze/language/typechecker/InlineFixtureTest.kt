@@ -25,7 +25,7 @@ class InlineFixtureTest {
         val source = """
 let x = 42        # expected: x : Int
 let y = 3.14      # expected: y : Float
-let name = "Alice" # expected: name : String
+let name = "Alice" # expected: name : Str
 let flag = True   # expected: flag : Boolean
 
 x + 10
@@ -43,13 +43,13 @@ x + 10
         val source = """
 use std::int
 
-let processUser = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: String, age: Int } } -> String
+let processUser = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: Str, age: Int } } -> Str
 
-let user1 = {name = "Alice", age = 30}                                         # expected: user1 : { name: String, age: Int }
-let user2 = {name = "Bob", age = 25}                                           # expected: user2 : { name: String, age: Int }
+let user1 = {name = "Alice", age = 30}                                         # expected: user1 : { name: Str, age: Int }
+let user2 = {name = "Bob", age = 25}                                           # expected: user2 : { name: Str, age: Int }
 
-let result1 = processUser {user = user1}                                       # expected: result1 : String
-let result2 = processUser {user = user2}                                       # expected: result2 : String
+let result1 = processUser {user = user1}                                       # expected: result1 : Str
+let result2 = processUser {user = user2}                                       # expected: result2 : Str
 
 result1
         """.trimIndent()
@@ -107,12 +107,12 @@ result1
 
 type Color = | Red, Blue { val: Int }, Green |
 
-let processColor: {color: Color} -> String = {color} -> match color is
+let processColor: {color: Color} -> Str = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"
-  Green -> "green"                                                       # expected: processColor : { color: Color } -> String
+  Green -> "green"                                                       # expected: processColor : { color: Color } -> Str
 
-let result = processColor {color = Red}                 # expected: result : String
+let result = processColor {color = Red}                 # expected: result : Str
 
 result
         """.trimIndent()
@@ -249,13 +249,13 @@ result
     fun `test open record extra fields`() {
         val source = """
 
-let processOpenUser: {user: {name: String, ...}} -> String = {user} -> user.name  # expected: processOpenUser : { user: { name: String, ... } } -> String
+let processOpenUser: {user: {name: Str, ...}} -> Str = {user} -> user.name  # expected: processOpenUser : { user: { name: Str, ... } } -> Str
 
-let user1 = {name = "Alice", age = 30, city = "NYC"}       # expected: user1 : { name: String, age: Int, city: String }
-let user2 = {name = "Bob", email = "bob@test.com"}         # expected: user2 : { name: String, email: String }
+let user1 = {name = "Alice", age = 30, city = "NYC"}       # expected: user1 : { name: Str, age: Int, city: Str }
+let user2 = {name = "Bob", email = "bob@test.com"}         # expected: user2 : { name: Str, email: Str }
 
-let result1 = processOpenUser {user = user1}               # expected: result1 : String
-let result2 = processOpenUser {user = user2}               # expected: result2 : String
+let result1 = processOpenUser {user = user1}               # expected: result1 : Str
+let result2 = processOpenUser {user = user2}               # expected: result2 : Str
 
 result1
         """.trimIndent()
@@ -304,13 +304,13 @@ let updatedConfig = {...configRecord, timeout = 60, debug = True}
         val source = """
 use std::int
 
-let processUser: {user: {name: String, age: Int, ...}} -> String = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: String, age: Int, ... } } -> String
+let processUser: {user: {name: Str, age: Int, ...}} -> Str = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: Str, age: Int, ... } } -> Str
 
-let user1 = {name = "Alice", age = 30, city = "NYC"}        # expected: user1 : { name: String, age: Int, city: String }
-let user2 = {name = "Bob", age = 25, email = "bob@test.com"} # expected: user2 : { name: String, age: Int, email: String }
+let user1 = {name = "Alice", age = 30, city = "NYC"}        # expected: user1 : { name: Str, age: Int, city: Str }
+let user2 = {name = "Bob", age = 25, email = "bob@test.com"} # expected: user2 : { name: Str, age: Int, email: Str }
 
-let result1 = processUser {user = user1}                    # expected: result1 : String
-let result2 = processUser {user = user2}                    # expected: result2 : String
+let result1 = processUser {user = user1}                    # expected: result1 : Str
+let result2 = processUser {user = user2}                    # expected: result2 : Str
 
 result1
         """.trimIndent()
@@ -329,10 +329,10 @@ result1
 let processColor = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"
-  _ -> "other"                                                       # expected: processColor : { color: | Red, Blue { val: Int }, ... | } -> String
+  _ -> "other"                                                       # expected: processColor : { color: | Red, Blue { val: Int }, ... | } -> Str
 
-let result1 = processColor {color = Red}                # expected: result1 : String
-let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : String
+let result1 = processColor {color = Red}                # expected: result1 : Str
+let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : Str
 
 result1
         """.trimIndent()
@@ -426,10 +426,10 @@ let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
     fun `test simple functions`() {
         val source = """
 let add = {x, y} -> x + y               # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
-let greet = {name} -> "Hello $(name)"  # expected: greet : { name: String } -> String
+let greet = {name} -> "Hello $(name)"  # expected: greet : { name: Str } -> Str
 
 let result1 = add {x = 10, y = 20}      # expected: result1 : Int
-let result2 = greet {name = "World"}    # expected: result2 : String
+let result2 = greet {name = "World"}    # expected: result2 : Str
 
 result1 + 100
         """.trimIndent()
@@ -449,9 +449,9 @@ type Color = | Red, Blue { val: Int }, Green |
 
 let processColor = {color: Color} -> match color is
   Red -> "red"
-  _ -> "other"                                                       # expected: processColor : { color: Color } -> String
+  _ -> "other"                                                       # expected: processColor : { color: Color } -> Str
 
-let result = processColor {color = Red}                 # expected: result : String
+let result = processColor {color = Red}                 # expected: result : Str
 
 result
         """.trimIndent()
@@ -495,7 +495,7 @@ result
         val source = """
 # Test that closed records reject extra fields (strict type safety)
 
-let processUser = {user} -> user.name                      # infers closed: { user: { name: String } }
+let processUser = {user} -> user.name                      # infers closed: { user: { name: Str } }
 
 # This should FAIL - passing extra fields to closed record
 let result = processUser {user = {name = "Alice", age = 30, city = "NYC"}}
@@ -632,7 +632,7 @@ validInt
 type Color = | Red, Blue { val: Int }, Green |
 
 # This should FAIL - missing Green case
-let processColor: {color: Color} -> String = {color} -> match color is
+let processColor: {color: Color} -> Str = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"
 
@@ -659,7 +659,7 @@ processColor
 type Color = | Red, Blue { val: Int } |
 
 # This should FAIL - missing Blue case and no wildcard
-let processColor: {color: Color} -> String = {color} -> match color is
+let processColor: {color: Color} -> Str = {color} -> match color is
   Red -> "red"
 
 processColor
@@ -818,7 +818,7 @@ result
 type Color = | Red, Blue { val: Int } |
 
 # This should FAIL - missing Blue case and no wildcard
-let processColor: {color: Color} -> String = {color} -> match color is
+let processColor: {color: Color} -> Str = {color} -> match color is
   Red -> "red"
 
 processColor

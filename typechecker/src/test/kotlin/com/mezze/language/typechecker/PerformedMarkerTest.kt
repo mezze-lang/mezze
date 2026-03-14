@@ -47,7 +47,7 @@ class PerformedMarkerTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -106,7 +106,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -136,7 +136,7 @@ class PerformedMarkerTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -159,7 +159,7 @@ class PerformedMarkerTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -181,7 +181,7 @@ class PerformedMarkerTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -205,7 +205,7 @@ class PerformedMarkerTest {
                 println: { msg: 'msg } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -282,7 +282,7 @@ class PerformedMarkerTest {
                 put: { val: 'state } -> {}
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -322,7 +322,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -359,7 +359,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -449,7 +449,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -489,7 +489,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -529,7 +529,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 
@@ -568,7 +568,7 @@ class PerformedMarkerTest {
                 get: {} -> 'state
             }
 
-            impl Log for Console having 'msg = String where {
+            impl Log for Console having 'msg = Str where {
                 println = { msg } -> {}
             }
 

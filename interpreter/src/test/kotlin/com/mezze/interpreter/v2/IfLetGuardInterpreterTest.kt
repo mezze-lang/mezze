@@ -60,7 +60,7 @@ class IfLetGuardInterpreterTest {
     @Test
     fun `if let with nested record pattern`() {
         val code = """
-            let getPerson: {id: Int} -> | Some {val: {name: String, age: Int}}, None | = {id} ->
+            let getPerson: {id: Int} -> | Some {val: {name: Str, age: Int}}, None | = {id} ->
                 match id is
                     1 -> Some {val = {name = "Alice", age = 30}}
                     _ -> None

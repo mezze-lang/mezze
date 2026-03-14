@@ -23,7 +23,7 @@ class EffectTypeCheckerTest {
     fun testEffectDeclarationTyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
         """.trimIndent()
         
@@ -39,11 +39,11 @@ class EffectTypeCheckerTest {
     fun testImplDeclarationTyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
         """.trimIndent()
         
@@ -59,7 +59,7 @@ class EffectTypeCheckerTest {
     fun testEffectfulFunctionTyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             let noisyAdd : {x: Int, y: Int} -> Int <Log> = {x, y} ->
@@ -127,11 +127,11 @@ class EffectTypeCheckerTest {
     fun testHandleExpressionTyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             impl Log for Console where {
-              log : {msg: String} -> {} = {msg} -> {}
+              log : {msg: Str} -> {} = {msg} -> {}
             }
             
             let program = do
@@ -157,7 +157,7 @@ class EffectTypeCheckerTest {
     fun testMultipleEffectsTyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             effect Random where {
@@ -188,7 +188,7 @@ class EffectTypeCheckerTest {
     fun testEffectRowSubtyping() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             effect Random where {
@@ -219,7 +219,7 @@ class EffectTypeCheckerTest {
     fun testEffectMismatchError() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             # Function with effect annotation

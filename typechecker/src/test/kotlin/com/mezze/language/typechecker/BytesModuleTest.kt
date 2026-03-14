@@ -315,7 +315,7 @@ class BytesModuleTest {
         val source = """
             use std::collections::bytes
             let b = bytes::from_string { s = "Hi" }
-            let hex: String = bytes::to_hex { b = b }
+            let hex: Str = bytes::to_hex { b = b }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -327,7 +327,7 @@ class BytesModuleTest {
         val source = """
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            let encoded: String = bytes::to_base64 { b = b }
+            let encoded: Str = bytes::to_base64 { b = b }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

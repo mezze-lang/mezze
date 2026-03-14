@@ -590,7 +590,7 @@ class LazyEffectsTest {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            type ValidationError = | Required {field: String}, TooShort {field: String, min: Int} |
+            type ValidationError = | Required {field: Str}, TooShort {field: Str, min: Int} |
 
             let validate_name = {name} ->
                 if name == "" then
@@ -938,7 +938,7 @@ class LazyEffectsTest {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
 
-            type Status = | Active, Inactive, Pending {reason: String} |
+            type Status = | Active, Inactive, Pending {reason: Str} |
 
             let get_status = {code} ->
                 if code < 0 then Exception.throw {error = "invalid code"}

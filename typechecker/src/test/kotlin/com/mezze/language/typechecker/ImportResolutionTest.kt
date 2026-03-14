@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Nested
  *
  * Instead, all resolution uses:
  * - Path segments: List<String>
- * - Content hashes: String (for O(1) lookup)
+ * - Content hashes: Str (for O(1) lookup)
  */
 class ImportResolutionTest {
 
@@ -86,7 +86,7 @@ class ImportResolutionTest {
         fun `impl with unqualified effect name parses correctly`() {
             val source = """
                 effect Log where {
-                    info: {msg: String} -> {} <Log>
+                    info: {msg: Str} -> {} <Log>
                 }
 
                 impl Log for Console {} where {

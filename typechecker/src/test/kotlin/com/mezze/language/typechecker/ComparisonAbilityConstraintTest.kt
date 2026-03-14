@@ -29,11 +29,8 @@ class ComparisonAbilityConstraintTest {
         val eqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "eq" }
         assertTrue(eqBinding.inferredType is MezzeType.FunctionType)
         val functionType = eqBinding.inferredType as MezzeType.FunctionType
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, functionType.returnType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, functionType.returnType)
     }
     
     @Test
@@ -48,11 +45,8 @@ class ComparisonAbilityConstraintTest {
         val neqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "neq" }
         assertTrue(neqBinding.inferredType is MezzeType.FunctionType)
         val functionType = neqBinding.inferredType as MezzeType.FunctionType
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, functionType.returnType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, functionType.returnType)
     }
     
     @Test
@@ -67,11 +61,8 @@ class ComparisonAbilityConstraintTest {
         val ltBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "lt" }
         assertTrue(ltBinding.inferredType is MezzeType.FunctionType)
         val functionType = ltBinding.inferredType as MezzeType.FunctionType
-        val boolVariant = MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, functionType.returnType)
+        val boolType = MezzeType.BoolType
+        assertEquals(boolType, functionType.returnType)
     }
     
     @Test

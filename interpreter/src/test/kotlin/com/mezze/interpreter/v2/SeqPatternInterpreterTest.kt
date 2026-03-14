@@ -335,7 +335,7 @@ class SeqPatternInterpreterTest {
     @Test
     fun `string seq pattern matching`() {
         val code = """
-            let get_greeting = {names: [String]} ->
+            let get_greeting = {names: [Str]} ->
                 match names is
                   [] -> "Hello, nobody!"
                   [name] -> "Hello, $(name)!"
@@ -349,7 +349,7 @@ class SeqPatternInterpreterTest {
     @Test
     fun `string seq with literal patterns`() {
         val code = """
-            let is_help_command = {args: [String]} ->
+            let is_help_command = {args: [Str]} ->
                 match args is
                   ["help"] | ["--help"] | ["-h"] -> True
                   _ -> False

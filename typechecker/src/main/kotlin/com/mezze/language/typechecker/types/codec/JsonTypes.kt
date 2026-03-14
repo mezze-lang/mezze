@@ -165,7 +165,7 @@ object JsonTypes {
             streamDecodeParams,
             resultType(
                 MezzeType.RecordType(mapOf(
-                    "value" to MezzeType.VariantType(mapOf("True" to null, "False" to null), null),
+                    "value" to MezzeType.BoolType,
                     "offset" to MezzeType.IntType
                 )),
                 decodeErrorType

@@ -158,7 +158,7 @@ class ContentAddressableHashingE2ETest {
     fun `ability implementations have content hashes`() {
         val source = """
             ability Describable 'a where {
-                describe: {val: 'a} -> String
+                describe: {val: 'a} -> Str
             }
 
             impl Describable Int where {
@@ -238,11 +238,11 @@ class ContentAddressableHashingE2ETest {
     fun `effect handlers have content hashes`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-                print: {msg: String} -> {} = {msg} -> {}
+                print: {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "test"}
@@ -372,15 +372,15 @@ class ContentAddressableHashingE2ETest {
     fun `multiple ability implementations have unique content hashes`() {
         val source = """
             ability Stringify 'a where {
-                stringify: {val: 'a} -> String
+                stringify: {val: 'a} -> Str
             }
 
             impl Stringify Int where {
-                stringify: {val: Int} -> String = {val} -> "int"
+                stringify: {val: Int} -> Str = {val} -> "int"
             }
 
-            impl Stringify String where {
-                stringify: {val: String} -> String = {val} -> "string"
+            impl Stringify Str where {
+                stringify: {val: Str} -> Str = {val} -> "string"
             }
 
             Stringify.stringify {val = 42}

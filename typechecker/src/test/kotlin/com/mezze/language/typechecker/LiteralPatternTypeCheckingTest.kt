@@ -156,7 +156,7 @@ class LiteralPatternTypeCheckingTest {
             let result = process { n = 5 }
         """.trimIndent()
 
-        // This should fail because branches return incompatible types: String vs Int
+        // This should fail because branches return incompatible types: Str vs Int
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }

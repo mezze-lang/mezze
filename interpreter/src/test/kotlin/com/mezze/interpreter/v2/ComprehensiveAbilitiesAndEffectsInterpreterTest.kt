@@ -24,11 +24,11 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             Show.show {val = 42}
@@ -47,8 +47,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               convert : {val: 'a} -> 'b
             }
 
-            impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> int::to_str {n = val}
+            impl Convert Int Str where {
+              convert : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             Convert.convert {val = 123}
@@ -64,18 +64,18 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
-            impl Show String where {
-              show : {val: String} -> String = {val} -> val
+            impl Show Str where {
+              show : {val: Str} -> Str = {val} -> val
             }
 
-            let displayValue: {val: 'a} -> String with Show 'a = {val} ->
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
               Show.show {val = val}
 
             displayValue {val = 42}
@@ -91,15 +91,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "INT:$(int::to_str {n = val})"
+              show : {val: Int} -> Str = {val} -> "INT:$(int::to_str {n = val})"
             }
 
-            impl Show String where {
-              show : {val: String} -> String = {val} -> "STR:$(val)"
+            impl Show Str where {
+              show : {val: Str} -> Str = {val} -> "STR:$(val)"
             }
 
             let displayInt = Show.show {val = 42}
@@ -116,22 +116,22 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testBasicEffectExecutionWithPropagation() {
         val source = """
             effect Database where {
-              query : {sql: String} -> String <Database, Log>
+              query : {sql: Str} -> Str <Database, Log>
             }
 
             effect Log where {
-              log : {message: String} -> {} <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             impl Database for MockDB where {
-              query : {sql: String} -> String = {sql} -> "mock_result_for_$(sql)"
+              query : {sql: Str} -> Str = {sql} -> "mock_result_for_$(sql)"
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: String} -> {} = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
 
-            let fetchData: {table: String} -> String <Database, Log> = {table} ->
+            let fetchData: {table: Str} -> Str <Database, Log> = {table} ->
               Database.query {sql = "SELECT * FROM $(table)"}
 
             perform ConsoleLogger, MockDB in fetchData {table = "users"}
@@ -145,35 +145,35 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testNestedEffectPropagationExecution() {
         val source = """
             effect Auth where {
-              authenticate : {token: String} -> Bool <Auth>
+              authenticate : {token: Str} -> Bool <Auth>
             }
 
             effect Database where {
-              query : {sql: String} -> String <Database, Log>
+              query : {sql: Str} -> Str <Database, Log>
             }
 
             effect Log where {
-              log : {message: String} -> {} <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             effect SecureDatabase where {
-              secureQuery : {sql: String, token: String} -> String <SecureDatabase, Database, Auth, Log>
+              secureQuery : {sql: Str, token: Str} -> Str <SecureDatabase, Database, Auth, Log>
             }
 
             impl Auth for MockAuth where {
-              authenticate : {token: String} -> Bool = {token} -> True
+              authenticate : {token: Str} -> Bool = {token} -> True
             }
 
             impl Database for MockDB where {
-              query : {sql: String} -> String = {sql} -> "db:$(sql)"
+              query : {sql: Str} -> Str = {sql} -> "db:$(sql)"
             }
 
             impl Log for MockLogger where {
-              log : {message: String} -> {} = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
 
             impl SecureDatabase for MockSecureDB where {
-              secureQuery : {sql: String, token: String} -> String = {sql, token} ->
+              secureQuery : {sql: Str, token: Str} -> Str = {sql, token} ->
                 if Auth.authenticate {token = token} then
                   Database.query {sql = sql}
                 else
@@ -192,19 +192,19 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testComplexAbilityAndEffectInteractionExecution() {
         val source = """
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "123"
+              show : {val: Int} -> Str = {val} -> "123"
             }
 
             impl Log for MockLogger where {
-              log : {message: String} -> {} = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
 
             perform MockLogger in do
@@ -225,7 +225,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Eq Int where {
@@ -233,11 +233,11 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "5"
+              show : {val: Int} -> Str = {val} -> "5"
             }
 
             impl Show Bool where {
-              show : {val: Bool} -> String = {val} -> "True"
+              show : {val: Bool} -> Str = {val} -> "True"
             }
 
             do
@@ -256,18 +256,18 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testEffectHandlerSwitchingExecution() {
         val source = """
             effect Log where {
-              log : {message: String} -> String <Log>
+              log : {message: Str} -> Str <Log>
             }
 
             impl Log for PrefixLogger where {
-              log : {message: String} -> String = {message} -> "PREFIX: $(message)"
+              log : {message: Str} -> Str = {message} -> "PREFIX: $(message)"
             }
 
             impl Log for SuffixLogger where {
-              log : {message: String} -> String = {message} -> "$(message) :SUFFIX"
+              log : {message: Str} -> Str = {message} -> "$(message) :SUFFIX"
             }
 
-            let logMessage: {msg: String} -> String <Log> = {msg} ->
+            let logMessage: {msg: Str} -> Str <Log> = {msg} ->
               Log.log {message = msg}
 
             let getResult = {} -> do
@@ -286,16 +286,16 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testPolymorphicAbilityResolutionExecution() {
         val source = """
             effect StringContainer where {
-              empty : {} -> String <StringContainer>,
-              add : {container: String, item: String} -> String <StringContainer>,
-              size : {container: String} -> Int <StringContainer>
+              empty : {} -> Str <StringContainer>,
+              add : {container: Str, item: Str} -> Str <StringContainer>,
+              size : {container: Str} -> Int <StringContainer>
             }
 
             impl StringContainer for TestContainer where {
-              empty : {} -> String = {} -> "",
-              add : {container: String, item: String} -> String = {container, item} ->
+              empty : {} -> Str = {} -> "",
+              add : {container: Str, item: Str} -> Str = {container, item} ->
                 if container == "" then item else "$(container),$(item)",
-              size : {container: String} -> Int = {container} ->
+              size : {container: Str} -> Int = {container} ->
                 if container == "" then 0 else 1
             }
 

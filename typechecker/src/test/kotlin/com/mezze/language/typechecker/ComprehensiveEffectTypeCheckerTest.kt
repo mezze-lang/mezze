@@ -23,8 +23,8 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testEffectDeclarationTypeChecking() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>,
-              debug : {msg: String, level: Int} -> {} <Log>
+              print : {msg: Str} -> {} <Log>,
+              debug : {msg: Str, level: Int} -> {} <Log>
             }
         """.trimIndent()
 
@@ -55,11 +55,11 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testSimpleImplDeclarationTypeChecking() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
         """.trimIndent()
 
@@ -88,11 +88,11 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testPerformExpressionTypeChecking() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Console in Log.print {msg = "Hello"}
@@ -164,7 +164,7 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testMultipleEffectsTypeChecking() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -172,7 +172,7 @@ class ComprehensiveEffectTypeCheckerTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for MathRandom where {
@@ -223,7 +223,7 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testDoBlockWithEffectsTypeChecking() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect Random where {
@@ -231,7 +231,7 @@ class ComprehensiveEffectTypeCheckerTest {
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Random for MathRandom where {
@@ -275,13 +275,13 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testEffectOperationParameterMatching() {
         val source = """
             effect FileSystem where {
-              readFile : {path: String} -> String <FileSystem>,
-              writeFile : {path: String, content: String} -> {} <FileSystem>
+              readFile : {path: Str} -> Str <FileSystem>,
+              writeFile : {path: Str, content: Str} -> {} <FileSystem>
             }
 
             impl FileSystem for MockFS where {
-              readFile : {path: String} -> String = {path} -> "mock content",
-              writeFile : {path: String, content: String} -> {} = {path, content} -> {}
+              readFile : {path: Str} -> Str = {path} -> "mock content",
+              writeFile : {path: Str, content: Str} -> {} = {path, content} -> {}
             }
         """.trimIndent()
 
@@ -309,11 +309,11 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testEffectRowInferenceInFunctions() {
         val source = """
             effect Log where {
-              print : {msg: String} -> {} <Log>
+              print : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             let loggedFunction = {name} -> do
@@ -347,13 +347,13 @@ class ComprehensiveEffectTypeCheckerTest {
     fun testNestedEffectCallsTypeChecking() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>,
-              debug : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>,
+              debug : {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> {},
-              debug : {msg: String} -> {} = {msg} -> {}
+              info : {msg: Str} -> {} = {msg} -> {},
+              debug : {msg: Str} -> {} = {msg} -> {}
             }
 
             let nestedLogging = {} ->

@@ -921,31 +921,22 @@ class SubstitutionApplier(
     private fun typeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BoolType
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    else -> {
-                        // Could be a type variable or type alias
-                        if (annotation.name.startsWith("'") || annotation.name.all { it.isLowerCase() }) {
-                            // Type variable - reuse from cache or create a fresh one
-                            // This ensures the same type parameter name maps to the same type variable
-                            // within a single method type conversion
-                            val normalizedName = annotation.name.removePrefix("'")
-                            val typeVar = typeVarCache.getOrPut(normalizedName) {
-                                TypeVar.fresh()
-                            }
-                            MezzeType.VarType(typeVar)
-                        } else {
-                            // Named type - use TypeApplication
-                            MezzeType.TypeApplication(annotation.name, emptyList())
-                        }
+                // Check primitive types first using centralized registry
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                // Not a primitive - could be a type variable or type alias
+                if (annotation.name.startsWith("'") || annotation.name.all { it.isLowerCase() }) {
+                    // Type variable - reuse from cache or create a fresh one
+                    // This ensures the same type parameter name maps to the same type variable
+                    // within a single method type conversion
+                    val normalizedName = annotation.name.removePrefix("'")
+                    val typeVar = typeVarCache.getOrPut(normalizedName) {
+                        TypeVar.fresh()
                     }
+                    MezzeType.VarType(typeVar)
+                } else {
+                    // Named type - use TypeApplication
+                    MezzeType.TypeApplication(annotation.name, emptyList())
                 }
             }
             is FunctionTypeAnnotation -> {
@@ -1312,19 +1303,8 @@ class SubstitutionApplier(
             // Found explicit implementation
             // Reconstruct the full type args from the impl's target types
             val implTypeArgs = impl.targetTypes.map { typeName ->
-                when (typeName) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BoolType
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    "Ordering" -> MezzeType.OrderingType
-                    else -> MezzeType.TypeApplication(typeName, emptyList())
-                }
+                // Use centralized registry for primitive types
+                PrimitiveTypes.fromName(typeName) ?: MezzeType.TypeApplication(typeName, emptyList())
             }
             // Content hash is now computed early (Phase 0.5) so it's available here
             val contentHash = impl.contentHash
@@ -1656,7 +1636,7 @@ class SubstitutionApplier(
                 when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
-                    "String" -> type is MezzeType.StringType
+                    "Str" -> type is MezzeType.StringType
                     "Bool" -> type is MezzeType.BoolType
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
@@ -1769,13 +1749,10 @@ class SubstitutionApplier(
      * Pretty print a type for ability constraint keys.
      */
     private fun prettyPrintType(type: MezzeType): String {
+        // Use centralized registry for primitive types
+        PrimitiveTypes.toName(type)?.let { return it }
+
         return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BoolType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
             is MezzeType.VarType -> "'${type.variable.name}"
             is MezzeType.TypeApplication -> {
                 if (type.args.isEmpty()) type.constructor
@@ -2345,24 +2322,14 @@ class SubstitutionApplier(
     private fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool" -> MezzeType.BoolType
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Ordering" -> MezzeType.OrderingType
-                    "Char" -> MezzeType.CharType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    else -> {
-                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                            MezzeType.VarType(TypeVar(annotation.name.removePrefix("'")))
-                        } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList())
-                        }
-                    }
+                // Use centralized registry for primitive types
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                // Not a primitive type
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    MezzeType.VarType(TypeVar(annotation.name.removePrefix("'")))
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList())
                 }
             }
             is FunctionTypeAnnotation -> {

@@ -83,7 +83,7 @@ class PipeOperatorIntegrationTest {
     void testPipeWithRecordOperations() {
         var ctx = runAndGetContext("""
             let person = {name = "Alice", age = 30}
-            let getName: {p: {name: String, ...}} -> String = {p} -> p.name
+            let getName: {p: {name: Str, ...}} -> Str = {p} -> p.name
             let greet = {name} -> "Hello, $(name)!"
             let result = person |> getName {p = @} |> greet {name = @}
             """);
@@ -103,7 +103,7 @@ class PipeOperatorIntegrationTest {
     @Test
     void testPipeWithRecordUpdates() {
         var ctx = runAndGetContext("""
-            let updateAge: {person: {name: String, age: Int}, newAge: Int} -> {name: String, age: Int} = {person, newAge} -> {...person, age = newAge}
+            let updateAge: {person: {name: Str, age: Int}, newAge: Int} -> {name: Str, age: Int} = {person, newAge} -> {...person, age = newAge}
             let person = {name = "Bob", age = 25}
             let result = person |> updateAge {person = @, newAge = 30}
             """);

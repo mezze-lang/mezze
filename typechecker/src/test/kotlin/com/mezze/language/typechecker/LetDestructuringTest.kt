@@ -143,7 +143,7 @@ class LetDestructuringTest {
 
     @Test
     fun `test destructured variables have correct types`() {
-        // name should be String, count should be Int, active should be Bool
+        // name should be Str, count should be Int, active should be Bool
         val code = """
             let record = { name = "test", count = 42, active = True }
             let { name, count, active } = record
@@ -293,7 +293,7 @@ class LetDestructuringTest {
     @Test
     fun `test destructuring with match expression`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             let handleResult = {r: Result} -> match r is
                 Ok { value } -> value

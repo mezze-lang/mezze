@@ -969,20 +969,10 @@ class ConstraintGenerator(
     private fun convertTypeAnnotationInternal(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
+                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
                 when (annotation.name) {
-                    "Int" -> MezzeType.IntType
-                    "Float" -> MezzeType.FloatType
-                    "String" -> MezzeType.StringType
-                    "Bool", "Boolean" -> MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
-                    "Nat" -> MezzeType.NatType
-                    "Frac" -> MezzeType.FracType
-                    "Ordering" -> MezzeType.OrderingType
-                    "Bytes" -> MezzeType.BytesType
-                    "ByteBuffer" -> MezzeType.ByteBufferType
-                    "Char" -> MezzeType.CharType
                     "Unit" -> MezzeType.RecordType(emptyMap())  // Unit is an empty record type
                     else -> {
                         // Type variable or type constructor

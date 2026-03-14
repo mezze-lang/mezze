@@ -232,7 +232,7 @@ class RecordVariantIntegrationTest {
         void testResultOk() {
             Object result = MezzeTestHelper.run("""
                 use std::result
-                let res: (Result String String) = Ok { val = "success" }
+                let res: (Result Str Str) = Ok { val = "success" }
                 res
                 """);
             assertInstanceOf(MezzeVariant.class, result);
@@ -244,7 +244,7 @@ class RecordVariantIntegrationTest {
         void testResultErr() {
             Object result = MezzeTestHelper.run("""
                 use std::result
-                let res: (Result String String) = Err { error = "failed" }
+                let res: (Result Str Str) = Err { error = "failed" }
                 res
                 """);
             assertInstanceOf(MezzeVariant.class, result);
@@ -290,7 +290,7 @@ class RecordVariantIntegrationTest {
         void testMatchResult() {
             Object result = MezzeTestHelper.run("""
                 use std::result
-                let okResult: (Result Int String) = Ok { val = 100 }
+                let okResult: (Result Int Str) = Ok { val = 100 }
                 result::fold {
                     result = okResult,
                     on_ok = { val } -> val,

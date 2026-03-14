@@ -89,7 +89,7 @@ class IfLetEffectTrackingTest {
     @Test
     fun `test if-let with nested record in option`() {
         val code = """
-            let getPerson: {id: Int} -> | Some {val: {name: String, age: Int}}, None | = {id} ->
+            let getPerson: {id: Int} -> | Some {val: {name: Str, age: Int}}, None | = {id} ->
                 match id is
                     1 -> Some {val = {name = "Alice", age = 30}}
                     _ -> None
@@ -264,7 +264,7 @@ class IfLetEffectTrackingTest {
     @Test
     fun `test if-let with multiple match cases`() {
         val code = """
-            let lookup: {key: Int} -> | Some {val: String}, None | = {key} ->
+            let lookup: {key: Int} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     1 -> Some {val = "one"}
                     2 -> Some {val = "two"}

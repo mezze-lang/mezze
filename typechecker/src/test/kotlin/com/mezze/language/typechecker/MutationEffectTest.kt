@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
  * Tests cover:
  * 1. Mutation effect declaration and operations
  * 2. LocalMut performer
- * 3. DebugMut performer
+ * 3. DebugLocalMut performer
  * 4. Mutable newtypes (MutSeq, MutMap, MutSet, MutBytes, MutInt, MutFloat, MutBool)
  * 5. Conversion functions (to_mut, to_immut)
  * 6. MutSeq operations (sort, reverse, fill, etc.)
@@ -44,7 +44,7 @@ class MutationEffectTest {
     @Test
     fun `test Mutation effect can be declared with mutate operation`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
         """.trimIndent()
@@ -57,11 +57,11 @@ class MutationEffectTest {
     @Test
     fun `test Mutation effect operation can be called`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            let doMutate: {} -> {} <Mutation> = {} -> Mutation.mutate {}
+            let doMutate: {} -> {} <Mut> = {} -> Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -76,11 +76,11 @@ class MutationEffectTest {
     @Test
     fun `test LocalMut performer can be declared`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
         """.trimIndent()
@@ -93,15 +93,15 @@ class MutationEffectTest {
     @Test
     fun `test LocalMut can handle Mutation effect`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
-            let test = {} -> perform LocalMut in Mutation.mutate {}
+            let test = {} -> perform LocalMut in Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -112,18 +112,18 @@ class MutationEffectTest {
     @Test
     fun `test LocalMut handles multiple mutate calls`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
             let test = {} -> perform LocalMut in do
-                Mutation.mutate {}
-                Mutation.mutate {}
-                Mutation.mutate {}
+                Mut.mutate {}
+                Mut.mutate {}
+                Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -136,11 +136,11 @@ class MutationEffectTest {
     // ========================================================================
 
     @Test
-    fun `test DebugMut can handle Mutation effect`() {
+    fun `test DebugLocalMut can handle Mutation effect`() {
         val source = """
-            use std::effects::mutation::{Mutation, DebugMut}
+            use std::effects::mutation::{Mut, DebugLocalMut}
 
-            let test = {} -> perform DebugMut in Mutation.mutate {}
+            let test = {} -> perform DebugLocalMut in Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -155,7 +155,7 @@ class MutationEffectTest {
     @Test
     fun `test MutSeq can be created from seq`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut}
 
             let test = {} -> perform LocalMut in do
                 let arr: MutSeq Int = seq_to_mut {seq = [1, 2, 3]}
@@ -170,11 +170,11 @@ class MutationEffectTest {
     @Test
     fun `test MutMap can be created from map`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutMap, map_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutMap, map_to_mut}
             use std::collections::map::{empty}
 
             let test = {} -> perform LocalMut in do
-                let m: MutMap String Int = map_to_mut {map = empty {}}
+                let m: MutMap Str Int = map_to_mut {map = empty {}}
                 {}
         """.trimIndent()
 
@@ -186,7 +186,7 @@ class MutationEffectTest {
     @Test
     fun `test MutSet can be created from set`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSet, set_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutSet, set_to_mut}
             use std::collections::set::{empty}
 
             let test = {} -> perform LocalMut in do
@@ -202,7 +202,7 @@ class MutationEffectTest {
     @Test
     fun `test MutInt can be created from int`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut}
 
             let test = {} -> perform LocalMut in do
                 let n: MutInt = int_to_mut {n = 42}
@@ -221,7 +221,7 @@ class MutationEffectTest {
     @Test
     fun `test seq_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut}
 
             let convert: {xs: ['a]} -> MutSeq 'a = {xs} -> perform LocalMut in
                 seq_to_mut {seq = xs}
@@ -235,7 +235,7 @@ class MutationEffectTest {
     @Test
     fun `test seq_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut}
 
             let round_trip: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -254,7 +254,7 @@ class MutationEffectTest {
     @Test
     fun `test map_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutMap, map_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutMap, map_to_mut}
 
             let convert: {m: Map 'k 'v} -> MutMap 'k 'v = {m} -> perform LocalMut in
                 map_to_mut {map = m}
@@ -268,7 +268,7 @@ class MutationEffectTest {
     @Test
     fun `test map_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, map_to_mut, map_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, map_to_mut, map_to_immut}
 
             let round_trip: {m: Map 'k 'v} -> Map 'k 'v = {m} -> perform LocalMut in do
                 let mm = map_to_mut {map = m}
@@ -287,7 +287,7 @@ class MutationEffectTest {
     @Test
     fun `test set_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSet, set_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutSet, set_to_mut}
 
             let convert: {s: Set 'a} -> MutSet 'a = {s} -> perform LocalMut in
                 set_to_mut {set = s}
@@ -301,7 +301,7 @@ class MutationEffectTest {
     @Test
     fun `test set_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, set_to_mut, set_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, set_to_mut, set_to_immut}
 
             let round_trip: {s: Set 'a} -> Set 'a = {s} -> perform LocalMut in do
                 let ms = set_to_mut {set = s}
@@ -320,7 +320,7 @@ class MutationEffectTest {
     @Test
     fun `test bytes_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutBytes, bytes_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutBytes, bytes_to_mut}
 
             let convert: {b: Bytes} -> MutBytes = {b} -> perform LocalMut in
                 bytes_to_mut {bytes = b}
@@ -334,7 +334,7 @@ class MutationEffectTest {
     @Test
     fun `test bytes_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, bytes_to_mut, bytes_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, bytes_to_mut, bytes_to_immut}
 
             let round_trip: {b: Bytes} -> Bytes = {b} -> perform LocalMut in do
                 let mb = bytes_to_mut {bytes = b}
@@ -353,7 +353,7 @@ class MutationEffectTest {
     @Test
     fun `test int_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut}
 
             let convert: {n: Int} -> MutInt = {n} -> perform LocalMut in
                 int_to_mut {n = n}
@@ -367,7 +367,7 @@ class MutationEffectTest {
     @Test
     fun `test int_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, int_to_mut, read_int}
+            use std::effects::mutation::{Mut, LocalMut, int_to_mut, read_int}
 
             let round_trip: {n: Int} -> Int = {n} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
@@ -382,7 +382,7 @@ class MutationEffectTest {
     @Test
     fun `test float_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutFloat, float_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutFloat, float_to_mut}
 
             let convert: {n: Float} -> MutFloat = {n} -> perform LocalMut in
                 float_to_mut {n = n}
@@ -396,7 +396,7 @@ class MutationEffectTest {
     @Test
     fun `test float_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, float_to_mut, float_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, float_to_mut, float_to_immut}
 
             let round_trip: {n: Float} -> Float = {n} -> perform LocalMut in do
                 let mn = float_to_mut {n = n}
@@ -411,7 +411,7 @@ class MutationEffectTest {
     @Test
     fun `test bool_to_mut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutBool, bool_to_mut}
+            use std::effects::mutation::{Mut, LocalMut, MutBool, bool_to_mut}
 
             let convert: {b: Bool} -> MutBool = {b} -> perform LocalMut in
                 bool_to_mut {b = b}
@@ -425,7 +425,7 @@ class MutationEffectTest {
     @Test
     fun `test bool_to_immut has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, bool_to_mut, bool_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, bool_to_mut, bool_to_immut}
 
             let round_trip: {b: Bool} -> Bool = {b} -> perform LocalMut in do
                 let mb = bool_to_mut {b = b}
@@ -444,7 +444,7 @@ class MutationEffectTest {
     @Test
     fun `test sort has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, sort}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort}
 
             let sort_ints: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -460,7 +460,7 @@ class MutationEffectTest {
     @Test
     fun `test sort_by has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, sort_by}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort_by}
 
             let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -476,7 +476,7 @@ class MutationEffectTest {
     @Test
     fun `test reverse has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, reverse}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
             let reverse_seq: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -492,7 +492,7 @@ class MutationEffectTest {
     @Test
     fun `test fill has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, fill}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill}
 
             let fill_with: {xs: ['a], v: 'a} -> ['a] = {xs, v} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -508,7 +508,7 @@ class MutationEffectTest {
     @Test
     fun `test fill_range has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, fill_range}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill_range}
 
             let fill_partial: {xs: ['a], start: Int, end: Int, v: 'a} -> ['a] = {xs, start, end, v} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -528,7 +528,7 @@ class MutationEffectTest {
     @Test
     fun `test read_int has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, int_to_mut, read_int}
+            use std::effects::mutation::{Mut, LocalMut, int_to_mut, read_int}
 
             let get_value: {n: Int} -> Int = {n} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
@@ -543,7 +543,7 @@ class MutationEffectTest {
     @Test
     fun `test write_int has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, int_to_mut, write_int, read_int}
+            use std::effects::mutation::{Mut, LocalMut, int_to_mut, write_int, read_int}
 
             let set_value: {initial: Int, new_val: Int} -> Int = {initial, new_val} -> perform LocalMut in do
                 let mn = int_to_mut {n = initial}
@@ -559,7 +559,7 @@ class MutationEffectTest {
     @Test
     fun `test incr has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, int_to_mut, incr, read_int}
+            use std::effects::mutation::{Mut, LocalMut, int_to_mut, incr, read_int}
 
             let increment: {n: Int, delta: Int} -> Int = {n, delta} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
@@ -575,7 +575,7 @@ class MutationEffectTest {
     @Test
     fun `test decr has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, int_to_mut, decr, read_int}
+            use std::effects::mutation::{Mut, LocalMut, int_to_mut, decr, read_int}
 
             let decrement: {n: Int, delta: Int} -> Int = {n, delta} -> perform LocalMut in do
                 let mn = int_to_mut {n = n}
@@ -595,7 +595,7 @@ class MutationEffectTest {
     @Test
     fun `test for_range has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, for_range, int_to_mut, incr, read_int}
+            use std::effects::mutation::{Mut, LocalMut, for_range, int_to_mut, incr, read_int}
 
             let sum_range: {start: Int, end: Int} -> Int = {start, end} -> perform LocalMut in do
                 let acc = int_to_mut {n = 0}
@@ -615,7 +615,7 @@ class MutationEffectTest {
     @Test
     fun `test while has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, while, int_to_mut, incr, read_int}
+            use std::effects::mutation::{Mut, LocalMut, while, int_to_mut, incr, read_int}
 
             let count_to: {target: Int} -> Int = {target} -> perform LocalMut in do
                 let counter = int_to_mut {n = 0}
@@ -634,7 +634,7 @@ class MutationEffectTest {
     @Test
     fun `test for_range can be used with mutation body`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, for_range, int_to_mut, incr, read_int}
+            use std::effects::mutation::{Mut, LocalMut, for_range, int_to_mut, incr, read_int}
 
             let test = {} -> perform LocalMut in do
                 let sum = int_to_mut {n = 0}
@@ -658,7 +658,7 @@ class MutationEffectTest {
     @Test
     fun `test seq_with_capacity has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_with_capacity}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_with_capacity}
 
             let create_seq: {cap: Int} -> MutSeq Int = {cap} -> perform LocalMut in
                 seq_with_capacity {capacity = cap}
@@ -672,9 +672,9 @@ class MutationEffectTest {
     @Test
     fun `test map_with_capacity has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutMap, map_with_capacity}
+            use std::effects::mutation::{Mut, LocalMut, MutMap, map_with_capacity}
 
-            let create_map: {cap: Int} -> MutMap String Int = {cap} -> perform LocalMut in
+            let create_map: {cap: Int} -> MutMap Str Int = {cap} -> perform LocalMut in
                 map_with_capacity {capacity = cap}
         """.trimIndent()
 
@@ -686,7 +686,7 @@ class MutationEffectTest {
     @Test
     fun `test set_with_capacity has correct type signature`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSet, set_with_capacity}
+            use std::effects::mutation::{Mut, LocalMut, MutSet, set_with_capacity}
 
             let create_set: {cap: Int} -> MutSet Int = {cap} -> perform LocalMut in
                 set_with_capacity {capacity = cap}
@@ -704,12 +704,12 @@ class MutationEffectTest {
     @Test
     fun `test Mutation effect propagates through function calls`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            let inner: {} -> {} <Mutation> = {} -> Mutation.mutate {}
-            let outer: {} -> {} <Mutation> = {} -> inner {}
+            let inner: {} -> {} <Mut> = {} -> Mut.mutate {}
+            let outer: {} -> {} <Mut> = {} -> inner {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -720,16 +720,16 @@ class MutationEffectTest {
     @Test
     fun `test Mutation effect handled by perform removes effect`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
-            # This function has <Mutation> effect
-            let mutating: {} -> {} <Mutation> = {} -> Mutation.mutate {}
+            # This function has <Mut> effect
+            let mutating: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # After perform, the effect is handled - result is pure
             let pure_result: {} -> {} = {} -> perform LocalMut in mutating {}
@@ -743,18 +743,18 @@ class MutationEffectTest {
     @Test
     fun `test nested perform with LocalMut`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
             let test = {} -> perform LocalMut in do
-                Mutation.mutate {}
+                Mut.mutate {}
                 perform LocalMut in do
-                    Mutation.mutate {}
+                    Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -765,7 +765,7 @@ class MutationEffectTest {
     @Test
     fun `test complete mutation workflow - convert mutate convert back`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, reverse}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
             let reverse_seq: {seq: ['a]} -> ['a] = {seq} -> perform LocalMut in do
                 let mut_seq = seq_to_mut {seq = seq}
@@ -785,12 +785,12 @@ class MutationEffectTest {
     @Test
     fun `test assigning effectful function to pure type causes error`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            # Function has <Mutation> effect
-            let effectful: {} -> {} <Mutation> = {} -> Mutation.mutate {}
+            # Function has <Mut> effect
+            let effectful: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # Trying to assign effectful function to pure function type should fail
             let pure_fn: {} -> {} = effectful
@@ -805,7 +805,7 @@ class MutationEffectTest {
     @Test
     fun `test wrong performer type causes error`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
@@ -818,7 +818,7 @@ class MutationEffectTest {
             }
 
             # Using wrong performer for Mutation should fail
-            let test = {} -> perform OtherPerformer in Mutation.mutate {}
+            let test = {} -> perform OtherPerformer in Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -830,12 +830,12 @@ class MutationEffectTest {
     @Test
     fun `test calling mutate without effect in signature causes error`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             # Function claims to be pure but calls effectful operation
-            let bad_fn: {} -> {} = {} -> Mutation.mutate {}
+            let bad_fn: {} -> {} = {} -> Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -852,7 +852,7 @@ class MutationEffectTest {
     fun `test validateHermeticEffects directly`() {
         // Direct test of the validation function
         val error = assertThrows<TypeCheckError> {
-            com.mezze.language.typechecker.context.ContextBuilder.validateHermeticEffects(setOf("Mutation", "IO"))
+            com.mezze.language.typechecker.context.ContextBuilder.validateHermeticEffects(setOf("Mut", "IO"))
         }
         assertTrue(error.message?.contains("hermetic") == true,
             "Expected hermetic error but got: ${error.message}")
@@ -861,17 +861,17 @@ class MutationEffectTest {
     @Test
     fun `test Mutation cannot coexist with IO effect`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             effect IO where {
-                read: {} -> String
+                read: {} -> Str
             }
 
             # This should fail - Mutation is hermetic and cannot mix with IO
-            let bad_fn: {} -> {} <Mutation, IO> = {} -> do
-                Mutation.mutate {}
+            let bad_fn: {} -> {} <Mut, IO> = {} -> do
+                Mut.mutate {}
                 IO.read {}
                 {}
         """.trimIndent()
@@ -880,14 +880,14 @@ class MutationEffectTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program)
         }
-        assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mutation") == true,
+        assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mut") == true,
             "Expected hermetic error but got: ${error.message}")
     }
 
     @Test
     fun `test Mutation cannot coexist with State effect`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
@@ -897,8 +897,8 @@ class MutationEffectTest {
             }
 
             # This should fail - Mutation cannot coexist with State
-            let bad_fn: {} -> Int <Mutation, State> = {} -> do
-                Mutation.mutate {}
+            let bad_fn: {} -> Int <Mut, State> = {} -> do
+                Mut.mutate {}
                 State.get {}
         """.trimIndent()
 
@@ -906,26 +906,26 @@ class MutationEffectTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program)
         }
-        assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mutation") == true,
+        assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mut") == true,
             "Expected hermetic error but got: ${error.message}")
     }
 
     @Test
     fun `test Mutation alone is valid`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
             # This is fine - Mutation alone
-            let good_fn: {} -> {} <Mutation> = {} -> Mutation.mutate {}
+            let good_fn: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # This is also fine - handled by performer
-            let handled_fn: {} -> {} = {} -> perform LocalMut in Mutation.mutate {}
+            let handled_fn: {} -> {} = {} -> perform LocalMut in Mut.mutate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -936,15 +936,15 @@ class MutationEffectTest {
     @Test
     fun `test nested perform handles Mutation hermetically`() {
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             effect IO where {
-                print: {msg: String} -> {}
+                print: {msg: Str} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
@@ -955,7 +955,7 @@ class MutationEffectTest {
             # This should work: Mutation is fully handled before IO
             let sequential_fn: {} -> {} = {} -> do
                 # First handle mutation completely
-                perform LocalMut in Mutation.mutate {}
+                perform LocalMut in Mut.mutate {}
                 # Then do IO separately
                 perform Console in IO.print {msg = "done"}
         """.trimIndent()
@@ -972,7 +972,7 @@ class MutationEffectTest {
     @Test
     fun `test importing mutation module`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut}
 
             let test = {} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = [1, 2, 3]}
@@ -987,7 +987,7 @@ class MutationEffectTest {
     @Test
     fun `test using MutSeq operations from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, reverse}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, reverse}
 
             let reverse_array: {xs: ['a]} -> ['a] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -1003,7 +1003,7 @@ class MutationEffectTest {
     @Test
     fun `test using for_range from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, for_range, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, for_range, int_to_mut, read_int, incr}
 
             let sum_to_n: {n: Int} -> Int = {n} -> perform LocalMut in do
                 let acc = int_to_mut {n = 0}
@@ -1023,7 +1023,7 @@ class MutationEffectTest {
     @Test
     fun `test using while from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, while, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, while, int_to_mut, read_int, incr}
 
             let count_to: {target: Int} -> Int = {target} -> perform LocalMut in do
                 let counter = int_to_mut {n = 0}
@@ -1042,7 +1042,7 @@ class MutationEffectTest {
     @Test
     fun `test using sort from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, sort}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort}
 
             let sort_ints: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -1058,7 +1058,7 @@ class MutationEffectTest {
     @Test
     fun `test using sort_by from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, sort_by}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, sort_by}
 
             let sort_descending: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -1072,11 +1072,11 @@ class MutationEffectTest {
     }
 
     @Test
-    fun `test using DebugMut from stdlib`() {
+    fun `test using DebugLocalMut from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, DebugMut, seq_to_mut, seq_to_immut}
+            use std::effects::mutation::{Mut, DebugLocalMut, seq_to_mut, seq_to_immut}
 
-            let test = {} -> perform DebugMut in do
+            let test = {} -> perform DebugLocalMut in do
                 let arr = seq_to_mut {seq = [1, 2, 3]}
                 seq_to_immut {seq = arr}
         """.trimIndent()
@@ -1089,7 +1089,7 @@ class MutationEffectTest {
     @Test
     fun `test using fill from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, seq_to_mut, seq_to_immut, fill}
+            use std::effects::mutation::{Mut, LocalMut, seq_to_mut, seq_to_immut, fill}
 
             let fill_with_zeros: {xs: [Int]} -> [Int] = {xs} -> perform LocalMut in do
                 let arr = seq_to_mut {seq = xs}
@@ -1105,10 +1105,10 @@ class MutationEffectTest {
     @Test
     fun `test using map conversions from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, map_to_mut, map_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, map_to_mut, map_to_immut}
             use std::collections::map
 
-            let process_map: {m: Map String Int} -> Map String Int = {m} -> perform LocalMut in do
+            let process_map: {m: Map Str Int} -> Map Str Int = {m} -> perform LocalMut in do
                 let mut_m = map_to_mut {map = m}
                 map_to_immut {map = mut_m}
         """.trimIndent()
@@ -1121,7 +1121,7 @@ class MutationEffectTest {
     @Test
     fun `test using set conversions from stdlib`() {
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, set_to_mut, set_to_immut}
+            use std::effects::mutation::{Mut, LocalMut, set_to_mut, set_to_immut}
             use std::collections::set
 
             let process_set: {s: Set Int} -> Set Int = {s} -> perform LocalMut in do
@@ -1142,7 +1142,7 @@ class MutationEffectTest {
     fun `test user-defined newtype wrapping record with MutInt`() {
         // User defines a newtype that wraps a record containing MutInt
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # User-defined newtype wrapping a record with a mutable field
             newtype Counter = Counter { count: MutInt }
@@ -1173,7 +1173,7 @@ class MutationEffectTest {
     fun `test user-defined newtype wrapping record with MutSeq`() {
         // User defines a newtype that wraps a record containing MutSeq
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
 
             # User-defined buffer newtype wrapping a record
             newtype Buffer 'a = Buffer { data: MutSeq 'a }
@@ -1201,10 +1201,10 @@ class MutationEffectTest {
     fun `test using stdlib MutInt newtype in function signatures`() {
         // User can use the stdlib-provided MutInt newtype in their own functions
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # User function that takes MutInt and modifies it
-            let double_incr: {n: MutInt} -> {} <Mutation> = {n} -> do
+            let double_incr: {n: MutInt} -> {} <Mut> = {n} -> do
                 incr {n = n, delta = 1}
                 incr {n = n, delta = 1}
 
@@ -1224,10 +1224,10 @@ class MutationEffectTest {
     fun `test using stdlib MutSeq newtype in function signatures`() {
         // User can use the stdlib-provided MutSeq newtype in their own functions
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort, reverse}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort, reverse}
 
             # User function that operates on MutSeq
-            let sort_and_reverse: {arr: MutSeq Int} -> {} <Mutation> = {arr} -> do
+            let sort_and_reverse: {arr: MutSeq Int} -> {} <Mut> = {arr} -> do
                 sort {seq = arr}
                 reverse {seq = arr}
 
@@ -1246,16 +1246,16 @@ class MutationEffectTest {
     fun `test record containing mutable fields`() {
         // User can create records that contain mutable fields
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # A record with mutable coordinates
-            let make_point: {x: Int, y: Int} -> {x: MutInt, y: MutInt} <Mutation> = {x, y} ->
+            let make_point: {x: Int, y: Int} -> {x: MutInt, y: MutInt} <Mut> = {x, y} ->
                 {x = int_to_mut {n = x}, y = int_to_mut {n = y}}
 
-            let move_x: {p: {x: MutInt, y: MutInt}, delta: Int} -> {} <Mutation> = {p, delta} ->
+            let move_x: {p: {x: MutInt, y: MutInt}, delta: Int} -> {} <Mut> = {p, delta} ->
                 incr {n = p.x, delta = delta}
 
-            let get_x: {p: {x: MutInt, y: MutInt}} -> Int <Mutation> = {p} ->
+            let get_x: {p: {x: MutInt, y: MutInt}} -> Int <Mut> = {p} ->
                 read_int {n = p.x}
 
             let test = {} -> perform LocalMut in do
@@ -1277,18 +1277,18 @@ class MutationEffectTest {
     fun `test type alias for record with mutable fields`() {
         // Type alias for a record containing mutable data
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # Type alias for a mutable counter record
-            type MutCounterRec = {value: MutInt, name: String}
+            type MutCounterRec = {value: MutInt, name: Str}
 
-            let make_counter: {name: String} -> MutCounterRec <Mutation> = {name} ->
+            let make_counter: {name: Str} -> MutCounterRec <Mut> = {name} ->
                 {value = int_to_mut {n = 0}, name = name}
 
-            let increment: {c: MutCounterRec} -> {} <Mutation> = {c} ->
+            let increment: {c: MutCounterRec} -> {} <Mut> = {c} ->
                 incr {n = c.value, delta = 1}
 
-            let get_value: {c: MutCounterRec} -> Int <Mutation> = {c} ->
+            let get_value: {c: MutCounterRec} -> Int <Mut> = {c} ->
                 read_int {n = c.value}
 
             let test = {} -> perform LocalMut in do
@@ -1307,12 +1307,12 @@ class MutationEffectTest {
     fun `test type alias variant with mutable payload`() {
         // Type alias for a variant that can hold mutable data
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutInt, int_to_mut, read_int, incr}
+            use std::effects::mutation::{Mut, LocalMut, MutInt, int_to_mut, read_int, incr}
 
             # Type alias for a variant - mutable or immutable counter
             type CounterState = | Frozen { value: Int }, Active { value: MutInt } |
 
-            let freeze_counter: {state: CounterState} -> Int <Mutation> = {state} ->
+            let freeze_counter: {state: CounterState} -> Int <Mut> = {state} ->
                 match state is
                     Frozen { value } -> value
                     Active { value } -> read_int {n = value}
@@ -1332,9 +1332,9 @@ class MutationEffectTest {
     fun `test using MutSeq directly without alias`() {
         // Using MutSeq directly in function signatures
         val source = """
-            use std::effects::mutation::{Mutation, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
+            use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut, sort}
 
-            let sort_array: {arr: MutSeq Int} -> {} <Mutation> = {arr} ->
+            let sort_array: {arr: MutSeq Int} -> {} <Mut> = {arr} ->
                 sort {seq = arr}
 
             let test = {} -> perform LocalMut in do
@@ -1354,13 +1354,14 @@ class MutationEffectTest {
 
     @Test
     fun `test user can define custom performer for Mutation`() {
-        // User defines their own performer (like DebugMut or LocalMut)
+        // User defines their own performer (like DebugLocalMut or LocalMut)
         val source = """
-            use std::effects::mutation::{Mutation, seq_to_mut, seq_to_immut}
+            use std::effects::mutation::{Mut, seq_to_mut, seq_to_immut}
 
             # User-defined custom performer
-            impl Mutation for MyMut where {
-                mutate = {} -> {}
+            impl Mut for MyMut where {
+                mutate = {act} -> act {},
+                loop = {cond, body} -> __native_mutation_loop {cond = cond, body = body}
             }
 
             let test = {} -> perform MyMut in do
@@ -1378,15 +1379,15 @@ class MutationEffectTest {
         // User creates a performer that logs before mutating
         // Note: This works because the effects are handled separately
         val source = """
-            effect Mutation where {
+            effect Mut where {
                 mutate: {} -> {}
             }
 
             effect Log where {
-                log: {msg: String} -> {}
+                log: {msg: Str} -> {}
             }
 
-            impl Mutation for LocalMut where {
+            impl Mut for LocalMut where {
                 mutate = {} -> {}
             }
 
@@ -1395,7 +1396,7 @@ class MutationEffectTest {
             }
 
             # A function that uses Mutation
-            let do_mutation: {} -> {} <Mutation> = {} -> Mutation.mutate {}
+            let do_mutation: {} -> {} <Mut> = {} -> Mut.mutate {}
 
             # Run with both effects handled separately (not mixed!)
             let test = {} -> do

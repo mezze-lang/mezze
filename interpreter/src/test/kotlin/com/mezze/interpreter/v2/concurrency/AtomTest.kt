@@ -33,8 +33,8 @@ class AtomTest {
         let reset: {atom: Atom 'a, value: 'a} -> 'a = {atom, value} -> __native_atom_reset {atom = atom, value = value}
         let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
         let compare_and_set: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool = {atom, expected, new} -> __native_atom_cas {atom = atom, expected = expected, new = new}
-        let add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {} = {atom, key, f} -> __native_atom_add_watch {atom = atom, key = key, f = f}
-        let remove_watch: {atom: Atom 'a, key: String} -> {} = {atom, key} -> __native_atom_remove_watch {atom = atom, key = key}
+        let add_watch: {atom: Atom 'a, key: Str, f: {key: Str, old: 'a, new: 'a} -> {}} -> {} = {atom, key, f} -> __native_atom_add_watch {atom = atom, key = key, f = f}
+        let remove_watch: {atom: Atom 'a, key: Str} -> {} = {atom, key} -> __native_atom_remove_watch {atom = atom, key = key}
         let atom_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a = {value, validator} -> __native_atom_new_validated {value = value, validator = validator}
         let set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {} = {atom, validator} -> __native_atom_set_validator {atom = atom, validator = validator}
     """.trimIndent()

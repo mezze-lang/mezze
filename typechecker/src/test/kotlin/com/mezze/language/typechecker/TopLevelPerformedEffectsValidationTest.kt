@@ -60,7 +60,7 @@ class TopLevelPerformedEffectsValidationTest {
         // Must wrap in function: let result = {} -> perform Console in Log.print {msg = "test"}
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -83,7 +83,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `let binding calling function with performed effects is rejected`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -107,7 +107,7 @@ class TopLevelPerformedEffectsValidationTest {
         // This is the pattern: let result = ({} -> perform Handler in expr) {}
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -154,7 +154,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `function definition with performed effects is allowed`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -175,7 +175,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `multiple function definitions with performed effects are allowed`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -200,14 +200,14 @@ class TopLevelPerformedEffectsValidationTest {
     fun `function returning function with performed effects is allowed`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
                 print = {msg} -> {}
             }
 
-            let makeLogger = {prefix: String} -> {} -> perform Console in
+            let makeLogger = {prefix: Str} -> {} -> perform Console in
                 Log.print {msg = prefix}
         """.trimIndent()
 
@@ -226,7 +226,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `checkProgram allows bare effectful expression for REPL`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -249,7 +249,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `checkProgramForExecution rejects bare effectful expression`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -274,7 +274,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `checkProgramForExecution rejects multiple bare effectful expressions`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -351,7 +351,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `chained effectful calls at top-level are rejected`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -379,7 +379,7 @@ class TopLevelPerformedEffectsValidationTest {
         // This is the recommended pattern when you need to use effectful code
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -402,7 +402,7 @@ class TopLevelPerformedEffectsValidationTest {
     fun `valid main program with effectful helpers passes execution check`() {
         val source = """
             effect Log where {
-                print: {msg: String} -> {} <Log>
+                print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -435,7 +435,7 @@ class TopLevelPerformedEffectsValidationTest {
                 throw: { error: 'error } -> 'a <Exception>
             }
 
-            impl Exception for ExceptionToResult having 'error = String where {
+            impl Exception for ExceptionToResult having 'error = Str where {
                 throw = { error } -> suspend_with { value = Err { error } }
             }
 
@@ -487,7 +487,7 @@ class TopLevelPerformedEffectsValidationTest {
                 throw: { error: 'error } -> 'a <Exception>
             }
 
-            impl Exception for ExceptionToResult having 'error = String where {
+            impl Exception for ExceptionToResult having 'error = Str where {
                 throw = { error } -> suspend_with { value = Err { error } }
             }
 

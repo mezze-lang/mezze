@@ -31,7 +31,7 @@ class HttpModuleTest {
                 {key = "email", value = JString {val = "alice@example.com"}}
             ] }
 
-            let user: Result {name: String, email: String} DecodeError = Decode.decode {val = json_obj, config = default_config}
+            let user: Result {name: Str, email: Str} DecodeError = Decode.decode {val = json_obj, config = default_config}
             match user is
                 Ok { val } -> val.name
                 Err { error } -> "error"

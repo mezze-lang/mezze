@@ -30,11 +30,11 @@ class SuspendedTypeTest {
     fun `perform with partial effect handling creates function with remaining effects`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect FileSystem where {
-                write: {path: String, content: String} -> {} <FileSystem>
+                write: {path: Str, content: Str} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -78,7 +78,7 @@ class SuspendedTypeTest {
     fun `perform with all effects handled returns function with performed marker`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -117,11 +117,11 @@ class SuspendedTypeTest {
     fun `perform on function handles effects sequentially`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect FileSystem where {
-                write: {path: String, content: String} -> {} <FileSystem>
+                write: {path: Str, content: Str} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -166,7 +166,7 @@ class SuspendedTypeTest {
     fun `perform on function reference removes effects from function type`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -198,11 +198,11 @@ class SuspendedTypeTest {
     fun `FunctionType with partial effect handling`() {
         val source = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect FileSystem where {
-                write: {path: String, content: String} -> {} <FileSystem>
+                write: {path: Str, content: Str} -> {} <FileSystem>
             }
 
             impl Log for Console where {

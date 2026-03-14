@@ -22,7 +22,7 @@ pub let modulo = { l: Int, r: Int } ->
 pub let to_str = { n: Int } ->
     __native_int_to_str { n = n }
 
-pub let from_string = { s: String } ->
+pub let from_string = { s: Str } ->
     __native_int_from_string { s = s }
 
 pub let from_nat = { n: Nat } ->

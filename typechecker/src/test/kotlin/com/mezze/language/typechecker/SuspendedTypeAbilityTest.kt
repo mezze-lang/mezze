@@ -54,11 +54,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -78,11 +78,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -102,11 +102,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -126,11 +126,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -150,11 +150,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getX: {} -> Int <Log> = {} -> do
@@ -179,11 +179,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              print: {msg: String} -> {} <Log>
+              print: {msg: Str} -> {} <Log>
             }
 
             impl Log for Console where {
-              print: {msg: String} -> {} = {msg} -> {}
+              print: {msg: Str} -> {} = {msg} -> {}
             }
 
             let innerFunc: {x: Int} -> Int <Log> = {x} -> do
@@ -210,14 +210,14 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
-            let getText: {} -> String <Log> = {} -> do
+            let getText: {} -> Str <Log> = {} -> do
                 Log.println { msg = "Getting text" }
                 "Hello"
 
@@ -225,7 +225,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "String <Log>"  // Effect propagates through string interpolation
+            "Str <Log>"  // Effect propagates through string interpolation
         )
     }
 
@@ -234,14 +234,14 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
-            let getText: {} -> String <Log> = {} -> do
+            let getText: {} -> Str <Log> = {} -> do
                 Log.println { msg = "Getting text" }
                 "Hello"
 
@@ -260,11 +260,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getBool: {} -> Bool <Log> = {} -> do
@@ -284,11 +284,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getBool: {} -> Bool <Log> = {} -> do
@@ -310,11 +310,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -334,11 +334,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getX: {} -> Int <Log> = {} -> do
@@ -364,11 +364,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -412,14 +412,14 @@ class SuspendedTypeAbilityTest {
         assertTypeCheckFails(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
-            let getText: {} -> String <Log> = {} -> do
+            let getText: {} -> Str <Log> = {} -> do
                 Log.println { msg = "Getting text" }
                 "Hello"
 
@@ -431,15 +431,15 @@ class SuspendedTypeAbilityTest {
 
     @Test
     fun `test suspended Int type used with string interpolation`() {
-        // Note: String interpolation works with any type that can be converted to string
+        // Note: Str interpolation works with any type that can be converted to string
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getNumber: {} -> Int <Log> = {} -> do
@@ -461,11 +461,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let makeAdder: { base: Int } -> { x: Int } -> Int <Log> = { base } -> {x} -> do
@@ -486,11 +486,11 @@ class SuspendedTypeAbilityTest {
         assertTypeChecks(
             """
             effect Log where {
-              println: { msg: String } -> {} <Log>
+              println: { msg: Str } -> {} <Log>
             }
 
             impl Log for Console where {
-              println: { msg: String } -> {} = { msg } -> {}
+              println: { msg: Str } -> {} = { msg } -> {}
             }
 
             let getBool: {} -> Bool <Log> = {} -> do

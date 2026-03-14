@@ -55,7 +55,7 @@ class ClosedVariantInExpressionTest {
     @Test
     fun `test variant constructor with payload creates closed variant`() {
         val source = """
-            type UserEvent = | Login {user: String}, Logout {user: String} |
+            type UserEvent = | Login {user: Str}, Logout {user: Str} |
 
             let event = Login {user = "alice"}
 
@@ -144,7 +144,7 @@ class ClosedVariantInExpressionTest {
     fun `test if-then-else with different variant constructors`() {
         // Both branches return different constructors of the same closed variant
         val source = """
-            type Response = | Success {data: String}, Failure {err: String} |
+            type Response = | Success {data: Str}, Failure {err: Str} |
 
             let process = {ok} ->
                 if ok then Success {data = "done"}
@@ -167,7 +167,7 @@ class ClosedVariantInExpressionTest {
     fun `test if-then-else with failure branch`() {
         // Test the failure branch
         val source = """
-            type Response = | Success {data: String}, Failure {err: String} |
+            type Response = | Success {data: Str}, Failure {err: Str} |
 
             let process = {ok} ->
                 if ok then Success {data = "done"}

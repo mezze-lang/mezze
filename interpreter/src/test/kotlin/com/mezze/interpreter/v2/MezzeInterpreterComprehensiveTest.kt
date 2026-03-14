@@ -75,7 +75,7 @@ class MezzeInterpreterComprehensiveTest {
         // Use completely unique constructor names to avoid conflicts with built-in types
         // (Ok/Err are used by the built-in Result type)
         val source = """
-            type Outcome = | Success {val: Int}, Failure {val: String} |
+            type Outcome = | Success {val: Int}, Failure {val: Str} |
             let value: Outcome = Success {val = 42}
             let result = match value is
               Success {val} -> val * 2
@@ -171,7 +171,7 @@ class MezzeInterpreterComprehensiveTest {
     @Test
     fun testComplexPatternMatching() {
         val source = """
-            type Result = | Success {value: Int}, Error {message: String} |
+            type Result = | Success {value: Int}, Error {message: Str} |
             let processResult = {result} -> match result is
               Success {value} -> value + 10
               Error {message} -> 0
@@ -277,7 +277,7 @@ class MezzeInterpreterComprehensiveTest {
             let bob = {id = 2, name = "Bob", active = False}
             let charlie = {id = 3, name = "Charlie", active = True}
 
-            let findUserById: {user: {id: Int, name: String, active: Bool}, targetId: Int} -> {id: Int, name: String, active: Bool} = {user, targetId} ->
+            let findUserById: {user: {id: Int, name: Str, active: Bool}, targetId: Int} -> {id: Int, name: Str, active: Bool} = {user, targetId} ->
               if user.id == targetId then user else {id = 0, name = "NotFound", active = False}
 
             let result = findUserById {user = bob, targetId = 2}
@@ -293,7 +293,7 @@ class MezzeInterpreterComprehensiveTest {
     @Test
     fun testErrorHandlingInInterpreter() {
         val source = """
-            type DivResult = | SuccessDiv { result: Int }, ErrorDiv { message: String } |
+            type DivResult = | SuccessDiv { result: Int }, ErrorDiv { message: Str } |
             let divide = {x, y} -> if y == 0 then ErrorDiv {message = "Division by zero"} else SuccessDiv {result = x / y}
             let result1 = divide {x = 10, y = 2}
             match result1 is

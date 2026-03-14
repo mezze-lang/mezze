@@ -29,7 +29,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green |
             
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red -> "red"
               Blue -> "blue" 
               Green -> "green"
@@ -45,7 +45,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green, Yellow |
             
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red | Blue -> "primary"
               Green | Yellow -> "secondary"
         """.trimIndent()
@@ -60,7 +60,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green, Yellow, Purple |
             
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
               _ -> "other"
@@ -76,7 +76,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int } |
             
-            let test: {temp: Temp} -> String = {temp} -> match temp is
+            let test: {temp: Temp} -> Str = {temp} -> match temp is
               Hot { degrees } if degrees > 100 -> "very hot"
               Cold { degrees } if degrees < -20 -> "very cold"
               _ -> "normal"
@@ -92,7 +92,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Weather = | Sunny { temp: Int }, Rainy { temp: Int }, Cloudy |
             
-            let test: {weather: Weather} -> String = {weather} -> match weather is
+            let test: {weather: Weather} -> Str = {weather} -> match weather is
               Sunny { temp } | Rainy { temp } if temp > 25 -> "warm weather"
               Sunny { temp } | Rainy { temp } -> "cool weather"
               Cloudy -> "cloudy"
@@ -110,7 +110,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green |
 
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
         """.trimIndent()
@@ -128,7 +128,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green, Yellow |
 
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red | Blue -> "primary"
               Green -> "secondary"
         """.trimIndent()
@@ -146,7 +146,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Temp = | Hot { degrees: Int } |
 
-            let test: {temp: Temp} -> String = {temp} -> match temp is
+            let test: {temp: Temp} -> Str = {temp} -> match temp is
               Hot { degrees } if degrees > 80 -> "very hot"
         """.trimIndent()
 
@@ -162,7 +162,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int } |
 
-            let test: {temp: Temp} -> String = {temp} -> match temp is
+            let test: {temp: Temp} -> Str = {temp} -> match temp is
               Hot { degrees } if degrees > 100 -> "very hot"
               Cold { degrees } if degrees < -20 -> "very cold"
         """.trimIndent()
@@ -179,7 +179,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Weather = | Sunny { temp: Int }, Rainy { temp: Int }, Cloudy |
 
-            let test: {weather: Weather} -> String = {weather} -> match weather is
+            let test: {weather: Weather} -> Str = {weather} -> match weather is
               Sunny { temp } | Rainy { temp } if temp > 25 -> "warm weather"
               Cloudy -> "cloudy"
         """.trimIndent()
@@ -198,7 +198,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green |
             
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
               _ -> "unknown"
@@ -214,7 +214,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Color = | Red, Blue, Green |
 
-            let test: {color: Color} -> String = {color} -> match color is
+            let test: {color: Color} -> Str = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
         """.trimIndent()
@@ -232,9 +232,9 @@ class MatchExhaustivenessTest {
     @Test
     fun `test complex nested patterns with guards`() {
         val code = """
-            type Status = | Active { priority: Int }, Inactive, Pending { reason: String } |
+            type Status = | Active { priority: Int }, Inactive, Pending { reason: Str } |
             
-            let test: {status: Status} -> String = {status} -> match status is
+            let test: {status: Status} -> Str = {status} -> match status is
               Active { priority } if priority > 5 -> "high priority"
               Active { priority } if priority > 0 -> "normal priority" 
               Active { priority } -> "low priority"
@@ -252,7 +252,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Event = | Click { x: Int }, Hover { x: Int }, Scroll |
             
-            let test: {event: Event} -> String = {event} -> match event is
+            let test: {event: Event} -> Str = {event} -> match event is
               Click { x } | Hover { x } if x > 100 -> "right side"
               Click { x } | Hover { x } if x < 50 -> "left side"
               Click { x } | Hover { x } -> "center"
@@ -269,7 +269,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Grade = | Score { value: Int } |
 
-            let test: {grade: Grade} -> String = {grade} -> match grade is
+            let test: {grade: Grade} -> Str = {grade} -> match grade is
               Score { value } if value >= 90 && value <= 100 -> "A"
               Score { value } if value >= 80 && value < 90 -> "B"
               Score { value } if value >= 70 && value < 80 -> "C"
@@ -289,7 +289,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Grade = | Score { value: Int } |
             
-            let test: {grade: Grade} -> String = {grade} -> match grade is
+            let test: {grade: Grade} -> Str = {grade} -> match grade is
               Score { value } if value >= 90 && value <= 100 -> "A"
               Score { value } if value >= 80 && value < 90 -> "B"
               Score { value } if value >= 70 && value < 80 -> "C"
@@ -305,9 +305,9 @@ class MatchExhaustivenessTest {
     @Test
     fun `test exhaustiveness with mixed pattern types`() {
         val code = """
-            type Result = | Success { value: Int }, Error { message: String }, Loading |
+            type Result = | Success { value: Int }, Error { message: Str }, Loading |
             
-            let test: {result: Result} -> String = {result} -> match result is
+            let test: {result: Result} -> Str = {result} -> match result is
               Success { value } if value > 0 -> "positive result"
               Success { value } -> "zero or negative result"
               Error { message } -> "error: $(message)"
@@ -328,7 +328,7 @@ class MatchExhaustivenessTest {
 
             type Single = | Only { value: Int } |
 
-            let test: {single: Single} -> String = {single} -> match single is
+            let test: {single: Single} -> Str = {single} -> match single is
               Only { value } -> "value: $(int::to_str {n = value})"
         """.trimIndent()
 
@@ -342,7 +342,7 @@ class MatchExhaustivenessTest {
         val code = """
             type Single = | Only { value: Int } |
 
-            let test: {single: Single} -> String = {single} -> match single is
+            let test: {single: Single} -> Str = {single} -> match single is
               Only { value } if value > 0 -> "positive"
         """.trimIndent()
 
@@ -416,7 +416,7 @@ class MatchExhaustivenessTest {
         }
         kotlin.test.assertTrue(
             exception.message!!.contains("mismatch") ||
-            exception.message!!.contains("String") ||
+            exception.message!!.contains("Str") ||
             exception.message!!.contains("Int")
         )
     }
@@ -438,7 +438,7 @@ class MatchExhaustivenessTest {
         }
         kotlin.test.assertTrue(
             exception.message!!.contains("mismatch") ||
-            exception.message!!.contains("String") ||
+            exception.message!!.contains("Str") ||
             exception.message!!.contains("Int")
         )
     }

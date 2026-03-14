@@ -97,7 +97,7 @@ class DuplicateDeclarationTest {
     @Test
     fun `test single overlapping constructor should fail`() {
         val code = """
-            type Result = | Ok { value: Int }, Err { message: String } |
+            type Result = | Ok { value: Int }, Err { message: Str } |
 
             type Status = | Ok, Pending, Failed |
 
@@ -129,7 +129,7 @@ class DuplicateDeclarationTest {
         val code = """
             type Option = | Some { val: Int }, None |
 
-            type Maybe = | Some { val: String }, Nothing |
+            type Maybe = | Some { val: Str }, Nothing |
 
             let main = {} -> 0
         """.trimIndent()

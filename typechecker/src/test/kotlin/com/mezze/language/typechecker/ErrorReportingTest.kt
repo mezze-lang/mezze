@@ -148,7 +148,7 @@ class ErrorReportingTest {
     fun testEffectHandlerError() {
         val source = """
             effect Log where {
-              log: {message: String} -> {} <Log>
+              log: {message: Str} -> {} <Log>
             }
 
             let test = do
@@ -224,7 +224,7 @@ class ErrorReportingTest {
     @Test
     fun testTypeAnnotationMismatchError() {
         val source = """
-            let x: String = 42
+            let x: Str = 42
         """.trimIndent()
 
         val program = parser.parse(source)

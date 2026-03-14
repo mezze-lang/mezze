@@ -38,7 +38,7 @@ class ModuleTypePreservationFixtureTest {
         val exportedModule = tempDir.resolve("exported_module.mz")
         exportedModule.writeText("""
             pub let exported_int: Int = 42
-            pub let exported_string: String = "hello"
+            pub let exported_string: Str = "hello"
             pub let add_func: { x: Int, y: Int } -> Int = { x, y } -> x + y
         """.trimIndent())
 
@@ -64,7 +64,7 @@ class ModuleTypePreservationFixtureTest {
         val testStringType = getBindingType(typedProgram, "test_string")
         assertNotNull(testStringType, "test_string should have a type")
         assertTrue(testStringType is MezzeType.StringType,
-                   "test_string should be String, but got: ${prettyPrintType(testStringType!!)}")
+                   "test_string should be Str, but got: ${prettyPrintType(testStringType!!)}")
 
         // Verify test_func has a function type
         val testFuncType = getBindingType(typedProgram, "test_func")

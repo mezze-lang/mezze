@@ -30,7 +30,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { a: String, b: String } -> String
+        // Should infer { a: Str, b: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["a"])
         assertEquals(MezzeType.StringType, paramType.fields["b"])
         assertEquals(MezzeType.StringType, functionType.returnType)
@@ -46,7 +46,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { value: String } -> String
+        // Should infer { value: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["value"])
         assertEquals(MezzeType.StringType, functionType.returnType)
     }
@@ -61,7 +61,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { value: String } -> String
+        // Should infer { value: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["value"])
         assertEquals(MezzeType.StringType, functionType.returnType)
     }
@@ -76,7 +76,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { value: String } -> String
+        // Should infer { value: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["value"])
         assertEquals(MezzeType.StringType, functionType.returnType)
     }
@@ -91,7 +91,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { a: String, b: String, c: String } -> String
+        // Should infer { a: Str, b: Str, c: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["a"])
         assertEquals(MezzeType.StringType, paramType.fields["b"])
         assertEquals(MezzeType.StringType, paramType.fields["c"])
@@ -108,7 +108,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { value: String } -> String
+        // Should infer { value: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["value"])
         assertEquals(MezzeType.StringType, functionType.returnType)
     }
@@ -123,7 +123,7 @@ class StringConstraintPropagationTest {
         val functionType = letBinding.inferredType as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
-        // Should infer { x: String, y: String } -> String
+        // Should infer { x: Str, y: Str } -> Str
         assertEquals(MezzeType.StringType, paramType.fields["x"])
         assertEquals(MezzeType.StringType, paramType.fields["y"])
         assertEquals(MezzeType.StringType, functionType.returnType)

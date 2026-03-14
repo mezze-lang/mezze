@@ -25,7 +25,7 @@ class BasicAbilitiesTest {
     fun testSimpleAbilityDeclaration() {
         val source = """
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
         """.trimIndent()
 
@@ -47,11 +47,11 @@ class BasicAbilitiesTest {
             use std::int
 
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> Str
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> int::to_str {n = val}
+              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
 
@@ -114,7 +114,7 @@ class BasicAbilitiesTest {
     fun testSimpleEffectDeclaration() {
         val source = """
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
         """.trimIndent()
 
@@ -133,11 +133,11 @@ class BasicAbilitiesTest {
     fun testSimpleEffectImplementation() {
         val source = """
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: Str} -> Unit <Log>
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> {}
+              log : {message: Str} -> Unit = {message} -> {}
             }
         """.trimIndent()
 

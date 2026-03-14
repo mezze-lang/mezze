@@ -46,7 +46,7 @@ class MatchEffectUnificationTest {
     fun `test match with pure and effectful branches unifies to effectful`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -76,7 +76,7 @@ class MatchEffectUnificationTest {
     fun `test match with two different effects unifies to union`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -138,7 +138,7 @@ class MatchEffectUnificationTest {
     fun `test match with multiple branches and different effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -180,7 +180,7 @@ class MatchEffectUnificationTest {
     fun `test nested match expressions with effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -213,7 +213,7 @@ class MatchEffectUnificationTest {
     fun `test match as function return value with effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -243,7 +243,7 @@ class MatchEffectUnificationTest {
     fun `test match with guards and mixed effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -301,7 +301,7 @@ class MatchEffectUnificationTest {
         // the result should preserve polymorphism
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -332,7 +332,7 @@ class MatchEffectUnificationTest {
         // Test that effects in the matched value are handled correctly
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -370,7 +370,7 @@ class MatchEffectUnificationTest {
     fun `test match unification with three different effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {
@@ -420,7 +420,7 @@ class MatchEffectUnificationTest {
     fun `test match with alternating pure and effectful branches`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -455,7 +455,7 @@ class MatchEffectUnificationTest {
     fun `test match in let binding propagates effects`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -486,7 +486,7 @@ class MatchEffectUnificationTest {
     fun `test deeply nested match expressions with effect accumulation`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             effect State where {

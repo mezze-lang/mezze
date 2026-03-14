@@ -44,13 +44,13 @@ class ModuleTypePreservationComprehensiveTest {
             # Module with explicit type annotations
             pub let pi: Float = 3.14159
             pub let max_value: Int = 1000
-            pub let greeting: String = "Hello, Mezze!"
+            pub let greeting: Str = "Hello, Mezze!"
             pub let is_active: Bool = True
 
             # Function types
             pub let add: { a: Int, b: Int } -> Int = { a, b } -> a + b
             pub let negate: { x: Int } -> Int = { x } -> NumSub.neg { n = x }
-            pub let concat: { s1: String, s2: String } -> String = { s1, s2 } -> s1
+            pub let concat: { s1: Str, s2: Str } -> Str = { s1, s2 } -> s1
         """.trimIndent())
 
         // Create main program that imports and uses these
@@ -81,7 +81,7 @@ class ModuleTypePreservationComprehensiveTest {
         val tests = listOf(
             "my_pi" to "Float",
             "my_max" to "Int",
-            "my_greeting" to "String",
+            "my_greeting" to "Str",
             "my_flag" to "Boolean",
             "sum" to "Int",
             "neg" to "Int"
@@ -95,7 +95,7 @@ class ModuleTypePreservationComprehensiveTest {
             val passed = when (expectedType) {
                 "Int" -> actualType is MezzeType.IntType
                 "Float" -> actualType is MezzeType.FloatType
-                "String" -> actualType is MezzeType.StringType
+                "Str" -> actualType is MezzeType.StringType
                 "Boolean" -> actualType is MezzeType.BoolType ||
                     (actualType is MezzeType.VariantType &&
                      actualType.constructors.keys.containsAll(listOf("True", "False")))

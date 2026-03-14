@@ -64,11 +64,11 @@ class BuiltinEffectsTest {
         val source = """
             # Test that parameter names are correctly extracted
             effect TestEffect where {
-              multiParam : {first: String, second: Int, third: Float} -> String <TestEffect>
+              multiParam : {first: Str, second: Int, third: Float} -> Str <TestEffect>
             }
 
             impl TestEffect for TestHandler where {
-              multiParam : {first: String, second: Int, third: Float} -> String =
+              multiParam : {first: Str, second: Int, third: Float} -> Str =
                 {first, second, third} -> first
             }
 

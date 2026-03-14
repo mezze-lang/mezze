@@ -28,11 +28,11 @@ class NewEffectSystemTest {
     fun testBasicEffectPerformerExecution() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Terminal in Console.print {msg = "Hello World"}
@@ -49,11 +49,11 @@ class NewEffectSystemTest {
     fun testParameterizedPerformer() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
-            impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> {}
+            impl Log for FileLogger {path: Str} where {
+              info : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}
@@ -68,22 +68,22 @@ class NewEffectSystemTest {
     fun testEffectTransformation() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[INFO] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> Console.print {msg = "[INFO] $(msg)"}
             }
 
-            let myFunction : {msg: String} -> {} <Log> = {msg} -> Log.info {msg = msg}
+            let myFunction : {msg: Str} -> {} <Log> = {msg} -> Log.info {msg = msg}
 
             perform Terminal, ConsoleLogger in myFunction {msg = "Hello"}
         """.trimIndent()
@@ -97,27 +97,27 @@ class NewEffectSystemTest {
     fun testMultipleEffectChaining() {
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: Str} -> {} <Log>
             }
 
             effect App where {
-              run : {name: String} -> String <App>
+              run : {name: Str} -> Str <App>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
+              info : {msg: Str} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
 
             impl App for MyApp where {
-              run : {name: String} -> String = {name} -> do
+              run : {name: Str} -> Str = {name} -> do
                 Log.info {msg = "Starting app for $(name)"}
                 "App result for $(name)"
             }

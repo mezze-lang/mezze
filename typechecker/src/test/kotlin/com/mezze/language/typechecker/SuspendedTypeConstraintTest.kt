@@ -84,7 +84,7 @@ class SuspendedTypeConstraintTest {
         // The result unifies to SuspendedType, and field access should still work
         val source = """
             effect State where {
-                get: {} -> {name: String, age: Int} <State>
+                get: {} -> {name: Str, age: Int} <State>
             }
 
             impl State for StateHandler where {
@@ -113,7 +113,7 @@ class SuspendedTypeConstraintTest {
         // Direct field access on effectful call: effectFn().field
         val source = """
             effect Config where {
-                load: {} -> {host: String, port: Int} <Config>
+                load: {} -> {host: Str, port: Int} <Config>
             }
 
             impl Config for ConfigLoader where {
@@ -139,7 +139,7 @@ class SuspendedTypeConstraintTest {
         // Test nested field access: effectFn().outer.inner
         val source = """
             effect Database where {
-                query: {} -> {data: {name: String, id: Int}} <Database>
+                query: {} -> {data: {name: Str, id: Int}} <Database>
             }
 
             impl Database for DBHandler where {
@@ -191,7 +191,7 @@ class SuspendedTypeConstraintTest {
         val source = """
             use std::effects::exception::{Exception, throw}
 
-            impl Exception for ExnHandler having 'error = String where {
+            impl Exception for ExnHandler having 'error = Str where {
                 throw = {error} -> {}
             }
 
@@ -234,7 +234,7 @@ class SuspendedTypeConstraintTest {
     fun `match on variant returned from effectful function should work`() {
         // Pattern matching on an effectful result should properly unwrap SuspendedType
         val source = """
-            type Status = | Loading, Ready { data: String }, Failed { error: String } |
+            type Status = | Loading, Ready { data: Str }, Failed { error: Str } |
 
             effect Api where {
                 fetch: {} -> Status <Api>
@@ -269,7 +269,7 @@ class SuspendedTypeConstraintTest {
     fun `field access on constructor payload from effectful result should work`() {
         // Combining both: effectFn returns variant, we match it, access field on payload
         val source = """
-            type Response = | Success { data: {name: String, id: Int} }, Error { message: String } |
+            type Response = | Success { data: {name: Str, id: Int} }, Error { message: Str } |
 
             effect Api where {
                 fetch: {} -> Response <Api>
@@ -300,8 +300,8 @@ class SuspendedTypeConstraintTest {
         // Multiple chained effectful operations with field access
         val source = """
             effect Store where {
-                getUser: {} -> {name: String, email: String} <Store>,
-                getSettings: {user: String} -> {theme: String} <Store>
+                getUser: {} -> {name: Str, email: Str} <Store>,
+                getSettings: {user: Str} -> {theme: Str} <Store>
             }
 
             impl Store for StoreHandler where {

@@ -23,15 +23,15 @@ class ExplicitEffectPropagationTest {
     fun testExplicitEffectPropagation() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             effect Database where {
-              query : {sql: String} -> String <Database>
+              query : {sql: Str} -> Str <Database>
             }
             
             # Explicit effect annotation - should include only Database
-            let useDatabase : {query: String} -> String <Database> = {query} ->
+            let useDatabase : {query: Str} -> Str <Database> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
         
@@ -57,11 +57,11 @@ class ExplicitEffectPropagationTest {
     fun testInferredEffectPropagation() {
         val source = """
             effect Log where {
-              log : {msg: String} -> {} <Log>
+              log : {msg: Str} -> {} <Log>
             }
             
             # Function with explicit effect annotation
-            let logSomething : {msg: String} -> {} <Log> = {msg} ->
+            let logSomething : {msg: Str} -> {} <Log> = {msg} ->
               Log.log {msg = msg}
         """.trimIndent()
         

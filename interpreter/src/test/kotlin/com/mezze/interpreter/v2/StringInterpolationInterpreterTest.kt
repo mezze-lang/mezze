@@ -100,7 +100,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected String") == true)
+        assertTrue(exception.message?.contains("expected Str") == true)
     }
 
     @Test
@@ -207,7 +207,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected String") == true)
+        assertTrue(exception.message?.contains("expected Str") == true)
     }
 
     @Test
@@ -221,7 +221,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected String") == true)
+        assertTrue(exception.message?.contains("expected Str") == true)
     }
 
     @Test
@@ -294,7 +294,7 @@ Have a great day!"
     @Test
     fun `test lambda returning string in interpolation`() {
         val code = """
-            let greet = {name: String} -> "Hi $(name)"
+            let greet = {name: Str} -> "Hi $(name)"
             let result = "Message: $(greet{name = "Alice"})"
             result
         """

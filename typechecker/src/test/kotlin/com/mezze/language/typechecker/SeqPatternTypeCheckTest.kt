@@ -556,7 +556,7 @@ class SeqPatternTypeCheckTest {
                 match xs is
                   [1, 2, 3] -> "match"
                   _ -> "no match"
-            let result: String = check {xs = [1, 2, 3]}
+            let result: Str = check {xs = [1, 2, 3]}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -564,13 +564,13 @@ class SeqPatternTypeCheckTest {
     }
 
     // ==========================================================================
-    // SECTION 12: String Seqs
+    // SECTION 12: Str Seqs
     // ==========================================================================
 
     @Test
     fun `string seq pattern matching`() {
         val code = """
-            let get_greeting = {names: [String]} ->
+            let get_greeting = {names: [Str]} ->
                 match names is
                   [] -> "Hello, nobody!"
                   [name] -> "Hello, $(name)!"
@@ -585,7 +585,7 @@ class SeqPatternTypeCheckTest {
     @Test
     fun `string seq with literal patterns`() {
         val code = """
-            let is_help_command = {args: [String]} ->
+            let is_help_command = {args: [Str]} ->
                 match args is
                   ["help"] | ["--help"] | ["-h"] -> True
                   _ -> False
@@ -694,7 +694,7 @@ class SeqPatternTypeCheckTest {
     @Test
     fun `real world - command line argument parsing`() {
         val code = """
-            let parse_args = {args: [String]} ->
+            let parse_args = {args: [Str]} ->
                 match args is
                   [] -> "no args"
                   ["--version"] -> "version 1.0"

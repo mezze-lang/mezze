@@ -5,8 +5,8 @@ type Color = | Red, Blue { val: Int }, Green |
 # This should PASS - wildcard handles missing cases
 let processColor = {color: Color} -> match color is
   Red -> "red"
-  _ -> "other"                                                       # expected: processColor : { color: Color } -> String
+  _ -> "other"                                                       # expected: processColor : { color: Color } -> Str
 
-let result = processColor {color = Red}                 # expected: result : String
+let result = processColor {color = Red}                 # expected: result : Str
 
 result

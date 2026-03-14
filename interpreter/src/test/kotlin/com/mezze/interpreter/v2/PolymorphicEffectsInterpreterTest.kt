@@ -39,7 +39,7 @@ class PolymorphicEffectsInterpreterTest {
     fun `test higher-order function with effectful callback executes correctly`() {
         val code = """
             effect Log where {
-                info: {msg: String} -> {} <Log>
+                info: {msg: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger {} where {
@@ -132,7 +132,7 @@ class PolymorphicEffectsInterpreterTest {
     @Test
     fun `test polymorphic effects with record return`() {
         val code = """
-            let both: { f: {} -> Int <...>, g: {} -> String <...> } -> { a: Int, b: String } <...> =
+            let both: { f: {} -> Int <...>, g: {} -> Str <...> } -> { a: Int, b: Str } <...> =
                 { f, g } -> { a = f {}, b = g {} }
 
             both { f = {} -> 42, g = {} -> "hello" }

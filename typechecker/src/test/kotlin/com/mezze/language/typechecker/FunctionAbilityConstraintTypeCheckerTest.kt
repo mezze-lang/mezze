@@ -23,7 +23,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testAbilityDeclarationTypeChecking() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
         """.trimIndent()
         
@@ -49,11 +49,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testAbilityImplementationTypeChecking() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
             impl Show Int where {
-                show : {val: Int} -> String = {val} -> "INT"
+                show : {val: Int} -> Str = {val} -> "INT"
             }
         """.trimIndent()
         
@@ -77,10 +77,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testLambdaExpressionWithAbilityConstraints() {
         val source = """
             ability Encoder 'a where {
-                encode : {val: 'a} -> String
+                encode : {val: 'a} -> Str
             }
 
-            { val: 'a } -> String with Encoder 'a = {val} -> "test"
+            { val: 'a } -> Str with Encoder 'a = {val} -> "test"
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -111,10 +111,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
             }
             
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
-            { left: 'a, right: 'a } -> String with Eq 'a, Show 'a = {left, right} -> "test"
+            { left: 'a, right: 'a } -> Str with Eq 'a, Show 'a = {left, right} -> "test"
         """.trimIndent()
         
         val program = parser.parse(source)
@@ -144,7 +144,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testAbilityOperationAccess() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
             Show.show
@@ -208,10 +208,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
     fun testAbilityConstraintWithConcreteTypes() {
         val source = """
             ability Show 'a where {
-                show : {val: 'a} -> String
+                show : {val: 'a} -> Str
             }
             
-            { val: Int } -> String with Show Int = {val} -> "test"
+            { val: Int } -> Str with Show Int = {val} -> "test"
         """.trimIndent()
         
         val program = parser.parse(source)

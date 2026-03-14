@@ -22,11 +22,11 @@ class SimplePerformerTest {
         // This is the exact same code that works in CLI
         val source = """
             effect Console where {
-              print : {msg: String} -> {} <Console>
+              print : {msg: Str} -> {} <Console>
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> {}
+              print : {msg: Str} -> {} = {msg} -> {}
             }
 
             perform Terminal in Console.print {msg = "Hello"}

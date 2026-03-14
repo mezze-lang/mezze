@@ -31,13 +31,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `string pattern captures value used in if-let lookup`() {
         val code = """
-            let lookup: {name: String} -> | Some {val: Int}, None | = {name} ->
+            let lookup: {name: Str} -> | Some {val: Int}, None | = {name} ->
                 match name is
                     "alice" -> Some {val = 100}
                     "bob" -> Some {val = 200}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "user:$(name)" if let Some {val = score} = lookup {name = name} -> score
                     _ -> 0
@@ -52,12 +52,12 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `string pattern with if-let falls through on None`() {
         val code = """
-            let lookup: {name: String} -> | Some {val: Int}, None | = {name} ->
+            let lookup: {name: Str} -> | Some {val: Int}, None | = {name} ->
                 match name is
                     "alice" -> Some {val = 100}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "user:$(name)" if let Some {val = score} = lookup {name = name} -> score
                     "user:$(name)" -> -1
@@ -75,13 +75,13 @@ class StringPatternIfLetIntegrationTest {
         // Note: "if let ... if condition" syntax is not supported.
         // Use nested match or check condition in the body instead.
         val code = """
-            let lookup: {name: String} -> | Some {val: Int}, None | = {name} ->
+            let lookup: {name: Str} -> | Some {val: Int}, None | = {name} ->
                 match name is
                     "admin" -> Some {val = 999}
                     "user" -> Some {val = 100}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "role:$(name)" if let Some {val = level} = lookup {name = name} ->
                         match level > 500 is
@@ -103,13 +103,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `multiple string captures with if-let lookup on one`() {
         val code = """
-            let validate: {domain: String} -> | Some {val: String}, None | = {domain} ->
+            let validate: {domain: Str} -> | Some {val: Str}, None | = {domain} ->
                 match domain is
                     "example.com" -> Some {val = "trusted"}
                     "test.org" -> Some {val = "testing"}
                     _ -> None
 
-            let parse_email = {email: String} ->
+            let parse_email = {email: Str} ->
                 match email is
                     "$(user)@$(domain)" if let Some {val = status} = validate {domain = domain} ->
                         "$(user) on $(status) domain"
@@ -126,7 +126,7 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `both string captures used in if-let expression`() {
         val code = """
-            let lookup_pair: {a: String, b: String} -> | Some {val: Int}, None | = {a, b} ->
+            let lookup_pair: {a: Str, b: Str} -> | Some {val: Int}, None | = {a, b} ->
                 match a is
                     "foo" ->
                         match b is
@@ -134,7 +134,7 @@ class StringPatternIfLetIntegrationTest {
                             _ -> None
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "$(first)-$(second)" if let Some {val = result} = lookup_pair {a = first, b = second} -> result
                     _ -> 0
@@ -153,13 +153,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `string pattern result used in nested option extraction`() {
         val code = """
-            let get_config: {key: String} -> | Some {val: {enabled: Bool, value: Int}}, None | = {key} ->
+            let get_config: {key: Str} -> | Some {val: {enabled: Bool, value: Int}}, None | = {key} ->
                 match key is
                     "debug" -> Some {val = {enabled = True, value = 1}}
                     "release" -> Some {val = {enabled = False, value = 0}}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "config:$(key)" if let Some {val = {enabled, value}} = get_config {key = key} ->
                         match enabled is
@@ -181,13 +181,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `URL routing with optional user lookup`() {
         val code = """
-            let find_user: {id: String} -> | Some {val: {name: String, role: String}}, None | = {id} ->
+            let find_user: {id: Str} -> | Some {val: {name: Str, role: Str}}, None | = {id} ->
                 match id is
                     "123" -> Some {val = {name = "Alice", role = "admin"}}
                     "456" -> Some {val = {name = "Bob", role = "user"}}
                     _ -> None
 
-            let route = {path: String} ->
+            let route = {path: Str} ->
                 match path is
                     "/users/$(id)/profile" if let Some {val = {name, role}} = find_user {id = id} ->
                         "Profile: $(name) ($(role))"
@@ -205,12 +205,12 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `URL routing - user not found falls through`() {
         val code = """
-            let find_user: {id: String} -> | Some {val: {name: String}}, None | = {id} ->
+            let find_user: {id: Str} -> | Some {val: {name: Str}}, None | = {id} ->
                 match id is
                     "123" -> Some {val = {name = "Alice"}}
                     _ -> None
 
-            let route = {path: String} ->
+            let route = {path: Str} ->
                 match path is
                     "/users/$(id)/profile" if let Some {val = {name}} = find_user {id = id} ->
                         "Profile: $(name)"
@@ -229,7 +229,7 @@ class StringPatternIfLetIntegrationTest {
         // Note: "if let ... if condition" syntax is not supported.
         // Use nested match to check additional conditions.
         val code = """
-            let get_level_config: {level: String} -> | Some {val: Int}, None | = {level} ->
+            let get_level_config: {level: Str} -> | Some {val: Int}, None | = {level} ->
                 match level is
                     "DEBUG" -> Some {val = 0}
                     "INFO" -> Some {val = 1}
@@ -237,7 +237,7 @@ class StringPatternIfLetIntegrationTest {
                     "ERROR" -> Some {val = 3}
                     _ -> None
 
-            let parse_log = {line: String, minLevel: Int} ->
+            let parse_log = {line: Str, minLevel: Int} ->
                 match line is
                     "[$(level)] $(message)" if let Some {val = levelNum} = get_level_config {level = level} ->
                         match levelNum >= minLevel is
@@ -260,14 +260,14 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `environment variable parsing with validation`() {
         val code = """
-            let valid_keys: {key: String} -> | Some {val: String}, None | = {key} ->
+            let valid_keys: {key: Str} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     "HOME" -> Some {val = "path"}
                     "USER" -> Some {val = "string"}
                     "PORT" -> Some {val = "number"}
                     _ -> None
 
-            let parse_env = {line: String} ->
+            let parse_env = {line: Str} ->
                 match line is
                     "$(key)=$(value)" if let Some {val = expectedKind} = valid_keys {key = key} ->
                         { valid = True, key = key, value = value, kind = expectedKind }
@@ -293,13 +293,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `string pattern with empty capture and if-let`() {
         val code = """
-            let check: {prefix: String} -> | Some {val: Int}, None | = {prefix} ->
+            let check: {prefix: Str} -> | Some {val: Int}, None | = {prefix} ->
                 match prefix is
                     "" -> Some {val = 0}
                     "test" -> Some {val = 1}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "$(prefix)-suffix" if let Some {val = n} = check {prefix = prefix} -> n
                     _ -> -1
@@ -314,7 +314,7 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `if-let with string pattern inside the option payload`() {
         val code = """
-            let get_data: {id: Int} -> | Some {val: String}, None | = {id} ->
+            let get_data: {id: Int} -> | Some {val: Str}, None | = {id} ->
                 match id is
                     1 -> Some {val = "name=Alice"}
                     2 -> Some {val = "name=Bob"}
@@ -339,17 +339,17 @@ class StringPatternIfLetIntegrationTest {
     fun `chained option lookups with string pattern using &&`() {
         // Multiple if-let bindings are chained with &&
         val code = """
-            let getA: {x: String} -> | Some {val: Int}, None | = {x} ->
+            let getA: {x: Str} -> | Some {val: Int}, None | = {x} ->
                 match x is
                     "a" -> Some {val = 10}
                     _ -> None
 
-            let getB: {x: String} -> | Some {val: Int}, None | = {x} ->
+            let getB: {x: Str} -> | Some {val: Int}, None | = {x} ->
                 match x is
                     "b" -> Some {val = 20}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "$(first)-$(second)" if let Some {val = a} = getA {x = first} && let Some {val = b} = getB {x = second} ->
                         a + b
@@ -365,17 +365,17 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `chained option lookups - second fails`() {
         val code = """
-            let getA: {x: String} -> | Some {val: Int}, None | = {x} ->
+            let getA: {x: Str} -> | Some {val: Int}, None | = {x} ->
                 match x is
                     "a" -> Some {val = 10}
                     _ -> None
 
-            let getB: {x: String} -> | Some {val: Int}, None | = {x} ->
+            let getB: {x: Str} -> | Some {val: Int}, None | = {x} ->
                 match x is
                     "b" -> Some {val = 20}
                     _ -> None
 
-            let process = {input: String} ->
+            let process = {input: Str} ->
                 match input is
                     "$(first)-$(second)" if let Some {val = a} = getA {x = first} && let Some {val = b} = getB {x = second} ->
                         a + b
@@ -396,13 +396,13 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `API request parsing with auth validation`() {
         val code = """
-            let validate_token: {token: String} -> | Some {val: {userId: String, role: String}}, None | = {token} ->
+            let validate_token: {token: Str} -> | Some {val: {userId: Str, role: Str}}, None | = {token} ->
                 match token is
                     "valid-admin" -> Some {val = {userId = "1", role = "admin"}}
                     "valid-user" -> Some {val = {userId = "2", role = "user"}}
                     _ -> None
 
-            let handle_request = {request: String} ->
+            let handle_request = {request: Str} ->
                 match request is
                     "auth:$(token) $(method) $(path)" if let Some {val = {userId, role}} = validate_token {token = token} ->
                         "$(method) $(path) by user $(userId) ($(role))"
@@ -419,17 +419,17 @@ class StringPatternIfLetIntegrationTest {
     @Test
     fun `cascading fallbacks with string patterns and if-let`() {
         val code = """
-            let cache: {key: String} -> | Some {val: String}, None | = {key} ->
+            let cache: {key: Str} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     "cached-key" -> Some {val = "from cache"}
                     _ -> None
 
-            let database: {key: String} -> | Some {val: String}, None | = {key} ->
+            let database: {key: Str} -> | Some {val: Str}, None | = {key} ->
                 match key is
                     "db-key" -> Some {val = "from database"}
                     _ -> None
 
-            let fetch = {query: String} ->
+            let fetch = {query: Str} ->
                 match query is
                     "get:$(key)" if let Some {val = result} = cache {key = key} -> result
                     "get:$(key)" if let Some {val = result} = database {key = key} -> result

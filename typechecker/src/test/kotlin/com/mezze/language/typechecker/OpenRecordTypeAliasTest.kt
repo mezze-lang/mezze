@@ -52,7 +52,7 @@ class OpenRecordTypeAliasTest {
     fun `test open record type alias accepts extra fields`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
             let x: Person = { name = "Alice", age = 30, city = "NYC" }
             x
@@ -66,7 +66,7 @@ class OpenRecordTypeAliasTest {
     fun `test open record type alias with multiple extra fields`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
             let x: Person = { name = "Bob", age = 25, city = "SF", job = "Engineer", salary = 100000 }
             x
@@ -80,7 +80,7 @@ class OpenRecordTypeAliasTest {
     fun `test open record type alias accepts exact fields`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
             let x: Person = { name = "Charlie", age = 35 }
             x
@@ -94,16 +94,16 @@ class OpenRecordTypeAliasTest {
     fun `test open record type alias in function parameter`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
-            let greet: { person: Person } -> String = { person } ->
+            let greet: { person: Person } -> Str = { person } ->
                 "$(person.name) is awesome"
 
             let result = greet { person = { name = "Diana", age = 28, city = "LA" } }
             result
             """.trimIndent(),
             "result",
-            "String"
+            "Str"
         )
     }
 
@@ -111,9 +111,9 @@ class OpenRecordTypeAliasTest {
     fun `test open record type alias in function return type`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
-            let makePerson: { name: String, age: Int, city: String } -> Person =
+            let makePerson: { name: Str, age: Int, city: Str } -> Person =
                 { name, age, city } -> { name = name, age = age, city = city }
 
             let result = makePerson { name = "Eve", age = 40, city = "Boston" }
@@ -130,7 +130,7 @@ class OpenRecordTypeAliasTest {
     fun `test closed record type alias rejects extra fields`() {
         assertTypeCheckFails(
             """
-            type ClosedPerson = { name: String, age: Int }
+            type ClosedPerson = { name: Str, age: Int }
 
             let x: ClosedPerson = { name = "Frank", age = 45, city = "Seattle" }
             x
@@ -142,7 +142,7 @@ class OpenRecordTypeAliasTest {
     fun `test closed record type alias accepts exact fields`() {
         assertTypeChecks(
             """
-            type ClosedPerson = { name: String, age: Int }
+            type ClosedPerson = { name: Str, age: Int }
 
             let x: ClosedPerson = { name = "Grace", age = 50 }
             x
@@ -156,7 +156,7 @@ class OpenRecordTypeAliasTest {
     fun `test closed record type alias rejects missing fields`() {
         assertTypeCheckFails(
             """
-            type ClosedPerson = { name: String, age: Int }
+            type ClosedPerson = { name: Str, age: Int }
 
             let x: ClosedPerson = { name = "Henry" }
             x
@@ -170,8 +170,8 @@ class OpenRecordTypeAliasTest {
     fun `test open and closed record type aliases together`() {
         assertTypeChecks(
             """
-            type OpenPerson = { name: String, ... }
-            type ClosedPerson = { name: String, age: Int }
+            type OpenPerson = { name: Str, ... }
+            type ClosedPerson = { name: Str, age: Int }
 
             let open: OpenPerson = { name = "Irene", age = 22, city = "Austin" }
             let closed: ClosedPerson = { name = "Jack", age = 33 }
@@ -187,8 +187,8 @@ class OpenRecordTypeAliasTest {
     fun `test nested open records`() {
         assertTypeChecks(
             """
-            type Address = { city: String, ... }
-            type Person = { name: String, address: Address, ... }
+            type Address = { city: Str, ... }
+            type Person = { name: Str, address: Address, ... }
 
             let x: Person = {
                 name = "Kate",
@@ -206,7 +206,7 @@ class OpenRecordTypeAliasTest {
     fun `test open record with different field order`() {
         assertTypeChecks(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
             let x: Person = { age = 55, city = "Portland", name = "Leo" }
             x
@@ -232,7 +232,7 @@ class OpenRecordTypeAliasTest {
     fun `test open record rejects incompatible field types`() {
         assertTypeCheckFails(
             """
-            type Person = { name: String, age: Int, ... }
+            type Person = { name: Str, age: Int, ... }
 
             let x: Person = { name = "Maya", age = "thirty" }
             x
