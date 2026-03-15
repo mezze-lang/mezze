@@ -360,13 +360,18 @@ internal fun desugarExpression(expr: Expression): Expression {
         is ParenthesizedExpression -> expr.copy(
             expression = desugarExpression(expr.expression)
         )
+        // Pipe expression - recurse into both sides
+        is PipeExpression -> expr.copy(
+            left = desugarExpression(expr.left),
+            right = desugarExpression(expr.right)
+        )
         // Literals and simple expressions (no desugaring needed)
         is IntLiteral -> expr
         is NatLiteral -> expr
         is FloatLiteral -> expr
         is FractionLiteral -> expr
         is Identifier -> expr
-        is PlaceholderExpression -> expr
+        is PipePlaceholder -> expr
     }
 }
 

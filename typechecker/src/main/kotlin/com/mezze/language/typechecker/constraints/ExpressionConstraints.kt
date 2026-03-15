@@ -77,7 +77,12 @@ class ExpressionConstraintGenerator {
 
             // Variables - lookup in context
             is Identifier -> generateIdentifier(expr, context)
-            is PlaceholderExpression -> generatePlaceholder(expr, context)
+
+            // Pipe placeholder - should not reach constraint generation (desugared earlier)
+            is PipePlaceholder -> generatePipePlaceholder(expr, context)
+
+            // Pipe expression - should not reach constraint generation (desugared earlier)
+            is PipeExpression -> generatePipeExpression(expr, context)
 
             // Parenthesized expression - just delegate to inner
             is ParenthesizedExpression -> generate(expr.expression, context)
@@ -432,10 +437,25 @@ class ExpressionConstraintGenerator {
         }
     }
 
-    private fun generatePlaceholder(expr: PlaceholderExpression, context: ConstraintContext): ConstraintResult {
-        // Placeholder for pipe operator - should be replaced during parsing
-        // Create fresh type variable
-        return ConstraintResult.simple(MezzeType.VarType(TypeVar.fresh()))
+    private fun generatePipePlaceholder(expr: PipePlaceholder, context: ConstraintContext): ConstraintResult {
+        // PipePlaceholder should be desugared before constraint generation
+        // If we reach here, it means @ was used outside of a pipe expression
+        throw com.mezze.language.typechecker.TypeCheckError(
+            "'@' can only be used inside a pipe expression (|>).\n\n" +
+            "  hint: Use '@' to refer to the piped value:\n" +
+            "        value |> func { arg = @ }",
+            expr.sourceLocation
+        )
+    }
+
+    private fun generatePipeExpression(expr: PipeExpression, context: ConstraintContext): ConstraintResult {
+        // PipeExpression should be desugared before constraint generation
+        // If we reach here, there's a bug in the transformation phase
+        throw com.mezze.language.typechecker.TypeCheckError(
+            "Internal error: PipeExpression was not desugared before type checking. " +
+            "This is a compiler bug.",
+            expr.sourceLocation
+        )
     }
 
     // ========================================================================

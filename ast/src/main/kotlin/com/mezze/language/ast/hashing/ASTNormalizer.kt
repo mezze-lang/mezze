@@ -76,7 +76,14 @@ object ASTNormalizer {
             sourceLocation = null
         )
 
-        is PlaceholderExpression -> expr.copy(
+        is PipePlaceholder -> expr.copy(
+            inferredType = null,
+            sourceLocation = null
+        )
+
+        is PipeExpression -> expr.copy(
+            left = normalizeExpression(expr.left),
+            right = normalizeExpression(expr.right),
             inferredType = null,
             sourceLocation = null
         )

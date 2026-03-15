@@ -566,7 +566,12 @@ class ContinuationTransformer {
             }
             // Literals don't use variables
             is IntLiteral, is NatLiteral, is FloatLiteral,
-            is FractionLiteral, is PlaceholderExpression -> {}
+            is FractionLiteral, is PipePlaceholder -> {}
+            // Pipe expression - recurse into both sides
+            is PipeExpression -> {
+                collectUsedVariablesRecursive(expr.left, collector)
+                collectUsedVariablesRecursive(expr.right, collector)
+            }
             // Parenthesized - recurse into inner
             is ParenthesizedExpression -> collectUsedVariablesRecursive(expr.expression, collector)
             // State machines

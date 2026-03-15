@@ -1531,94 +1531,84 @@ internal val MezzeParser.logicalAndExpression: Parser<Expression>
         result
     }
 
-    // Desugar pipe operator by replacing @ placeholders with the piped value
-    // Transforms: value |> func {x = @} into func {x = value}
-internal fun MezzeParser.desugarPipe(pipeValue: Expression, target: Expression): Expression {
-        return when (target) {
-            // @ is parsed as Identifier("@") - replace with piped value
-            is Identifier -> if (target.localName == "@") pipeValue else target
-
-            // Recurse into function calls
-            is FunctionCall -> target.copy(
-                function = desugarPipe(pipeValue, target.function),
-                arguments = desugarPipe(pipeValue, target.arguments)
-            )
-
-            // Recurse into record literals (this is where @ typically appears)
-            is RecordLiteral -> target.copy(
-                entries = target.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> entry.copy(
-                            value = entry.value?.let { desugarPipe(pipeValue, it) }
-                        )
-                        is RecordSpreadEntry -> entry.copy(
-                            expression = desugarPipe(pipeValue, entry.expression)
-                        )
-                    }
-                }
-            )
-
-            // Recurse into conditional expressions
-            is IfExpression -> target.copy(
-                condition = desugarPipe(pipeValue, target.condition),
-                thenBranch = desugarPipe(pipeValue, target.thenBranch),
-                elseBranch = desugarPipe(pipeValue, target.elseBranch)
-            )
-
-            // Recurse into lambda expressions
-            is LambdaExpression -> target.copy(
-                body = desugarPipe(pipeValue, target.body)
-            )
-
-            // Recurse into match expressions
-            is MatchExpression -> target.copy(
-                expression = desugarPipe(pipeValue, target.expression),
-                cases = target.cases.map { matchCase ->
-                    matchCase.copy(
-                        guard = matchCase.guard?.let { desugarPipe(pipeValue, it) },
-                        expression = desugarPipe(pipeValue, matchCase.expression)
-                    )
-                }
-            )
-
-            // Recurse into do expressions
-            is DoExpression -> target.copy(
-                statements = target.statements.map { stmt ->
-                    when (stmt) {
-                        is LetStatement -> stmt.copy(
-                            expression = desugarPipe(pipeValue, stmt.expression)
-                        )
-                        is ExpressionStatement -> stmt.copy(
-                            expression = desugarPipe(pipeValue, stmt.expression)
-                        )
-                    }
-                },
-                result = desugarPipe(pipeValue, target.result)
-            )
-
-            // Recurse into seq literals
-            is SeqLiteral -> target.copy(
-                elements = target.elements.map { element ->
-                    when (element) {
-                        is SeqRegularElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
-                        is SeqSpreadElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
-                    }
-                }
-            )
-
-            // Recurse into perform expressions
-            is PerformExpression -> target.copy(
-                expression = desugarPipe(pipeValue, target.expression)
-            )
-
-            // Literals, identifiers, etc. don't contain placeholders
-            else -> target
+    // Count PipePlaceholder occurrences in an expression
+internal fun countPipePlaceholders(expr: Expression): Int {
+    return when (expr) {
+        is PipePlaceholder -> 1
+        is FunctionCall -> countPipePlaceholders(expr.function) + countPipePlaceholders(expr.arguments)
+        is RecordLiteral -> expr.entries.sumOf { entry ->
+            when (entry) {
+                is RecordFieldEntry -> entry.value?.let { countPipePlaceholders(it) } ?: 0
+                is RecordSpreadEntry -> countPipePlaceholders(entry.expression)
+            }
         }
+        is IfExpression -> countPipePlaceholders(expr.condition) +
+            countPipePlaceholders(expr.thenBranch) + countPipePlaceholders(expr.elseBranch)
+        is LambdaExpression -> countPipePlaceholders(expr.body)
+        is MatchExpression -> countPipePlaceholders(expr.expression) +
+            expr.cases.sumOf { countPipePlaceholders(it.expression) + (it.guard?.let { countPipePlaceholders(it) } ?: 0) }
+        is DoExpression -> expr.statements.sumOf { stmt ->
+            when (stmt) {
+                is LetStatement -> countPipePlaceholders(stmt.expression)
+                is ExpressionStatement -> countPipePlaceholders(stmt.expression)
+            }
+        } + countPipePlaceholders(expr.result)
+        is SeqLiteral -> expr.elements.sumOf { element ->
+            when (element) {
+                is SeqRegularElement -> countPipePlaceholders(element.expression)
+                is SeqSpreadElement -> countPipePlaceholders(element.expression)
+            }
+        }
+        is PerformExpression -> countPipePlaceholders(expr.expression)
+        is MemberAccess -> countPipePlaceholders(expr.receiver)
+        is VariantConstruction -> expr.value?.let { countPipePlaceholders(it) } ?: 0
+        is ParenthesizedExpression -> countPipePlaceholders(expr.expression)
+        is PipeExpression -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
+        else -> 0
     }
+}
+
+    // Find all PipePlaceholder locations in an expression
+internal fun findPipePlaceholderLocations(expr: Expression): List<SourceLocation> {
+    return when (expr) {
+        is PipePlaceholder -> listOfNotNull(expr.sourceLocation)
+        is FunctionCall -> findPipePlaceholderLocations(expr.function) + findPipePlaceholderLocations(expr.arguments)
+        is RecordLiteral -> expr.entries.flatMap { entry ->
+            when (entry) {
+                is RecordFieldEntry -> entry.value?.let { findPipePlaceholderLocations(it) } ?: emptyList()
+                is RecordSpreadEntry -> findPipePlaceholderLocations(entry.expression)
+            }
+        }
+        is IfExpression -> findPipePlaceholderLocations(expr.condition) +
+            findPipePlaceholderLocations(expr.thenBranch) + findPipePlaceholderLocations(expr.elseBranch)
+        is LambdaExpression -> findPipePlaceholderLocations(expr.body)
+        is MatchExpression -> findPipePlaceholderLocations(expr.expression) +
+            expr.cases.flatMap { findPipePlaceholderLocations(it.expression) + (it.guard?.let { findPipePlaceholderLocations(it) } ?: emptyList()) }
+        is DoExpression -> expr.statements.flatMap { stmt ->
+            when (stmt) {
+                is LetStatement -> findPipePlaceholderLocations(stmt.expression)
+                is ExpressionStatement -> findPipePlaceholderLocations(stmt.expression)
+            }
+        } + findPipePlaceholderLocations(expr.result)
+        is SeqLiteral -> expr.elements.flatMap { element ->
+            when (element) {
+                is SeqRegularElement -> findPipePlaceholderLocations(element.expression)
+                is SeqSpreadElement -> findPipePlaceholderLocations(element.expression)
+            }
+        }
+        is PerformExpression -> findPipePlaceholderLocations(expr.expression)
+        is MemberAccess -> findPipePlaceholderLocations(expr.receiver)
+        is VariantConstruction -> expr.value?.let { findPipePlaceholderLocations(it) } ?: emptyList()
+        is ParenthesizedExpression -> findPipePlaceholderLocations(expr.expression)
+        is PipeExpression -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
+        else -> emptyList()
+    }
+}
 
     // Pipe operator: |>
     // Low precedence, left-associative operator for function composition
-    // Syntax: value |> function {param = @} where @ is replaced with value
+    // Syntax: value |> function {param = @} where @ refers to the piped value
+    // Creates PipeExpression AST node (desugared later in typechecker)
 internal val MezzeParser.pipeExpression: Parser<Expression>
     get() = { stream ->
         var result: ParseResult<Expression> = comparisonExpression(stream)
@@ -1628,15 +1618,64 @@ internal val MezzeParser.pipeExpression: Parser<Expression>
             val op = currentStream.current()
 
             if (op?.type == TokenType.PIPE_OP) {
+                val pipeLocation = tokenLocation(op, currentFile)
                 val opStream = currentStream.advance()
                 val right = comparisonExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        // Desugar pipe operator immediately at parse time
-                        ParseResult.Success(
-                            desugarPipe(result.value, right.value),
-                            right.remaining
-                        )
+                        // Validate: exactly one @ in the right-hand side
+                        val placeholderCount = countPipePlaceholders(right.value)
+
+                        when {
+                            placeholderCount == 0 -> {
+                                val rightLoc = right.value.sourceLocation
+                                ParseResult.Failure(
+                                    """Pipe expression is missing '@' placeholder.
+                                    |
+                                    |The pipe operator (|>) passes a value to the right-hand side, but there's no '@' to receive it.
+                                    |
+                                    |  hint: Add '@' where you want the piped value to appear:
+                                    |        value |> func { arg = @ }
+                                    """.trimMargin(),
+                                    right.remaining.getSourcePosition(),
+                                    rightLoc?.line ?: op.line,
+                                    rightLoc?.column ?: op.column
+                                )
+                            }
+                            placeholderCount > 1 -> {
+                                val locations = findPipePlaceholderLocations(right.value)
+                                val locDesc = locations.mapIndexed { i, loc ->
+                                    "  ${i + 1}. line ${loc.line}, column ${loc.column}"
+                                }.joinToString("\n")
+                                ParseResult.Failure(
+                                    """Pipe expression has multiple '@' placeholders (only one allowed).
+                                    |
+                                    |Found $placeholderCount '@' placeholders at:
+                                    |$locDesc
+                                    |
+                                    |Each pipe (|>) should have exactly one '@' to indicate where the value goes.
+                                    |
+                                    |  hint: If you need the value in multiple places, bind it first:
+                                    |        let x = value
+                                    |        func { a = x, b = x }
+                                    """.trimMargin(),
+                                    right.remaining.getSourcePosition(),
+                                    locations.firstOrNull()?.line ?: op.line,
+                                    locations.firstOrNull()?.column ?: op.column
+                                )
+                            }
+                            else -> {
+                                // Valid: exactly one @
+                                ParseResult.Success(
+                                    PipeExpression(
+                                        left = result.value,
+                                        right = right.value,
+                                        sourceLocation = pipeLocation
+                                    ),
+                                    right.remaining
+                                )
+                            }
+                        }
                     }
                     is ParseResult.Failure -> result // Keep left side on error
                 }
@@ -2106,7 +2145,7 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
     // ===== BASIC PARSERS =====
 
 
-    // @ placeholder for pipe operator
+    // @ placeholder for pipe operator - creates PipePlaceholder AST node
 internal val MezzeParser.atPlaceholderExpression: Parser<Expression>
     get() = { stream ->
         val atToken = stream.current()
@@ -2114,7 +2153,7 @@ internal val MezzeParser.atPlaceholderExpression: Parser<Expression>
         val token = tok(TokenType.AT)(stream)
         when (token) {
             is ParseResult.Success -> ParseResult.Success(
-                Identifier(localName = "@", sourceLocation = location),  // Parse @ as identifier for now, desugar later
+                PipePlaceholder(sourceLocation = location),
                 token.remaining
             )
             is ParseResult.Failure -> token

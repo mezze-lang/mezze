@@ -158,21 +158,19 @@ let result = 5 |> add {x = @, y = 3}
     }
 
     @Test
-    fun `test multiple placeholders with same value`() {
+    fun `test multiple placeholders is an error`() {
         val source = """
 let combine = {x, y} -> x + y
 let result = 5 |> combine {x = @, y = @}
 """.trim()
 
-        assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
-
-            // Both placeholders should be replaced with same value
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
-
+        // Multiple @ in a single pipe expression is now an error
+        val exception = org.junit.jupiter.api.assertThrows<Exception> {
+            parser.parse(source)
         }
+        assertTrue(exception.message?.contains("multiple") == true ||
+                   exception.message?.contains("only one") == true,
+                   "Error should mention multiple placeholders: ${exception.message}")
     }
 
     @Test

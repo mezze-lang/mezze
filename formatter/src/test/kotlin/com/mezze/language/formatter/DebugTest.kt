@@ -7,6 +7,26 @@ class DebugTest {
     private val formatter = Formatter()
 
     @Test
+    fun `format long pipe chain multi-line`() {
+        val input = "let x = initial_value |> first_long_function_name { param = @ } |> second_long_function_name { param = @ } |> third_long_function_name { param = @ }"
+        val output = formatter.format(input)
+        // Should format on multiple lines due to length
+        println("Multi-line pipe output:\n$output")
+        assertTrue(output.contains("|>"))
+        // The line count should be > 1 for multi-line formatting
+        val lineCount = output.lines().filter { it.isNotBlank() }.size
+        assertTrue(lineCount > 1, "Expected multi-line output, got: $output")
+    }
+
+    @Test
+    fun `format short pipe stays single line`() {
+        val input = "let x = 1 |> f { a = @ }"
+        val output = formatter.format(input)
+        println("Single-line pipe output:\n$output")
+        assertEquals("let x = 1 |> f { a = @ }\n", output)
+    }
+
+    @Test
     fun `format should preserve operator syntax`() {
         val input = "let f = {x, y} -> x + y"
         val output = formatter.format(input)

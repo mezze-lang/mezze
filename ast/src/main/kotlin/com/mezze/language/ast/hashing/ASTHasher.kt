@@ -176,9 +176,16 @@ object ASTHasher {
                 }
             }
 
-            is PlaceholderExpression -> {
-                // Shouldn't appear in final AST, but hash it for completeness
-                builder.append(byteArrayOf(0xFF.toByte()))
+            is PipePlaceholder -> {
+                // Pipe placeholder (@) - unique tag
+                builder.append("pipe_placeholder:".toByteArray())
+            }
+
+            is PipeExpression -> {
+                // Pipe expression: left |> right
+                builder.append("pipe:".toByteArray())
+                hashExpressionInto(expr.left, builder)
+                hashExpressionInto(expr.right, builder)
             }
 
             is ParenthesizedExpression -> {

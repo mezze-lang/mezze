@@ -248,9 +248,49 @@ data class Identifier(
 
 }
 
-// Temporary placeholder for pipe operator desugaring - should never appear in final AST
+/**
+ * Pipe operator expression: left |> right
+ *
+ * The pipe operator passes the left expression to the right expression,
+ * where the @ placeholder in the right expression is replaced with the left value.
+ *
+ * Rules:
+ * - Every |> must have exactly one @ in the right-hand side
+ * - @ must appear as a record field value (not field name)
+ * - @ can be nested: x |> f { a = g { b = @ } }
+ *
+ * Examples:
+ *   x |> f { a = @ }           -- becomes f { a = x }
+ *   x |> f { a = g { b = @ } } -- becomes f { a = g { b = x } }
+ *   x |> f { a = @ } |> g { b = @ } -- becomes g { b = f { a = x } }
+ *
+ * This node is preserved in the AST for formatting. The typechecker
+ * desugars it by replacing the @ placeholder with the piped value.
+ */
 @Serializable
-data class PlaceholderExpression(
+data class PipeExpression(
+    val left: Expression,
+    val right: Expression,
+    override val inferredType: MezzeType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+/**
+ * Pipe placeholder: @
+ *
+ * Represents the @ symbol in a pipe expression's right-hand side.
+ * During typechecking, this is replaced with the piped value.
+ *
+ * Rules:
+ * - Only valid inside a PipeExpression's right-hand side
+ * - Must appear as a record field value
+ * - Exactly one @ per pipe expression
+ *
+ * Example: x |> f { y = @ }
+ *          The @ is a PipePlaceholder that gets replaced with x
+ */
+@Serializable
+data class PipePlaceholder(
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression

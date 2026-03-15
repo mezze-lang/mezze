@@ -2127,11 +2127,17 @@ class TypeValidator(
             is NatLiteral,
             is FloatLiteral,
             is FractionLiteral,
-            is PlaceholderExpression,
+            is PipePlaceholder,
             is PerformExpression,
             is EffectCallExpression,
             is StateMachineExpression -> {
                 // No patterns to validate in these
+            }
+
+            // Pipe expression - recurse into both sides
+            is PipeExpression -> {
+                errors.addAll(validatePatternsInExpression(expr.left, substitution))
+                errors.addAll(validatePatternsInExpression(expr.right, substitution))
             }
 
             // Parenthesized - recurse into inner
@@ -2408,10 +2414,16 @@ class TypeValidator(
             is NatLiteral,
             is FloatLiteral,
             is FractionLiteral,
-            is PlaceholderExpression,
+            is PipePlaceholder,
             is EffectCallExpression,
             is StateMachineExpression -> {
                 // No sub-expressions to validate
+            }
+
+            // Pipe expression - recurse into both sides
+            is PipeExpression -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.left, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
             // Parenthesized - recurse into inner
@@ -2631,9 +2643,15 @@ class TypeValidator(
                 is NatLiteral,
                 is FloatLiteral,
                 is FractionLiteral,
-                is PlaceholderExpression,
+                is PipePlaceholder,
                 is EffectCallExpression,
                 is StateMachineExpression -> { }
+
+                // Pipe expression - recurse into both sides
+                is PipeExpression -> {
+                    traverse(e.left)
+                    traverse(e.right)
+                }
 
                 // Parenthesized - recurse into inner
                 is ParenthesizedExpression -> traverse(e.expression)

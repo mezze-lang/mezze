@@ -215,7 +215,8 @@
       "Bash(if [ -f \"$f\" ])",
       "Bash(__NEW_LINE_f059a63367e6ce27__ for f in interpreter/src/test/kotlin/com/mezze/interpreter/v2/stdlib/*.kt)",
       "Bash(python3 -c \" import json with open\\(''/Users/shriyans/.claude/projects/-Users-shriyans-Projects-funk/64f8ef8b-8a6a-43f8-b776-61cb2fd205c7.jsonl'', ''r''\\) as f: for line in f: try: obj = json.loads\\(line\\) content = str\\(obj\\) if ''loop effect'' in content.lower\\(\\) or ''Loop effect'' in content or ''mutate {act'' in content or ''act ='' in content: print\\(content[:500]\\) print\\(''---''\\) except: pass \")",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "WebFetch(domain:zacsweers.github.io)"
     ],
     "deny": [],
     "ask": []

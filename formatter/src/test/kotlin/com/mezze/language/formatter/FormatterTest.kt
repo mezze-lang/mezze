@@ -860,4 +860,54 @@ class FormatterTest {
         val output = formatter.format(input)
         assertEquals("let x = ((a + b))\n", output)
     }
+
+    // =========================================================================
+    // PIPE EXPRESSIONS
+    // =========================================================================
+
+    @Test
+    fun `format simple pipe expression`() {
+        val input = "let x = 1 |> f { a = @ }"
+        val output = formatter.format(input)
+        assertEquals("let x = 1 |> f { a = @ }\n", output)
+    }
+
+    @Test
+    fun `format chained pipe expression`() {
+        val input = "let x = 1 |> f { a = @ } |> g { b = @ }"
+        val output = formatter.format(input)
+        assertEquals("let x = 1 |> f { a = @ } |> g { b = @ }\n", output)
+    }
+
+    @Test
+    fun `format pipe with nested placeholder`() {
+        val input = "let x = 1 |> f { a = g { b = @ } }"
+        val output = formatter.format(input)
+        assertEquals("let x = 1 |> f { a = g { b = @ } }\n", output)
+    }
+
+    @Test
+    fun `format long pipe chain on multiple lines`() {
+        val input = "let x = 1 |> first_function { a = @ } |> second_function { b = @ } |> third_function { c = @ } |> fourth_function { d = @ }"
+        val output = formatter.format(input)
+        // Should be multi-line due to length
+        assertTrue(output.contains("|>"))
+        assertTrue(output.contains("first_function"))
+        assertTrue(output.contains("fourth_function"))
+    }
+
+    @Test
+    fun `formatter is idempotent for pipe expression`() {
+        val input = "let x = 1 |> f { a = @ } |> g { b = @ }"
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `format pipe with complex left side`() {
+        val input = "let x = (a + b) |> f { n = @ }"
+        val output = formatter.format(input)
+        assertEquals("let x = (a + b) |> f { n = @ }\n", output)
+    }
 }

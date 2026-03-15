@@ -538,7 +538,8 @@ class PrettyPrinter {
             is DoExpression -> printDoExpression(expr)
             is PerformExpression -> printPerformExpression(expr)
             is EffectCallExpression -> printEffectCallExpression(expr)
-            is PlaceholderExpression -> append("_")
+            is PipePlaceholder -> append("@")
+            is PipeExpression -> printPipeExpression(expr)
             is ParenthesizedExpression -> {
                 append("(")
                 printExpression(expr.expression)
@@ -741,10 +742,124 @@ class PrettyPrinter {
         }
     }
 
+    /**
+     * Print a pipe expression with nice formatting.
+     *
+     * Short chains stay on one line:
+     *   x |> f { a = @ } |> g { b = @ }
+     *
+     * Long chains break to multiple lines with |> at the start of each line:
+     *   someValue
+     *       |> firstFunction { arg = @ }
+     *       |> secondFunction { arg = @ }
+     */
+    private fun printPipeExpression(expr: PipeExpression) {
+        // Collect all pipe segments (flatten left-associative chain)
+        val segments = mutableListOf<Expression>()
+        var current: Expression = expr
+        while (current is PipeExpression) {
+            segments.add(0, current.right)  // Add to front
+            current = current.left
+        }
+        segments.add(0, current)  // Add the leftmost (non-pipe) expression
+
+        // Estimate total length to decide single-line vs multi-line
+        val estimatedLength = estimatePipeChainLength(segments)
+        val useMultiLine = estimatedLength > config.MAX_LINE_LENGTH ||
+                           segments.any { isComplexExpression(it) } ||
+                           segments.size > 3
+
+        if (useMultiLine) {
+            // Multi-line: first segment on its own, then each pipe on new line indented
+            printExpression(segments[0])
+            newLine()
+            indent {
+                for (i in 1 until segments.size) {
+                    printIndent()
+                    append("|> ")
+                    printExpression(segments[i])
+                    if (i < segments.size - 1) {
+                        newLine()
+                    }
+                }
+            }
+        } else {
+            // Single line: x |> f { a = @ } |> g { b = @ }
+            printExpression(segments[0])
+            for (i in 1 until segments.size) {
+                append(" |> ")
+                printExpression(segments[i])
+            }
+        }
+    }
+
+    /**
+     * Estimate the length of a pipe chain if printed on a single line.
+     */
+    private fun estimatePipeChainLength(segments: List<Expression>): Int {
+        var length = 0
+        for ((index, segment) in segments.withIndex()) {
+            length += estimateExpressionLength(segment)
+            if (index > 0) {
+                length += 4  // " |> "
+            }
+        }
+        return length + currentColumn  // Add current indent
+    }
+
+    /**
+     * Rough estimate of how many characters an expression will take.
+     */
+    private fun estimateExpressionLength(expr: Expression): Int {
+        return when (expr) {
+            is IntLiteral -> expr.value.toString().length
+            is NatLiteral -> expr.value.toString().length + 1
+            is FloatLiteral -> expr.value.toString().length
+            is FractionLiteral -> expr.numerator.toString().length + expr.denominator.toString().length + 1
+            is StringLiteral -> expr.value.length + 2
+            is Identifier -> expr.localName.length + (expr.qualifier?.segments?.sumOf { it.length + 2 } ?: 0)
+            is PipePlaceholder -> 1
+            is VariantConstruction -> expr.constructor.length + (expr.value?.let { estimateExpressionLength(it) + 1 } ?: 0)
+            is MemberAccess -> estimateExpressionLength(expr.receiver) + expr.member.length + 1
+            is FunctionCall -> estimateExpressionLength(expr.function) + estimateExpressionLength(expr.arguments) + 1
+            is RecordLiteral -> {
+                if (expr.entries.isEmpty()) 2
+                else expr.entries.sumOf { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.name.length + (entry.value?.let { estimateExpressionLength(it) + 3 } ?: 0)
+                        is RecordSpreadEntry -> estimateExpressionLength(entry.expression) + 4
+                    }
+                } + 4
+            }
+            is ParenthesizedExpression -> estimateExpressionLength(expr.expression) + 2
+            is PipeExpression -> estimateExpressionLength(expr.left) + estimateExpressionLength(expr.right) + 4
+            else -> 20  // Conservative estimate for complex expressions
+        }
+    }
+
+    /**
+     * Check if an expression is "complex" and should trigger multi-line formatting.
+     */
+    private fun isComplexExpression(expr: Expression): Boolean {
+        return when (expr) {
+            is DoExpression, is MatchExpression, is PerformExpression,
+            is LambdaExpression -> true
+            is RecordLiteral -> expr.entries.size > 3 || expr.entries.any { entry ->
+                when (entry) {
+                    is RecordFieldEntry -> entry.value?.let { isComplexExpression(it) } ?: false
+                    is RecordSpreadEntry -> isComplexExpression(entry.expression)
+                }
+            }
+            is FunctionCall -> isComplexExpression(expr.arguments)
+            is IfExpression -> true  // if-then-else is usually clearer on multiple lines in pipes
+            else -> false
+        }
+    }
+
     private fun isSimpleExpression(expr: Expression): Boolean {
         return when (expr) {
             is IntLiteral, is FloatLiteral, is StringLiteral,
-            is NatLiteral, is FractionLiteral, is Identifier, is PlaceholderExpression -> true
+            is NatLiteral, is FractionLiteral, is Identifier, is PipePlaceholder -> true
             is VariantConstruction -> {
                 val value = expr.value
                 value == null || isSimpleExpression(value)

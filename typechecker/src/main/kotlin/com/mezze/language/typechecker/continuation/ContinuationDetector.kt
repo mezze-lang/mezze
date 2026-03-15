@@ -108,7 +108,10 @@ class ContinuationDetector {
             }
             // Literals and identifiers don't use continuations
             is IntLiteral, is NatLiteral, is FloatLiteral,
-            is FractionLiteral, is Identifier, is PlaceholderExpression -> false
+            is FractionLiteral, is Identifier, is PipePlaceholder -> false
+
+            // Pipe expression - check both sides
+            is PipeExpression -> usesContinuations(expr.left) || usesContinuations(expr.right)
 
             // Parenthesized - check inner expression
             is ParenthesizedExpression -> usesContinuations(expr.expression)

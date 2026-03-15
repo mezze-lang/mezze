@@ -689,7 +689,14 @@ class SubstitutionApplier(
 
             // Variables
             is Identifier -> applyToIdentifier(expr)
-            is PlaceholderExpression -> applyToPlaceholder(expr)
+
+            // Pipe placeholder and expression (should be desugared before this phase, but handle gracefully)
+            is PipePlaceholder -> expr.copy(inferredType = expr.inferredType?.let { substitution.apply(it) })
+            is PipeExpression -> expr.copy(
+                left = applyToExpression(expr.left),
+                right = applyToExpression(expr.right),
+                inferredType = expr.inferredType?.let { substitution.apply(it) }
+            )
 
             // Parenthesized
             is ParenthesizedExpression -> expr.copy(
@@ -824,10 +831,6 @@ class SubstitutionApplier(
         )
     }
 
-    private fun applyToPlaceholder(expr: PlaceholderExpression): PlaceholderExpression {
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(inferredType = updatedType)
-    }
 
     // ========================================================================
     // RECORDS

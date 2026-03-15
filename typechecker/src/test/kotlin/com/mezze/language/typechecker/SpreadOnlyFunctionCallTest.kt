@@ -127,17 +127,20 @@ class SpreadOnlyFunctionCallTest {
     }
 
     @Test
-    fun `should reject spread-only in pipe operator function call`() {
+    fun `should reject pipe without placeholder`() {
+        // With the new pipe validation, this fails at parse time because there's no @
         val code = """
             let process = {x} -> x * 2
             let args = { x = 5 }
             let result = 10 |> process { ...args }
         """.trimIndent()
 
-        val exception = assertThrows<TypeCheckError> {
-            parseAndTypeCheck(code)
+        val exception = assertThrows<com.mezze.language.parser.ParseException> {
+            parser.parse(code)
         }
-        assertTrue(exception.message!!.contains("cannot use spread-only records"))
+        // Error should mention missing @ placeholder
+        assertTrue(exception.message!!.contains("@") || exception.message!!.contains("placeholder"),
+            "Error should mention missing placeholder: ${exception.message}")
     }
 
     @Test

@@ -38,7 +38,12 @@ class TypeSubstitutor(
 
             // Variables
             is Identifier -> expr.copy(inferredType = substitutedType)
-            is PlaceholderExpression -> expr.copy(inferredType = substitutedType)
+            is PipePlaceholder -> expr.copy(inferredType = substitutedType)
+            is PipeExpression -> expr.copy(
+                left = apply(expr.left),
+                right = apply(expr.right),
+                inferredType = substitutedType
+            )
             is ParenthesizedExpression -> expr.copy(
                 expression = apply(expr.expression),
                 inferredType = substitutedType

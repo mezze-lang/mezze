@@ -95,7 +95,12 @@ class InternalBindingRenamer {
             }
         }
 
-        is PlaceholderExpression -> expr
+        is PipePlaceholder -> expr
+
+        is PipeExpression -> expr.copy(
+            left = renameExpr(expr.left),
+            right = renameExpr(expr.right)
+        )
 
         is ParenthesizedExpression -> expr.copy(
             expression = renameExpr(expr.expression)
