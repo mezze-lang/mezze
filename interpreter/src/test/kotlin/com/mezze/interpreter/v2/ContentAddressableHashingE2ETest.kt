@@ -482,8 +482,8 @@ class ContentAddressableHashingE2ETest {
                 inner: {val: 'a} -> Int
             }
 
-            ability Outer 'a with Inner 'a where {
-                outer: {val: 'a} -> Int
+            ability Outer 'a where {
+                outer: {val: 'a} with Inner 'a -> Int
             }
 
             impl Inner Int where {

@@ -126,7 +126,7 @@ class AbilityValidationTest {
     }
 
     @Test
-    fun `test ability with dependencies`() {
+    fun `test ability with method-level constraints`() {
         val source = """
             # Define a helper function to compare strings
             let stringEquals = {a: Str, b: Str} -> a == b
@@ -135,10 +135,11 @@ class AbilityValidationTest {
               eq: {l: 'a, r: 'a} -> Bool
             }
 
-            ability Ord 'a with Eq 'a where {
-              compare: {l: 'a, r: 'a} -> Int,
-              lt: {l: 'a, r: 'a} -> Bool,
-              gt: {l: 'a, r: 'a} -> Bool
+            # Method-level constraints instead of ability-level
+            ability Ord 'a where {
+              compare: {l: 'a, r: 'a} with Eq 'a -> Int,
+              lt: {l: 'a, r: 'a} with Eq 'a -> Bool,
+              gt: {l: 'a, r: 'a} with Eq 'a -> Bool
             }
 
             impl Eq Str where {
@@ -159,7 +160,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        assertNotNull(typedProgram, "Ability with dependencies should pass")
+        assertNotNull(typedProgram, "Ability with method-level constraints should pass")
     }
 
     @Test

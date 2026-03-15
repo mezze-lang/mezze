@@ -97,12 +97,12 @@ class AbilityAssociatedTypesTest {
     }
 
     @Test
-    fun `test ability with having and with constraint together`() {
+    fun `test ability with having and method-level constraint together`() {
         val source = """
-            ability Container 'c having 'item with Eq 'item where {
+            ability Container 'c having 'item where {
                 empty: {} -> 'c,
                 add: {container: 'c, element: 'item} -> 'c,
-                contains: {container: 'c, element: 'item} -> Bool,
+                contains: {container: 'c, element: 'item} with Eq 'item -> Bool,
             }
 
             impl Container [Int] having 'item = Int where {
@@ -117,8 +117,13 @@ class AbilityAssociatedTypesTest {
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
-        assertEquals(1, ability.dependencies.size)
-        assertEquals("Eq", ability.dependencies[0].abilityName)
+        // No ability-level dependencies
+        assertEquals(0, ability.dependencies.size)
+        // Method-level constraint on 'contains'
+        val containsOp = ability.operations.find { it.name == "contains" }
+        assertNotNull(containsOp)
+        assertEquals(1, containsOp!!.abilityConstraints.size)
+        assertEquals("Eq", containsOp.abilityConstraints[0].abilityName)
     }
 
     @Test
@@ -278,12 +283,12 @@ class AbilityAssociatedTypesTest {
     }
 
     @Test
-    fun `test ability with multiple constraints and associated type`() {
+    fun `test ability with multiple method-level constraints and associated type`() {
         val source = """
-            ability SortedSet 's having 'elem with Eq 'elem, Ord 'elem where {
+            ability SortedSet 's having 'elem where {
                 empty: {} -> 's,
-                insert: {set: 's, element: 'elem} -> 's,
-                contains: {set: 's, element: 'elem} -> Bool,
+                insert: {set: 's, element: 'elem} with Eq 'elem, Ord 'elem -> 's,
+                contains: {set: 's, element: 'elem} with Eq 'elem -> Bool,
             }
         """.trimIndent()
 
@@ -292,7 +297,12 @@ class AbilityAssociatedTypesTest {
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'elem", ability.associatedType)
-        assertEquals(2, ability.dependencies.size)
+        // No ability-level dependencies
+        assertEquals(0, ability.dependencies.size)
+        // Method-level constraints
+        val insertOp = ability.operations.find { it.name == "insert" }
+        assertNotNull(insertOp)
+        assertEquals(2, insertOp!!.abilityConstraints.size)
     }
 
     @Test
@@ -570,11 +580,11 @@ class AbilityAssociatedTypesTest {
     }
 
     @Test
-    fun `test ability with multiple associated types and constraints`() {
+    fun `test ability with multiple associated types and method-level constraints`() {
         val source = """
-            ability Converter 'from having 'to, 'error with Eq 'from, Show 'error where {
-                convert: {value: 'from} -> 'to,
-                describe: {error: 'error} -> Str,
+            ability Converter 'from having 'to, 'error where {
+                convert: {value: 'from} with Eq 'from -> 'to,
+                describe: {error: 'error} with Show 'error -> Str,
             }
         """.trimIndent()
 
@@ -583,7 +593,11 @@ class AbilityAssociatedTypesTest {
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals(2, ability.associatedTypes.size)
-        assertEquals(2, ability.dependencies.size)
+        // No ability-level dependencies
+        assertEquals(0, ability.dependencies.size)
+        // Method-level constraints
+        assertEquals(1, ability.operations[0].abilityConstraints.size)
+        assertEquals(1, ability.operations[1].abilityConstraints.size)
     }
 
     @Test

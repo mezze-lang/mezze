@@ -36,8 +36,8 @@
 #   perform SimpleHttpClient in do
 #       get { url = "https://api.example.com/status" }
 
-use std::codec::json::{Json, to_str, parse_str}
-use std::codec::core::{Encode, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, EncodeFormat, DecodeFormat}
+use std::codec::json::{Json, JsonFmt, json_fmt, to_str, parse_str}
+use std::codec::core::{EncodeRepr, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, Format, DecodeFormat}
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
@@ -555,8 +555,8 @@ pub let post_json_json_with: { url: Str, json: Json, config: HttpConfig } -> Res
 # =============================================================================
 
 # POST any encodable type as JSON body
-pub let post_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let post_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -566,8 +566,8 @@ pub let post_body: { url: Str, body: 'a } -> Result Response HttpError <Http> wi
         Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
 
 # PUT any encodable type as JSON body
-pub let put_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let put_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -577,8 +577,8 @@ pub let put_body: { url: Str, body: 'a } -> Result Response HttpError <Http> wit
         Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
 
 # PATCH any encodable type as JSON body
-pub let patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with Encode Json 'a = { url, body } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -588,8 +588,8 @@ pub let patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http> w
         Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
 
 # POST typed body with custom config
-pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -599,8 +599,8 @@ pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Res
         Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
 
 # PUT typed body with custom config
-pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -610,8 +610,8 @@ pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Resp
         Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
 
 # PATCH typed body with custom config
-pub let patch_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with Encode Json 'a = { url, body, config } -> do
-    match Encode.encode { val = body, config = default_config } is
+pub let patch_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
+    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -761,22 +761,22 @@ pub let async_get_json_with: { url: Str, config: HttpConfig } -> Result Json Htt
 # =============================================================================
 
 # Async POST typed body
-pub let async_post_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with Encode Json 'a = { url, body } -> do
+pub let async_post_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with EncodeRepr 'a = { url, body } -> do
     let promise = Async.spawn { f = {} -> post_body { url = url, body = body } }
     Async.await { p = promise }
 
 # Async PUT typed body
-pub let async_put_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with Encode Json 'a = { url, body } -> do
+pub let async_put_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with EncodeRepr 'a = { url, body } -> do
     let promise = Async.spawn { f = {} -> put_body { url = url, body = body } }
     Async.await { p = promise }
 
 # Async PATCH typed body
-pub let async_patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with Encode Json 'a = { url, body } -> do
+pub let async_patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http, Async> with EncodeRepr 'a = { url, body } -> do
     let promise = Async.spawn { f = {} -> patch_body { url = url, body = body } }
     Async.await { p = promise }
 
 # Async POST typed body with config
-pub let async_post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http, Async> with Encode Json 'a = { url, body, config } -> do
+pub let async_post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http, Async> with EncodeRepr 'a = { url, body, config } -> do
     let promise = Async.spawn { f = {} -> post_body_with { url = url, body = body, config = config } }
     Async.await { p = promise }
 

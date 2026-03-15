@@ -930,7 +930,8 @@ class ExpressionConstraintGenerator {
         // Instantiate method type with fresh type variables
         // This prevents type variable pollution across different method calls
         // BUT: We need to preserve associated type variable names so we can match them later
-        val instantiatedMethodType = instantiateTypeWithFreshVarsPreservingAssociated(methodType, associatedTypeNames)
+        // ALSO: We need the mapping from original names to fresh vars to correctly categorize them
+        val (instantiatedMethodType, originalToFresh) = instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(methodType, associatedTypeNames)
 
         // Add ability constraint to the function type
         if (instantiatedMethodType is MezzeType.FunctionType) {
@@ -943,24 +944,40 @@ class ExpressionConstraintGenerator {
                 return ConstraintResult.simple(instantiatedMethodType)
             }
 
-            // Separate type params from associated types
-            // Type params are declared in ability declaration typeParams (e.g., 'c for Container 'c)
-            // Associated types are declared in associatedTypes (e.g., 'item for Container 'c having 'item)
+            // Separate type params from associated types using the originalToFresh mapping
             val typeParamNames = abilityDecl?.typeParams?.map { it.removePrefix("'") }?.toSet() ?: emptySet()
             val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
 
-            // Find the type variables that correspond to associated types
+            // Find the type variables that correspond to associated types vs ability type params
             val associatedTypeVarsMap = mutableMapOf<String, TypeVar>()
-            val regularTypeVars = mutableListOf<TypeVar>()
+            val abilityTypeVarsMap = mutableMapOf<String, TypeVar>()
+            val methodLocalTypeVars = mutableListOf<TypeVar>()
 
+            // Use the originalToFresh mapping to categorize fresh type vars by their original role
             for (typeVar in typeVars) {
-                val varName = typeVar.name.removePrefix("'")
-                if (associatedTypeNamesNormalized.contains(varName)) {
-                    associatedTypeVarsMap[varName] = typeVar
-                } else {
-                    regularTypeVars.add(typeVar)
+                // Find which original name this fresh var came from
+                val matchedOrigName = originalToFresh.entries.find { it.value == typeVar }?.key
+                when {
+                    matchedOrigName != null && associatedTypeNamesNormalized.contains(matchedOrigName) -> {
+                        associatedTypeVarsMap[matchedOrigName] = typeVar
+                    }
+                    matchedOrigName != null && typeParamNames.contains(matchedOrigName) -> {
+                        abilityTypeVarsMap[matchedOrigName] = typeVar
+                    }
+                    else -> {
+                        // Method-local type variable (from method-level constraints like `with Show 'b`)
+                        methodLocalTypeVars.add(typeVar)
+                    }
                 }
             }
+
+            // CRITICAL FIX: Extract ability type vars by NAME matching, preserving declaration order
+            // The ability declaration defines the order: `ability DecodeRepr 'a` means ['a]
+            // We must use this order, not extraction order from the function type
+            val abilityTypeVars = abilityDecl?.typeParams?.mapNotNull { paramName ->
+                val normalizedName = paramName.removePrefix("'")
+                abilityTypeVarsMap[normalizedName]
+            } ?: abilityTypeVarsMap.values.toList()
 
             // Build constraints
             val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
@@ -970,11 +987,11 @@ class ExpressionConstraintGenerator {
             // Convert type variables to type arguments (wrapped in VarType)
             // For single-parameter abilities (like Identity 'a), typeArgs will be empty
             // For multi-parameter abilities (like Convert 'a 'b), typeArgs will be ['b]
-            if (regularTypeVars.isNotEmpty()) {
-                val typeArgs = regularTypeVars.drop(1).map { MezzeType.VarType(it) }
+            if (abilityTypeVars.isNotEmpty()) {
+                val typeArgs = abilityTypeVars.drop(1).map { MezzeType.VarType(it) }
 
                 val abilityConstraint = Constraint.AbilityRequired(
-                    typeVar = regularTypeVars.first(),
+                    typeVar = abilityTypeVars.first(),
                     abilityName = abilityName,
                     typeArgs = typeArgs,  // Additional type arguments if multi-parameter ability
                     context = "Ability method call: $abilityName.$methodName",
@@ -986,12 +1003,33 @@ class ExpressionConstraintGenerator {
                 if (associatedTypeVarsMap.isNotEmpty()) {
                     val associatedTypeConstraint = Constraint.AssociatedTypeResolution(
                         abilityName = abilityName,
-                        primaryTypeVar = regularTypeVars.first(),
+                        primaryTypeVar = abilityTypeVars.first(),
                         associatedTypeVars = associatedTypeVarsMap,
                         context = "Associated type resolution for $abilityName.$methodName",
                         sourceLocation = expr.sourceLocation
                     )
                     associatedTypeConstraints.add(associatedTypeConstraint)
+                }
+            }
+
+            // CRITICAL: Also extract method-level ability constraints from the function type
+            // These are constraints like `with Show 'b` declared on the method itself
+            // They need to be added as AbilityRequired constraints so they get validated at call time
+            if (instantiatedMethodType.abilityConstraints.isNotEmpty()) {
+                for (constraint in instantiatedMethodType.abilityConstraints) {
+                    // Extract the type variable from typeArgs (first VarType is the constrained type)
+                    val constrainedType = constraint.typeArgs.firstOrNull()
+                    if (constrainedType is MezzeType.VarType) {
+                        abilityConstraints.add(
+                            Constraint.AbilityRequired(
+                                typeVar = constrainedType.variable,
+                                abilityName = constraint.abilityName,
+                                typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
+                                context = "Method-level constraint: ${constraint.abilityName} on ${abilityName}.$methodName",
+                                sourceLocation = expr.sourceLocation
+                            )
+                        )
+                    }
                 }
             }
 
@@ -1467,9 +1505,20 @@ class ExpressionConstraintGenerator {
         type: MezzeType,
         associatedTypeNames: List<String>
     ): MezzeType {
+        return instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(type, associatedTypeNames).first
+    }
+
+    /**
+     * Same as instantiateTypeWithFreshVarsPreservingAssociated but also returns the mapping
+     * from original type var names (normalized, without ') to the fresh TypeVar instances.
+     */
+    private fun instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(
+        type: MezzeType,
+        associatedTypeNames: List<String>
+    ): Pair<MezzeType, Map<String, TypeVar>> {
         val freeVars = getFreeTypeVariables(type)
         if (freeVars.isEmpty()) {
-            return type
+            return type to emptyMap()
         }
 
         // Normalize associated type names (remove ' prefix if present)
@@ -1487,7 +1536,13 @@ class ExpressionConstraintGenerator {
                 TypeVar.fresh()
             }
         }
-        return applyTypeVarSubstitution(type, substitution)
+
+        // Build the name mapping: original var name (normalized) -> fresh TypeVar
+        val nameMapping = substitution.entries.associate { (oldVar, newVar) ->
+            oldVar.name.removePrefix("'") to newVar
+        }
+
+        return applyTypeVarSubstitution(type, substitution) to nameMapping
     }
 
     /**
@@ -1570,7 +1625,14 @@ class ExpressionConstraintGenerator {
                 paramType = applyTypeVarSubstitution(type.paramType, substitution),
                 returnType = applyTypeVarSubstitution(type.returnType, substitution),
                 effects = type.effects,
-                abilityConstraints = type.abilityConstraints  // Keep constraints as-is for now
+                // CRITICAL: Apply substitution to ability constraints too
+                // This ensures that fresh type variables in the constraint are properly connected
+                abilityConstraints = type.abilityConstraints.map { constraint ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { applyTypeVarSubstitution(it, substitution) }
+                    )
+                }
             )
             is MezzeType.RecordType -> MezzeType.RecordType(
                 fields = type.fields.mapValues { (_, fieldType) ->
@@ -2578,6 +2640,29 @@ class ExpressionConstraintGenerator {
                 val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
                 val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
 
+                // CRITICAL: Propagate ability constraints from function and arguments
+                var effectfulAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
+
+                // CRITICAL: If the function type has ability constraints (like `with Show 'b`),
+                // generate AbilityRequired constraints for them. These constraints will be unified
+                // with the actual argument types through the equality constraint above.
+                if (functionType.abilityConstraints.isNotEmpty()) {
+                    val methodLevelConstraints = functionType.abilityConstraints.mapNotNull { constraint ->
+                        // Extract the type variable from typeArgs (first VarType is the constrained type)
+                        val constrainedType = constraint.typeArgs.firstOrNull()
+                        if (constrainedType is MezzeType.VarType) {
+                            Constraint.AbilityRequired(
+                                typeVar = constrainedType.variable,
+                                abilityName = constraint.abilityName,
+                                typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
+                                context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
+                                sourceLocation = expr.sourceLocation
+                            )
+                        } else null
+                    }
+                    effectfulAbilityConstraints = effectfulAbilityConstraints + methodLevelConstraints
+                }
+
                 // If the function has unhandled effects (suspended) or performed effects,
                 // wrap in SuspendedType. This is important for top-level validation to detect <*>.
                 val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null
@@ -2600,6 +2685,8 @@ class ExpressionConstraintGenerator {
                     effects = propagatedEffects,  // Propagate effects from function type
                     effectInstances = propagatedEffectInstances,  // Propagate effect instances from function type too!
                     performed = propagatedPerformed,  // Propagate performed flag
+                    abilityConstraints = effectfulAbilityConstraints,  // Propagate ability constraints including method-level
+                    associatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                     usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                     tailCalls = tailCalls,
@@ -2648,9 +2735,32 @@ class ExpressionConstraintGenerator {
         val collectedPerformed = functionResult.performed || argumentResult.performed
 
         // CRITICAL: Propagate ability constraints from function and arguments
-        val collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
+        var collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
         // CRITICAL: Propagate associated type constraints from function and arguments
         val collectedAssociatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints
+
+        // CRITICAL: If the function type has ability constraints (like `with Show 'b`),
+        // generate AbilityRequired constraints for them. These constraints will be unified
+        // with the actual argument types through the equality constraint above.
+        if (functionResult.type is MezzeType.FunctionType) {
+            val funcType = functionResult.type as MezzeType.FunctionType
+            if (funcType.abilityConstraints.isNotEmpty()) {
+                val methodLevelConstraints = funcType.abilityConstraints.mapNotNull { constraint ->
+                    // Extract the type variable from typeArgs (first VarType is the constrained type)
+                    val constrainedType = constraint.typeArgs.firstOrNull()
+                    if (constrainedType is MezzeType.VarType) {
+                        Constraint.AbilityRequired(
+                            typeVar = constrainedType.variable,
+                            abilityName = constraint.abilityName,
+                            typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
+                            context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
+                            sourceLocation = expr.sourceLocation
+                        )
+                    } else null
+                }
+                collectedAbilityConstraints = collectedAbilityConstraints + methodLevelConstraints
+            }
+        }
 
         // TCO: Include tail call if detected
         val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls

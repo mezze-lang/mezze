@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 /**
  * Unit tests for the CodecGenerator class.
  *
- * Tests the automatic derivation of Encode/Decode implementations.
+ * Tests the automatic derivation of EncodeRepr/DecodeRepr implementations.
  */
 class CodecGeneratorTest {
 
@@ -218,10 +218,11 @@ class CodecGeneratorTest {
         val formatType = MezzeType.TypeApplication("Json", emptyList())
         val impl = generator.generateEncodeImpl(formatType, MezzeType.IntType)
 
-        assertEquals("Encode", impl.ability.localName)
-        assertEquals(2, impl.targetTypes.size)
+        assertEquals("EncodeRepr", impl.ability.localName)
+        // Roc-style: single type parameter (just the data type)
+        assertEquals(1, impl.targetTypes.size)
         assertEquals(1, impl.operations.size)  // encode with config
-        assertEquals("encode", impl.operations[0].name)
+        assertEquals("encode_repr", impl.operations[0].name)
     }
 
     @Test
@@ -233,8 +234,9 @@ class CodecGeneratorTest {
         ))
         val impl = generator.generateEncodeImpl(formatType, recordType)
 
-        assertEquals("Encode", impl.ability.localName)
-        assertEquals(2, impl.targetTypes.size)
+        assertEquals("EncodeRepr", impl.ability.localName)
+        // Roc-style: single type parameter (just the data type)
+        assertEquals(1, impl.targetTypes.size)
         assertEquals(1, impl.operations.size)  // encode with config
         assertNotNull(impl.operations[0].implementation)
     }
@@ -248,7 +250,7 @@ class CodecGeneratorTest {
         ))
         val impl = generator.generateEncodeImpl(formatType, variantType)
 
-        assertEquals("Encode", impl.ability.localName)
+        assertEquals("EncodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
 
@@ -258,7 +260,7 @@ class CodecGeneratorTest {
         val listType = MezzeType.ListType(MezzeType.IntType)
         val impl = generator.generateEncodeImpl(formatType, listType)
 
-        assertEquals("Encode", impl.ability.localName)
+        assertEquals("EncodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
 
@@ -282,10 +284,11 @@ class CodecGeneratorTest {
         val formatType = MezzeType.TypeApplication("Json", emptyList())
         val impl = generator.generateDecodeImpl(formatType, MezzeType.IntType)
 
-        assertEquals("Decode", impl.ability.localName)
-        assertEquals(2, impl.targetTypes.size)
+        assertEquals("DecodeRepr", impl.ability.localName)
+        // Roc-style: single type parameter (just the data type)
+        assertEquals(1, impl.targetTypes.size)
         assertEquals(1, impl.operations.size)  // decode with config
-        assertEquals("decode", impl.operations[0].name)
+        assertEquals("decode_repr", impl.operations[0].name)
     }
 
     @Test
@@ -297,7 +300,7 @@ class CodecGeneratorTest {
         ))
         val impl = generator.generateDecodeImpl(formatType, recordType)
 
-        assertEquals("Decode", impl.ability.localName)
+        assertEquals("DecodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // decode with config
         assertNotNull(impl.operations[0].implementation)
     }
@@ -311,7 +314,7 @@ class CodecGeneratorTest {
         ))
         val impl = generator.generateDecodeImpl(formatType, variantType)
 
-        assertEquals("Decode", impl.ability.localName)
+        assertEquals("DecodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // decode with config
     }
 
@@ -325,7 +328,8 @@ class CodecGeneratorTest {
         val impl = generator.generateStreamEncodeImpl(formatType, MezzeType.IntType)
 
         assertEquals("StreamEncode", impl.ability.localName)
-        assertEquals(2, impl.targetTypes.size)
+        // Roc-style: single type parameter (just the data type)
+        assertEquals(1, impl.targetTypes.size)
         assertEquals(1, impl.operations.size)
         assertEquals("stream_encode", impl.operations[0].name)
     }
@@ -336,7 +340,8 @@ class CodecGeneratorTest {
         val impl = generator.generateStreamDecodeImpl(formatType, MezzeType.IntType)
 
         assertEquals("StreamDecode", impl.ability.localName)
-        assertEquals(2, impl.targetTypes.size)
+        // Roc-style: single type parameter (just the data type)
+        assertEquals(1, impl.targetTypes.size)
         assertEquals(1, impl.operations.size)
         assertEquals("stream_decode", impl.operations[0].name)
     }
@@ -397,7 +402,7 @@ class CodecGeneratorTest {
         val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
         val impl = generator.generateEncodeImpl(formatType, optionType)
 
-        assertEquals("Encode", impl.ability.localName)
+        assertEquals("EncodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
 
@@ -407,7 +412,7 @@ class CodecGeneratorTest {
         val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
         val impl = generator.generateDecodeImpl(formatType, optionType)
 
-        assertEquals("Decode", impl.ability.localName)
+        assertEquals("DecodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // decode with config
     }
 
@@ -417,7 +422,7 @@ class CodecGeneratorTest {
         val resultType = MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType))
         val impl = generator.generateEncodeImpl(formatType, resultType)
 
-        assertEquals("Encode", impl.ability.localName)
+        assertEquals("EncodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
 
@@ -427,7 +432,7 @@ class CodecGeneratorTest {
         val resultType = MezzeType.TypeApplication("Result", listOf(MezzeType.IntType, MezzeType.StringType))
         val impl = generator.generateDecodeImpl(formatType, resultType)
 
-        assertEquals("Decode", impl.ability.localName)
+        assertEquals("DecodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // decode with config
     }
 
@@ -591,7 +596,7 @@ class CodecGeneratorTest {
         val emptyVariant = MezzeType.VariantType(emptyMap())
         val impl = generator.generateEncodeImpl(formatType, emptyVariant)
 
-        assertEquals("Encode", impl.ability.localName)
+        assertEquals("EncodeRepr", impl.ability.localName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
 

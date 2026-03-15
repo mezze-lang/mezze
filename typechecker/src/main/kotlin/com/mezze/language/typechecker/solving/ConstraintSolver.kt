@@ -1479,13 +1479,25 @@ class ConstraintSolver(
             }
         }
 
-        // Check codec abilities (Encode, Decode, StreamEncode, StreamDecode)
-        // These take two type arguments: format type and data type
-        if (typeArgs.size == 2 && isCodecAbility(abilityName)) {
-            val formatType = typeArgs[0]
-            val dataType = typeArgs[1]
-            if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
-                return true
+        // Check codec abilities (Encode, EncodeRepr, Decode, DecodeRepr, StreamEncode, StreamDecode)
+        // For Roc-style design, EncodeRepr/DecodeRepr take 1 type arg (data type)
+        // The format type comes from Format/DecodeFormat impl in scope
+        if (isCodecAbility(abilityName)) {
+            if (typeArgs.size == 2) {
+                // Old-style: 2 type args (format, data)
+                val formatType = typeArgs[0]
+                val dataType = typeArgs[1]
+                if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
+                    return true
+                }
+            } else if (typeArgs.size == 1 && abilityName in setOf("EncodeRepr", "DecodeRepr")) {
+                // Roc-style single-parameter ability: EncodeRepr 'a or DecodeRepr 'a
+                // The format is provided at the method call site, not at constraint time.
+                // We just need to verify the data type is serializable.
+                val dataType = typeArgs[0]
+                if (codecGenerator.isSerializable(dataType) && !containsVarType(dataType)) {
+                    return true
+                }
             }
         }
 
@@ -1788,7 +1800,7 @@ class ConstraintSolver(
      * Check if an ability name is a codec ability.
      */
     private fun isCodecAbility(abilityName: String): Boolean {
-        return abilityName in listOf("Encode", "Decode", "StreamEncode", "StreamDecode")
+        return abilityName in listOf("Encode", "EncodeRepr", "Decode", "DecodeRepr", "StreamEncode", "StreamDecode")
     }
 
     /**
@@ -1815,8 +1827,8 @@ class ConstraintSolver(
 
         // Generate the implementation based on ability type
         val generatedImpl = when (abilityName) {
-            "Encode" -> codecGenerator.generateEncodeImpl(formatType, dataType)
-            "Decode" -> codecGenerator.generateDecodeImpl(formatType, dataType)
+            "Encode", "EncodeRepr" -> codecGenerator.generateEncodeImpl(formatType, dataType)
+            "Decode", "DecodeRepr" -> codecGenerator.generateDecodeImpl(formatType, dataType)
             "StreamEncode" -> codecGenerator.generateStreamEncodeImpl(formatType, dataType)
             "StreamDecode" -> codecGenerator.generateStreamDecodeImpl(formatType, dataType)
             else -> return false
@@ -2153,29 +2165,29 @@ class ConstraintSolver(
             "Default" -> "No default value for $typeNames. To enable this, implement: impl Default $primaryType where { ... }"
             "Parse" -> "Cannot parse into $typeNames. To enable this, implement: impl Parse $primaryType where { ... }"
             "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert $typeNames where { ... }"
-            "Decode" -> {
-                // Special handling for Decode - check if the data type is a type variable
+            "Decode", "DecodeRepr" -> {
+                // Special handling for Decode/DecodeRepr - check if the data type is a type variable
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
-                    """Cannot infer decode target type for Decode.decode call.
+                    """Cannot infer decode target type for $abilityName call.
   The result type 'a in Result 'a DecodeError could not be determined from context.
 
   Hint: Add a type annotation to specify the expected type:
-    let person: {name: String, age: Int} = json::decode {val = json}
+    let person: {name: String, age: Int} = DecodeRepr.decode_repr {val = json, fmt = json_fmt, config = default_config}
 
   Or use the result in a way that constrains its type:
-    let person = json::decode {val = json}
+    let person = DecodeRepr.decode_repr {val = json, fmt = json_fmt, config = default_config}
     person.name  # This would constrain person to have a 'name' field"""
                 } else {
                     "Cannot decode $typeNames. Ensure the format implements DecodeFormat and the data type is serializable."
                 }
             }
-            "Encode" -> {
+            "Encode", "EncodeRepr" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
-                    "Cannot infer encode source type for Encode.encode call. Add a type annotation to the value being encoded."
+                    "Cannot infer encode source type for $abilityName call. Add a type annotation to the value being encoded."
                 } else {
-                    "Cannot encode $typeNames. Ensure the format implements EncodeFormat and the data type is serializable."
+                    "Cannot encode $typeNames. Ensure the format implements Format and the data type is serializable."
                 }
             }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName $primaryType where { ... }"
@@ -2239,9 +2251,35 @@ class ConstraintSolver(
      * @return Substitution binding type variables to concrete types, or null if inference failed
      */
     private fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>): Substitution? {
-        // Special handling for Decode with concrete format but unknown data type
-        // This enables: let person = json::decode {val = json_data}
+        // Special handling for DecodeRepr with unknown data type (Roc-style single-parameter ability)
+        // This enables: let person = DecodeRepr.decode_repr {val = json_data, fmt = json_fmt, config = default_config}
         // where the result type is inferred from downstream usage
+        if (abilityName == "DecodeRepr" && typeArgs.size == 1) {
+            val dataType = typeArgs[0]
+
+            // If data is a type variable, try to infer from generated impls
+            if (dataType is MezzeType.VarType) {
+                // Look for generated DecodeRepr impls - the data type is in targetTypes[0]
+                val matchingImpls = generatedCodecImpls.values.filter { impl ->
+                    impl.ability.localName == "DecodeRepr" &&
+                    impl.targetTypes.isNotEmpty()
+                }
+
+                if (matchingImpls.size == 1) {
+                    // Exactly one impl - we can infer the data type!
+                    val impl = matchingImpls.first()
+                    // Extract the data type from the impl's target types using structural conversion
+                    val inferredType = convertAnnotationToType(impl.targetTypes[0])
+
+                    if (inferredType != null) {
+                        return Substitution.single(dataType.variable, inferredType)
+                    }
+                }
+                // Multiple impls or none found - cannot infer unambiguously
+                // This will result in an error asking for type annotation
+            }
+        }
+        // Also handle old-style Decode with 2 params for backward compatibility
         if (abilityName == "Decode" && typeArgs.size == 2) {
             val formatType = typeArgs[0]
             val dataType = typeArgs[1]
@@ -2351,12 +2389,9 @@ class ConstraintSolver(
             is IdentifierTypeAnnotation -> {
                 // Check primitive types first
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                // Check if this is a known type declaration
-                if (typeDeclarations.containsKey(annotation.name)) {
-                    MezzeType.TypeApplication(annotation.name, emptyList())
-                } else {
-                    null
-                }
+                // For non-primitive identifiers, create a TypeApplication
+                // (the type may be from an imported module, so we don't require it in typeDeclarations)
+                MezzeType.TypeApplication(annotation.name, emptyList())
             }
             is TypeApplicationAnnotation -> {
                 val args = annotation.args.mapNotNull { convertAnnotationToType(it) }

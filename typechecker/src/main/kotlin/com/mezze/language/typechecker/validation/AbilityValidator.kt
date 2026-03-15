@@ -16,8 +16,9 @@ object AbilityValidator {
      * Validate ability declaration.
      *
      * Checks:
-     * 1. Operation effects are not polymorphic (<...>)
-     * 2. Operation effects are not performed (<*>)
+     * 1. No ability-level constraints (use method-level constraints instead)
+     * 2. Operation effects are not polymorphic (<...>)
+     * 3. Operation effects are not performed (<*>)
      *
      * Ability operations must declare concrete effects because they define a contract.
      * Polymorphic or performed effects would make the contract ambiguous.
@@ -26,6 +27,34 @@ object AbilityValidator {
      * @throws TypeCheckError if validation fails
      */
     fun validateAbilityDeclaration(ability: AbilityDeclaration) {
+        // Rule 1: No ability-level constraints - use method-level constraints instead
+        // This ensures a simpler, more uniform constraint model where constraints are always on functions
+        if (ability.constraints.isNotEmpty() || ability.dependencies.isNotEmpty()) {
+            // Format constraints nicely for error message
+            val constraintsList = (ability.constraints.map { "${it.abilityName} ${it.typeParam}" } +
+                                   ability.dependencies.map { dep ->
+                                       val args = dep.typeArgs.joinToString(" ") { typeAnnotationToString(it) }
+                                       "${dep.abilityName} $args"
+                                   })
+                .joinToString(", ")
+
+            // Generate suggestion for method-level constraints
+            val suggestion = buildString {
+                append("Move constraints to method signatures. For example:\n\n")
+                append("  ability ${ability.name} ${ability.typeParams.joinToString(" ")} where {\n")
+                for (op in ability.operations) {
+                    append("      ${op.name}: ... with $constraintsList -> ...\n")
+                }
+                append("  }")
+            }
+
+            throw TypeCheckError(
+                "Ability '${ability.name}' uses ability-level constraints ('with $constraintsList'), " +
+                "but only method-level constraints are allowed.\n\n$suggestion",
+                ability.sourceLocation
+            )
+        }
+
         for (operation in ability.operations) {
             val effects = operation.effects ?: continue  // No effects is fine (pure operation)
 

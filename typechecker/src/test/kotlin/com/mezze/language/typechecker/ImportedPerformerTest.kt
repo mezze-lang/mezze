@@ -481,10 +481,10 @@ class ImportedPerformerTest {
     fun `ability imported from stdlib codec should work`() {
         // Test importing actual stdlib ability
         val source = """
-            use std::codec::core::{Encode, EncodeError, CodecConfig, FieldTransform}
+            use std::codec::core::{Encode, EncodeError, CodecConfig, default_config}
 
-            # Just verify the imports work - Encode is a multi-param ability
-            let config: CodecConfig = { field_transform = Identity }
+            # Just verify the imports work - Encode is a single-param ability, CodecConfig is a record type
+            let config: CodecConfig = default_config
         """.trimIndent()
 
         val program = parser.parse(source)

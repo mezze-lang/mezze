@@ -356,7 +356,8 @@ data class AbilityOperation(
     val name: String,
     val paramType: TypeAnnotation,
     val returnType: TypeAnnotation,
-    val effects: EffectRowAnnotation? = null  // Optional effects the operation performs
+    val effects: EffectRowAnnotation? = null,  // Optional effects the operation performs
+    val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Method-level ability constraints
 ) {
     /** Returns true if this operation declares any effects */
     val hasEffects: Boolean get() = effects != null && effects.allEffectNames.isNotEmpty()

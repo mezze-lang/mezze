@@ -327,9 +327,17 @@ class ContextBuilder {
         // Add ability record type (for qualified access like Show.display)
         val abilityRecordType = MezzeType.RecordType(
             fields = abilityDecl.operations.associate { op ->
+                // Convert method-level ability constraints to FunctionAbilityConstraint
+                val constraints = op.abilityConstraints.map { constraint ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
+                    )
+                }
                 val functionType = MezzeType.FunctionType(
                     paramType = convertTypeAnnotation(op.paramType),
-                    returnType = convertTypeAnnotation(op.returnType)
+                    returnType = convertTypeAnnotation(op.returnType),
+                    abilityConstraints = constraints
                 )
                 op.name to functionType
             }

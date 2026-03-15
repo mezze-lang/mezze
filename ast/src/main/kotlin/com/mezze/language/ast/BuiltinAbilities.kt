@@ -45,8 +45,9 @@ object BuiltinAbilities {
     const val DECODE = "Decode"
     const val STREAM_ENCODE = "StreamEncode"
     const val STREAM_DECODE = "StreamDecode"
-    const val ENCODE_FORMAT = "EncodeFormat"
+    const val FORMAT = "Format"  // was ENCODE_FORMAT
     const val DECODE_FORMAT = "DecodeFormat"
+    const val STREAM_FORMAT = "StreamFormat"  // was STREAM_ENCODE_FORMAT
 
     // Other stdlib abilities
     const val SHOW = "Show"

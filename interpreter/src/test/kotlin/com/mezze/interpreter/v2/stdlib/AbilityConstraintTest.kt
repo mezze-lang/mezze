@@ -39,11 +39,11 @@ class AbilityConstraintTest {
     @Test
     fun `function with Encode ability constraint compiles`() {
         val error = typeCheck("""
-            use std::codec::core::{Encode, CodecConfig, default_config}
-            use std::codec::json::{Json, to_str}
+            use std::codec::core::{EncodeRepr, CodecConfig, default_config}
+            use std::codec::json::{Json, JsonFmt, json_fmt, to_str}
 
-            let encode_to_json: { body: 'a } -> Str with Encode Json 'a = { body } -> do
-                let result = Encode.encode { val = body, config = default_config }
+            let encode_to_json: { body: 'a } -> Str with EncodeRepr 'a = { body } -> do
+                let result = EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config }
                 match result is
                     Ok { val } -> to_str { json = val }
                     Err { error } -> "error"

@@ -32,6 +32,9 @@ dependencies {
     implementation("io.vertx:vertx-core:4.5.1")
     implementation("io.vertx:vertx-web-client:4.5.1")
 
+    // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
+    implementation("com.dslplatform:dsl-json:2.0.2")
+
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(project(":typechecker"))

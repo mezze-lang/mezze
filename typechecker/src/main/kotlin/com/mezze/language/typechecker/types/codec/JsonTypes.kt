@@ -73,16 +73,19 @@ object JsonTypes {
             resultType(MezzeType.StringType, encodeErrorType)
         )
 
-        // __native_json_to_bytes: {json: Json} -> Result Bytes EncodeError
-        // Serializes a Json variant to UTF-8 bytes
-        context["__native_json_to_bytes"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("json" to jsonType)),
+        // __native_json_serialize_bytes: {json: Json, pretty: Bool} -> Result Bytes EncodeError
+        // Serializes a Json variant to UTF-8 bytes (DSL-JSON powered)
+        context["__native_json_serialize_bytes"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "json" to jsonType,
+                "pretty" to MezzeType.BoolType
+            )),
             resultType(MezzeType.BytesType, encodeErrorType)
         )
 
-        // __native_json_from_bytes: {bytes: Bytes} -> Result Json DecodeError
-        // Parses UTF-8 bytes as JSON into a Json variant
-        context["__native_json_from_bytes"] = MezzeType.FunctionType(
+        // __native_json_parse_bytes: {bytes: Bytes} -> Result Json DecodeError
+        // Parses UTF-8 bytes as JSON into a Json variant (DSL-JSON powered)
+        context["__native_json_parse_bytes"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("bytes" to MezzeType.BytesType)),
             resultType(jsonType, decodeErrorType)
         )

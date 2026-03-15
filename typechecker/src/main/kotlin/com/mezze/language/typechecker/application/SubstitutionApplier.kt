@@ -225,7 +225,10 @@ class SubstitutionApplier(
         // This ensures they're registered BEFORE any code that uses them
         // IMPORTANT: Process generated impls through applyToImplAbilityDeclaration so their
         // internal expressions get ability resolution (resolvedAbilities populated)
-        val processedCodecImpls = generatedCodecImpls.map { applyToImplAbilityDeclaration(it) }
+        // NOTE: Take a snapshot of the list to avoid ConcurrentModificationException since
+        // applyToImplAbilityDeclaration may generate additional impls
+        val codecImplsSnapshot = generatedCodecImpls.toList()
+        val processedCodecImpls = codecImplsSnapshot.map { applyToImplAbilityDeclaration(it) }
         val allItems = processedCodecImpls + updatedItems
         return Program(items = allItems)
     }
@@ -1232,9 +1235,9 @@ class SubstitutionApplier(
         // Look for implementations of this ability, or check if it's auto-derivable
         val hasImpl = mutableAbilityImpls.values.any { it.abilityName == abilityName }
         val isCodecAbility = abilityName in setOf(
-            "Encode", "Decode",
-            "EncodeFormat", "DecodeFormat",
-            "StreamEncodeFormat", "StreamDecodeFormat"
+            "Encode", "Decode", "EncodeRepr", "DecodeRepr",
+            "Format", "DecodeFormat",
+            "StreamFormat", "StreamDecodeFormat"
         )
         if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !isCodecAbility) {
             return resolvedAbilities
@@ -1244,9 +1247,9 @@ class SubstitutionApplier(
         val argType = arguments.inferredType
         if (argType !is MezzeType.RecordType) return resolvedAbilities
 
-        // For Encode/Decode abilities, the type we need is in the "val" field specifically
+        // For Encode/EncodeRepr/Decode/DecodeRepr abilities, the type we need is in the "val" field specifically
         // For other abilities like Show, use the first field's type
-        val primaryType = if (abilityName == "Encode" || abilityName == "Decode") {
+        val primaryType = if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
             // Encode/Decode use {val: 'a, config: 'cfg} where 'a is the data type
             val valFieldType = argType.fields["val"]
             if (valFieldType != null) {
@@ -1262,13 +1265,13 @@ class SubstitutionApplier(
 
         if (primaryType == null) return resolvedAbilities
 
-        // For Encode/Decode, we need to search with both format type AND data type
-        // The format type comes from the EncodeFormat/DecodeFormat impl in scope
+        // For Encode/EncodeRepr/Decode/DecodeRepr, we need to search with both format type AND data type
+        // The format type comes from the Format/DecodeFormat impl in scope
         var impl: com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo? = null
 
-        if (abilityName == "Encode" || abilityName == "Decode") {
-            // Find the format type from EncodeFormat/DecodeFormat impl
-            val formatAbility = if (abilityName == "Encode") "EncodeFormat" else "DecodeFormat"
+        if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
+            // Find the format type from Format/DecodeFormat impl
+            val formatAbility = if (abilityName in setOf("Encode", "EncodeRepr")) "Format" else "DecodeFormat"
             val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
             val formatTypeName = formatImpl?.targetTypes?.firstOrNull()
 
@@ -1289,7 +1292,7 @@ class SubstitutionApplier(
         }
 
         // If no match found by argument types, try to find the only implementation
-        // This handles format-parameterized abilities like EncodeFormat 'repr
+        // This handles format-parameterized abilities like Format 'repr
         // where the type parameter doesn't come from the arguments
         if (impl == null) {
             // O(1) lookup via secondary index instead of O(N) filter
@@ -1328,17 +1331,17 @@ class SubstitutionApplier(
                     // No implementationHash for builtins - they're handled specially by interpreter
                 )
             }
-        } else if (abilityName == "Encode" || abilityName == "Decode") {
-            // Auto-derive Encode/Decode for serializable types
-            // First, find the format type from the EncodeFormat/DecodeFormat impl in scope
-            val formatAbility = if (abilityName == "Encode") "EncodeFormat" else "DecodeFormat"
+        } else if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
+            // Auto-derive Encode/EncodeRepr/Decode/DecodeRepr for serializable types
+            // First, find the format type from the Format/DecodeFormat impl in scope
+            val formatAbility = if (abilityName in setOf("Encode", "EncodeRepr")) "Format" else "DecodeFormat"
             val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
 
-            // For Encode: primaryType is the data type from the argument (correct)
-            // For Decode: primaryType is the format type from the argument (wrong!)
+            // For Encode/EncodeRepr: primaryType is the data type from the argument (correct)
+            // For Decode/DecodeRepr: primaryType is the format type from the argument (wrong!)
             //             We need the return type, which is Result 'a DecodeError
             //             The 'a is what we need to decode to
-            val dataType = if (abilityName == "Decode") {
+            val dataType = if (abilityName in setOf("Decode", "DecodeRepr")) {
                 // BIDIRECTIONAL INFERENCE: For Decode without type annotation, the target type
                 // is inferred from usage (e.g., field access like val.name). This creates
                 // HasField constraints that bind type variables to record types in the substitution.
@@ -1358,7 +1361,7 @@ class SubstitutionApplier(
 
                 extractedType ?: primaryType
             } else {
-                primaryType // For Encode, use the argument type
+                primaryType // For Encode/EncodeRepr, use the argument type
             }
 
             // For built-in parametric types (Option, Result), keep them as TypeApplication
@@ -1376,20 +1379,36 @@ class SubstitutionApplier(
             // these to {name: String} so they're treated as concrete serializable types.
             val closedType = closeOpenRecords(resolvedPrimaryType)
 
+            // Skip if closedType is a format type (Json, etc.) - these are intermediate representations
+            // not valid decode targets. This can happen when bidirectional inference fails.
+            val formatTypes = setOf("Json", "JString", "JInt", "JBool", "JArray", "JObject", "JNull", "JFloat")
+            val isFormatType = when (closedType) {
+                is MezzeType.TypeApplication -> closedType.constructor in formatTypes
+                is MezzeType.VariantType -> closedType.constructors.keys.all { it in formatTypes }
+                else -> false
+            }
 
-            if (formatImpl != null && codecGenerator.isSerializable(closedType) && !containsVarType(closedType)) {
+            if (formatImpl != null && codecGenerator.isSerializable(closedType) && !containsVarType(closedType) && !isFormatType) {
                 // Get the format type (e.g., "Json")
                 val formatTypeName = formatImpl.targetTypes.firstOrNull() ?: return resolvedAbilities
                 val formatType = MezzeType.TypeApplication(formatTypeName, emptyList())
 
                 // Recursively generate implementations for all nested types
-                // The record/variant encode calls Encode.encode for each field/variant
+                // The record/variant encode calls EncodeRepr.encode_repr for each field/variant
                 // Filter out VarTypes since we can't generate code for unknown types
                 // Use closedType to ensure nested open records are also closed
+                // Also filter out format types (Json, etc.) - these are intermediate representations
                 val allTypesToGenerate = collectNestedTypes(closedType)
                     .filter { !containsVarType(it) }
+                    .filter { nestedType ->
+                        when (nestedType) {
+                            is MezzeType.TypeApplication -> nestedType.constructor !in formatTypes
+                            is MezzeType.VariantType -> !nestedType.constructors.keys.all { it in formatTypes }
+                            else -> true
+                        }
+                    }
                 for (nestedType in allTypesToGenerate) {
-                    val nestedImpl = if (abilityName == "Encode") {
+                    val nestedImpl = if (abilityName in setOf("Encode", "EncodeRepr")) {
                         codecGenerator.generateEncodeImpl(formatType, nestedType)
                     } else {
                         codecGenerator.generateDecodeImpl(formatType, nestedType)
@@ -1398,7 +1417,7 @@ class SubstitutionApplier(
                 }
 
                 // Generate the main implementation using the closed type
-                val generatedImpl = if (abilityName == "Encode") {
+                val generatedImpl = if (abilityName in setOf("Encode", "EncodeRepr")) {
                     codecGenerator.generateEncodeImpl(formatType, closedType)
                 } else {
                     codecGenerator.generateDecodeImpl(formatType, closedType)

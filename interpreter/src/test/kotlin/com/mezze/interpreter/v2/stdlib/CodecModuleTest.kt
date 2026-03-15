@@ -102,10 +102,10 @@ class CodecModuleTest {
     @Test
     fun `test CodecConfig construction`() {
         val result = eval("""
-            use std::codec::core::{CodecConfig, FieldTransform}
+            use std::codec::core::{CodecConfig, FieldTransform, NullHandling, default_config}
 
             let t: FieldTransform = SnakeCase
-            let config: CodecConfig = {field_transform = t}
+            let config: CodecConfig = {...default_config, field_transform = t}
             match config.field_transform is
                 SnakeCase -> True
                 _ -> False
@@ -297,25 +297,22 @@ class CodecModuleTest {
         assertEquals("Int", result)
     }
 
-    // === Entry Type Tests ===
+    // === Key-Value Record Tests ===
+    // Note: Entry type was removed from codec. Using anonymous records instead.
 
     @Test
-    fun `test Entry type construction`() {
+    fun `test key-value record construction`() {
         val result = eval("""
-            use std::codec::core::{Entry}
-
-            let entry: Entry String Int = {key = "count", value = 42}
+            let entry: {key: Str, value: Int} = {key = "count", value = 42}
             entry.value
         """)
         assertEquals(42L, result)
     }
 
     @Test
-    fun `test Entry with complex types`() {
+    fun `test key-value record with complex types`() {
         val result = eval("""
-            use std::codec::core::{Entry}
-
-            let entry: Entry Int {name: Str} = {key = 1, value = {name = "Alice"}}
+            let entry: {key: Int, value: {name: Str}} = {key = 1, value = {name = "Alice"}}
             entry.value.name
         """)
         assertEquals("Alice", result)

@@ -264,11 +264,15 @@ class ConstraintGenerator(
                                 // Check that type variables in annotation are not forced to FULLY concrete types.
                                 // Only flag when substitution maps type var to something with NO type variables.
                                 if (annotation is FunctionTypeAnnotation) {
+                                    // Collect type vars that have ability constraints - these may be
+                                    // mapped to concrete types by bidirectional inference and should be skipped
+                                    val abilityConstrainedVars = result.abilityConstraints.map { it.typeVar }.toSet()
                                     validatePolymorphismPreserved(
                                         preConvertedAnnotationType,
                                         substitution,
                                         varName,
-                                        item.expression.sourceLocation
+                                        item.expression.sourceLocation,
+                                        abilityConstrainedVars
                                     )
                                 }
 
@@ -1829,13 +1833,24 @@ class ConstraintGenerator(
         annotationType: MezzeType,
         substitution: com.mezze.language.typechecker.solving.Substitution,
         varName: String,
-        sourceLocation: SourceLocation? = null
+        sourceLocation: SourceLocation? = null,
+        abilityConstrainedTypeVars: Set<TypeVar> = emptySet()
     ) {
         // Collect all type variables from the annotation
         val annotationTypeVars = collectTypeVars(annotationType)
 
         // Check each type variable - if substitution maps it to a FULLY CONCRETE type, that's an error
         for (typeVar in annotationTypeVars) {
+            // Skip type variables that have ability constraints on them.
+            // The solver's bidirectional inference may map these to concrete types
+            // from available impls, but that doesn't mean the function isn't polymorphic.
+            // The constraint will be validated at the call site instead.
+            if (abilityConstrainedTypeVars.any {
+                it.name.removePrefix("'") == typeVar.name.removePrefix("'") || it.id == typeVar.id
+            }) {
+                continue
+            }
+
             val substituted = substitution.apply(MezzeType.VarType(typeVar))
             if (substituted !is MezzeType.VarType) {
                 // Check if the substituted type is FULLY concrete (no type variables)
@@ -2067,13 +2082,23 @@ class ConstraintGenerator(
             val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
 
             if (matchingAnnotatedList.isNotEmpty()) {
-                // Check if ANY of the matching annotated abilities have a type variable that's unified
-                // with the usage's type variable. This handles cases like:
+                // Check if ANY of the matching annotated abilities have a type arg that matches
+                // the usage's type variable. This handles cases like:
                 //   annotation: Show 'x, Show 'y
                 //   usage: Show on 'y (should match Show 'y, not fail because it doesn't match Show 'x)
+                // Also handles multi-parameter abilities like:
+                //   annotation: Encode Json 'a (typeArgs=[Json, 'a])
+                //   usage: typeVar=format_fresh (resolves to Json), typeArgs=[data_fresh]
+                val resolvedUsageTypeVar = substitution.apply(MezzeType.VarType(usage.typeVar))
                 val hasMatchingTypeVar = matchingAnnotatedList.any { matchingAnnotated ->
                     matchingAnnotated.typeArgs.any { annotatedTypeArg ->
-                        annotatedTypeArg is MezzeType.VarType && areUnified(usage.typeVar, annotatedTypeArg.variable)
+                        when {
+                            // Check VarType: unified through substitution
+                            annotatedTypeArg is MezzeType.VarType ->
+                                areUnified(usage.typeVar, annotatedTypeArg.variable)
+                            // Check concrete type: usage's typeVar resolves to same concrete type
+                            else -> resolvedUsageTypeVar == annotatedTypeArg
+                        }
                     }
                 }
 

@@ -63,15 +63,15 @@ class ComprehensiveAbilitiesAndEffectsTest {
     }
 
     @Test
-    fun testAbilityWithDependencies() {
+    fun testAbilityWithMethodLevelConstraints() {
         // Note: Using MyEq/MyOrd to avoid conflict with built-in Eq ability
         val source = """
             ability MyEq 'a where {
               equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability MyOrd 'a with MyEq 'a where {
-              compare : {left: 'a, right: 'a} -> Int
+            ability MyOrd 'a where {
+              compare : {left: 'a, right: 'a} with MyEq 'a -> Int
             }
 
             impl MyEq Int where {
@@ -87,13 +87,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        // Verify MyOrd ability has dependency on MyEq
+        // Verify MyOrd ability has method-level constraint (not ability-level dependency)
         val ordDecl = typedProgram.items.find {
             it is AbilityDeclaration && it.name == "MyOrd"
         } as AbilityDeclaration?
         assertNotNull(ordDecl)
-        assertTrue(ordDecl.dependencies.isNotEmpty())
-        assertEquals("MyEq", ordDecl.dependencies.first().abilityName)
+        assertTrue(ordDecl.dependencies.isEmpty())
+        assertEquals(1, ordDecl.operations.first().abilityConstraints.size)
+        assertEquals("MyEq", ordDecl.operations.first().abilityConstraints.first().abilityName)
     }
 
     @Test

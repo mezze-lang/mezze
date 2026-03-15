@@ -1,6 +1,6 @@
 # std/json/stream.mezze - Streaming JSON codec (Tier 2)
 #
-# Provides StreamEncodeFormat and StreamDecodeFormat implementations for JSON.
+# Provides StreamFormat and StreamDecodeFormat implementations for JSON.
 # These write directly to ByteBuffer / read from Bytes without building
 # intermediate Json variant representation.
 #
@@ -15,7 +15,7 @@
 #   let result = stream::stream_int {value = 42, buffer = buf, path = codec::empty_path}
 #   # result is Ok containing buffer with "42"
 
-use std::codec::core::{StreamEncodeFormat, StreamDecodeFormat, EncodeError, DecodeError}
+use std::codec::core::{StreamFormat, StreamDecodeFormat, EncodeError, DecodeError, CodecConfig}
 use std::collections::list
 use std::collections::buffer
 use std::collections::bytes
@@ -33,7 +33,7 @@ pub type JsonStream = {}
 # STREAM ENCODE FORMAT IMPLEMENTATION
 # ============================================================================
 
-impl StreamEncodeFormat JsonStream where {
+impl StreamFormat JsonStream where {
     stream_int = {value, buffer, path} -> do
         let s = __native_int_to_str {n = value}
         let buf2 = buffer::write_string {buf = buffer, s = s}

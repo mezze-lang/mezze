@@ -1264,9 +1264,9 @@ class ASTToTruffleConverterV2(
                 // Check if this is a codec ability call outside a polymorphic function
                 // These use runtime lookup based on argument types
                 val codecAbilities = setOf(
-                    "Encode", "Decode",
-                    "EncodeFormat", "DecodeFormat",
-                    "StreamEncodeFormat", "StreamDecodeFormat"
+                    "Encode", "EncodeRepr", "Decode", "DecodeRepr",
+                    "Format", "DecodeFormat",
+                    "StreamFormat", "StreamDecodeFormat"
                 )
                 if (receiverName in codecAbilities) {
                     // Not inside a polymorphic function - fall back to runtime lookup

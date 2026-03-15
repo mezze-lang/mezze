@@ -2761,9 +2761,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_buffer_is_empty", (r, c) -> IONatives.bufferIsEmpty(r));
         HANDLERS.put("__native_buffer_size", (r, c) -> IONatives.bufferSize(r));
 
-        // === JSON ===
+        // === JSON (DSL-JSON powered) ===
         HANDLERS.put("__native_json_serialize", (r, c) -> IONatives.jsonSerialize(r));
+        HANDLERS.put("__native_json_serialize_bytes", (r, c) -> IONatives.jsonSerializeBytes(r));
         HANDLERS.put("__native_json_parse", (r, c) -> IONatives.jsonParse(r));
+        HANDLERS.put("__native_json_parse_bytes", (r, c) -> IONatives.jsonParseBytes(r));
 
         // === HTTP Mock ===
         HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));

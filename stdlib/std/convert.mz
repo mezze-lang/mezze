@@ -1,0 +1,89 @@
+# std/convert.mz - Generic conversion abilities
+#
+# Provides generic type conversion abilities similar to Rust's From/Into/TryFrom/TryInto.
+# These are fundamental building blocks used throughout the stdlib.
+#
+# Example:
+#   # Infallible conversion
+#   impl From Int Str where {
+#       from = {val} -> int::to_str {val}
+#   }
+#   let s: Str = From.from {val = 42}
+#
+#   # Fallible conversion
+#   impl TryFrom Str Int ParseError where {
+#       try_from = {val} -> int::parse {val}
+#   }
+#   let n: Result Int ParseError = TryFrom.try_from {val = "42"}
+
+use std::int
+use std::float
+use std::collections::bytes
+
+# =============================================================================
+# INFALLIBLE CONVERSIONS
+# =============================================================================
+
+# Convert from type 'a to type 'b (infallible)
+# Like Rust's From trait
+ability From 'a 'b where {
+    from: {val: 'a} -> 'b
+}
+
+# Convert to type 'b from type 'a (infallible)
+# Like Rust's Into trait - typically auto-derived from From
+ability To 'a 'b where {
+    to: {val: 'a} -> 'b
+}
+
+# =============================================================================
+# FALLIBLE CONVERSIONS
+# =============================================================================
+
+# Fallible conversion from type 'a to type 'b
+# Like Rust's TryFrom trait
+ability TryFrom 'a 'b 'err where {
+    try_from: {val: 'a} -> Result 'b 'err
+}
+
+# Fallible conversion to type 'b from type 'a
+# Like Rust's TryInto trait
+ability TryTo 'a 'b 'err where {
+    try_to: {val: 'a} -> Result 'b 'err
+}
+
+# =============================================================================
+# COMMON IMPLEMENTATIONS
+# =============================================================================
+
+# Identity conversions
+impl From 'a 'a where {
+    from = {val} -> val
+}
+
+impl To 'a 'a where {
+    to = {val} -> val
+}
+
+# Int -> Str
+impl To Int Str where {
+    to = {val} -> int::to_str {n = val}
+}
+
+# Float -> Str
+impl To Float Str where {
+    to = {val} -> float::to_str {n = val}
+}
+
+# Bool -> Str
+impl To Bool Str where {
+    to = {val} -> if val then "True" else "False"
+}
+
+# Str -> Bytes
+impl To Str Bytes where {
+    to = {val} -> bytes::from_string {s = val}
+}
+
+# Note: TryFrom Bytes Str is defined in std/codec/core.mz
+# to avoid circular dependencies (it uses DecodeError)

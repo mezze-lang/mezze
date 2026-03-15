@@ -300,21 +300,14 @@ public final class IONatives {
         throw new RuntimeException("Expected Buffer for field '" + fieldName + "'");
     }
 
-    // ==================== JSON ====================
+    // ==================== JSON (using DSL-JSON) ====================
 
     /**
      * Serialize a Json variant type to a JSON string.
      * Takes: {json: Json, pretty: Bool}
      * Returns: Result String Error (Ok {val = string} or Err {error = {...}})
      *
-     * Json variant type:
-     * - JNull
-     * - JBool {val: Bool}
-     * - JInt {val: Int}
-     * - JFloat {val: Float}
-     * - JString {val: String}
-     * - JArray {items: Array Json}
-     * - JObject {fields: Array {key: String, value: Json}}
+     * Uses DSL-JSON for high-performance byte-level serialization.
      */
     @TruffleBoundary
     public static MezzeVariant jsonSerialize(MezzeRecord args) {
@@ -323,7 +316,10 @@ public final class IONatives {
         boolean pretty = prettyObj instanceof Boolean b && b;
 
         try {
-            String result = serializeJsonVariant(jsonValue, pretty, 0);
+            if (!(jsonValue instanceof MezzeVariant json)) {
+                throw new RuntimeException("Expected Json variant");
+            }
+            String result = DslJsonCodec.serializeToString(json, pretty);
             return MezzeVariant.ok(result);
         } catch (Exception e) {
             MezzeRecord error = MezzeRecord.fromFields(
@@ -335,422 +331,79 @@ public final class IONatives {
     }
 
     /**
-     * Serialize a Json variant to JSON string.
+     * Serialize a Json variant to bytes.
+     * Takes: {json: Json, pretty: Bool}
+     * Returns: Result Bytes Error
+     *
+     * Uses DSL-JSON for high-performance byte-level serialization.
      */
-    private static String serializeJsonVariant(Object value, boolean pretty, int indent) {
-        if (value instanceof MezzeVariant variant) {
-            String constructor = variant.getConstructorName();
-            return switch (constructor) {
-                case "JNull" -> "null";
-                case "JBool" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    Boolean b = (Boolean) payload.getField("val");
-                    yield b.toString();
-                }
-                case "JInt" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    Long l = (Long) payload.getField("val");
-                    yield l.toString();
-                }
-                case "JFloat" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    Double d = (Double) payload.getField("val");
-                    yield d.toString();
-                }
-                case "JString" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    String s = (String) payload.getField("val");
-                    yield "\"" + escapeJsonString(s) + "\"";
-                }
-                case "JArray" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    Object items = payload.getField("items");
-                    yield serializeJsonArray(items, pretty, indent);
-                }
-                case "JObject" -> {
-                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
-                    Object fields = payload.getField("fields");
-                    yield serializeJsonObject(fields, pretty, indent);
-                }
-                default -> throw new RuntimeException("Unknown Json variant: " + constructor);
-            };
+    @TruffleBoundary
+    public static MezzeVariant jsonSerializeBytes(MezzeRecord args) {
+        Object jsonValue = getField(args, "json");
+        Object prettyObj = getField(args, "pretty");
+        boolean pretty = prettyObj instanceof Boolean b && b;
+
+        try {
+            if (!(jsonValue instanceof MezzeVariant json)) {
+                throw new RuntimeException("Expected Json variant");
+            }
+            byte[] result = DslJsonCodec.serializeToBytes(json, pretty);
+            return MezzeVariant.ok(new BytesNatives.MezzeBytes(result));
+        } catch (Exception e) {
+            MezzeRecord error = MezzeRecord.fromFields(
+                new String[]{"path", "message"},
+                new Object[]{MezzeList.empty(), "JSON serialize error: " + e.getMessage()}
+            );
+            return MezzeVariant.err(error);
         }
-        throw new RuntimeException("Expected Json variant, got: " + (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
     /**
-     * Serialize JArray items to JSON string.
+     * Parse JSON from string.
+     * Takes: {s: String}
+     * Returns: Result Json Error
+     *
+     * Uses DSL-JSON for high-performance byte-level parsing.
      */
-    private static String serializeJsonArray(Object items, boolean pretty, int indent) {
-        Object[] elements = getArrayElements(items);
-        if (elements.length == 0) {
-            return "[]";
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("[");
-        if (pretty) {
-            sb.append("\n");
-        }
-
-        for (int i = 0; i < elements.length; i++) {
-            if (i > 0) {
-                sb.append(",");
-                if (pretty) sb.append("\n");
-            }
-            if (pretty) {
-                sb.append("  ".repeat(indent + 1));
-            }
-            sb.append(serializeJsonVariant(elements[i], pretty, indent + 1));
-        }
-
-        if (pretty) {
-            sb.append("\n");
-            sb.append("  ".repeat(indent));
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Serialize JObject fields to JSON string.
-     */
-    private static String serializeJsonObject(Object fields, boolean pretty, int indent) {
-        Object[] entries = getArrayElements(fields);
-        if (entries.length == 0) {
-            return "{}";
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        if (pretty) {
-            sb.append("\n");
-        }
-
-        for (int i = 0; i < entries.length; i++) {
-            if (i > 0) {
-                sb.append(",");
-                if (pretty) sb.append("\n");
-            }
-            if (pretty) {
-                sb.append("  ".repeat(indent + 1));
-            }
-
-            // Each entry is {key: String, value: Json}
-            MezzeRecord entry = (MezzeRecord) entries[i];
-            String key = (String) entry.getField("key");
-            Object value = entry.getField("value");
-
-            sb.append("\"").append(escapeJsonString(key)).append("\"");
-            sb.append(":");
-            if (pretty) sb.append(" ");
-            sb.append(serializeJsonVariant(value, pretty, indent + 1));
-        }
-
-        if (pretty) {
-            sb.append("\n");
-            sb.append("  ".repeat(indent));
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    /**
-     * Get array elements from MezzeSeq, MezzeList, or Object[] (Array in Mezze).
-     */
-    private static Object[] getArrayElements(Object arr) {
-        if (arr instanceof MezzeSeq seq) {
-            return seq.toArray();
-        } else if (arr instanceof MezzeList list) {
-            return list.toArray();
-        } else if (arr instanceof Object[] objArr) {
-            return objArr;
-        }
-        throw new RuntimeException("Expected array, got: " + (arr == null ? "null" : arr.getClass().getSimpleName()));
-    }
-
     @TruffleBoundary
     public static Object jsonParse(MezzeRecord args) {
         String s = getString(args, "s");
         try {
-            return parseJson(s.trim());
+            MezzeVariant result = DslJsonCodec.parseString(s.trim());
+            return createOk(result);
         } catch (Exception e) {
             return createErr("JSON parse error: " + e.getMessage());
         }
     }
 
-    private static String toJson(Object value) {
-        if (value == null || value instanceof MezzeUnit) {
-            return "null";
-        } else if (value instanceof Boolean b) {
-            return b.toString();
-        } else if (value instanceof Long l) {
-            return l.toString();
-        } else if (value instanceof Double d) {
-            return d.toString();
-        } else if (value instanceof String s) {
-            return "\"" + escapeJsonString(s) + "\"";
-        } else if (value instanceof MezzeList list) {
-            Object[] store = list.toArray();
-            StringBuilder sb = new StringBuilder("[");
-            for (int i = 0; i < store.length; i++) {
-                if (i > 0) sb.append(",");
-                sb.append(toJson(store[i]));
-            }
-            sb.append("]");
-            return sb.toString();
-        } else if (value instanceof MezzeRecord rec) {
-            // Check if it's a variant
-            int variantIdx = rec.getFieldIndex("$variant");
-            if (variantIdx >= 0) {
-                String variant = (String) rec.getField(variantIdx);
-                // Handle Option type
-                if ("None".equals(variant)) return "null";
-                if ("Some".equals(variant)) {
-                    int valIdx = rec.getFieldIndex("val");
-                    if (valIdx >= 0) return toJson(rec.getField(valIdx));
-                }
-            }
+    /**
+     * Parse JSON from bytes.
+     * Takes: {bytes: Bytes}
+     * Returns: Result Json Error
+     *
+     * Uses DSL-JSON for high-performance byte-level parsing (no UTF-8 conversion needed).
+     */
+    @TruffleBoundary
+    public static Object jsonParseBytes(MezzeRecord args) {
+        Object bytesValue = getField(args, "bytes");
+        byte[] bytes;
 
-            StringBuilder sb = new StringBuilder("{");
-            int fieldCount = rec.getFieldCount();
-            boolean first = true;
-            for (int i = 0; i < fieldCount; i++) {
-                String name = rec.getShape().getFieldName(i);
-                if (name.startsWith("$")) continue; // Skip internal fields
-                if (!first) sb.append(",");
-                first = false;
-                sb.append("\"").append(escapeJsonString(name)).append("\":");
-                sb.append(toJson(rec.getField(i)));
-            }
-            sb.append("}");
-            return sb.toString();
+        if (bytesValue instanceof BytesNatives.MezzeBytes mb) {
+            bytes = mb.getData();
+        } else if (bytesValue instanceof MezzeBytes mb) {
+            bytes = new byte[mb.length()];
+            System.arraycopy(mb.getData(), mb.getOffset(), bytes, 0, mb.length());
+        } else if (bytesValue instanceof byte[] b) {
+            bytes = b;
         } else {
-            return "\"" + value.toString() + "\"";
+            return createErr("Expected Bytes for field 'bytes'");
         }
-    }
 
-    private static String escapeJsonString(String s) {
-        StringBuilder sb = new StringBuilder();
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
-    private static Object parseJson(String s) {
-        if (s.isEmpty()) return createErr("Empty input");
-        return new JsonParser(s).parse();
-    }
-
-    private static class JsonParser {
-        private final String s;
-        private int pos = 0;
-
-        JsonParser(String s) { this.s = s; }
-
-        Object parse() {
-            skipWhitespace();
-            Object result = parseValue();
-            skipWhitespace();
+        try {
+            MezzeVariant result = DslJsonCodec.parseBytes(bytes);
             return createOk(result);
-        }
-
-        Object parseValue() {
-            skipWhitespace();
-            if (pos >= s.length()) throw new RuntimeException("Unexpected end of input");
-            char c = s.charAt(pos);
-            return switch (c) {
-                case '{' -> parseObject();
-                case '[' -> parseArray();
-                case '"' -> parseString();
-                case 't', 'f' -> parseBoolean();
-                case 'n' -> parseNull();
-                default -> {
-                    if (c == '-' || Character.isDigit(c)) yield parseNumber();
-                    throw new RuntimeException("Unexpected character: " + c);
-                }
-            };
-        }
-
-        // Create Json variant constructors using global tag registry
-        MezzeVariant jNull() {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JNull");
-            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
-        }
-
-        MezzeVariant jBool(boolean val) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JBool");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant jInt(long val) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JInt");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant jFloat(double val) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JFloat");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant jString(String val) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JString");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant jArray(Object[] items) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JArray");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"items"}, new Object[]{items});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant jObject(Object[] fields) {
-            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JObject");
-            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"fields"}, new Object[]{fields});
-            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
-        }
-
-        MezzeVariant parseObject() {
-            expect('{');
-            skipWhitespace();
-            java.util.List<MezzeRecord> fields = new java.util.ArrayList<>();
-            if (peek() != '}') {
-                do {
-                    skipWhitespace();
-                    String key = parseRawString();
-                    skipWhitespace();
-                    expect(':');
-                    Object value = parseValue();
-                    // Each field is a record {key: String, value: Json}
-                    fields.add(MezzeRecord.fromFields(
-                        new String[]{"key", "value"}, new Object[]{key, value}));
-                    skipWhitespace();
-                } while (match(','));
-            }
-            expect('}');
-            return jObject(fields.toArray());
-        }
-
-        MezzeVariant parseArray() {
-            expect('[');
-            skipWhitespace();
-            java.util.List<Object> items = new java.util.ArrayList<>();
-            if (peek() != ']') {
-                do {
-                    items.add(parseValue());
-                    skipWhitespace();
-                } while (match(','));
-            }
-            expect(']');
-            return jArray(items.toArray());
-        }
-
-        // Parse string and return as JString variant
-        MezzeVariant parseString() {
-            return jString(parseRawString());
-        }
-
-        // Parse raw string value (not wrapped in JString)
-        String parseRawString() {
-            expect('"');
-            StringBuilder sb = new StringBuilder();
-            while (pos < s.length() && s.charAt(pos) != '"') {
-                char c = s.charAt(pos++);
-                if (c == '\\' && pos < s.length()) {
-                    char next = s.charAt(pos++);
-                    switch (next) {
-                        case '"' -> sb.append('"');
-                        case '\\' -> sb.append('\\');
-                        case 'n' -> sb.append('\n');
-                        case 'r' -> sb.append('\r');
-                        case 't' -> sb.append('\t');
-                        case 'u' -> {
-                            if (pos + 4 <= s.length()) {
-                                String hex = s.substring(pos, pos + 4);
-                                sb.append((char) Integer.parseInt(hex, 16));
-                                pos += 4;
-                            }
-                        }
-                        default -> sb.append(next);
-                    }
-                } else {
-                    sb.append(c);
-                }
-            }
-            expect('"');
-            return sb.toString();
-        }
-
-        MezzeVariant parseNumber() {
-            int start = pos;
-            if (peek() == '-') pos++;
-            while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
-            if (pos < s.length() && s.charAt(pos) == '.') {
-                pos++;
-                while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
-                return jFloat(Double.parseDouble(s.substring(start, pos)));
-            }
-            if (pos < s.length() && (s.charAt(pos) == 'e' || s.charAt(pos) == 'E')) {
-                pos++;
-                if (peek() == '+' || peek() == '-') pos++;
-                while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
-                return jFloat(Double.parseDouble(s.substring(start, pos)));
-            }
-            return jInt(Long.parseLong(s.substring(start, pos)));
-        }
-
-        MezzeVariant parseBoolean() {
-            if (s.startsWith("true", pos)) {
-                pos += 4;
-                return jBool(true);
-            } else if (s.startsWith("false", pos)) {
-                pos += 5;
-                return jBool(false);
-            }
-            throw new RuntimeException("Expected boolean");
-        }
-
-        MezzeVariant parseNull() {
-            if (s.startsWith("null", pos)) {
-                pos += 4;
-                return jNull();
-            }
-            throw new RuntimeException("Expected null");
-        }
-
-        void skipWhitespace() {
-            while (pos < s.length() && Character.isWhitespace(s.charAt(pos))) pos++;
-        }
-
-        char peek() {
-            return pos < s.length() ? s.charAt(pos) : '\0';
-        }
-
-        void expect(char c) {
-            if (pos >= s.length() || s.charAt(pos) != c) {
-                throw new RuntimeException("Expected '" + c + "'");
-            }
-            pos++;
-        }
-
-        boolean match(char c) {
-            if (pos < s.length() && s.charAt(pos) == c) {
-                pos++;
-                return true;
-            }
-            return false;
+        } catch (Exception e) {
+            return createErr("JSON parse error: " + e.getMessage());
         }
     }
 

@@ -23,15 +23,15 @@ class HttpModuleTest {
     fun `test decode with type annotation`() {
         val result = eval("""
             use std::codec::json
-            use std::codec::json::{Json}
-            use std::codec::core::{Decode, DecodeError, default_config}
+            use std::codec::json::{Json, JsonFmt, json_fmt}
+            use std::codec::core::{DecodeRepr, DecodeError, default_config}
 
             let json_obj = JObject { fields = [
                 {key = "name", value = JString {val = "Alice"}},
                 {key = "email", value = JString {val = "alice@example.com"}}
             ] }
 
-            let user: Result {name: Str, email: Str} DecodeError = Decode.decode {val = json_obj, config = default_config}
+            let user: Result {name: Str, email: Str} DecodeError = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
             match user is
                 Ok { val } -> val.name
                 Err { error } -> "error"
@@ -43,15 +43,15 @@ class HttpModuleTest {
     fun `test decode with bidirectional type inference`() {
         val result = eval("""
             use std::codec::json
-            use std::codec::json::{Json}
-            use std::codec::core::{Decode, DecodeError, default_config}
+            use std::codec::json::{Json, JsonFmt, json_fmt}
+            use std::codec::core::{DecodeRepr, DecodeError, default_config}
 
             let json_obj = JObject { fields = [
                 {key = "name", value = JString {val = "Bob"}},
                 {key = "age", value = JInt {val = 30}}
             ] }
 
-            let user = Decode.decode {val = json_obj, config = default_config}
+            let user = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
             match user is
                 Ok { val } -> val.name
                 Err { error } -> "error"
@@ -64,8 +64,8 @@ class HttpModuleTest {
         val result = eval("""
             use std::effects::log::{Console, println}
             use std::codec::json
-            use std::codec::json::{Json}
-            use std::codec::core::{Decode, DecodeError, default_config}
+            use std::codec::json::{Json, JsonFmt, json_fmt}
+            use std::codec::core::{DecodeRepr, DecodeError, default_config}
 
             let json_obj = JObject { fields = [
                 {key = "name", value = JString {val = "Charlie"}}
@@ -73,7 +73,7 @@ class HttpModuleTest {
 
             perform Console in do
                 println { msg = "Starting decode" }
-                let user = Decode.decode {val = json_obj, config = default_config}
+                let user = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
                 match user is
                     Ok { val } -> val.name
                     Err { error } -> "error"

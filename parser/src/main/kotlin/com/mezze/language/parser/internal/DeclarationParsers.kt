@@ -1337,14 +1337,15 @@ internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() 
                             is ParseResult.Success -> {
                                 val funcType = functionType.value as? FunctionTypeAnnotation
                                 if (funcType != null) {
-                                    // Extract effects from the function type (if any)
+                                    // Extract effects and ability constraints from the function type (if any)
                                     // Validation of effects (no <...> or <*>) is done in typechecker
                                     ParseResult.Success(
                                         AbilityOperation(
                                             name.value.text,
                                             funcType.paramType,
                                             funcType.returnType,
-                                            funcType.effects
+                                            funcType.effects,
+                                            funcType.abilityConstraints
                                         ),
                                         functionType.remaining
                                     )

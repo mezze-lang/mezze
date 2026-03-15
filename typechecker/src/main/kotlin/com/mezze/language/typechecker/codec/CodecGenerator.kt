@@ -411,14 +411,14 @@ class CodecGenerator {
     }
 
     /**
-     * Get the EncodeFormat ability identifier.
-     * This returns just "EncodeFormat" - the ability name itself.
-     * When used in a member access like EncodeFormat.encode_int, the SubstitutionApplier
+     * Get the Format ability identifier (was EncodeFormat).
+     * This returns just "Format" - the ability name itself.
+     * When used in a member access like Format.encode_int, the SubstitutionApplier
      * will resolve this to the correct implementation based on the format type in scope.
      */
     private fun encodeFormatImpl(formatType: MezzeType): Identifier {
         // Return the ability name - SubstitutionApplier will resolve to the correct impl
-        return id("EncodeFormat")
+        return id("Format")
     }
 
     /**
@@ -430,11 +430,11 @@ class CodecGenerator {
     }
 
     /**
-     * Get the StreamEncodeFormat ability identifier.
-     * This returns just "StreamEncodeFormat" - the ability name itself.
+     * Get the StreamFormat ability identifier (was StreamEncodeFormat).
+     * This returns just "StreamFormat" - the ability name itself.
      */
     private fun streamEncodeFormatImpl(formatType: MezzeType): Identifier {
-        return id("StreamEncodeFormat")
+        return id("StreamFormat")
     }
 
     /**
@@ -663,21 +663,24 @@ class CodecGenerator {
      */
     private fun typedEncodeCall(dataType: MezzeType, valueExpr: Expression): FunctionCall {
         // Create the arguments record with type information
+        // EncodeRepr.encode_repr takes {val, fmt, config}
         val argsRecord = RecordLiteral(
             entries = listOf(
                 RecordFieldEntry("val", valueExpr),
+                RecordFieldEntry("fmt", id("fmt")),
                 RecordFieldEntry("config", id("config"))
             ),
             // Set the inferredType so SubstitutionApplier can find the val field's type
             inferredType = MezzeType.RecordType(
                 fields = mapOf(
                     "val" to dataType,
+                    "fmt" to MezzeType.VarType(TypeVar("fmt", 0)),
                     "config" to MezzeType.VarType(TypeVar("config", 0))  // Config type is polymorphic
                 )
             )
         )
         return FunctionCall(
-            function = member(id("Encode"), "encode"),
+            function = member(id("EncodeRepr"), "encode_repr"),
             arguments = argsRecord
         )
     }
@@ -766,9 +769,11 @@ class CodecGenerator {
      */
     private fun typedDecodeCall(targetType: MezzeType, valueExpr: Expression): FunctionCall {
         // Create the arguments record with type information
+        // DecodeRepr.decode_repr takes {val, fmt, config}
         val argsRecord = RecordLiteral(
             entries = listOf(
                 RecordFieldEntry("val", valueExpr),
+                RecordFieldEntry("fmt", id("fmt")),
                 RecordFieldEntry("config", id("config"))
             ),
             // For Decode, the val field contains the serialized representation (e.g., JValue)
@@ -776,6 +781,7 @@ class CodecGenerator {
             inferredType = MezzeType.RecordType(
                 fields = mapOf(
                     "val" to MezzeType.VarType(TypeVar("repr", 0)),  // Serialized representation
+                    "fmt" to MezzeType.VarType(TypeVar("fmt", 0)),
                     "config" to MezzeType.VarType(TypeVar("config", 0))
                 )
             )
@@ -791,7 +797,7 @@ class CodecGenerator {
             rowVar = null
         )
         return FunctionCall(
-            function = member(id("Decode"), "decode"),
+            function = member(id("DecodeRepr"), "decode_repr"),
             arguments = argsRecord,
             inferredType = resultType
         )
@@ -2046,8 +2052,13 @@ class CodecGenerator {
     }
 
     /**
-     * Create an Encode impl declaration.
-     * Generates single `encode` method that takes config parameter.
+     * Create an EncodeRepr impl declaration.
+     * Generates single `encode_repr` method that takes val, fmt, and config parameters.
+     *
+     * With the Roc-inspired design, EncodeRepr is a single-parameter ability (just the data type).
+     * The format is passed as a method parameter and the Format constraint is at method level.
+     *
+     * Generated impl: impl EncodeRepr DataType where { encode_repr = {val, fmt, config} -> ... }
      */
     private fun createEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         // Wrap body in a do block that creates an empty path (Seq String)
@@ -2055,22 +2066,29 @@ class CodecGenerator {
         val encodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("Encode"),
-            targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
+            ability = QualifiedRef.local("EncodeRepr"),
+            // Single type parameter - just the data type (Roc-style)
+            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
-                    name = "encode",
+                    name = "encode_repr",
                     paramType = null,  // Inferred from ability declaration
                     returnType = null, // Inferred from ability declaration
-                    implementation = lambda(listOf("val", "config"), encodeBody)
+                    // Now takes val, fmt, and config
+                    implementation = lambda(listOf("val", "fmt", "config"), encodeBody)
                 )
             )
         )
     }
 
     /**
-     * Create a Decode impl declaration.
-     * Generates single `decode` method that takes config parameter.
+     * Create a DecodeRepr impl declaration.
+     * Generates single `decode_repr` method that takes val, fmt, and config parameters.
+     *
+     * With the Roc-inspired design, DecodeRepr is a single-parameter ability (just the data type).
+     * The format constraint is at method level via DecodeFormat.
+     *
+     * Generated impl: impl DecodeRepr DataType where { decode_repr = {val, fmt, config} -> ... }
      */
     private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         // Wrap body in a do block that creates an empty path (Seq String)
@@ -2078,14 +2096,16 @@ class CodecGenerator {
         val decodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("Decode"),
-            targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
+            ability = QualifiedRef.local("DecodeRepr"),
+            // Single type parameter - just the data type (Roc-style)
+            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
-                    name = "decode",
+                    name = "decode_repr",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("val", "config"), decodeBody)
+                    // Now takes val, fmt, and config
+                    implementation = lambda(listOf("val", "fmt", "config"), decodeBody)
                 )
             )
         )
@@ -2159,7 +2179,7 @@ class CodecGenerator {
         hookName: String
     ): ImplAbilityDeclaration {
         val body = call(
-            member(id("StreamEncodeFormat"), hookName),
+            member(id("StreamFormat"), hookName),
             record("val" to id("val"), "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, dataType, body)
@@ -2168,7 +2188,7 @@ class CodecGenerator {
     private fun generateNatStreamEncode(formatType: MezzeType): ImplAbilityDeclaration {
         val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("val")))
         val body = call(
-            member(id("StreamEncodeFormat"), "stream_int"),
+            member(id("StreamFormat"), "stream_int"),
             record("val" to toIntCall, "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, MezzeType.NatType, body)
@@ -2177,7 +2197,7 @@ class CodecGenerator {
     private fun generateCharStreamEncode(formatType: MezzeType): ImplAbilityDeclaration {
         val toStringCall = call(member(id("char"), "to_string"), record("c" to id("val")))
         val body = call(
-            member(id("StreamEncodeFormat"), "stream_string"),
+            member(id("StreamFormat"), "stream_string"),
             record("val" to toStringCall, "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, MezzeType.CharType, body)
@@ -2190,13 +2210,13 @@ class CodecGenerator {
             // Empty record
             val body = match(
                 call(
-                    member(id("StreamEncodeFormat"), "stream_record_start"),
+                    member(id("StreamFormat"), "stream_record_start"),
                     record("buffer" to id("buffer"), "path" to id("path"))
                 ),
                 matchCase(
                     okPat("buf1"),
                     call(
-                        member(id("StreamEncodeFormat"), "stream_record_end"),
+                        member(id("StreamFormat"), "stream_record_end"),
                         record("buffer" to id("buf1"), "path" to id("path"))
                     )
                 ),
@@ -2214,7 +2234,7 @@ class CodecGenerator {
         // Start with stream_record_start, then stream each field, then stream_record_end
         var currentBuffer = "buffer"
         var resultExpr: Expression = call(
-            member(id("StreamEncodeFormat"), "stream_record_end"),
+            member(id("StreamFormat"), "stream_record_end"),
             record("buffer" to id("buf_final"), "path" to id("path"))
         )
 
@@ -2238,7 +2258,7 @@ class CodecGenerator {
                     okPat("field_buf"),
                     match(
                         call(
-                            member(id("StreamEncodeFormat"), "stream_record_field"),
+                            member(id("StreamFormat"), "stream_record_field"),
                             record(
                                 "key" to str(fieldName),
                                 "val" to id("field_buf"),
@@ -2260,7 +2280,7 @@ class CodecGenerator {
         // Wrap with stream_record_start
         return match(
             call(
-                member(id("StreamEncodeFormat"), "stream_record_start"),
+                member(id("StreamFormat"), "stream_record_start"),
                 record("buffer" to id("buffer"), "path" to id("path"))
             ),
             matchCase(okPat("buf_start"), resultExpr),
@@ -2276,7 +2296,7 @@ class CodecGenerator {
                 matchCase(
                     constructorPat(constructorName, null),
                     call(
-                        member(id("StreamEncodeFormat"), "stream_variant"),
+                        member(id("StreamFormat"), "stream_variant"),
                         record(
                             "tag" to str(constructorName),
                             "payload" to none(),
@@ -2300,7 +2320,7 @@ class CodecGenerator {
                         matchCase(
                             okPat("payload_buf"),
                             call(
-                                member(id("StreamEncodeFormat"), "stream_variant"),
+                                member(id("StreamFormat"), "stream_variant"),
                                 record(
                                     "tag" to str(constructorName),
                                     "payload" to some(id("payload_buf")),
@@ -2323,7 +2343,7 @@ class CodecGenerator {
         // Use recursive approach with fold
         val body = match(
             call(
-                member(id("StreamEncodeFormat"), "stream_list_start"),
+                member(id("StreamFormat"), "stream_list_start"),
                 record("buffer" to id("buffer"), "path" to id("path"))
             ),
             matchCase(
@@ -2352,7 +2372,7 @@ class CodecGenerator {
                                                 okPat("elem_buf"),
                                                 match(
                                                     call(
-                                                        member(id("StreamEncodeFormat"), "stream_list_element"),
+                                                        member(id("StreamFormat"), "stream_list_element"),
                                                         record(
                                                             "val" to id("elem_buf"),
                                                             "is_first" to member(id("state"), "is_first"),
@@ -2378,7 +2398,7 @@ class CodecGenerator {
                     matchCase(
                         okPat("final_state"),
                         call(
-                            member(id("StreamEncodeFormat"), "stream_list_end"),
+                            member(id("StreamFormat"), "stream_list_end"),
                             record("buffer" to member(id("final_state"), "buffer"), "path" to id("path"))
                         )
                     ),
@@ -2404,7 +2424,7 @@ class CodecGenerator {
             matchCase(
                 nonePat(),
                 call(
-                    member(id("StreamEncodeFormat"), "stream_none"),
+                    member(id("StreamFormat"), "stream_none"),
                     record("buffer" to id("buffer"), "path" to id("path"))
                 )
             ),
@@ -2422,7 +2442,7 @@ class CodecGenerator {
                     matchCase(
                         okPat("inner_buf"),
                         call(
-                            member(id("StreamEncodeFormat"), "stream_some"),
+                            member(id("StreamFormat"), "stream_some"),
                             record("val" to id("inner_buf"), "buffer" to id("buffer"), "path" to id("path"))
                         )
                     ),
@@ -2787,10 +2807,16 @@ class CodecGenerator {
     // STREAMING IMPL CREATION HELPERS
     // ========================================================================
 
+    /**
+     * Create a StreamEncode impl declaration.
+     * With the Roc-inspired design, StreamEncode is single-parameter (just data type).
+     * The format constraint is at method level via StreamEncodeFormat.
+     */
     private fun createStreamEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
             ability = QualifiedRef.local("StreamEncode"),
-            targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
+            // Single type parameter - just the data type (Roc-style)
+            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
                     name = "stream_encode",
@@ -2802,10 +2828,16 @@ class CodecGenerator {
         )
     }
 
+    /**
+     * Create a StreamDecode impl declaration.
+     * With the Roc-inspired design, StreamDecode is single-parameter (just data type).
+     * The format constraint is at method level via StreamDecodeFormat.
+     */
     private fun createStreamDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
             ability = QualifiedRef.local("StreamDecode"),
-            targetTypes = listOf(mezzeTypeToAnnotation(formatType), mezzeTypeToAnnotation(dataType)),
+            // Single type parameter - just the data type (Roc-style)
+            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
                 ImplAbilityOperation(
                     name = "stream_decode",

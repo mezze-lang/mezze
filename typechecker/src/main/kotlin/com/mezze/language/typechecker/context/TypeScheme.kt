@@ -163,15 +163,13 @@ private fun applySubstitutionToType(
                 paramType = applySubstitutionToType(type.paramType, substitution),
                 returnType = applySubstitutionToType(type.returnType, substitution),
                 effects = type.effects,
-                // CRITICAL FIX: Apply substitution to ability constraints as well
-                // This ensures that when a polymorphic function is instantiated,
-                // the ability constraints refer to the fresh type variables
-                abilityConstraints = type.abilityConstraints.map { constraint ->
-                    MezzeType.FunctionAbilityConstraint(
-                        abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applySubstitutionToType(it, substitution) }
-                    )
-                }
+                // IMPORTANT: Clear abilityConstraints when instantiating from TypeScheme
+                // The constraints are already captured in the TypeScheme.constraints and will
+                // be instantiated as freshConstraints. If we also keep them on the FunctionType,
+                // they would be double-counted when the function is called.
+                // For ability methods (which don't use TypeScheme), abilityConstraints are
+                // preserved on the FunctionType and processed in generateFunctionCall.
+                abilityConstraints = emptyList()
             )
         }
         is MezzeType.RecordType -> {

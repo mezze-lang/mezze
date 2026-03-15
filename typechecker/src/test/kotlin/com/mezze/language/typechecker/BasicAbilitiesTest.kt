@@ -87,27 +87,30 @@ class BasicAbilitiesTest {
     }
 
     @Test
-    fun testAbilityWithDependencies() {
+    fun testAbilityWithMethodLevelConstraints() {
         val source = """
             ability Eq 'a where {
               equals : {left: 'a, right: 'a} -> Boolean
             }
-            
-            ability Ord 'a with Eq 'a where {
-              compare : {left: 'a, right: 'a} -> Int
+
+            ability Ord 'a where {
+              compare : {left: 'a, right: 'a} with Eq 'a -> Int
             }
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        // Verify Ord ability has dependency on Eq
-        val ordDecl = typedProgram.items.find { 
-            it is AbilityDeclaration && it.name == "Ord" 
+        // Verify Ord ability has method-level constraint (not ability-level dependency)
+        val ordDecl = typedProgram.items.find {
+            it is AbilityDeclaration && it.name == "Ord"
         } as AbilityDeclaration?
         assertNotNull(ordDecl)
-        assertTrue(ordDecl.dependencies.isNotEmpty())
-        assertEquals("Eq", ordDecl.dependencies.first().abilityName)
+        // No ability-level dependencies
+        assertTrue(ordDecl.dependencies.isEmpty())
+        // But method has constraint
+        assertEquals(1, ordDecl.operations.first().abilityConstraints.size)
+        assertEquals("Eq", ordDecl.operations.first().abilityConstraints.first().abilityName)
     }
 
     @Test

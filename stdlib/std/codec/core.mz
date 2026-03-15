@@ -1,32 +1,45 @@
-# std/codec.mezze - Core serialization/deserialization abilities
+# std/codec/core.mz - Core serialization/deserialization abilities
 #
 # This module defines the codec system for Mezze - a type-safe, automatic
-# serialization framework inspired by Rust's Serde.
+# serialization framework.
 #
 # Architecture:
-# - Tier 1 (default): Build intermediate representation, then serialize
-# - Tier 2 (streaming): Write directly to ByteBuffer for large data (>100MB)
+# - Tier 1 (default): Build intermediate representation (AST), then convert to output
+#   - Flexible: inspect, manipulate AST before final conversion
+#   - Good for most use cases
+# - Tier 2 (streaming): Write directly to ByteBuffer
+#   - Performance: no intermediate allocations
+#   - Use for large data (>100MB)
 #
 # The TypeChecker automatically generates Encode/Decode implementations
-# for any serializable type at the call site - no annotations needed.
+# for any serializable type at the call site.
 #
 # Example:
-#   use std::codec
-#   use std::json
+#   use std::codec::{Encode, default_config}
+#   use std::codec::json
 #
 #   let user = {name = "Alice", age = 30}
-#   let bytes = json::encode {value = user}  # Auto-generates impl!
-#   let decoded = json::decode {bytes = bytes}  # Result {name: Str, age: Int} DecodeError
+#
+#   # Encode to bytes (via JSON AST)
+#   let bytes: Result Bytes EncodeError = Encode.encode {val = user, fmt = json::utf8, config = default_config}
+#
+#   # Encode to string
+#   let str: Result Str EncodeError = Encode.encode {val = user, fmt = json::string, config = default_config}
+#
+#   # Get AST for inspection/manipulation
+#   let ast: Result Json EncodeError = EncodeRepr.encode_repr {val = user, fmt = json::utf8, config = default_config}
 
 use std::string
 use std::int
 use std::collections::seq
+use std::collections::bytes
+use std::convert::{TryFrom, TryTo}
 
-# ============================================================================
+# =============================================================================
 # ERROR TYPES
-# ============================================================================
+# =============================================================================
 
-# Error returned when encoding fails (e.g., CSV can't encode nested records)
+# Error returned when encoding fails
 pub type EncodeError = {
     path: [Str],      # Path to the field that failed (e.g., ["user", "address"])
     message: Str      # Human-readable error message
@@ -40,197 +53,235 @@ pub type DecodeError = {
     found: Option Str # What was actually found (e.g., "String")
 }
 
-# ============================================================================
-# CONFIGURATION TYPES
-# ============================================================================
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 
 # Field name transformation strategies
 pub type FieldTransform = | Identity, SnakeCase, CamelCase, KebabCase, ScreamingSnakeCase |
 
+# How to handle null/None values
+pub type NullHandling = | OmitNull, IncludeNull |
+
 # Codec configuration for runtime customization
 pub type CodecConfig = {
-    field_transform: FieldTransform
+    field_transform: FieldTransform,
+    null_handling: NullHandling,
+    sort_keys: Bool,
+    indent: Option Int    # None = compact, Some n = pretty with n spaces
 }
 
-# Default codec configuration (identity transform - no changes to field names)
-pub let default_config: CodecConfig = {field_transform = Identity}
-
-# ============================================================================
-# TYPE ALIASES
-# ============================================================================
-
-# Entry type for map key-value pairs
-pub type Entry 'k 'v = {key: 'k, value: 'v}
-
-# ============================================================================
-# TIER 1: INTERMEDIATE REPRESENTATION (Default)
-# ============================================================================
-
-# User-facing ability for encoding values to a format's intermediate representation
-# TypeChecker auto-generates implementations for serializable types
-ability Encode 'repr 'a where {
-    encode: {val: 'a, config: CodecConfig} -> Result 'repr EncodeError
+# Default codec configuration
+pub let default_config: CodecConfig = {
+    field_transform = Identity,
+    null_handling = IncludeNull,
+    sort_keys = False,
+    indent = None
 }
 
-# User-facing ability for decoding values from a format's intermediate representation
-# TypeChecker auto-generates implementations for serializable types
-ability Decode 'repr 'a where {
-    decode: {val: 'repr, config: CodecConfig} -> Result 'a DecodeError
-}
+# =============================================================================
+# TIER 1: INTERMEDIATE REPRESENTATION
+# =============================================================================
 
-# Format author ability - defines how to encode primitive values and structures
-# to the format's intermediate representation (e.g., Json variant)
-ability EncodeFormat 'repr where {
-    # Atoms (6 hooks)
-    encode_int: {val: Int, path: [Str]} -> Result 'repr EncodeError,
-    encode_float: {val: Float, path: [Str]} -> Result 'repr EncodeError,
-    encode_string: {val: Str, path: [Str]} -> Result 'repr EncodeError,
-    encode_bool: {val: Bool, path: [Str]} -> Result 'repr EncodeError,
-    encode_frac: {val: Frac, path: [Str]} -> Result 'repr EncodeError,
-    encode_bytes: {val: Bytes, path: [Str]} -> Result 'repr EncodeError,
+# Format ability - format authors implement this ONCE per format
+# Hooks build the intermediate representation (AST)
+#
+# Example: impl Format Json Json where { ... }
+#          impl Format Csv Csv where { ... }
+#
+ability Format 'fmt 'repr where {
+    # Atoms (8 hooks)
+    encode_int: {val: Int, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_float: {val: Float, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_string: {val: Str, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_bool: {val: Bool, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_frac: {val: Frac, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_bytes: {val: Bytes, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_char: {val: Char, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_nat: {val: Nat, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
 
     # Structures (2 hooks)
-    # Note: fields is Seq for efficient construction with [...] syntax
-    # Using anonymous record {key: Str, value: 'repr} instead of Entry for structural compatibility
-    encode_record: {fields: [{key: Str, value: 'repr}], path: [Str]} -> Result 'repr EncodeError,
-    encode_variant: {tag: Str, payload: Option 'repr, path: [Str]} -> Result 'repr EncodeError,
+    encode_record: {fields: [{key: Str, value: 'repr}], config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_variant: {tag: Str, payload: Option 'repr, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
 
     # Collections (3 hooks)
-    encode_list: {elems: List 'repr, path: [Str]} -> Result 'repr EncodeError,
-    encode_set: {elems: Set 'repr, path: [Str]} -> Result 'repr EncodeError,
-    encode_map: {entries: List {key: 'repr, value: 'repr}, path: [Str]} -> Result 'repr EncodeError,
+    encode_list: {elems: ['repr], config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_set: {elems: Set 'repr, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
+    encode_map: {entries: [{key: 'repr, value: 'repr}], config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
 
     # Nullable (1 hook)
-    encode_option: {val: Option 'repr, path: [Str]} -> Result 'repr EncodeError,
+    encode_option: {val: Option 'repr, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
 
     # Field name transformation (1 hook)
-    # Transforms field names according to format config (e.g., camelCase -> snake_case)
-    # Uses the CodecConfig to determine the transformation strategy
     transform_field: {name: Str, config: CodecConfig} -> Str
 }
 
-# Format author ability - defines how to decode values from the format's
-# intermediate representation back to Mezze types
-ability DecodeFormat 'repr where {
-    # Atoms (6 hooks)
-    decode_int: {val: 'repr, path: [Str]} -> Result Int DecodeError,
-    decode_float: {val: 'repr, path: [Str]} -> Result Float DecodeError,
-    decode_string: {val: 'repr, path: [Str]} -> Result Str DecodeError,
-    decode_bool: {val: 'repr, path: [Str]} -> Result Bool DecodeError,
-    decode_frac: {val: 'repr, path: [Str]} -> Result Frac DecodeError,
-    decode_bytes: {val: 'repr, path: [Str]} -> Result Bytes DecodeError,
+# Decode format ability - format authors implement this ONCE per format
+# Hooks extract values from the intermediate representation (AST)
+#
+ability DecodeFormat 'fmt 'repr where {
+    # Atoms (8 hooks)
+    decode_int: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Int DecodeError,
+    decode_float: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Float DecodeError,
+    decode_string: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Str DecodeError,
+    decode_bool: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Bool DecodeError,
+    decode_frac: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Frac DecodeError,
+    decode_bytes: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Bytes DecodeError,
+    decode_char: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Char DecodeError,
+    decode_nat: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Nat DecodeError,
 
     # Structures (2 hooks)
-    decode_record_field: {val: 'repr, key: Str, path: [Str]} -> Result 'repr DecodeError,
-    decode_variant: {val: 'repr, path: [Str]} -> Result {tag: Str, payload: Option 'repr} DecodeError,
+    decode_record_field: {val: 'repr, key: Str, config: CodecConfig, path: [Str]} -> Result 'repr DecodeError,
+    decode_variant: {val: 'repr, config: CodecConfig, path: [Str]} -> Result {tag: Str, payload: Option 'repr} DecodeError,
 
     # Collections (3 hooks)
-    decode_list: {val: 'repr, path: [Str]} -> Result (List 'repr) DecodeError,
-    decode_set: {val: 'repr, path: [Str]} -> Result (Set 'repr) DecodeError,
-    decode_map: {val: 'repr, path: [Str]} -> Result (List {key: 'repr, value: 'repr}) DecodeError,
+    decode_list: {val: 'repr, config: CodecConfig, path: [Str]} -> Result ['repr] DecodeError,
+    decode_set: {val: 'repr, config: CodecConfig, path: [Str]} -> Result (Set 'repr) DecodeError,
+    decode_map: {val: 'repr, config: CodecConfig, path: [Str]} -> Result [{key: 'repr, value: 'repr}] DecodeError,
 
     # Nullable (1 hook)
-    decode_option: {val: 'repr, path: [Str]} -> Result (Option 'repr) DecodeError,
+    decode_option: {val: 'repr, config: CodecConfig, path: [Str]} -> Result (Option 'repr) DecodeError,
 
     # Field name transformation (1 hook)
-    # Transforms field names according to format config (e.g., snake_case -> camelCase)
-    # This is the inverse of EncodeFormat.transform_field
-    # Uses the CodecConfig to determine the transformation strategy
     transform_field: {name: Str, config: CodecConfig} -> Str
 }
 
-# ============================================================================
-# TIER 2: STREAMING (Optional, for >100MB data)
-# ============================================================================
+# =============================================================================
+# USER-FACING ENCODE ABILITIES
+# =============================================================================
 
-# User-facing ability for streaming encoding directly to ByteBuffer
-# Avoids building intermediate representation - better for large data
-ability StreamEncode 'format 'a where {
-    stream_encode: {value: 'a, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError
+# Encode to intermediate representation (for inspection/manipulation)
+# TypeChecker auto-generates implementations for serializable types
+ability EncodeRepr 'a where {
+    encode_repr: {val: 'a, fmt: 'fmt, config: CodecConfig} with Format 'fmt 'repr -> Result 'repr EncodeError
 }
 
-# User-facing ability for streaming decoding directly from Bytes
-# Returns the decoded value and the new offset position
-ability StreamDecode 'format 'a where {
-    stream_decode: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: 'a, offset: Int} DecodeError
+# Encode directly to output type (Bytes, Str, etc.)
+# Uses Format to build AST, then TryTo to convert to final output
+# TypeChecker auto-generates implementations for serializable types
+ability Encode 'a where {
+    encode: {val: 'a, fmt: 'fmt, config: CodecConfig} with Format 'fmt 'repr, TryTo 'repr 'out EncodeError -> Result 'out EncodeError
 }
 
-# Format author ability for streaming encoding
-# Writes directly to ByteBuffer without intermediate representation
-ability StreamEncodeFormat 'format where {
-    # Atoms (6 hooks)
-    stream_int: {value: Int, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_float: {value: Float, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_string: {value: Str, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_bool: {value: Bool, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_frac: {value: Frac, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_bytes: {value: Bytes, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+# =============================================================================
+# USER-FACING DECODE ABILITIES
+# =============================================================================
+
+# Decode from intermediate representation
+# TypeChecker auto-generates implementations for serializable types
+ability DecodeRepr 'a where {
+    decode_repr: {val: 'repr, fmt: 'fmt, config: CodecConfig} with DecodeFormat 'fmt 'repr -> Result 'a DecodeError
+}
+
+# Decode from input type (Bytes, Str, etc.)
+# Uses TryFrom to parse input to AST, then DecodeFormat to extract values
+# TypeChecker auto-generates implementations for serializable types
+ability Decode 'a where {
+    decode: {val: 'in, fmt: 'fmt, config: CodecConfig} with TryFrom 'in 'repr DecodeError, DecodeFormat 'fmt 'repr -> Result 'a DecodeError
+}
+
+# =============================================================================
+# TIER 2: STREAMING (Performance, large data)
+# =============================================================================
+
+# Streaming format ability - writes directly to ByteBuffer
+# No intermediate AST - maximum performance for large data
+#
+ability StreamFormat 'fmt where {
+    # Atoms (8 hooks)
+    stream_int: {val: Int, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_float: {val: Float, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_string: {val: Str, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_bool: {val: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_frac: {val: Frac, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_bytes: {val: Bytes, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_char: {val: Char, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_nat: {val: Nat, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
     # Record (3 hooks)
-    stream_record_start: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_record_field: {key: Str, value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_record_end: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_record_start: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_record_field: {key: Str, is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_record_end: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
-    # Variant (1 hook)
-    stream_variant: {tag: Str, payload: Option ByteBuffer, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+    # Variant (2 hooks)
+    stream_variant_start: {tag: Str, has_payload: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_variant_end: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
     # List (3 hooks)
-    stream_list_start: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_list_element: {value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_list_end: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_list_start: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_list_elem: {is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_list_end: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
     # Set (3 hooks)
-    stream_set_start: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_set_element: {value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_set_end: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_set_start: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_set_elem: {is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_set_end: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
     # Map (3 hooks)
-    stream_map_start: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_map_entry: {key: ByteBuffer, value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_map_end: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_map_start: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_map_entry: {is_first: Bool, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_map_end: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
 
     # Option (2 hooks)
-    stream_none: {buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError,
-    stream_some: {value: ByteBuffer, buffer: ByteBuffer, path: [Str]} -> Result ByteBuffer EncodeError
+    stream_option_none: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+    stream_option_some: {buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
+
+    # Field name transformation (1 hook)
+    transform_field: {name: Str, config: CodecConfig} -> Str
 }
 
-# Format author ability for streaming decoding
-# Reads directly from Bytes with offset tracking
-ability StreamDecodeFormat 'format where {
-    # Atoms (6 hooks)
-    stream_decode_int: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Int, offset: Int} DecodeError,
-    stream_decode_float: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Float, offset: Int} DecodeError,
-    stream_decode_string: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Str, offset: Int} DecodeError,
-    stream_decode_bool: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Bool, offset: Int} DecodeError,
-    stream_decode_frac: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Frac, offset: Int} DecodeError,
-    stream_decode_bytes: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Bytes, offset: Int} DecodeError,
+# Streaming decode format ability - reads directly from Bytes
+#
+ability StreamDecodeFormat 'fmt where {
+    # Atoms (8 hooks)
+    stream_decode_int: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Int, offset: Int} DecodeError,
+    stream_decode_float: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Float, offset: Int} DecodeError,
+    stream_decode_string: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Str, offset: Int} DecodeError,
+    stream_decode_bool: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Bool, offset: Int} DecodeError,
+    stream_decode_frac: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Frac, offset: Int} DecodeError,
+    stream_decode_bytes: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Bytes, offset: Int} DecodeError,
+    stream_decode_char: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Char, offset: Int} DecodeError,
+    stream_decode_nat: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Nat, offset: Int} DecodeError,
 
     # Record (2 hooks)
-    stream_decode_record_start: {bytes: Bytes, offset: Int, path: [Str]} -> Result {offset: Int} DecodeError,
-    stream_decode_record_field: {bytes: Bytes, offset: Int, key: Str, path: [Str]} -> Result {value: Bytes, offset: Int} DecodeError,
+    stream_decode_record_start: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {offset: Int} DecodeError,
+    stream_decode_record_field: {bytes: Bytes, offset: Int, key: Str, config: CodecConfig, path: [Str]} -> Result {value: Bytes, offset: Int} DecodeError,
 
     # Variant (1 hook)
-    stream_decode_variant: {bytes: Bytes, offset: Int, path: [Str]} -> Result {tag: Str, payload: Option Bytes, offset: Int} DecodeError,
+    stream_decode_variant: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {tag: Str, payload: Option Bytes, offset: Int} DecodeError,
 
     # List (2 hooks)
-    stream_decode_list_start: {bytes: Bytes, offset: Int, path: [Str]} -> Result {offset: Int} DecodeError,
-    stream_decode_list_next: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError,
+    stream_decode_list_start: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {offset: Int} DecodeError,
+    stream_decode_list_next: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError,
 
     # Set (2 hooks)
-    stream_decode_set_start: {bytes: Bytes, offset: Int, path: [Str]} -> Result {offset: Int} DecodeError,
-    stream_decode_set_next: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError,
+    stream_decode_set_start: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {offset: Int} DecodeError,
+    stream_decode_set_next: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError,
 
     # Map (2 hooks)
-    stream_decode_map_start: {bytes: Bytes, offset: Int, path: [Str]} -> Result {offset: Int} DecodeError,
-    stream_decode_map_next: {bytes: Bytes, offset: Int, path: [Str]} -> Result {entry: Option {key: Bytes, value: Bytes}, offset: Int} DecodeError,
+    stream_decode_map_start: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {offset: Int} DecodeError,
+    stream_decode_map_next: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {entry: Option {key: Bytes, value: Bytes}, offset: Int} DecodeError,
 
     # Option (1 hook)
-    stream_decode_option: {bytes: Bytes, offset: Int, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError
+    stream_decode_option: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Option Bytes, offset: Int} DecodeError,
+
+    # Field name transformation (1 hook)
+    transform_field: {name: Str, config: CodecConfig} -> Str
 }
 
-# ============================================================================
+# User-facing streaming encode
+ability StreamEncode 'a where {
+    stream_encode: {val: 'a, fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig} with StreamFormat 'fmt -> Result ByteBuffer EncodeError
+}
+
+# User-facing streaming decode
+ability StreamDecode 'a where {
+    stream_decode: {bytes: Bytes, offset: Int, fmt: 'fmt, config: CodecConfig} with StreamDecodeFormat 'fmt -> Result {value: 'a, offset: Int} DecodeError
+}
+
+# =============================================================================
 # HELPER FUNCTIONS
-# ============================================================================
+# =============================================================================
 
 # Create an empty path (for top-level encoding/decoding)
 pub let empty_path: [Str] = []
@@ -257,3 +308,29 @@ pub let encode_error = {path: [Str], message: Str} ->
 # Create a decode error
 pub let decode_error = {path: [Str], message: Str, expected: Str, found: Option Str} ->
     Err {error = {path = path, message = message, expected = expected, found = found}}
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+# Note: For now, use the ability methods directly:
+# - Encode.encode {val, fmt, config = default_config}
+# - Decode.decode {val, fmt, config = default_config}
+# - StreamEncode.stream_encode {val, fmt, buffer, config = default_config}
+# - StreamDecode.stream_decode {bytes, offset, fmt, config = default_config}
+#
+# Fully polymorphic convenience wrappers require ability constraints to
+# introduce new type variables which isn't currently supported.
+
+# =============================================================================
+# CONVERSION IMPLEMENTATIONS
+# =============================================================================
+
+# Bytes -> Str (UTF-8)
+# Defined here to avoid circular dependency with std/convert.mz
+impl TryFrom Bytes Str DecodeError where {
+    try_from = {val} ->
+        match bytes::to_str {b = val} is
+            Ok {val = s} -> Ok {val = s}
+            Err {error = e} -> Err {error = {path = [], message = e, expected = "valid UTF-8", found = None}}
+}
