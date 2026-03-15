@@ -1837,7 +1837,7 @@ class ExpressionConstraintGenerator {
             // Primitive types: exact string match
             MezzeType.IntType -> implTypeName == "Int"
             MezzeType.FloatType -> implTypeName == "Float"
-            MezzeType.StringType -> implTypeName == "String"
+            MezzeType.StringType -> implTypeName == "Str"
             MezzeType.BoolType -> implTypeName == "Bool"
             MezzeType.NatType -> implTypeName == "Nat"
             MezzeType.FracType -> implTypeName == "Frac"

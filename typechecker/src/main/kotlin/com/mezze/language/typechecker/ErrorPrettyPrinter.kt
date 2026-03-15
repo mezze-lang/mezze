@@ -315,7 +315,7 @@ object ErrorPrettyPrinter {
             "result" -> listOf("Result", "Ok", "Err")
             "int" -> listOf("Int")
             "float" -> listOf("Float")
-            "string" -> listOf("String")
+            "string" -> listOf("Str")
             "bool" -> listOf("Bool")
             "nat" -> listOf("Nat")
             "abilities" -> BuiltinAbilities.ALL.toList()
