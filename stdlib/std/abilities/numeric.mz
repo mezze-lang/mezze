@@ -1,0 +1,31 @@
+# std/abilities/numeric.mz - Numeric abilities
+#
+# Defines arithmetic operations as abilities.
+# Operators are desugared to method-call syntax:
+#   x + y  ->  x.add {r = y}
+#   x - y  ->  x.sub {r = y}
+#   x * y  ->  x.mul {r = y}
+#   x / y  ->  x.div {r = y}
+#   x % y  ->  x.mod {r = y}
+#   -x     ->  x.neg {}
+
+ability NumAdd for 'a where {
+    add: {r: 'a} -> 'a
+}
+
+ability NumSub for 'a where {
+    sub: {r: 'a} -> 'a,
+    neg: {} -> 'a
+}
+
+ability NumMul for 'a where {
+    mul: {r: 'a} -> 'a
+}
+
+ability NumDiv for 'a where {
+    div: {r: 'a} -> 'a
+}
+
+ability NumMod for 'a where {
+    mod: {r: 'a} -> 'a
+}

@@ -222,13 +222,20 @@ class TypeChecker(
             parentContext
         }
 
-        // PHASE 0.5: Compute Content Hashes for Declarations
+        // PHASE 0.5: Resolve cross-module ability impls
+        // The parser's resolveImplDeclarations only handles same-file abilities.
+        // When an ability is imported from another module, its impl is parsed as ImplDeclaration
+        // (effect impl). Convert those to ImplAbilityDeclaration using import context.
+        // Must happen BEFORE content hash computation so new ImplAbilityDeclarations get hashed.
+        val resolvedProgram = resolveImplDeclarationsWithImports(program, importContext)
+
+        // PHASE 0.6: Compute Content Hashes for Declarations
         // Compute hashes BEFORE building context so AbilityImplInfo.contentHash is populated.
         // This allows SubstitutionApplier to use content hashes directly instead of mangled lookup keys.
         // Pass importContext so effect/ability hashes can be resolved for local impls referencing them
-        val hashedProgram = computeDeclarationHashes(program, importContext)
+        val hashedProgram = computeDeclarationHashes(resolvedProgram, importContext)
 
-        // PHASE 0.6: Desugar PipeExpressions
+        // PHASE 0.7: Desugar PipeExpressions
         // Convert PipeExpression nodes to FunctionCall by replacing PipePlaceholder with piped value.
         // This must happen before constraint generation since the typechecker doesn't know about pipes.
         val desugaredProgram = desugarPipeExpressions(hashedProgram)
@@ -418,7 +425,7 @@ class TypeChecker(
 
 
         // PHASE 3: Solve Constraints
-        val solver = ConstraintSolver(context, allTypeDeclarations, buildResult.abilityDeclarations)
+        val solver = ConstraintSolver(context, allTypeDeclarations, allAbilityDeclarations)
         val solveResult = solver.solve(allConstraints)
 
         // Check if solving failed
@@ -705,9 +712,13 @@ class TypeChecker(
         }
 
         // PHASE 0.5: Compute Content Hashes for Declarations
-        val hashedProgram = computeDeclarationHashes(program, importContext)
+        // PHASE 0.5: Resolve cross-module ability impls
+        val resolvedProgram = resolveImplDeclarationsWithImports(program, importContext)
 
-        // PHASE 0.6: Desugar PipeExpressions
+        // PHASE 0.6: Compute Content Hashes
+        val hashedProgram = computeDeclarationHashes(resolvedProgram, importContext)
+
+        // PHASE 0.7: Desugar PipeExpressions
         val desugaredProgram = desugarPipeExpressions(hashedProgram)
 
         // PHASE 1: Build Context
@@ -862,7 +873,7 @@ class TypeChecker(
               constraintResults.values.flatMap { it.associatedTypeConstraints }
 
         // PHASE 3: Solve Constraints
-        val solver = ConstraintSolver(context, allTypeDeclarations, buildResult.abilityDeclarations)
+        val solver = ConstraintSolver(context, allTypeDeclarations, allAbilityDeclarations)
         val solveResult = solver.solve(allConstraints)
 
         // Process solve result
@@ -1302,7 +1313,7 @@ class TypeChecker(
         for ((implKey, implDecl) in importContext.importedAbilityImpls) {
             // implKey is the content hash (map is keyed by content hash)
             val implInfo = TypingContext.AbilityImplInfo(
-                abilityName = implDecl.ability.localName,
+                abilityName = implDecl.abilityName,  // null for inherent impls
                 targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
                 targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
                 associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
@@ -1430,9 +1441,10 @@ class TypeChecker(
                 }
                 is ImplAbilityDeclaration -> {
                     // Resolve ability reference to its content hash using the local name
-                    val abilityHash = abilityHashByName[item.ability.localName]
-                    if (abilityHash != null && item.ability.resolvedContentHash == null) {
-                        item.copy(ability = item.ability.withResolvedHash(abilityHash))
+                    val abilityRef = item.abilityRef
+                    val abilityHash = item.abilityName?.let { abilityHashByName[it] }
+                    if (abilityHash != null && abilityRef != null && abilityRef.resolvedContentHash == null) {
+                        item.copy(target = ImplTarget.Named(abilityRef.withResolvedHash(abilityHash)))
                     } else {
                         item
                     }
@@ -2168,6 +2180,79 @@ class TypeChecker(
         return program.copy(
             items = program.items.map { desugarPipeInProgramItem(it) }
         )
+    }
+
+    /**
+     * Resolve ImplDeclarations that reference imported abilities (not effects) into ImplAbilityDeclarations.
+     *
+     * The parser's resolveImplDeclarations only handles same-file ability names. When an ability
+     * is imported from another module, its impl is still parsed as ImplDeclaration (effect impl syntax).
+     * This step converts those to ImplAbilityDeclaration using the import context.
+     */
+    private fun resolveImplDeclarationsWithImports(
+        program: Program,
+        importContext: ModuleImportContext?
+    ): Program {
+        if (importContext == null) return program
+
+        val importedAbilities = importContext.importedAbilities
+        val importedEffects = importContext.importedEffects
+        val localAbilityNames = program.items.filterIsInstance<AbilityDeclaration>().map { it.name }.toSet()
+        val localEffectNames = program.items.filterIsInstance<EffectDeclaration>().map { it.name }.toSet()
+
+        // Build lookup sets for both qualified and unqualified names
+        val allAbilityNames = localAbilityNames + importedAbilities.keys +
+            importedAbilities.values.map { it.name }.toSet()
+        val allEffectNames = localEffectNames + importedEffects.keys +
+            importedEffects.values.map { it.name }.toSet()
+
+        var changed = false
+        val resolvedItems = program.items.map { item ->
+            if (item is ImplDeclaration) {
+                // Build the full reference name (e.g., "serializer::Serializable" or just "Show")
+                val fullRefName = if (item.effect.isQualified) {
+                    "${item.effect.qualifier!!.fullPath}::${item.effect.localName}"
+                } else {
+                    item.effect.localName
+                }
+                val localName = item.effect.localName
+
+                // Check if this references an ability (by qualified name, unqualified name, or local name)
+                val isAbility = fullRefName in allAbilityNames ||
+                    localName in allAbilityNames
+                val isEffect = fullRefName in allEffectNames ||
+                    localName in allEffectNames
+
+                if (isAbility && !isEffect) {
+                    changed = true
+                    val targetType = IdentifierTypeAnnotation(item.performerName)
+                    ImplAbilityDeclaration(
+                        target = ImplTarget.Named(item.effect),
+                        targetTypes = listOf(targetType),
+                        forallVars = emptyList(),
+                        associatedTypeBindings = item.associatedTypeBindings,
+                        operations = item.operations.map { op ->
+                            val paramType = op.paramType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
+                            val returnType = op.returnType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
+                            ImplAbilityOperation(
+                                name = op.name,
+                                paramType = paramType,
+                                returnType = returnType,
+                                implementation = op.implementation
+                            )
+                        },
+                        inferredType = null,
+                        sourceLocation = item.sourceLocation
+                    )
+                } else {
+                    item
+                }
+            } else {
+                item
+            }
+        }
+
+        return if (changed) program.copy(items = resolvedItems) else program
     }
 
     private fun desugarPipeInProgramItem(item: ProgramItem): ProgramItem {

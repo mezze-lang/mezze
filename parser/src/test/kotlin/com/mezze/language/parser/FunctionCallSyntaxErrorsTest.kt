@@ -50,7 +50,7 @@ class FunctionCallSyntaxErrorsTest {
     @Test
     fun `should reject member access function call with parentheses`() {
         val code = """
-            ability Parse 'a where {
+            ability Parse for 'a where {
                decode: {val: String} -> 'a
             }
 
@@ -123,8 +123,8 @@ class FunctionCallSyntaxErrorsTest {
     @Test
     fun `should allow record literal on new line after member access`() {
         val code = """
-            ability Show 'a where {
-                show: {value: 'a} -> String
+            ability Show for 'a where {
+                show: {} -> String
             }
 
             let result = Show.show

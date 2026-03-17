@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.inline;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -34,6 +35,15 @@ public abstract class DirectGreaterThanNode extends MezzeNode {
     @Specialization
     protected static boolean gtStrings(String left, String right) {
         return left.compareTo(right) > 0;
+    }
+
+    @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
+    protected static boolean gtFractions(MezzeRecord left, MezzeRecord right) {
+        return FractionHelper.compareFractions(left, right) > 0;
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     @Fallback

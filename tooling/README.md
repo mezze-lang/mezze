@@ -66,7 +66,7 @@ code --install-extension mezze-language-0.3.1.vsix
 The TextMate grammar (`syntaxes/mezze.tmLanguage.json`) is **manually maintained** and covers all Mezze language features including:
 - String interpolation (`$()` syntax)
 - Let destructuring patterns
-- Ability method calls (`Show.show`)
+- Ability method calls (`value.show {}`, `x.eq { r = y }`)
 - Fraction literals (`1//2`)
 - Effect rows, ability constraints, and more
 

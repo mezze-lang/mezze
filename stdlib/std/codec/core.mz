@@ -20,14 +20,14 @@
 #
 #   let user = {name = "Alice", age = 30}
 #
-#   # Encode to bytes (via JSON AST)
-#   let bytes: Result Bytes EncodeError = Encode.encode {val = user, fmt = json::utf8, config = default_config}
+#   # Encode to bytes (via JSON AST) — receiver is the data
+#   let bytes: Result Bytes EncodeError = user.encode { fmt = json::utf8, config = default_config }
 #
 #   # Encode to string
-#   let str: Result Str EncodeError = Encode.encode {val = user, fmt = json::string, config = default_config}
+#   let str: Result Str EncodeError = user.encode { fmt = json::string, config = default_config }
 #
 #   # Get AST for inspection/manipulation
-#   let ast: Result Json EncodeError = EncodeRepr.encode_repr {val = user, fmt = json::utf8, config = default_config}
+#   let ast: Result Json EncodeError = user.encode_repr { fmt = json::utf8, config = default_config }
 
 use std::string
 use std::int
@@ -86,10 +86,10 @@ pub let default_config: CodecConfig = {
 # Format ability - format authors implement this ONCE per format
 # Hooks build the intermediate representation (AST)
 #
-# Example: impl Format Json Json where { ... }
-#          impl Format Csv Csv where { ... }
+# Example: impl Format for Json JsonFmt where { ... }
+#          impl Format for Csv CsvFmt where { ... }
 #
-ability Format 'fmt 'repr where {
+ability Format 'repr for 'fmt where {
     # Atoms (8 hooks)
     encode_int: {val: Int, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
     encode_float: {val: Float, config: CodecConfig, path: [Str]} -> Result 'repr EncodeError,
@@ -119,7 +119,7 @@ ability Format 'fmt 'repr where {
 # Decode format ability - format authors implement this ONCE per format
 # Hooks extract values from the intermediate representation (AST)
 #
-ability DecodeFormat 'fmt 'repr where {
+ability DecodeFormat 'repr for 'fmt where {
     # Atoms (8 hooks)
     decode_int: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Int DecodeError,
     decode_float: {val: 'repr, config: CodecConfig, path: [Str]} -> Result Float DecodeError,
@@ -152,15 +152,17 @@ ability DecodeFormat 'fmt 'repr where {
 
 # Encode to intermediate representation (for inspection/manipulation)
 # TypeChecker auto-generates implementations for serializable types
-ability EncodeRepr 'a where {
-    encode_repr: {val: 'a, fmt: 'fmt, config: CodecConfig} with Format 'fmt 'repr -> Result 'repr EncodeError
+# Receiver (it) is the data to encode
+ability EncodeRepr for 'a where {
+    encode_repr: {fmt: 'fmt, config: CodecConfig} with Format 'repr 'fmt -> Result 'repr EncodeError
 }
 
 # Encode directly to output type (Bytes, Str, etc.)
 # Uses Format to build AST, then TryTo to convert to final output
 # TypeChecker auto-generates implementations for serializable types
-ability Encode 'a where {
-    encode: {val: 'a, fmt: 'fmt, config: CodecConfig} with Format 'fmt 'repr, TryTo 'repr 'out EncodeError -> Result 'out EncodeError
+# Receiver (it) is the data to encode
+ability Encode for 'a where {
+    encode: {fmt: 'fmt, config: CodecConfig} with Format 'repr 'fmt, TryTo 'out EncodeError 'repr -> Result 'out EncodeError
 }
 
 # =============================================================================
@@ -169,15 +171,19 @@ ability Encode 'a where {
 
 # Decode from intermediate representation
 # TypeChecker auto-generates implementations for serializable types
-ability DecodeRepr 'a where {
-    decode_repr: {val: 'repr, fmt: 'fmt, config: CodecConfig} with DecodeFormat 'fmt 'repr -> Result 'a DecodeError
+# Receiver (it) is the serialized representation (e.g., Json AST)
+# 'a is the target type (inferred from type annotation on the binding)
+ability DecodeRepr 'a for 'repr where {
+    decode_repr: {fmt: 'fmt, config: CodecConfig} with DecodeFormat 'repr 'fmt -> Result 'a DecodeError
 }
 
 # Decode from input type (Bytes, Str, etc.)
 # Uses TryFrom to parse input to AST, then DecodeFormat to extract values
 # TypeChecker auto-generates implementations for serializable types
-ability Decode 'a where {
-    decode: {val: 'in, fmt: 'fmt, config: CodecConfig} with TryFrom 'in 'repr DecodeError, DecodeFormat 'fmt 'repr -> Result 'a DecodeError
+# Receiver (it) is the serialized input (e.g., Bytes, Str)
+# 'a is the target type (inferred from type annotation on the binding)
+ability Decode 'a for 'in where {
+    decode: {fmt: 'fmt, config: CodecConfig} with TryFrom 'repr DecodeError 'in, DecodeFormat 'repr 'fmt -> Result 'a DecodeError
 }
 
 # =============================================================================
@@ -187,7 +193,7 @@ ability Decode 'a where {
 # Streaming format ability - writes directly to ByteBuffer
 # No intermediate AST - maximum performance for large data
 #
-ability StreamFormat 'fmt where {
+ability StreamFormat for 'fmt where {
     # Atoms (8 hooks)
     stream_int: {val: Int, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
     stream_float: {val: Float, buffer: ByteBuffer, config: CodecConfig, path: [Str]} -> Result ByteBuffer EncodeError,
@@ -232,7 +238,7 @@ ability StreamFormat 'fmt where {
 
 # Streaming decode format ability - reads directly from Bytes
 #
-ability StreamDecodeFormat 'fmt where {
+ability StreamDecodeFormat for 'fmt where {
     # Atoms (8 hooks)
     stream_decode_int: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Int, offset: Int} DecodeError,
     stream_decode_float: {bytes: Bytes, offset: Int, config: CodecConfig, path: [Str]} -> Result {value: Float, offset: Int} DecodeError,
@@ -270,13 +276,16 @@ ability StreamDecodeFormat 'fmt where {
 }
 
 # User-facing streaming encode
-ability StreamEncode 'a where {
-    stream_encode: {val: 'a, fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig} with StreamFormat 'fmt -> Result ByteBuffer EncodeError
+# Receiver (it) is the data to encode
+ability StreamEncode for 'a where {
+    stream_encode: {fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig} with StreamFormat 'fmt -> Result ByteBuffer EncodeError
 }
 
 # User-facing streaming decode
-ability StreamDecode 'a where {
-    stream_decode: {bytes: Bytes, offset: Int, fmt: 'fmt, config: CodecConfig} with StreamDecodeFormat 'fmt -> Result {value: 'a, offset: Int} DecodeError
+# Receiver (it) is the byte data to decode from
+# 'a is the target type (inferred from type annotation)
+ability StreamDecode 'a for 'bytes where {
+    stream_decode: {offset: Int, fmt: 'fmt, config: CodecConfig} with StreamDecodeFormat 'fmt -> Result {value: 'a, offset: Int} DecodeError
 }
 
 # =============================================================================
@@ -314,10 +323,10 @@ pub let decode_error = {path: [Str], message: Str, expected: Str, found: Option 
 # =============================================================================
 
 # Note: For now, use the ability methods directly:
-# - Encode.encode {val, fmt, config = default_config}
-# - Decode.decode {val, fmt, config = default_config}
-# - StreamEncode.stream_encode {val, fmt, buffer, config = default_config}
-# - StreamDecode.stream_decode {bytes, offset, fmt, config = default_config}
+# - value.encode {fmt, config = default_config}
+# - repr.decode {fmt, config = default_config}
+# - value.stream_encode {fmt, buffer, config = default_config}
+# - bytes.stream_decode {offset, fmt, config = default_config}
 #
 # Fully polymorphic convenience wrappers require ability constraints to
 # introduce new type variables which isn't currently supported.
@@ -328,7 +337,7 @@ pub let decode_error = {path: [Str], message: Str, expected: Str, found: Option 
 
 # Bytes -> Str (UTF-8)
 # Defined here to avoid circular dependency with std/convert.mz
-impl TryFrom Bytes Str DecodeError where {
+impl TryFrom for Str DecodeError Bytes where {
     try_from = {val} ->
         match bytes::to_str {b = val} is
             Ok {val = s} -> Ok {val = s}

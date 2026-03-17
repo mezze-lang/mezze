@@ -2,6 +2,7 @@ package com.mezze.interpreter.v2.stdlib
 
 import com.mezze.interpreter.v2.MezzeTestHelper
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 
@@ -31,7 +32,7 @@ class HttpModuleTest {
                 {key = "email", value = JString {val = "alice@example.com"}}
             ] }
 
-            let user: Result {name: Str, email: Str} DecodeError = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
+            let user: Result {name: Str, email: Str} DecodeError = json_obj.decode_repr { fmt = json_fmt, config = default_config }
             match user is
                 Ok { val } -> val.name
                 Err { error } -> "error"
@@ -51,12 +52,30 @@ class HttpModuleTest {
                 {key = "age", value = JInt {val = 30}}
             ] }
 
-            let user = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
+            let user: Result {name: Str, age: Int} DecodeError = json_obj.decode_repr { fmt = json_fmt, config = default_config }
             match user is
                 Ok { val } -> val.name
                 Err { error } -> "error"
         """)
         assertEquals("Bob", result)
+    }
+
+    @Test
+    fun `test encode via method-call syntax`() {
+        val result = eval("""
+            use std::codec::json
+            use std::codec::json::{Json, JsonFmt, json_fmt, to_str}
+            use std::codec::core::{EncodeRepr, EncodeError, default_config}
+
+            let user = { name = "Dave", age = 25 }
+            let encoded: Result Json EncodeError = user.encode_repr { fmt = json_fmt, config = default_config }
+            match encoded is
+                Ok { val } -> to_str { json = val }
+                Err { error } -> "error"
+        """)
+        // Should produce valid JSON string
+        val str = result as String
+        assertTrue(str.contains("Dave"), "Expected JSON to contain 'Dave' but got: $str")
     }
 
     @Test
@@ -73,7 +92,7 @@ class HttpModuleTest {
 
             perform Console in do
                 println { msg = "Starting decode" }
-                let user = DecodeRepr.decode_repr {val = json_obj, fmt = json_fmt, config = default_config}
+                let user: Result {name: Str} DecodeError = json_obj.decode_repr { fmt = json_fmt, config = default_config }
                 match user is
                     Ok { val } -> val.name
                     Err { error } -> "error"

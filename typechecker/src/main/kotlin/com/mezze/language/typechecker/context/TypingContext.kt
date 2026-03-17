@@ -18,7 +18,7 @@ import com.mezze.language.ast.*
 data class TypingContext(
     private val bindings: Map<BindingKey, Binding>,
     private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
-    private val abilityImplsByName: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash]
+    private val abilityImplsByName: Map<String?, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash] (null key = inherent impls)
     // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
     private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
     private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
@@ -26,6 +26,10 @@ data class TypingContext(
     // Keyed by content hash for cross-module safety
     private val performerAssociatedTypes: Map<String, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
     private val performerAssociatedTypesByName: Map<String, List<String>> = emptyMap(),  // performerName -> [contentHash] index
+    // Anonymous impl methods: "TypeName::methodName" -> method info
+    private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
+    // Secondary index for anonymous methods: "TypeName" -> [methodName]
+    private val anonymousImplMethodsByType: Map<String, List<String>> = emptyMap(),
     val parent: TypingContext? = null
 ) {
     /**
@@ -69,7 +73,7 @@ data class TypingContext(
      * Content hashes are computed in TypeChecker Phase 0.5 before context building.
      */
     data class AbilityImplInfo(
-        val abilityName: String,
+        val abilityName: String?,  // null for inherent impls
         val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
         val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
         val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
@@ -93,6 +97,17 @@ data class TypingContext(
         val performerFields: MezzeType? = null,  // RecordType with performer parameter types (e.g., {cont: Continuation 'a 'b 'c})
         val suspensionType: MezzeType? = null,  // Type passed to suspend_with in the handler (for continuation inference)
         val contentHash: String? = null
+    )
+
+    /**
+     * Information about a method from an anonymous impl (`impl Type where { ... }`).
+     */
+    data class InherentMethodInfo(
+        val targetTypeName: String,     // e.g., "Int"
+        val methodName: String,         // e.g., "to_float"
+        val methodType: MezzeType,      // The function type of the method (without receiver)
+        val implContentHash: String,    // Content hash of the impl declaration
+        val sourceModule: String? = null
     )
 
     /**
@@ -269,10 +284,79 @@ data class TypingContext(
     }
 
     /**
+     * Find abilities that have a method with the given name.
+     * Returns list of (abilityName, methodType) pairs.
+     * Used for method call resolution: `value.method { args }`.
+     */
+    fun findAbilitiesByMethodName(methodName: String): List<Pair<String, MezzeType>> {
+        val results = mutableListOf<Pair<String, MezzeType>>()
+        for ((abilityName, operationType) in abilityOperationTypes) {
+            if (operationType is MezzeType.RecordType) {
+                val methodType = operationType.fields[methodName]
+                if (methodType != null) {
+                    results.add(abilityName to methodType)
+                }
+            }
+        }
+        parent?.findAbilitiesByMethodName(methodName)?.let { results.addAll(it) }
+        return results.distinctBy { it.first }
+    }
+
+    /**
      * Extend context with effect operation types.
      */
     fun extendWithEffectOperationType(effectName: String, operationType: MezzeType): TypingContext {
         return copy(effectOperationTypes = effectOperationTypes + (effectName to operationType))
+    }
+
+    // ========================================================================
+    // ANONYMOUS IMPL METHODS
+    // ========================================================================
+
+    /**
+     * Find an anonymous impl method for a given type and method name.
+     * Used for `value.method { args }` resolution when no ability method matches.
+     */
+    fun findAnonymousMethod(typeName: String, methodName: String): InherentMethodInfo? {
+        val key = "$typeName::$methodName"
+        return anonymousImplMethods[key] ?: parent?.findAnonymousMethod(typeName, methodName)
+    }
+
+    /**
+     * Find all anonymous impl method names for a given type.
+     */
+    fun getAnonymousMethodNames(typeName: String): List<String> {
+        val local = anonymousImplMethodsByType[typeName] ?: emptyList()
+        val parentMethods = parent?.getAnonymousMethodNames(typeName) ?: emptyList()
+        return (local + parentMethods).distinct()
+    }
+
+    /**
+     * Find anonymous methods by method name (across all types).
+     * Returns list of (typeName, methodInfo) pairs.
+     * Used when receiver type is not yet known — matched by unification.
+     */
+    fun findAnonymousMethodsByName(methodName: String): List<InherentMethodInfo> {
+        val results = mutableListOf<InherentMethodInfo>()
+        for ((key, info) in anonymousImplMethods) {
+            if (info.methodName == methodName) {
+                results.add(info)
+            }
+        }
+        parent?.findAnonymousMethodsByName(methodName)?.let { results.addAll(it) }
+        return results
+    }
+
+    /**
+     * Extend context with an anonymous impl method.
+     */
+    fun extendWithAnonymousMethod(info: InherentMethodInfo): TypingContext {
+        val key = "${info.targetTypeName}::${info.methodName}"
+        val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
+        return copy(
+            anonymousImplMethods = anonymousImplMethods + (key to info),
+            anonymousImplMethodsByType = anonymousImplMethodsByType + (info.targetTypeName to (existingMethods + info.methodName))
+        )
     }
 
     // ========================================================================

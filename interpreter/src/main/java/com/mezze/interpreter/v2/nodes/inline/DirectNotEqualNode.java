@@ -42,9 +42,21 @@ public abstract class DirectNotEqualNode extends MezzeNode {
         return !left.equals(right);
     }
 
-    @Specialization
+    @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
+    protected static boolean neqFractions(MezzeRecord left, MezzeRecord right) {
+        return !FractionHelper.equalFractions(left, right);
+    }
+
+    @Specialization(replaces = "neqFractions")
     protected static boolean neqRecords(MezzeRecord left, MezzeRecord right) {
+        if (FractionHelper.isFraction(left) && FractionHelper.isFraction(right)) {
+            return !FractionHelper.equalFractions(left, right);
+        }
         return !left.equals(right);
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     @Specialization

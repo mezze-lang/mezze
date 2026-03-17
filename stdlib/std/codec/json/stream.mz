@@ -33,7 +33,7 @@ pub type JsonStream = {}
 # STREAM ENCODE FORMAT IMPLEMENTATION
 # ============================================================================
 
-impl StreamFormat JsonStream where {
+impl StreamFormat for JsonStream where {
     stream_int = {value, buffer, path} -> do
         let s = __native_int_to_str {n = value}
         let buf2 = buffer::write_string {buf = buffer, s = s}
@@ -167,7 +167,7 @@ impl StreamFormat JsonStream where {
 # STREAM DECODE FORMAT IMPLEMENTATION
 # ============================================================================
 
-impl StreamDecodeFormat JsonStream where {
+impl StreamDecodeFormat for JsonStream where {
     stream_decode_int = {bytes, offset, path} ->
         __native_json_stream_decode_int {bytes = bytes, offset = offset, path = path},
 

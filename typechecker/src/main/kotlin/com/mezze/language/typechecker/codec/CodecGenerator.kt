@@ -10,15 +10,15 @@ import com.mezze.language.ast.PrimitiveTypes
  * constraint that doesn't have an explicit implementation. It generates the
  * implementation AST based on the type structure.
  *
- * Example: For `json::encode {value = user}` where user: {name: String, age: Int},
- * this generates:
+ * Example: For `user.encode { fmt = json::utf8, config = default_config }` where
+ * user: {name: Str, age: Int}, this generates an impl with `it` as the receiver:
  *
  * ```
- * impl Encode Json {name: String, age: Int} where {
- *     encode = {value, path} ->
- *         let name_encoded = EncodeFormat.encode_string {value = value.name, path = append_path {path, "name"}}
- *         let age_encoded = EncodeFormat.encode_int {value = value.age, path = append_path {path, "age"}}
- *         EncodeFormat.encode_record {fields = [{key = "name", value = name_encoded}, ...], path = path}
+ * impl EncodeRepr for {name: Str, age: Int} where {
+ *     encode_repr = {fmt, config} ->
+ *         let name_encoded = Format.encode_string {val = it.name, path = ...}
+ *         let age_encoded = Format.encode_int {val = it.age, path = ...}
+ *         Format.encode_record {fields = [{key = "name", value = name_encoded}, ...], path = ...}
  * }
  * ```
  */
@@ -199,7 +199,7 @@ class CodecGenerator {
         // Convert the variant to a Bool value using pattern matching, then encode
         val body = call(
             member(encodeFormatImpl(formatType), "encode_bool"),
-            record("val" to id("val"), "path" to id("path"))
+            record("val" to id("it"), "path" to id("path"))
         )
         // Use BoolType for the impl to ensure proper dispatch
         return createEncodeImpl(formatType, MezzeType.VariantType(
@@ -257,7 +257,7 @@ class CodecGenerator {
     private fun generateBoolDecode(formatType: MezzeType): ImplAbilityDeclaration {
         val body = call(
             member(decodeFormatImpl(formatType), "decode_bool"),
-            record("val" to id("val"), "path" to id("path"))
+            record("val" to id("it"), "path" to id("path"))
         )
         return createDecodeImpl(formatType, MezzeType.VariantType(
             constructors = mapOf("True" to null, "False" to null),
@@ -502,7 +502,7 @@ class CodecGenerator {
     ): ImplAbilityDeclaration {
         val body = call(
             member(encodeFormatImpl(formatType), hookName),
-            record(paramName to id("val"), "path" to id("path"))
+            record(paramName to id("it"), "path" to id("path"))
         )
         return createEncodeImpl(formatType, dataType, body)
     }
@@ -513,7 +513,7 @@ class CodecGenerator {
     private fun generateNatEncode(formatType: MezzeType): ImplAbilityDeclaration {
         val toIntCall = call(
             id("__native_nat_to_int"),
-            record("n" to id("val"))
+            record("n" to id("it"))
         )
         val body = call(
             member(encodeFormatImpl(formatType), "encode_int"),
@@ -528,7 +528,7 @@ class CodecGenerator {
     private fun generateCharEncode(formatType: MezzeType): ImplAbilityDeclaration {
         val toStringCall = call(
             id("__native_char_to_string"),
-            record("c" to id("val"))
+            record("c" to id("it"))
         )
         val body = call(
             member(encodeFormatImpl(formatType), "encode_string"),
@@ -579,7 +579,7 @@ class CodecGenerator {
         // Wrap with match expressions for error handling (in reverse order)
         for ((fieldName, fieldType) in fields.reversed()) {
             // Generate direct EncodeFormat.encode_* call based on field type
-            val encodeCall = generateDirectEncodeCall(formatType, fieldType, member(id("val"), fieldName), fieldName)
+            val encodeCall = generateDirectEncodeCall(formatType, fieldType, member(id("it"), fieldName), fieldName)
 
             resultExpr = match(
                 encodeCall,
@@ -658,31 +658,52 @@ class CodecGenerator {
     }
 
     /**
-     * Create a typed Encode.encode call with inferredType set on the arguments.
-     * This allows SubstitutionApplier to resolve the correct implementation.
+     * Create a typed encode call using method-call syntax: value.encode_repr { fmt, config }.
+     * The receiver (valueExpr) has its inferredType set so SubstitutionApplier can resolve
+     * the correct implementation via resolveMethodCallByReceiverType.
      */
     private fun typedEncodeCall(dataType: MezzeType, valueExpr: Expression): FunctionCall {
-        // Create the arguments record with type information
-        // EncodeRepr.encode_repr takes {val, fmt, config}
+        // Create a copy of valueExpr with inferredType set so dispatch works
+        val typedReceiver = withInferredType(valueExpr, dataType)
+
+        // Create the arguments record (no val field - data is the receiver)
         val argsRecord = RecordLiteral(
             entries = listOf(
-                RecordFieldEntry("val", valueExpr),
                 RecordFieldEntry("fmt", id("fmt")),
                 RecordFieldEntry("config", id("config"))
             ),
-            // Set the inferredType so SubstitutionApplier can find the val field's type
             inferredType = MezzeType.RecordType(
                 fields = mapOf(
-                    "val" to dataType,
                     "fmt" to MezzeType.VarType(TypeVar("fmt", 0)),
-                    "config" to MezzeType.VarType(TypeVar("config", 0))  // Config type is polymorphic
+                    "config" to MezzeType.VarType(TypeVar("config", 0))
                 )
             )
         )
+        // Use method-call syntax: valueExpr.encode_repr { fmt, config }
         return FunctionCall(
-            function = member(id("EncodeRepr"), "encode_repr"),
+            function = MemberAccess(
+                receiver = typedReceiver,
+                member = "encode_repr",
+                inferredType = null  // Will be resolved by SubstitutionApplier
+            ),
             arguments = argsRecord
         )
+    }
+
+    /**
+     * Create a copy of an Expression with the given inferredType set.
+     * Expression types are immutable data classes, so we use .copy() on each concrete type.
+     */
+    private fun withInferredType(expr: Expression, type: MezzeType): Expression {
+        return when (expr) {
+            is Identifier -> expr.copy(inferredType = type)
+            is MemberAccess -> expr.copy(inferredType = type)
+            is FunctionCall -> expr.copy(inferredType = type)
+            is RecordLiteral -> expr.copy(inferredType = type)
+            is StringLiteral -> expr.copy(inferredType = type)
+            is IntLiteral -> expr.copy(inferredType = type)
+            else -> expr // fallback: leave type unset
+        }
     }
 
     /**
@@ -760,27 +781,22 @@ class CodecGenerator {
     }
 
     /**
-     * Create a typed Decode.decode call with inferredType set on the arguments.
-     * This allows SubstitutionApplier to resolve the correct implementation.
+     * Create a typed decode call using method-call syntax: value.decode_repr { fmt, config }.
+     * The receiver (valueExpr) is the serialized representation.
      *
-     * Note: For Decode, the target type comes from the return type (Result 'a DecodeError),
-     * not from the argument. But we set the inferredType on the record so the return type
-     * can be properly resolved.
+     * Note: For Decode, dispatch is on the TARGET type (from return type Result 'a DecodeError),
+     * not the receiver type. The return type is set on the FunctionCall so SubstitutionApplier
+     * can determine the target type for auto-derivation.
      */
     private fun typedDecodeCall(targetType: MezzeType, valueExpr: Expression): FunctionCall {
-        // Create the arguments record with type information
-        // DecodeRepr.decode_repr takes {val, fmt, config}
+        // Create the arguments record (no val field - repr data is the receiver)
         val argsRecord = RecordLiteral(
             entries = listOf(
-                RecordFieldEntry("val", valueExpr),
                 RecordFieldEntry("fmt", id("fmt")),
                 RecordFieldEntry("config", id("config"))
             ),
-            // For Decode, the val field contains the serialized representation (e.g., JValue)
-            // The targetType is what we want to decode TO, which affects the return type
             inferredType = MezzeType.RecordType(
                 fields = mapOf(
-                    "val" to MezzeType.VarType(TypeVar("repr", 0)),  // Serialized representation
                     "fmt" to MezzeType.VarType(TypeVar("fmt", 0)),
                     "config" to MezzeType.VarType(TypeVar("config", 0))
                 )
@@ -796,8 +812,13 @@ class CodecGenerator {
             ),
             rowVar = null
         )
+        // Use method-call syntax: valueExpr.decode_repr { fmt, config }
         return FunctionCall(
-            function = member(id("DecodeRepr"), "decode_repr"),
+            function = MemberAccess(
+                receiver = valueExpr,
+                member = "decode_repr",
+                inferredType = null
+            ),
             arguments = argsRecord,
             inferredType = resultType
         )
@@ -829,7 +850,7 @@ class CodecGenerator {
             }
         }
 
-        val body = match(id("val"), *cases.toTypedArray())
+        val body = match(id("it"), *cases.toTypedArray())
         return createEncodeImpl(formatType, variantType, body)
     }
 
@@ -947,7 +968,7 @@ class CodecGenerator {
         val foldCall = call(
             id("__native_list_fold_left"),
             record(
-                "xs" to id("val"),
+                "xs" to id("it"),
                 "init" to ok(call(id("__native_list_empty"), record())),
                 "f" to lambda(listOf("acc", "elem"), foldBody)
             )
@@ -973,7 +994,7 @@ class CodecGenerator {
      */
     private fun generateArrayEncode(formatType: MezzeType, seqType: MezzeType.SeqType): ImplAbilityDeclaration {
         // Use __native_seq_to_list to convert seq to list
-        val toListCall = call(id("__native_seq_to_list"), record("xs" to id("val")))
+        val toListCall = call(id("__native_seq_to_list"), record("xs" to id("it")))
 
         // Create list type for encoding
         val listType = MezzeType.ListType(seqType.elementType)
@@ -990,7 +1011,7 @@ class CodecGenerator {
      */
     private fun generateSetEncode(formatType: MezzeType, setType: MezzeType.SetType): ImplAbilityDeclaration {
         // Convert set to list using native function
-        val toListCall = call(id("__native_set_to_list"), record("s" to id("val")))
+        val toListCall = call(id("__native_set_to_list"), record("s" to id("it")))
 
         // Generate direct encode call for each element
         val elementType = setType.elementType
@@ -1059,7 +1080,7 @@ class CodecGenerator {
      */
     private fun generateSortedSetEncode(formatType: MezzeType, sortedSetType: MezzeType.SortedSetType): ImplAbilityDeclaration {
         // Convert sorted set to list, encode as list
-        val toListCall = call(id("__native_sorted_set_to_list"), record("s" to id("val")))
+        val toListCall = call(id("__native_sorted_set_to_list"), record("s" to id("it")))
 
         // Generate direct encode call for each element
         val elementType = sortedSetType.elementType
@@ -1130,7 +1151,7 @@ class CodecGenerator {
      */
     private fun generateMapEncode(formatType: MezzeType, mapType: MezzeType.MapType): ImplAbilityDeclaration {
         // Get entries as list using native function
-        val entriesCall = call(id("__native_map_entries"), record("m" to id("val")))
+        val entriesCall = call(id("__native_map_entries"), record("m" to id("it")))
 
         // Generate direct encode calls for key and value
         val keyType = mapType.keyType
@@ -1202,7 +1223,7 @@ class CodecGenerator {
      */
     private fun generateSortedMapEncode(formatType: MezzeType, sortedMapType: MezzeType.SortedMapType): ImplAbilityDeclaration {
         // Get entries as list using native function
-        val entriesCall = call(id("__native_sorted_map_entries"), record("m" to id("val")))
+        val entriesCall = call(id("__native_sorted_map_entries"), record("m" to id("it")))
 
         // Generate direct encode calls for key and value
         val keyType = sortedMapType.keyType
@@ -1291,7 +1312,7 @@ class CodecGenerator {
         val innerEncodeCall = generateDirectEncodeCall(formatType, innerType, id("inner"), "__option_inner")
 
         val body = match(
-            id("val"),
+            id("it"),
             matchCase(
                 nonePat(),
                 call(
@@ -1330,7 +1351,7 @@ class CodecGenerator {
         val errEncodeCall = generateDirectEncodeCall(formatType, errType, id("err_val"), "__result_err")
 
         val body = match(
-            id("val"),
+            id("it"),
             matchCase(
                 okPat("ok_val"),
                 match(
@@ -1385,7 +1406,7 @@ class CodecGenerator {
     ): ImplAbilityDeclaration {
         val body = call(
             member(decodeFormatImpl(formatType), hookName),
-            record("val" to id("val"), "path" to id("path"))
+            record("val" to id("it"), "path" to id("path"))
         )
         return createDecodeImpl(formatType, dataType, body)
     }
@@ -1397,7 +1418,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_int"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("int_val"),
@@ -1430,7 +1451,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_string"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("str_val"),
@@ -1500,7 +1521,7 @@ class CodecGenerator {
             val getFieldCall = call(
                 member(decodeFormatImpl(formatType), "decode_record_field"),
                 record(
-                    "val" to id("val"),
+                    "val" to id("it"),
                     "key" to transformFieldNameForDecode(formatType, fieldName),
                     "path" to id("path")
                 )
@@ -1607,7 +1628,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_variant"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("variant_info"),
@@ -1702,7 +1723,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_list"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_list"),
@@ -1735,7 +1756,7 @@ class CodecGenerator {
 
         val body = match(
             // Use typed ability call for list decoding
-            typedDecodeCall(listType, id("val")),
+            typedDecodeCall(listType, id("it")),
             matchCase(
                 okPat("decoded_list"),
                 ok(call(member(id("seq"), "from_list"), record("list" to id("decoded_list"))))
@@ -1754,7 +1775,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_set"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_set"),
@@ -1790,7 +1811,7 @@ class CodecGenerator {
 
         val body = match(
             // Use typed ability call for set decoding
-            typedDecodeCall(setType, id("val")),
+            typedDecodeCall(setType, id("it")),
             matchCase(
                 okPat("decoded_set"),
                 ok(call(member(id("sortedset"), "from_set"), record("s" to id("decoded_set"))))
@@ -1810,7 +1831,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_map"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_entries"),
@@ -1861,7 +1882,7 @@ class CodecGenerator {
 
         val body = match(
             // Use typed ability call for map decoding
-            typedDecodeCall(mapType, id("val")),
+            typedDecodeCall(mapType, id("it")),
             matchCase(
                 okPat("decoded_map"),
                 ok(call(member(id("sortedmap"), "from_map"), record("m" to id("decoded_map"))))
@@ -1891,7 +1912,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_option"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("opt_repr"),
@@ -1925,7 +1946,7 @@ class CodecGenerator {
         val body = match(
             call(
                 member(decodeFormatImpl(formatType), "decode_variant"),
-                record("val" to id("val"), "path" to id("path"))
+                record("val" to id("it"), "path" to id("path"))
             ),
             matchCase(
                 okPat("variant_info"),
@@ -2058,7 +2079,7 @@ class CodecGenerator {
      * With the Roc-inspired design, EncodeRepr is a single-parameter ability (just the data type).
      * The format is passed as a method parameter and the Format constraint is at method level.
      *
-     * Generated impl: impl EncodeRepr DataType where { encode_repr = {val, fmt, config} -> ... }
+     * Generated impl: impl EncodeRepr for DataType where { encode_repr = {val, fmt, config} -> ... }
      */
     private fun createEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         // Wrap body in a do block that creates an empty path (Seq String)
@@ -2066,7 +2087,7 @@ class CodecGenerator {
         val encodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("EncodeRepr"),
+            target = ImplTarget.Named(QualifiedRef.local("EncodeRepr")),
             // Single type parameter - just the data type (Roc-style)
             targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
@@ -2074,8 +2095,8 @@ class CodecGenerator {
                     name = "encode_repr",
                     paramType = null,  // Inferred from ability declaration
                     returnType = null, // Inferred from ability declaration
-                    // Now takes val, fmt, and config
-                    implementation = lambda(listOf("val", "fmt", "config"), encodeBody)
+                    // Receiver (it) is the data; params are fmt and config
+                    implementation = lambda(listOf("fmt", "config"), encodeBody)
                 )
             )
         )
@@ -2083,12 +2104,13 @@ class CodecGenerator {
 
     /**
      * Create a DecodeRepr impl declaration.
-     * Generates single `decode_repr` method that takes val, fmt, and config parameters.
+     * Generates single `decode_repr` method that takes fmt and config parameters.
+     * The receiver (it) is the serialized representation (e.g., Json AST).
      *
      * With the Roc-inspired design, DecodeRepr is a single-parameter ability (just the data type).
      * The format constraint is at method level via DecodeFormat.
      *
-     * Generated impl: impl DecodeRepr DataType where { decode_repr = {val, fmt, config} -> ... }
+     * Generated impl: impl DecodeRepr for DataType where { decode_repr = {fmt, config} -> ... }
      */
     private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         // Wrap body in a do block that creates an empty path (Seq String)
@@ -2096,7 +2118,7 @@ class CodecGenerator {
         val decodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("DecodeRepr"),
+            target = ImplTarget.Named(QualifiedRef.local("DecodeRepr")),
             // Single type parameter - just the data type (Roc-style)
             targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
@@ -2104,8 +2126,8 @@ class CodecGenerator {
                     name = "decode_repr",
                     paramType = null,
                     returnType = null,
-                    // Now takes val, fmt, and config
-                    implementation = lambda(listOf("val", "fmt", "config"), decodeBody)
+                    // Receiver (it) is the repr data; params are fmt and config
+                    implementation = lambda(listOf("fmt", "config"), decodeBody)
                 )
             )
         )
@@ -2180,13 +2202,13 @@ class CodecGenerator {
     ): ImplAbilityDeclaration {
         val body = call(
             member(id("StreamFormat"), hookName),
-            record("val" to id("val"), "buffer" to id("buffer"), "path" to id("path"))
+            record("val" to id("it"), "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, dataType, body)
     }
 
     private fun generateNatStreamEncode(formatType: MezzeType): ImplAbilityDeclaration {
-        val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("val")))
+        val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("it")))
         val body = call(
             member(id("StreamFormat"), "stream_int"),
             record("val" to toIntCall, "buffer" to id("buffer"), "path" to id("path"))
@@ -2195,7 +2217,7 @@ class CodecGenerator {
     }
 
     private fun generateCharStreamEncode(formatType: MezzeType): ImplAbilityDeclaration {
-        val toStringCall = call(member(id("char"), "to_string"), record("c" to id("val")))
+        val toStringCall = call(member(id("char"), "to_string"), record("c" to id("it")))
         val body = call(
             member(id("StreamFormat"), "stream_string"),
             record("val" to toStringCall, "buffer" to id("buffer"), "path" to id("path"))
@@ -2249,7 +2271,7 @@ class CodecGenerator {
                 call(
                     member(id("StreamEncode"), "stream_encode"),
                     record(
-                        "val" to member(id("val"), fieldName),
+                        "val" to member(id("it"), fieldName),
                         "buffer" to call(member(id("bytebuffer"), "new"), record()),
                         "path" to appendPath(id("path"), fieldName)
                     )
@@ -2335,7 +2357,7 @@ class CodecGenerator {
             }
         }
 
-        val body = match(id("val"), *cases.toTypedArray())
+        val body = match(id("it"), *cases.toTypedArray())
         return createStreamEncodeImpl(formatType, variantType, body)
     }
 
@@ -2352,7 +2374,7 @@ class CodecGenerator {
                     call(
                         member(id("list"), "fold_indexed"),
                         record(
-                            "list" to id("val"),
+                            "list" to id("it"),
                             "init" to ok(record("buffer" to id("buf_start"), "is_first" to VariantConstruction("True"))),
                             "f" to lambda(listOf("acc", "elem", "idx"),
                                 match(
@@ -2420,7 +2442,7 @@ class CodecGenerator {
 
     private fun generateOptionStreamEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ImplAbilityDeclaration {
         val body = match(
-            id("val"),
+            id("it"),
             matchCase(
                 nonePat(),
                 call(
@@ -2814,7 +2836,7 @@ class CodecGenerator {
      */
     private fun createStreamEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("StreamEncode"),
+            target = ImplTarget.Named(QualifiedRef.local("StreamEncode")),
             // Single type parameter - just the data type (Roc-style)
             targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
@@ -2822,7 +2844,7 @@ class CodecGenerator {
                     name = "stream_encode",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("value", "buffer", "path"), body)
+                    implementation = lambda(listOf("buffer", "path"), body)
                 )
             )
         )
@@ -2835,7 +2857,7 @@ class CodecGenerator {
      */
     private fun createStreamDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
         return ImplAbilityDeclaration(
-            ability = QualifiedRef.local("StreamDecode"),
+            target = ImplTarget.Named(QualifiedRef.local("StreamDecode")),
             // Single type parameter - just the data type (Roc-style)
             targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
             operations = listOf(
@@ -2843,7 +2865,7 @@ class CodecGenerator {
                     name = "stream_decode",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("bytes", "offset", "path"), body)
+                    implementation = lambda(listOf("offset", "path"), body)
                 )
             )
         )

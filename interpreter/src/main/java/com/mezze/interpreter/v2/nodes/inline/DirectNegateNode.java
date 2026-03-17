@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.inline;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -30,6 +31,15 @@ public abstract class DirectNegateNode extends MezzeNode {
     @Specialization
     protected static double negateDouble(double value) {
         return -value;
+    }
+
+    @Specialization(guards = "isFrac(value)")
+    protected static MezzeRecord negateFraction(MezzeRecord value) {
+        return FractionHelper.negateFraction(value);
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     @Fallback

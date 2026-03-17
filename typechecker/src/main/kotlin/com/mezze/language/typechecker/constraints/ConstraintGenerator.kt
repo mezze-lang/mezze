@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.scope.ScopedEffectConstants
 import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.scope.extractScopeTypeFromAnnotation
 import com.mezze.language.typechecker.scope.validateScopedEffectSignatures
+import com.mezze.language.ast.Keywords
 
 /**
  * Constraint generator - orchestrator for constraint-based type inference.
@@ -1099,8 +1100,13 @@ class ConstraintGenerator(
     private fun validateAbilityImplementation(impl: ImplAbilityDeclaration, context: TypingContext) {
         // Find the ability declaration
         // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
-        val qualifiedAbilityName = impl.ability.qualifier?.let { "${it.fullPath}::${impl.ability.localName}" } ?: impl.ability.localName
-        val abilityDeclaration = abilityDeclarations[impl.ability.localName]
+        // Inherent impls don't implement an ability — skip ability-based validation
+        if (impl.isInherent) return
+
+        val abilityName = impl.abilityName!!  // safe: not inherent
+        val abilityQualifier = impl.abilityRef?.qualifier
+        val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
+        val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Ability '${qualifiedAbilityName}' not found - cannot validate implementation"
@@ -1147,6 +1153,19 @@ class ConstraintGenerator(
                     bodyContext = bodyContext.extendMono(name, type)
                 }
 
+                // Inject `it` as implicit receiver — typed as the target type corresponding to receiverTypeParam
+                if (impl.targetTypes.isNotEmpty()) {
+                    val receiverIndex = if (abilityDeclaration.receiverTypeParam != null) {
+                        abilityDeclaration.typeParams.indexOf(abilityDeclaration.receiverTypeParam)
+                    } else {
+                        // Fallback: receiver is the last type param (convention)
+                        abilityDeclaration.typeParams.size - 1
+                    }
+                    val safeIndex = receiverIndex.coerceIn(0, impl.targetTypes.size - 1)
+                    val receiverType = convertTypeAnnotation(impl.targetTypes[safeIndex])
+                    bodyContext = bodyContext.extendMono(Keywords.IT, receiverType)
+                }
+
                 val constraintContext = ConstraintContext(
                     bodyContext,
                     expectedType = null,  // Synthesize type, don't check against expected
@@ -1166,7 +1185,7 @@ class ConstraintGenerator(
                 if (bodyResult.undefinedVariables.isNotEmpty()) {
                     val undefinedVar = bodyResult.undefinedVariables.first()
                     throw com.mezze.language.typechecker.TypeCheckError(
-                        "Type error in ability '${impl.ability.localName}' operation '${implOp.name}' implementation: " +
+                        "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: " +
                         "Undefined variable '${undefinedVar.name}'"
                     )
                 }
@@ -1178,7 +1197,7 @@ class ConstraintGenerator(
                 when (solveResult) {
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
                         throw com.mezze.language.typechecker.TypeCheckError(
-                            "Type error in ability '${impl.ability.localName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
+                            "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
                         )
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
@@ -1198,7 +1217,7 @@ class ConstraintGenerator(
                                 val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
                                 val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Method '${implOp.name}' in impl ${impl.ability.localName} returns wrong type: " +
+                                    "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }

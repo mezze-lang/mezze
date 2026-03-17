@@ -248,12 +248,12 @@ class ComprehensiveEffectInterpreterTest {
     fun testEffectCallWithComplexArguments() {
         val source = """
             effect Math where {
-              add : {x: Int, y: Int} -> Int <Math>,
+              compute : {x: Int, y: Int} -> Int <Math>,
               multiply : {x: Int, y: Int} -> Int <Math>
             }
 
             impl Math for Calculator where {
-              add : {x: Int, y: Int} -> Int = {x, y} -> x + y,
+              compute : {x: Int, y: Int} -> Int = {x, y} -> x + y,
               multiply : {x: Int, y: Int} -> Int = {x, y} -> x * y
             }
 
@@ -262,7 +262,7 @@ class ComprehensiveEffectInterpreterTest {
               do
                 let a = 3
                 let b = 4
-                let sum = Math.add {x = a, y = b}
+                let sum = Math.compute {x = a, y = b}
                 let product = Math.multiply {x = sum, y = 2}
                 product
 

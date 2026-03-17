@@ -157,22 +157,22 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `ability implementations have content hashes`() {
         val source = """
-            ability Describable 'a where {
-                describe: {val: 'a} -> Str
+            ability Describable for 'a where {
+                describe: {} -> Str
             }
 
-            impl Describable Int where {
-                describe = {val} -> "an integer"
+            impl Describable for Int where {
+                describe = {} -> "an integer"
             }
 
-            Describable.describe {val = 42}
+            42.describe {}
         """.trimIndent()
 
         val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
 
         // Find ability impl
         val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .find { it.ability.localName == "Describable" }
+            .find { it.abilityName == "Describable" }
 
         assertNotNull(impl, "Should find Describable impl")
         assertNotNull(impl!!.contentHash, "Ability impl should have contentHash")
@@ -182,48 +182,49 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `resolved ability has implementation hash at call site`() {
         val source = """
-            ability Doubler 'a where {
-                double: {val: 'a} -> 'a
+            ability Doubler for 'a where {
+                double: {} -> 'a
             }
 
-            impl Doubler Int where {
-                double = {val} -> val + val
+            impl Doubler for Int where {
+                double = {} -> it + it
             }
 
-            Doubler.double {val = 21}
+            21.double {}
         """.trimIndent()
 
         val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
 
-        // Find the function call and check resolved ability
+        // After ability inlining, the call is rewritten to a direct function call
+        // with the impl body. The ability is fully resolved at compile time.
         val topLevelExpr = result.program.items.filterIsInstance<TopLevelExpression>().lastOrNull()
         assertNotNull(topLevelExpr, "Should have top-level expression")
 
         val funcCall = topLevelExpr!!.expression as? FunctionCall
-        assertNotNull(funcCall, "Should be a function call")
+        assertNotNull(funcCall, "Should be a function call (inlined impl body)")
 
-        // The resolved ability should have implementationHash
-        val resolvedAbilities = funcCall!!.resolvedAbilities
-        assertTrue(resolvedAbilities.isNotEmpty(), "Should have resolved abilities")
+        // The impl body should be inlined — resolvedAbilities should be empty
+        // because the ability abstraction is fully resolved at compile time
+        assertTrue(funcCall!!.resolvedAbilities.isEmpty(),
+            "Inlined ability call should have empty resolvedAbilities")
 
-        val resolved = resolvedAbilities.values.firstOrNull()
-        assertNotNull(resolved, "Should have at least one resolved ability")
-        assertNotNull(resolved!!.implementationHash,
-            "ResolvedAbility should have implementationHash for runtime dispatch")
+        // The function should be a DoExpression that binds `it` to the receiver
+        assertTrue(funcCall.function is DoExpression,
+            "Inlined call's function should be a DoExpression binding `it`")
     }
 
     @Test
     fun `ability resolution works at runtime via hash lookup`() {
         val source = """
-            ability Triple 'a where {
-                triple: {val: 'a} -> 'a
+            ability Triple for 'a where {
+                triple: {} -> 'a
             }
 
-            impl Triple Int where {
-                triple = {val} -> val + val + val
+            impl Triple for Int where {
+                triple = {} -> it + it + it
             }
 
-            Triple.triple {val = 10}
+            10.triple {}
         """.trimIndent()
 
         val result = eval(source)
@@ -263,14 +264,14 @@ class ContentAddressableHashingE2ETest {
     fun `effect handler resolution works at runtime via hash lookup`() {
         val source = """
             effect Math where {
-                add: {x: Int, y: Int} -> Int <Math>
+                compute: {x: Int, y: Int} -> Int <Math>
             }
 
             impl Math for Calculator where {
-                add: {x: Int, y: Int} -> Int = {x, y} -> x + y
+                compute: {x: Int, y: Int} -> Int = {x, y} -> x + y
             }
 
-            perform Calculator in Math.add {x = 10, y = 32}
+            perform Calculator in Math.compute {x = 10, y = 32}
         """
 
         // Debug: check hashes on the typed program
@@ -338,15 +339,15 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `complete pipeline - parse, typecheck, execute with hash-based dispatch`() {
         val source = """
-            ability Square 'a where {
-                square: {val: 'a} -> 'a
+            ability Square for 'a where {
+                square: {} -> 'a
             }
 
-            impl Square Int where {
-                square = {val} -> val * val
+            impl Square for Int where {
+                square = {} -> it * it
             }
 
-            let compute = {n: Int} -> Square.square {val = n}
+            let compute = {n: Int} -> n.square {}
 
             compute {n = 7}
         """.trimIndent()
@@ -371,19 +372,19 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `multiple ability implementations have unique content hashes`() {
         val source = """
-            ability Stringify 'a where {
-                stringify: {val: 'a} -> Str
+            ability Stringify for 'a where {
+                stringify: {} -> Str
             }
 
-            impl Stringify Int where {
-                stringify: {val: Int} -> Str = {val} -> "int"
+            impl Stringify for Int where {
+                stringify: {} -> Str = {} -> "int"
             }
 
-            impl Stringify Str where {
-                stringify: {val: Str} -> Str = {val} -> "string"
+            impl Stringify for Str where {
+                stringify: {} -> Str = {} -> "string"
             }
 
-            Stringify.stringify {val = 42}
+            42.stringify {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -391,7 +392,7 @@ class ContentAddressableHashingE2ETest {
 
         // Verify each impl has a different content hash
         val impls = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .filter { it.ability.localName == "Stringify" }
+            .filter { it.abilityName == "Stringify" }
 
         assertEquals(2, impls.size, "Should have 2 Stringify impls")
 
@@ -478,23 +479,23 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `nested ability calls resolve correctly via hashes`() {
         val source = """
-            ability Inner 'a where {
-                inner: {val: 'a} -> Int
+            ability Inner for 'a where {
+                inner: {} -> Int
             }
 
-            ability Outer 'a where {
-                outer: {val: 'a} with Inner 'a -> Int
+            ability Outer for 'a where {
+                outer: {} with Inner 'a -> Int
             }
 
-            impl Inner Int where {
-                inner = {val} -> val
+            impl Inner for Int where {
+                inner = {} -> it
             }
 
-            impl Outer Int where {
-                outer = {val} -> Inner.inner {val = val} + 10
+            impl Outer for Int where {
+                outer = {} -> it.inner {} + 10
             }
 
-            Outer.outer {val = 5}
+            5.outer {}
         """.trimIndent()
 
         val result = eval(source)
@@ -504,15 +505,15 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `higher-order functions with ability constraints work with hash dispatch`() {
         val source = """
-            ability Addable 'a where {
-                add: {a: 'a, b: 'a} -> 'a
+            ability Addable for 'a where {
+                plus: {b: 'a} -> 'a
             }
 
-            impl Addable Int where {
-                add = {a, b} -> a + b
+            impl Addable for Int where {
+                plus = {b} -> it + b
             }
 
-            let sumWith = {x: Int, y: Int} -> Addable.add {a = x, b = y}
+            let sumWith = {x: Int, y: Int} -> x.plus {b = y}
 
             sumWith {x = 100, y = 23}
         """.trimIndent()
@@ -551,15 +552,15 @@ class ContentAddressableHashingE2ETest {
     @Test
     fun `ability impl hash matches between declaration and resolution`() {
         val source = """
-            ability Negate 'a where {
-                negate: {val: 'a} -> 'a
+            ability Negate for 'a where {
+                negate: {} -> 'a
             }
 
-            impl Negate Int where {
-                negate = {val} -> 0 - val
+            impl Negate for Int where {
+                negate = {} -> 0 - it
             }
 
-            Negate.negate {val = 42}
+            42.negate {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -567,23 +568,23 @@ class ContentAddressableHashingE2ETest {
 
         // Get the impl's content hash
         val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            .find { it.ability.localName == "Negate" }
+            .find { it.abilityName == "Negate" }
         assertNotNull(impl)
         val implHash = impl!!.contentHash
         assertNotNull(implHash)
 
-        // Get the resolved ability's implementation hash at the call site
+        // After inlining, the call is rewritten: resolvedAbilities is empty,
+        // but the impl body is inlined directly. The impl still has its content hash.
         val topLevelExpr = typeCheckResult.program.items.filterIsInstance<TopLevelExpression>().lastOrNull()
         assertNotNull(topLevelExpr)
         val funcCall = topLevelExpr!!.expression as? FunctionCall
         assertNotNull(funcCall)
-        val resolved = funcCall!!.resolvedAbilities.values.firstOrNull()
-        assertNotNull(resolved)
-        val resolvedHash = resolved!!.implementationHash
-        assertNotNull(resolvedHash)
 
-        // The hashes should match - the resolved ability points to the impl
-        assertEquals(implHash, resolvedHash,
-            "ResolvedAbility.implementationHash should match ImplAbilityDeclaration.contentHash")
+        // Ability is fully resolved at compile time — resolvedAbilities should be empty
+        assertTrue(funcCall!!.resolvedAbilities.isEmpty(),
+            "Inlined ability call should have empty resolvedAbilities")
+        // The function should be a DoExpression (let it = 42 in negate_impl_body)
+        assertTrue(funcCall.function is DoExpression,
+            "Inlined call should have DoExpression as function (binding it)")
     }
 }

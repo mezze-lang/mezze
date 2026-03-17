@@ -385,54 +385,59 @@ class ImportResolutionTest {
 
         @Test
         fun `impl ability with unqualified ability name`() {
+            // When the ability is declared in the same file, resolveImplDeclarations converts it
             val source = """
-                impl Show Int where {
-                    show = {val} -> "Int"
+                ability Show for 'a where {
+                    show: {} -> Str
+                }
+
+                impl Show for Int where {
+                    show = {} -> "Int"
                 }
             """.trimIndent()
 
             val program = parser.parse(source)
-            val impl = program.items[0] as ImplAbilityDeclaration
+            val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
 
-            assertEquals("Show", impl.ability.localName)
-            assertFalse(impl.ability.isQualified)
+            assertEquals("Show", impl.abilityName)
+            assertFalse(impl.abilityRef!!.isQualified)
         }
 
         @Test
         fun `impl ability with qualified ability name`() {
             val source = """
-                impl codec::Encode Json Int where {
-                    encode = {val, config} -> {}
+                impl codec::Encode for Json Int where {
+                    encode = {config} -> {}
                 }
             """.trimIndent()
 
             val program = parser.parse(source)
             val impl = program.items[0] as ImplAbilityDeclaration
 
-            assertEquals("Encode", impl.ability.localName)
-            assertEquals(listOf("codec"), impl.ability.qualifier?.segments)
-            assertTrue(impl.ability.isQualified)
+            assertEquals("Encode", impl.abilityName)
+            assertEquals(listOf("codec"), impl.abilityRef?.qualifier?.segments)
+            assertTrue(impl.abilityRef!!.isQualified)
         }
 
         @Test
         fun `impl ability with full path ability name`() {
             val source = """
-                impl std::codec::Encode Json Int where {
-                    encode = {val, config} -> {}
+                impl std::codec::Encode for Json Int where {
+                    encode = {config} -> {}
                 }
             """.trimIndent()
 
             val program = parser.parse(source)
             val impl = program.items[0] as ImplAbilityDeclaration
 
-            assertEquals("Encode", impl.ability.localName)
-            assertEquals(listOf("std", "codec"), impl.ability.qualifier?.segments)
-            assertTrue(impl.ability.isQualified)
+            assertEquals("Encode", impl.abilityName)
+            assertEquals(listOf("std", "codec"), impl.abilityRef?.qualifier?.segments)
+            assertTrue(impl.abilityRef!!.isQualified)
 
             // Check ability reference structure
-            assertEquals("Encode", impl.ability.localName)
-            assertEquals(listOf("std", "codec"), impl.ability.qualifier?.segments ?: emptyList<String>())
-            assertEquals("std::codec::Encode", "${impl.ability.qualifier?.fullPath}::${impl.ability.localName}")
+            assertEquals("Encode", impl.abilityName)
+            assertEquals(listOf("std", "codec"), impl.abilityRef?.qualifier?.segments ?: emptyList<String>())
+            assertEquals("std::codec::Encode", "${impl.abilityRef?.qualifier?.fullPath}::${impl.abilityName}")
         }
     }
 }

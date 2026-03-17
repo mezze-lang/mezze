@@ -276,13 +276,18 @@ class AbilityImplStorageNode(
     @field:Child private var recordChild: MezzeNode,
     private val hashSlot: Int,
     private val contentHash: String,
-    private val abilityName: String
+    private val abilityName: String,
+    private val operationNames: Array<String> = emptyArray()
 ) : MezzeNode() {
 
     override fun execute(frame: VirtualFrame): Any {
         val value = recordChild.execute(frame)
         frame.setObject(hashSlot, value)
         storeInContext(value)
+        // Also store each individual operation function for direct dispatch via content hash
+        if (operationNames.isNotEmpty() && value is com.mezze.interpreter.v2.values.MezzeRecord) {
+            storeOperations(value)
+        }
         return value
     }
 
@@ -294,6 +299,16 @@ class AbilityImplStorageNode(
         context.registerAbilityImpl(abilityName, value)
         // Register by content hash for dictionary passing (JIT-friendly)
         context.registerAbilityImplByHash(contentHash, value)
+    }
+
+    @TruffleBoundary
+    private fun storeOperations(record: com.mezze.interpreter.v2.values.MezzeRecord) {
+        val context = MezzeContext.get(this)
+        for (opName in operationNames) {
+            val opFunc = record.getField(opName) ?: continue
+            val opKey = com.mezze.language.ast.hashing.MezzeHash.operationHash(contentHash, opName)
+            context.defineGlobal(opKey, opFunc)
+        }
     }
 }
 

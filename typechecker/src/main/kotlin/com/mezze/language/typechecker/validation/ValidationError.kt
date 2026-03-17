@@ -349,7 +349,7 @@ sealed interface ValidationError {
     /**
      * Orphan instance (ability implementation for type from different module).
      *
-     * Example: impl Eq String in user code (String is built-in)
+     * Example: impl Eq for String in user code (String is built-in)
      */
     data class OrphanInstance(
         val abilityName: String,
@@ -367,7 +367,7 @@ sealed interface ValidationError {
     /**
      * Overlapping instances (same ability implemented multiple times for same type).
      *
-     * Example: impl Eq Int twice
+     * Example: impl Eq for Int twice
      */
     data class OverlappingInstance(
         val abilityName: String,
@@ -388,7 +388,7 @@ sealed interface ValidationError {
     /**
      * Missing ability implementation.
      *
-     * Example: Show.show {val = 42} when there's no impl Show Int
+     * Example: 42.show {} when there's no impl Show for Int
      */
     data class MissingAbilityImplementation(
         val abilityName: String,

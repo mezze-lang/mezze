@@ -36,15 +36,15 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with no effects (pure)`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show = {val} -> "number"
+            impl Show for Int where {
+                show = {} -> "number"
             }
 
-            Show.show {val = 42}
+            42.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -56,15 +56,15 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with explicit empty effects`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str <>
+            ability Show for 'a where {
+                show: {} -> Str <>
             }
 
-            impl Show Int where {
-                show = {val} -> "number"
+            impl Show for Int where {
+                show = {} -> "number"
             }
 
-            Show.show {val = 42}
+            42.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -80,15 +80,15 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int, v: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
-                set = {c, i, v} -> True
+            impl Mutable for [Int] where {
+                set = {i, v} -> True
             }
 
-            Mutable.set {c = [1, 2, 3], i = 0, v = 42}
+            [1, 2, 3].set {i = 0, v = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -108,15 +108,15 @@ class AbilityOperationEffectsTest {
                 throw: {msg: Str} -> {}
             }
 
-            ability FileReader 'a where {
+            ability FileReader for 'a where {
                 read_file: {path: Str} -> 'a <IO, Exception>
             }
 
-            impl FileReader Str where {
+            impl FileReader for Str where {
                 read_file = {path} -> "file content"
             }
 
-            FileReader.read_file {path = "/tmp/test.txt"}
+            "".read_file {path = "/tmp/test.txt"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -132,20 +132,20 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Container 'c having 'elem where {
-                len: {c: 'c} -> Int,
-                get: {c: 'c, i: Int} -> Option 'elem,
-                set: {c: 'c, i: Int, v: 'elem} -> Bool <Mut>
+            ability Container for 'c having 'elem where {
+                len: {} -> Int,
+                get: {i: Int} -> Option 'elem,
+                set: {i: Int, v: 'elem} -> Bool <Mut>
             }
 
-            impl Container [Int] having 'elem = Int where {
-                len = {c} -> 0,
-                get = {c, i} -> None,
-                set = {c, i, v} -> True
+            impl Container for [Int] having 'elem = Int where {
+                len = {} -> 0,
+                get = {i} -> None,
+                set = {i, v} -> True
             }
 
             let arr = [1, 2, 3]
-            let length = Container.len {c = arr}
+            let length = arr.len {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -159,8 +159,8 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with polymorphic effects should fail`() {
         val source = """
-            ability Processor 'a where {
-                process: {val: 'a} -> Str <...>
+            ability Processor for 'a where {
+                process: {} -> Str <...>
             }
         """.trimIndent()
 
@@ -182,8 +182,8 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut, ...>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut, ...>
             }
         """.trimIndent()
 
@@ -203,8 +203,8 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with performed marker should fail`() {
         val source = """
-            ability Runner 'a where {
-                run: {val: 'a} -> Str <*>
+            ability Runner for 'a where {
+                run: {} -> Str <*>
             }
         """.trimIndent()
 
@@ -226,8 +226,8 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut, *>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut, *>
             }
         """.trimIndent()
 
@@ -247,8 +247,8 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test ability operation with just polymorphic marker alone should fail`() {
         val source = """
-            ability Flexible 'a where {
-                flex: {val: 'a} -> 'a <...>
+            ability Flexible for 'a where {
+                flex: {} -> 'a <...>
             }
         """.trimIndent()
 
@@ -269,10 +269,10 @@ class AbilityOperationEffectsTest {
                 log: {msg: Str} -> {}
             }
 
-            ability Mixed 'a where {
-                pure_op: {val: 'a} -> Str,
-                effectful_op: {val: 'a} -> Str <Log>,
-                bad_op: {val: 'a} -> Str <...>
+            ability Mixed for 'a where {
+                pure_op: {} -> Str,
+                effectful_op: {} -> Str <Log>,
+                bad_op: {} -> Str <...>
             }
         """.trimIndent()
 
@@ -302,17 +302,17 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int, v: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
-                set = {c, i, v} -> True
+            impl Mutable for [Int] where {
+                set = {i, v} -> True
             }
 
             # Just call the ability method - don't worry about effect handling for now
             let arr = [1, 2, 3]
-            Mutable.set {c = arr, i = 0, v = 99}
+            arr.set {i = 0, v = 99}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -324,16 +324,16 @@ class AbilityOperationEffectsTest {
     @Test
     fun `test calling pure ability operation has no effect`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show = {val} -> "number"
+            impl Show for Int where {
+                show = {} -> "number"
             }
 
             # Pure function calling pure ability operation
-            let display: {x: Int} -> Str <> = {x} -> Show.show {val = x}
+            let display: {x: Int} -> Str <> = {x} -> x.show {}
 
             display {x = 42}
         """.trimIndent()
@@ -353,16 +353,16 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int, v: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int, v: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
+            impl Mutable for [Int] where {
                 # Implementation should also have <Mut> effect
-                set = {c, i, v} -> True
+                set = {i, v} -> True
             }
 
-            Mutable.set {c = [1, 2, 3], i = 0, v = 42}
+            [1, 2, 3].set {i = 0, v = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -380,20 +380,20 @@ class AbilityOperationEffectsTest {
                 mutate: {} -> {}
             }
 
-            ability Iterator 'iter having 'item where {
-                next: {iter: 'iter} -> Option 'item <Mut>,
-                has_next: {iter: 'iter} -> Bool
+            ability Iterator for 'iter having 'item where {
+                next: {} -> Option 'item <Mut>,
+                has_next: {} -> Bool
             }
 
             type IntIter = { pos: Int, data: [Int] }
 
-            impl Iterator IntIter having 'item = Int where {
-                next = {iter} -> Some {val = 0},
-                has_next = {iter} -> True
+            impl Iterator for IntIter having 'item = Int where {
+                next = {} -> Some {val = 0},
+                has_next = {} -> True
             }
 
             let iter = { pos = 0, data = [1, 2, 3] }
-            Iterator.has_next {iter = iter}
+            iter.has_next {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -411,16 +411,16 @@ class AbilityOperationEffectsTest {
                 log: {msg: Str} -> {}
             }
 
-            ability Factory 'a where {
+            ability Factory for 'a where {
                 # Returns a function that has effects
                 create_logger: {prefix: Str} -> ({msg: Str} -> {} <Log>)
             }
 
-            impl Factory Str where {
+            impl Factory for Str where {
                 create_logger = {prefix} -> {msg} -> {}
             }
 
-            Factory.create_logger {prefix = "INFO"}
+            "".create_logger {prefix = "INFO"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -437,16 +437,16 @@ class AbilityOperationEffectsTest {
                 put: {val: Int} -> {}
             }
 
-            ability Transformer 'a where {
+            ability Transformer for 'a where {
                 # Operation itself has State effect, takes a pure function
-                transform: {val: 'a, f: {x: 'a} -> 'a} -> 'a <State>
+                transform: {f: {x: 'a} -> 'a} -> 'a <State>
             }
 
-            impl Transformer Int where {
-                transform = {val, f} -> f {x = val}
+            impl Transformer for Int where {
+                transform = {f} -> f {x = it}
             }
 
-            Transformer.transform {val = 5, f = {x} -> x + 1}
+            5.transform {f = {x} -> x + 1}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -466,26 +466,26 @@ class AbilityOperationEffectsTest {
                 write: {data: Str} -> {}
             }
 
-            ability Readable 'a where {
-                read_all: {source: 'a} -> Str <Read>
+            ability Readable for 'a where {
+                read_all: {} -> Str <Read>
             }
 
-            ability Writable 'a where {
-                write_all: {dest: 'a, data: Str} -> {} <Write>
+            ability Writable for 'a where {
+                write_all: {data: Str} -> {} <Write>
             }
 
             type File = { path: Str }
 
-            impl Readable File where {
-                read_all = {source} -> "content"
+            impl Readable for File where {
+                read_all = {} -> "content"
             }
 
-            impl Writable File where {
-                write_all = {dest, data} -> {}
+            impl Writable for File where {
+                write_all = {data} -> {}
             }
 
             let f = { path = "/tmp/test" }
-            Readable.read_all {source = f}
+            f.read_all {}
         """.trimIndent()
 
         val program = parser.parse(source)

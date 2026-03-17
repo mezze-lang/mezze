@@ -24,7 +24,7 @@ Rich syntax highlighting for all Mezze language features:
 - **Types and Constructors**: Capitalized identifiers like `Option`, `Result`, `Some`, `None`
 - **Effect Rows**: `<State, IO, Network>` with performed marker `<*>` or `<Log, *>`
 - **Ability Constraints**: `with NumAdd 'a, Eq 'b`
-- **Ability Method Calls**: `Show.show`, `NumOps.add` (Ability.method syntax)
+- **Ability Method Calls**: `value.show {}`, `x.add { r = y }` (method-call syntax)
 - **Module Paths**: `math::geometry::area`
 - **Operators**: `|>`, `->`, `==`, `&&`, `||`, `...`, `@`, etc.
 - **String Interpolation**: `"Hello, $(name)!"` syntax with nested expression highlighting

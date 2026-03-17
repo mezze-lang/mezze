@@ -182,7 +182,7 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<Expression>
                 TokenType.DOT -> {
                     // Member access: obj.field
                     val dotStream = currentStream.advance()
-                    val member = identifierParser(dotStream)
+                    val member = memberIdentifierParser(dotStream)
                     result = when (member) {
                         is ParseResult.Success -> ParseResult.Success(
                             MemberAccess(
@@ -1976,7 +1976,7 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                 TokenType.DOT -> {
                     // Member access: obj.field
                     val dotStream = currentStream.advance()
-                    val member = identifierParser(dotStream)
+                    val member = memberIdentifierParser(dotStream)
                     result = when (member) {
                         is ParseResult.Success -> ParseResult.Success(
                             MemberAccess(
@@ -2061,7 +2061,7 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                     // BUG #10 FIX: Check for function call without {} syntax
                     // Only check when the previous expression is a simple identifier (like `my_func x`)
                     // or a variant constructor (like `Left 42`)
-                    // For complex expressions (like `Show.show {val = @}` followed by newline and identifier),
+                    // For complex expressions (like `@.show {}` followed by newline and identifier),
                     // skip this check as the identifier is likely a separate statement
                     val funcExpr = result.value
                     if (funcExpr is Identifier) {

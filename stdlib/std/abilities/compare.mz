@@ -1,0 +1,22 @@
+# std/abilities/compare.mz - Comparison abilities
+#
+# Defines equality and ordering operations as abilities.
+# Operators are desugared to method-call syntax:
+#   x == y  ->  x.eq {r = y}
+#   x != y  ->  x.neq {r = y}
+#   x < y   ->  x.lt {r = y}
+#   x <= y  ->  x.le {r = y}
+#   x > y   ->  x.gt {r = y}
+#   x >= y  ->  x.ge {r = y}
+
+ability Eq for 'a where {
+    eq: {r: 'a} -> Bool,
+    neq: {r: 'a} -> Bool
+}
+
+ability Ord for 'a where {
+    lt: {r: 'a} -> Bool,
+    le: {r: 'a} -> Bool,
+    gt: {r: 'a} -> Bool,
+    ge: {r: 'a} -> Bool
+}

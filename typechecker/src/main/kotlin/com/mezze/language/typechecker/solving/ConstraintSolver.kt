@@ -1206,7 +1206,7 @@ class ConstraintSolver(
                     } else {
                         // Some types are still type variables - try bidirectional inference!
                         // This is key for multi-parameter abilities like Convert 'a 'b
-                        // When 'a = Int, we can look for impl Convert Int String and infer 'b = String
+                        // When 'a = Int, we can look for impl Convert for Int String and infer 'b = String
                         val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs)
                         if (inferredSubst != null) {
                             // Store the inferred substitution for later application
@@ -1310,7 +1310,7 @@ class ConstraintSolver(
      * with their concrete bindings.
      *
      * Example: For `Container.get {container = intArray}` where `intArray: [Int]`
-     * and `impl Container [Int] having 'item = Int`:
+     * and `impl Container for [Int] having 'item = Int`:
      * - primaryTypeVar resolves to [Int]
      * - Look up impl for Container [Int]
      * - Unify 'item with Int
@@ -2107,6 +2107,12 @@ class ConstraintSolver(
             // Inspect - built-in ability for displaying values
             "Inspect" -> true  // All types can be inspected
 
+            // Logical operators - only Bool
+            "LogicalAnd", "LogicalOr", "LogicalNot" -> {
+                unwrappedType is MezzeType.BoolType ||
+                isBoolVariant(unwrappedType)
+            }
+
             else -> false
         }
     }
@@ -2261,7 +2267,7 @@ class ConstraintSolver(
             if (dataType is MezzeType.VarType) {
                 // Look for generated DecodeRepr impls - the data type is in targetTypes[0]
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    impl.ability.localName == "DecodeRepr" &&
+                    impl.abilityName == "DecodeRepr" &&
                     impl.targetTypes.isNotEmpty()
                 }
 
@@ -2288,7 +2294,7 @@ class ConstraintSolver(
             if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 // Look for generated Decode impls for this format using STRUCTURAL matching
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    impl.ability.localName == "Decode" &&
+                    impl.abilityName == "Decode" &&
                     impl.targetTypes.size >= 2 &&
                     typeMatchesAnnotation(formatType, impl.targetTypes[0])
                 }

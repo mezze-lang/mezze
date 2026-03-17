@@ -556,7 +556,7 @@ pub let post_json_json_with: { url: Str, json: Json, config: HttpConfig } -> Res
 
 # POST any encodable type as JSON body
 pub let post_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -567,7 +567,7 @@ pub let post_body: { url: Str, body: 'a } -> Result Response HttpError <Http> wi
 
 # PUT any encodable type as JSON body
 pub let put_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -578,7 +578,7 @@ pub let put_body: { url: Str, body: 'a } -> Result Response HttpError <Http> wit
 
 # PATCH any encodable type as JSON body
 pub let patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -589,7 +589,7 @@ pub let patch_body: { url: Str, body: 'a } -> Result Response HttpError <Http> w
 
 # POST typed body with custom config
 pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -600,7 +600,7 @@ pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Res
 
 # PUT typed body with custom config
 pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }
@@ -611,7 +611,7 @@ pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Resp
 
 # PATCH typed body with custom config
 pub let patch_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Response HttpError <Http> with EncodeRepr 'a = { url, body, config } -> do
-    match EncodeRepr.encode_repr { val = body, fmt = json_fmt, config = default_config } is
+    match body.encode_repr { fmt = json_fmt, config = default_config } is
         Ok { val = json } -> do
             let body_str = to_str { json = json }
             let body_bytes = bytes::from_string { s = body_str }

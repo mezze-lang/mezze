@@ -25,8 +25,8 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `error message for polymorphic effects mentions the operation name and ability`() {
         val source = """
-            ability BadAbility 'a where {
-                bad_operation: {val: 'a} -> Str <...>
+            ability BadAbility for 'a where {
+                bad_operation: {} -> Str <...>
             }
         """.trimIndent()
 
@@ -51,8 +51,8 @@ class AbilityOperationEffectsErrorMessagesTest {
     @Test
     fun `error message for performed marker mentions the operation name and ability`() {
         val source = """
-            ability BadAbility 'a where {
-                bad_operation: {val: 'a} -> Str <*>
+            ability BadAbility for 'a where {
+                bad_operation: {} -> Str <*>
             }
         """.trimIndent()
 
@@ -81,8 +81,8 @@ class AbilityOperationEffectsErrorMessagesTest {
                 mutate: {} -> {}
             }
 
-            ability BadAbility 'a where {
-                bad_op: {val: 'a} -> Str <Mut, ...>
+            ability BadAbility for 'a where {
+                bad_op: {} -> Str <Mut, ...>
             }
         """.trimIndent()
 
@@ -108,8 +108,8 @@ class AbilityOperationEffectsErrorMessagesTest {
                 mutate: {} -> {}
             }
 
-            ability BadAbility 'a where {
-                bad_op: {val: 'a} -> Str <Mut, *>
+            ability BadAbility for 'a where {
+                bad_op: {} -> Str <Mut, *>
             }
         """.trimIndent()
 
@@ -135,11 +135,11 @@ class AbilityOperationEffectsErrorMessagesTest {
                 log: {msg: Str} -> {}
             }
 
-            ability MixedAbility 'a where {
-                good_op1: {val: 'a} -> Str,
-                good_op2: {val: 'a} -> Int <Log>,
-                the_bad_one: {val: 'a} -> Bool <...>,
-                good_op3: {val: 'a} -> Float
+            ability MixedAbility for 'a where {
+                good_op1: {} -> Str,
+                good_op2: {} -> Int <Log>,
+                the_bad_one: {} -> Bool <...>,
+                good_op3: {} -> Float
             }
         """.trimIndent()
 
@@ -170,16 +170,16 @@ class AbilityOperationEffectsErrorMessagesTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
+            impl Mutable for [Int] where {
                 # No explicit type - should inherit <Mut> from ability
-                set = {c, i} -> True
+                set = {i} -> True
             }
 
-            Mutable.set {c = [1, 2, 3], i = 0}
+            [1, 2, 3].set {i = 0}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -195,16 +195,16 @@ class AbilityOperationEffectsErrorMessagesTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
+            impl Mutable for [Int] where {
                 # Explicit matching signature
-                set: {c: [Int], i: Int} -> Bool <Mut> = {c, i} -> True
+                set: {i: Int} -> Bool <Mut> = {i} -> True
             }
 
-            Mutable.set {c = [1, 2, 3], i = 0}
+            [1, 2, 3].set {i = 0}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -227,13 +227,13 @@ class AbilityOperationEffectsErrorMessagesTest {
                 log: {msg: Str} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
+            impl Mutable for [Int] where {
                 # WRONG: declares <Log> but ability says <Mut>
-                set: {c: [Int], i: Int} -> Bool <Log> = {c, i} -> True
+                set: {i: Int} -> Bool <Log> = {i} -> True
             }
         """.trimIndent()
 
@@ -261,13 +261,13 @@ class AbilityOperationEffectsErrorMessagesTest {
                 mutate: {} -> {}
             }
 
-            ability Mutable 'c where {
-                set: {c: 'c, i: Int} -> Bool <Mut>
+            ability Mutable for 'c where {
+                set: {i: Int} -> Bool <Mut>
             }
 
-            impl Mutable [Int] where {
+            impl Mutable for [Int] where {
                 # WRONG: declares pure <> but ability says <Mut>
-                set: {c: [Int], i: Int} -> Bool <> = {c, i} -> True
+                set: {i: Int} -> Bool <> = {i} -> True
             }
         """.trimIndent()
 
@@ -288,13 +288,13 @@ class AbilityOperationEffectsErrorMessagesTest {
                 log: {msg: Str} -> {}
             }
 
-            ability Show 'a where {
-                show: {val: 'a} -> Str  # Pure - no effects
+            ability Show for 'a where {
+                show: {} -> Str  # Pure - no effects
             }
 
-            impl Show Int where {
+            impl Show for Int where {
                 # WRONG: declares <Log> but ability is pure
-                show: {val: Int} -> Str <Log> = {val} -> "number"
+                show: {} -> Str <Log> = {} -> "number"
             }
         """.trimIndent()
 

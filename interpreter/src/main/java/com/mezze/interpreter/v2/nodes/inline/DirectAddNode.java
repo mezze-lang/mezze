@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.inline;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -51,6 +52,18 @@ public abstract class DirectAddNode extends MezzeNode {
     @Specialization
     protected static String addStrings(String left, String right) {
         return left + right;
+    }
+
+    /**
+     * Fraction addition: (a/b) + (c/d) = (a*d + c*b) / (b*d)
+     */
+    @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
+    protected static MezzeRecord addFractions(MezzeRecord left, MezzeRecord right) {
+        return FractionHelper.addFractions(left, right);
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     /**

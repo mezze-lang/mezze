@@ -42,12 +42,31 @@ object BuiltinAbilities {
 
     // Serialization abilities (used by codec system)
     const val ENCODE = "Encode"
+    const val ENCODE_REPR = "EncodeRepr"
     const val DECODE = "Decode"
+    const val DECODE_REPR = "DecodeRepr"
     const val STREAM_ENCODE = "StreamEncode"
     const val STREAM_DECODE = "StreamDecode"
-    const val FORMAT = "Format"  // was ENCODE_FORMAT
+    const val FORMAT = "Format"
     const val DECODE_FORMAT = "DecodeFormat"
-    const val STREAM_FORMAT = "StreamFormat"  // was STREAM_ENCODE_FORMAT
+    const val STREAM_FORMAT = "StreamFormat"
+    const val STREAM_DECODE_FORMAT = "StreamDecodeFormat"
+
+    /** All codec-related ability names */
+    val CODEC_ABILITIES = setOf(
+        ENCODE, ENCODE_REPR, DECODE, DECODE_REPR,
+        STREAM_ENCODE, STREAM_DECODE,
+        FORMAT, DECODE_FORMAT, STREAM_FORMAT, STREAM_DECODE_FORMAT
+    )
+
+    /** Encode-side codec abilities (data → repr) */
+    val ENCODE_ABILITIES = setOf(ENCODE, ENCODE_REPR)
+
+    /** Decode-side codec abilities (repr → data) */
+    val DECODE_ABILITIES = setOf(DECODE, DECODE_REPR)
+
+    /** All user-facing codec abilities (auto-derived by CodecGenerator) */
+    val AUTO_DERIVE_CODEC_ABILITIES = setOf(ENCODE, ENCODE_REPR, DECODE, DECODE_REPR)
 
     // Other stdlib abilities
     const val SHOW = "Show"

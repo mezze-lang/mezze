@@ -679,8 +679,8 @@ object ASTHasher {
         val builder = MezzeHashBuilder()
         builder.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
         // Hash the ability reference (localName + qualifier segments)
-        builder.append(decl.ability.localName)
-        decl.ability.qualifier?.let { q ->
+        builder.append(decl.abilityName ?: "")
+        decl.abilityRef?.qualifier?.let { q ->
             builder.appendList(q.segments) { append(it) }
         }
         builder.appendList(decl.targetTypes) { hashTypeAnnotationInto(it, this) }

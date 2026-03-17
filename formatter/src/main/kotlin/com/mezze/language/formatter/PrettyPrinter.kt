@@ -18,17 +18,17 @@ class PrettyPrinter {
     private var comments: List<Comment> = emptyList()
     private var nextCommentIndex = 0
 
-    // Reverse mapping: ability.method -> operator symbol
-    private val abilityMethodToOperator: Map<String, String> = buildMap {
+    // Reverse mapping: method name -> operator symbol (for new desugaring: x.add {r = y})
+    private val methodToOperator: Map<String, String> = buildMap {
         for ((op, binaryOp) in OperatorMapping.BINARY_OPERATORS) {
-            put("${binaryOp.ability}.${binaryOp.method}", op)
+            put(binaryOp.method, op)
         }
     }
 
-    // Reverse mapping for unary operators
-    private val abilityMethodToUnaryOperator: Map<String, String> = buildMap {
+    // Reverse mapping: method name -> operator symbol (for unary: x.neg {})
+    private val methodToUnaryOperator: Map<String, String> = buildMap {
         for ((op, unaryOp) in OperatorMapping.UNARY_OPERATORS) {
-            put("${unaryOp.ability}.${unaryOp.method}", op)
+            put(unaryOp.method, op)
         }
     }
 
@@ -324,8 +324,19 @@ class PrettyPrinter {
     private fun printAbilityDeclaration(decl: AbilityDeclaration) {
         append("ability ")
         append(decl.name)
-        append(" ")
-        append(decl.typeParams.joinToString(" "))
+        // Generic type params go before 'for', receiver goes after 'for'
+        val receiverParam = decl.receiverTypeParam
+        val genericParams = if (receiverParam != null) {
+            decl.typeParams.filter { it != receiverParam }
+        } else {
+            decl.typeParams.dropLast(1)
+        }
+        if (genericParams.isNotEmpty()) {
+            append(" ")
+            append(genericParams.joinToString(" "))
+        }
+        append(" for ")
+        append(receiverParam ?: decl.typeParams.lastOrNull() ?: "'a")
 
         if (decl.associatedTypes.isNotEmpty()) {
             append(" having ")
@@ -430,15 +441,24 @@ class PrettyPrinter {
             append(". ")
         }
 
-        if (decl.ability.qualifier != null) {
-            append(decl.ability.qualifier!!.fullPath)
-            append("::")
-        }
-        append(decl.ability.localName)
-        append(" ")
-        decl.targetTypes.forEachIndexed { index, type ->
-            if (index > 0) append(" ")
-            printTypeAnnotation(type)
+        if (decl.isInherent) {
+            // Inherent impl: impl Type where { ... }
+            decl.targetTypes.forEachIndexed { index, type ->
+                if (index > 0) append(" ")
+                printTypeAnnotation(type)
+            }
+        } else {
+            val abilityRef = decl.abilityRef
+            if (abilityRef?.qualifier != null) {
+                append(abilityRef.qualifier!!.fullPath)
+                append("::")
+            }
+            append(decl.abilityName!!)
+            append(" for ")
+            decl.targetTypes.forEachIndexed { index, type ->
+                if (index > 0) append(" ")
+                printTypeAnnotation(type)
+            }
         }
 
         if (decl.associatedTypeBindings.isNotEmpty()) {
@@ -935,27 +955,24 @@ class PrettyPrinter {
      * Try to extract a binary operator from a desugared function call.
      * Returns (operator, left, right) if this is a desugared binary op, null otherwise.
      *
-     * Pattern: MemberAccess(Identifier("NumAdd"), "add") with args {l = x, r = y}
+     * New pattern: x.add { r = y } — receiver is left operand, args have only {r}
      */
     private fun tryExtractBinaryOperator(expr: FunctionCall): Triple<String, Expression, Expression>? {
         val func = expr.function
         val args = expr.arguments
 
-        // Check for MemberAccess pattern: Ability.method
+        // Check for MemberAccess pattern: receiver.method
         if (func !is MemberAccess) return null
-        val receiver = func.receiver
-        if (receiver !is Identifier) return null
 
-        val key = "${receiver.localName}.${func.member}"
-        val op = abilityMethodToOperator[key] ?: return null
+        val op = methodToOperator[func.member] ?: return null
 
-        // Check for record args with l and r fields
+        // Check for record args with r field (new pattern: {r = y})
         if (args !is RecordLiteral) return null
         val fieldEntries = args.getFieldEntries()
-        if (fieldEntries.size != 2) return null
+        if (fieldEntries.size != 1) return null
 
-        val left = fieldEntries.find { it.name == "l" }?.value ?: return null
         val right = fieldEntries.find { it.name == "r" }?.value ?: return null
+        val left = func.receiver
 
         return Triple(op, left, right)
     }
@@ -964,29 +981,23 @@ class PrettyPrinter {
      * Try to extract a unary operator from a desugared function call.
      * Returns (operator, operand) if this is a desugared unary op, null otherwise.
      *
-     * Pattern: MemberAccess(Identifier("NumSub"), "neg") with args {n = x}
+     * New pattern: x.neg {} — receiver is operand, args is empty record
      */
     private fun tryExtractUnaryOperator(expr: FunctionCall): Pair<String, Expression>? {
         val func = expr.function
         val args = expr.arguments
 
-        // Check for MemberAccess pattern: Ability.method
+        // Check for MemberAccess pattern: receiver.method
         if (func !is MemberAccess) return null
-        val receiver = func.receiver
-        if (receiver !is Identifier) return null
 
-        val key = "${receiver.localName}.${func.member}"
-        val op = abilityMethodToUnaryOperator[key] ?: return null
+        val op = methodToUnaryOperator[func.member] ?: return null
 
-        // Check for record args with appropriate field
+        // Check for empty record args (new pattern: {})
         if (args !is RecordLiteral) return null
         val fieldEntries = args.getFieldEntries()
-        if (fieldEntries.size != 1) return null
+        if (fieldEntries.isNotEmpty()) return null
 
-        val unaryOpDef = OperatorMapping.getUnaryOp(op) ?: return null
-        val operand = fieldEntries.find { it.name == unaryOpDef.fieldName }?.value ?: return null
-
-        return Pair(op, operand)
+        return Pair(op, func.receiver)
     }
 
     private fun printIfExpression(expr: IfExpression) {

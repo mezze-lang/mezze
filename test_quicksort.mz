@@ -64,24 +64,24 @@ let quicksort: {arr: MutSeq Int} -> {} <Mutation> = {arr} -> do
 let test_local_mut = {} -> do
     let unsorted = [5, 2, 9, 1, 7, 6, 3, 8, 4]
     println { msg = "Testing with LocalMut:" }
-    println { msg = "  Input:  $(Inspect.to_str {val = unsorted})" }
+    println { msg = "  Input:  $(unsorted.to_str {})" }
     let sorted = perform LocalMut in do
         let arr = seq_to_mut { seq = unsorted }
         quicksort { arr = arr }
         seq_to_immut { seq = arr }
-    println { msg = "  Output: $(Inspect.to_str {val = sorted})" }
+    println { msg = "  Output: $(sorted.to_str {})" }
     println { msg = "" }
 
 # Test with DebugLocalMut (shows loop iteration counts)
 let test_debug_mut = {} -> do
     let unsorted = [5, 2, 9, 1, 7, 6, 3, 8, 4]
     println { msg = "Testing with DebugLocalMut:" }
-    println { msg = "  Input:  $(Inspect.to_str {val = unsorted})" }
+    println { msg = "  Input:  $(unsorted.to_str {})" }
     let sorted = perform DebugLocalMut in do
         let arr = seq_to_mut { seq = unsorted }
         quicksort { arr = arr }
         seq_to_immut { seq = arr }
-    println { msg = "  Output: $(Inspect.to_str {val = sorted})" }
+    println { msg = "  Output: $(sorted.to_str {})" }
     println { msg = "" }
 
 # Run both tests

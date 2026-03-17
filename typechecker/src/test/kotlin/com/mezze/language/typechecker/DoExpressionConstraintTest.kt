@@ -208,23 +208,23 @@ class DoExpressionConstraintTest {
 
     @Test
     fun testAbilityCallWithConcreteTypeInDoShouldFail() {
-        // Test case for the bug fix: calling Show.show with a concrete Bool type
-        // should fail when no impl Show Bool exists
+        // Test case for the bug fix: calling .show on a concrete Bool type
+        // should fail when no impl Show for Bool exists
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             let noiseAdd = {x, y} -> do
               let sum = x + y
               let diff = x - y
               let val = diff > sum
-              Show.show {val}
+              val.show {}
         """.trimIndent()
 
         val ast = parser.parse(source)
 
-        // This should fail because val has type Bool, but there's no impl Show Bool
+        // This should fail because val has type Bool, but there's no impl Show for Bool
         assertThrows(TypeCheckError::class.java) {
             typeChecker.typeCheck(ast).program
         }
@@ -234,13 +234,13 @@ class DoExpressionConstraintTest {
     fun testAbilityCallWithExplicitFieldValueInDo() {
         // Using explicit field value {val = diff} where diff is polymorphic
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             let noiseAdd = {x, y} -> do
               let diff = x - y
-              Show.show {val = diff}
+              diff.show {}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -258,12 +258,12 @@ class DoExpressionConstraintTest {
     fun testAbilityCallWithPolymorphicTypeInDoShouldSucceed() {
         // When the type is truly polymorphic, it should add a constraint and succeed
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             let polyShow = {val} -> do
-              let result = Show.show {val}
+              let result = val.show {}
               result
         """.trimIndent()
 
@@ -339,7 +339,7 @@ class DoExpressionConstraintTest {
         val source = """
             let test = {x} -> do
               let val = True
-              Inspect.to_str {val}
+              val.to_dbg_str {}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -356,15 +356,15 @@ class DoExpressionConstraintTest {
         // Test that ability constraints from do expressions with let bindings
         // are correctly propagated to the enclosing lambda
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             let noiseAdd = {x, y} -> do
               let sum = x + y
               let diff = x - y
               let val = diff
-              Show.show { val }
+              val.show {}
         """.trimIndent()
 
         val ast = parser.parse(source)

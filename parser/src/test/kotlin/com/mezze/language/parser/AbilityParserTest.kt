@@ -11,7 +11,7 @@ class AbilityParserTest {
     @Test
     fun testSimpleAbilityDeclaration() {
         val source = """
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
               encode : {val: 'a} -> String
             }
         """.trimIndent()
@@ -33,7 +33,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityWithMultipleOperations() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
               show : {val: 'a} -> String,
               debug : {val: 'a} -> String,
             }
@@ -53,16 +53,20 @@ class AbilityParserTest {
     @Test
     fun testSimpleImplAbilityDeclaration() {
         val source = """
-            impl Encoder Int where {
+            ability Encoder for 'a where {
+              encode : {val: 'a} -> String
+            }
+
+            impl Encoder for Int where {
               encode : {val: Int} -> String = {val} -> "number"
             }
         """.trimIndent()
 
         val program = parser.parse(source)
-        assertEquals(1, program.items.size)
+        assertEquals(2, program.items.size)
 
-        val impl = program.items[0] as ImplAbilityDeclaration
-        assertEquals("Encoder", impl.ability.localName)
+        val impl = program.items[1] as ImplAbilityDeclaration
+        assertEquals("Encoder", impl.abilityName)
         assertEquals(1, impl.targetTypes.size)
         assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals(1, impl.operations.size)
@@ -76,16 +80,21 @@ class AbilityParserTest {
     @Test
     fun testImplAbilityWithMultipleOperations() {
         val source = """
-            impl Show String where {
+            ability Show for 'a where {
+              show : {val: 'a} -> String,
+              debug : {val: 'a} -> String,
+            }
+
+            impl Show for String where {
               show : {val: String} -> String = {val} -> val,
               debug : {val: String} -> String = {val} -> "\"$(val)\"",
             }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val impl = program.items[1] as ImplAbilityDeclaration
 
-        assertEquals("Show", impl.ability.localName)
+        assertEquals("Show", impl.abilityName)
         assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals(2, impl.operations.size)
 
@@ -96,11 +105,11 @@ class AbilityParserTest {
     @Test
     fun testAbilityAndImplTogether() {
         val source = """
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
               encode : {val: 'a} -> String
             }
 
-            impl Encoder Int where {
+            impl Encoder for Int where {
               encode : {val: Int} -> String = {val} -> intToString {val = val}
             }
         """.trimIndent()
@@ -112,19 +121,19 @@ class AbilityParserTest {
         assertEquals("Encoder", ability.name)
 
         val impl = program.items[1] as ImplAbilityDeclaration
-        assertEquals("Encoder", impl.ability.localName)
+        assertEquals("Encoder", impl.abilityName)
         assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
     }
 
     @Test
     fun testComplexAbilityExample() {
         val source = """
-            ability Serializer 'a where {
+            ability Serializer for 'a where {
               serialize : {val: 'a} -> String,
               deserialize : {str: String} -> 'a,
             }
 
-            impl Serializer Int where {
+            impl Serializer for Int where {
               serialize : {val: Int} -> String = {val} -> intToString {val = val},
               deserialize : {str: String} -> Int = {str} -> stringToInt {str = str},
             }
@@ -140,14 +149,14 @@ class AbilityParserTest {
         assertEquals("deserialize", ability.operations[1].name)
 
         val impl = program.items[1] as ImplAbilityDeclaration
-        assertEquals("Serializer", impl.ability.localName)
+        assertEquals("Serializer", impl.abilityName)
         assertEquals(2, impl.operations.size)
     }
 
     @Test
     fun testAbilityWithMultipleTypeParameters() {
         val source = """
-            ability KVStore 'a 'b where {
+            ability KVStore 'b for 'a where {
               store : {key: 'a, value: 'b} -> {}
             }
         """.trimIndent()
@@ -157,7 +166,8 @@ class AbilityParserTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("KVStore", ability.name)
-        assertEquals(listOf("'a", "'b"), ability.typeParams)
+        assertEquals(listOf("'b", "'a"), ability.typeParams)
+        assertEquals("'a", ability.receiverTypeParam)
         assertEquals(1, ability.operations.size)
 
         val operation = ability.operations[0]
@@ -167,7 +177,7 @@ class AbilityParserTest {
     @Test
     fun testImplWithMultipleTypes() {
         val source = """
-            impl KVStore String Int where {
+            impl KVStore for String Int where {
               store : {key: String, value: Int} -> {} = {key, value} -> {}
             }
         """.trimIndent()
@@ -176,7 +186,7 @@ class AbilityParserTest {
         assertEquals(1, program.items.size)
 
         val impl = program.items[0] as ImplAbilityDeclaration
-        assertEquals("KVStore", impl.ability.localName)
+        assertEquals("KVStore", impl.abilityName)
         assertEquals(2, impl.targetTypes.size)
         assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
         assertEquals("Int", (impl.targetTypes[1] as IdentifierTypeAnnotation).name)

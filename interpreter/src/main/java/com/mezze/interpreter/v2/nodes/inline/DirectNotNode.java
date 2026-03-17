@@ -1,0 +1,32 @@
+package com.mezze.interpreter.v2.nodes.inline;
+
+import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.oracle.truffle.api.dsl.Fallback;
+import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.nodes.NodeInfo;
+
+/**
+ * Direct logical NOT node that takes the operand directly.
+ * Used for method-call syntax: x.not {} (desugared from !x).
+ */
+@NodeChild(value = "operand", type = MezzeNode.class)
+@NodeInfo(shortName = "direct-not")
+public abstract class DirectNotNode extends MezzeNode {
+
+    @Specialization
+    protected static boolean notBoolean(boolean value) {
+        return !value;
+    }
+
+    @Fallback
+    protected static Object typeError(Object value) {
+        throw new RuntimeException(
+            "Cannot apply ! to " + (value == null ? "null" : value.getClass().getSimpleName())
+        );
+    }
+
+    public static DirectNotNode create(MezzeNode operand) {
+        return DirectNotNodeGen.create(operand);
+    }
+}

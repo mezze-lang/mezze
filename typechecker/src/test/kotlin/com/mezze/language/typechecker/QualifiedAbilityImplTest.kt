@@ -12,7 +12,7 @@ import java.nio.file.Files
 /**
  * Tests for qualified ability names in impl declarations.
  *
- * e.g., `impl mymodule::MyAbility SomeType where { ... }`
+ * e.g., `impl mymodule::MyAbility for SomeType where { ... }`
  */
 class QualifiedAbilityImplTest {
 
@@ -34,12 +34,12 @@ class QualifiedAbilityImplTest {
     fun `parsing qualified ability names in impl`() {
         // Test that the parser correctly parses qualified ability names
         val source = """
-            ability Printable 'a where {
+            ability Printable for 'a where {
                 print: {value: 'a} -> Str
             }
 
             # Use qualified name in impl (within same module, normally wouldn't but tests parsing)
-            impl Printable Int where {
+            impl Printable for Int where {
                 print = {value} -> "int"
             }
         """.trimIndent()
@@ -50,15 +50,15 @@ class QualifiedAbilityImplTest {
         // Find the impl
         val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(impl)
-        assertEquals("Printable", impl!!.ability.localName)
-        assertTrue((impl.ability.qualifier?.segments ?: emptyList()).isEmpty())  // No module path in this case
+        assertEquals("Printable", impl!!.abilityName)
+        assertTrue((impl.abilityRef?.qualifier?.segments ?: emptyList()).isEmpty())  // No module path in this case
     }
 
     @Test
     fun `impl with qualified ability name from imported module`() {
         // Create a module that exports an ability
         val abilityModule = """
-            ability Serializable 'a where {
+            ability Serializable for 'a where {
                 serialize: {value: 'a} -> Str
             }
         """.trimIndent()
@@ -76,7 +76,7 @@ class QualifiedAbilityImplTest {
             type MyInt = | MyInt { val: Int } |
 
             # Implement using qualified ability name for LOCAL type (valid - not an orphan)
-            impl serializer::Serializable MyInt where {
+            impl serializer::Serializable for MyInt where {
                 serialize: { value: MyInt } -> Str = { value } ->
                     match value is
                         MyInt { val } -> "serialized_int"
@@ -90,17 +90,22 @@ class QualifiedAbilityImplTest {
         // Parse and type check
         val program = parser.parse(mainModule)
 
-        // Verify parsing produced correct AST
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
-        assertNotNull(impl)
-        assertEquals("Serializable", impl!!.ability.localName)
-        assertEquals(listOf("serializer"), impl.ability.qualifier?.segments ?: emptyList<String>())
-        assertEquals("serializer::Serializable", "${impl.ability.qualifier?.fullPath}::${impl.ability.localName}")
+        // Verify parsing: qualified ability impls are initially parsed as ImplDeclaration
+        // (since effect and ability impls share syntax). The typechecker converts them.
+        val parsedImpl = program.items.filterIsInstance<ImplDeclaration>().firstOrNull()
+        assertNotNull(parsedImpl, "Parser should produce ImplDeclaration for cross-module ability impl")
+        assertEquals("Serializable", parsedImpl!!.effect.localName)
+        assertEquals(listOf("serializer"), parsedImpl.effect.qualifier?.segments ?: emptyList<String>())
 
-        // Type check should succeed
+        // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
         val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
         assertNotNull(typedProgram)
+
+        // After type checking, the impl should have been resolved as an ability impl
+        val resolvedImpl = typedProgram.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
+        assertNotNull(resolvedImpl, "Typechecker should convert cross-module ability impl to ImplAbilityDeclaration")
+        assertEquals("Serializable", resolvedImpl!!.abilityName)
 
         println("SUCCESS: Qualified ability impl type-checked correctly!")
     }
@@ -112,7 +117,7 @@ class QualifiedAbilityImplTest {
         Files.createDirectories(srcDir)
 
         val codecModule = """
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
                 encode: {value: 'a} -> Str
             }
         """.trimIndent()
@@ -127,7 +132,7 @@ class QualifiedAbilityImplTest {
             # Define a local type
             type MyData = | MyData { val: Str } |
 
-            impl codec::Encoder MyData where {
+            impl codec::Encoder for MyData where {
                 encode: { value: MyData } -> Str = { value } ->
                     match value is
                         MyData { val } -> "encoded"
@@ -140,17 +145,21 @@ class QualifiedAbilityImplTest {
 
         val program = parser.parse(mainModule)
 
-        // Verify parsing
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
-        assertNotNull(impl)
-        assertEquals("Encoder", impl!!.ability.localName)
-        assertEquals(listOf("codec"), impl.ability.qualifier?.segments ?: emptyList<String>())
-        assertEquals("codec::Encoder", "${impl.ability.qualifier?.fullPath}::${impl.ability.localName}")
+        // Verify parsing: qualified ability impls are initially parsed as ImplDeclaration
+        val parsedImpl = program.items.filterIsInstance<ImplDeclaration>().firstOrNull()
+        assertNotNull(parsedImpl, "Parser should produce ImplDeclaration for cross-module ability impl")
+        assertEquals("Encoder", parsedImpl!!.effect.localName)
+        assertEquals(listOf("codec"), parsedImpl.effect.qualifier?.segments ?: emptyList<String>())
 
-        // Type check
+        // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
         val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
         assertNotNull(typedProgram)
+
+        // After type checking, the impl should have been resolved
+        val resolvedImpl = typedProgram.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
+        assertNotNull(resolvedImpl, "Typechecker should convert cross-module ability impl to ImplAbilityDeclaration")
+        assertEquals("Encoder", resolvedImpl!!.abilityName)
 
         println("SUCCESS: Multi-segment qualified ability impl works!")
     }
@@ -160,7 +169,7 @@ class QualifiedAbilityImplTest {
         // Just test that parsing works for deeply qualified names
         val source = """
             # This is just a parsing test - the module wouldn't exist
-            # impl foo::bar::baz::MyAbility Int where {
+            # impl foo::bar::baz::MyAbility for Int where {
             #     op = {value} -> "test"
             # }
             let x = 1

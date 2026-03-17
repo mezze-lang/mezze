@@ -169,17 +169,19 @@ internal fun desugarBinaryOperator(
 ): Expression {
     val op = OperatorMapping.getBinaryOp(operator)
         ?: throw IllegalArgumentException("Unknown binary operator: $operator")
-    val (abilityName, operationName) = op.ability to op.method
+    val operationName = op.method
 
+    // Desugar to method call syntax: x + y → x.add { r = y }
+    // The left operand is the receiver (bound via `it` in the ability system),
+    // the right operand is the explicit argument.
     val desugared = FunctionCall(
         function = MemberAccess(
-            receiver = Identifier(localName = abilityName, sourceLocation = location),
+            receiver = left,
             member = operationName,
             sourceLocation = location
         ),
         arguments = RecordLiteral(
             entries = listOf(
-                RecordFieldEntry("l", left),
                 RecordFieldEntry("r", right)
             ),
             sourceLocation = location
@@ -196,8 +198,8 @@ internal fun desugarBinaryOperator(
 }
 
 /**
- * Desugar a unary operator into an ability method call.
- * For example: -x becomes NumSub.neg {n = x}, !x becomes LogicalNot.not {val = x}
+ * Desugar a unary operator into a method call.
+ * For example: -x becomes x.neg {}, !x becomes x.not {}
  */
 internal fun desugarUnaryOperator(
     operator: String,
@@ -206,18 +208,18 @@ internal fun desugarUnaryOperator(
 ): Expression {
     val op = OperatorMapping.getUnaryOp(operator)
         ?: throw IllegalArgumentException("Unknown unary operator: $operator")
-    val (abilityName, operationName, fieldName) = Triple(op.ability, op.method, op.fieldName)
+    val operationName = op.method
 
+    // Desugar to method call syntax: -x → x.neg {}, !x → x.not {}
+    // The operand is the receiver (bound via `it`), no additional arguments.
     val desugared = FunctionCall(
         function = MemberAccess(
-            receiver = Identifier(localName = abilityName, sourceLocation = location),
+            receiver = operand,
             member = operationName,
             sourceLocation = location
         ),
         arguments = RecordLiteral(
-            entries = listOf(
-                RecordFieldEntry(fieldName, operand)
-            ),
+            entries = emptyList(),
             sourceLocation = location
         ),
         sourceLocation = location
@@ -239,6 +241,57 @@ internal fun desugarUnaryOperator(
  * Desugar an entire program by desugaring all program items.
  * Preserves comments from the original program.
  */
+/**
+ * Post-processing: convert ImplDeclarations that reference abilities into ImplAbilityDeclarations.
+ *
+ * Since ability impls and effect impls share the `impl X for Y where { ... }` syntax,
+ * the parser tries the effect impl parser first (which produces ImplDeclaration). This pass checks
+ * which ones actually reference a declared ability (not an effect) and converts those to
+ * ImplAbilityDeclaration.
+ *
+ * The heuristic: if the name is NOT a known effect in this program, treat it as an ability impl.
+ */
+internal fun resolveImplDeclarations(program: Program): Program {
+    // Collect ability and effect names declared in this program
+    val abilityNames = program.items.filterIsInstance<AbilityDeclaration>().map { it.name }.toSet()
+    val effectNames = program.items.filterIsInstance<EffectDeclaration>().map { it.name }.toSet()
+
+    if (abilityNames.isEmpty()) return program
+
+    val resolvedItems = program.items.map { item ->
+        if (item is ImplDeclaration && item.effect.localName in abilityNames && item.effect.localName !in effectNames) {
+            // This is actually an ability impl — convert to ImplAbilityDeclaration
+            val targetType = IdentifierTypeAnnotation(item.performerName)
+            val targetTypes = listOf(targetType)
+
+            ImplAbilityDeclaration(
+                target = ImplTarget.Named(item.effect),
+                targetTypes = targetTypes,
+                forallVars = emptyList(),
+                associatedTypeBindings = item.associatedTypeBindings,
+                operations = item.operations.map { op ->
+                    // The performerOperationParser uses placeholder empty records {} when no
+                    // type annotation is given, but ImplAbilityOperation uses null for inference.
+                    val paramType = op.paramType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
+                    val returnType = op.returnType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
+                    ImplAbilityOperation(
+                        name = op.name,
+                        paramType = paramType,
+                        returnType = returnType,
+                        implementation = op.implementation
+                    )
+                },
+                inferredType = null,
+                sourceLocation = item.sourceLocation
+            )
+        } else {
+            item
+        }
+    }
+
+    return program.copy(items = resolvedItems)
+}
+
 internal fun desugarProgram(program: Program): Program {
     return Program(
         items = program.items.map { desugarProgramItem(it) },
@@ -261,7 +314,9 @@ internal fun desugarProgramItem(item: ProgramItem): ProgramItem {
         is TypeDeclaration -> item
         is EffectDeclaration -> item
         is AbilityDeclaration -> item
-        is ImplAbilityDeclaration -> item
+        is ImplAbilityDeclaration -> item.copy(operations = item.operations.map { op ->
+            op.copy(implementation = desugarExpression(op.implementation))
+        })
         is UseDeclaration -> item
         is PubUseDeclaration -> item
     }

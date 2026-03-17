@@ -152,9 +152,10 @@ object ContentHashComputer {
 
                 is ImplAbilityDeclaration -> {
                     // Resolve ability reference
-                    val abilityHash = abilityHashByName[item.ability.localName]
-                    if (abilityHash != null && item.ability.resolvedContentHash == null) {
-                        item.copy(ability = item.ability.withResolvedHash(abilityHash))
+                    val abilityRef = item.abilityRef
+                    val abilityHash = item.abilityName?.let { abilityHashByName[it] }
+                    if (abilityHash != null && abilityRef != null && abilityRef.resolvedContentHash == null) {
+                        item.copy(target = ImplTarget.Named(abilityRef.withResolvedHash(abilityHash)))
                     } else {
                         item
                     }

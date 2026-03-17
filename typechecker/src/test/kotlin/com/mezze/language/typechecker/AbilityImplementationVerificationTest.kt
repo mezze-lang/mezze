@@ -22,18 +22,18 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test ability call with concrete type but no implementation should fail`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            let add = {x, y} -> Show.show {val = ((x + y) > (x - y))}
+            let add = {x, y} -> ((x + y) > (x - y)).show {}
 
             add
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should fail because (x + y) > (x - y) is Bool but there's no impl Show Bool
+        // Should fail because (x + y) > (x - y) is Bool but there's no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program).program
         }
@@ -45,22 +45,22 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test ability call with concrete type and valid implementation should succeed`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Bool where {
-                show: {val: Bool} -> Str = {val} -> if val then "True" else "False"
+            impl Show for Bool where {
+                show = {} -> if it then "True" else "False"
             }
 
-            let add = {x, y} -> Show.show {val = ((x + y) > (x - y))}
+            let add = {x, y} -> ((x + y) > (x - y)).show {}
 
             add
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should succeed because impl Show Bool exists
+        // Should succeed because impl Show for Bool exists
         val typedProgram = typeChecker.typeCheck(program).program
         // Just verify it doesn't throw
         assertTrue(typedProgram.items.isNotEmpty())
@@ -69,11 +69,11 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test ability call with polymorphic type should succeed`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            let showResult = {x} -> Show.show {val = x}
+            let showResult = {x} -> x.show {}
 
             showResult
         """.trimIndent()
@@ -88,18 +88,18 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test ability call with Int without implementation should fail`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            let test = Show.show {val = 42}
+            let test = 42.show {}
 
             test
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should fail because 42 is Int but there's no impl Show Int
+        // Should fail because 42 is Int but there's no impl Show for Int
         val exception = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program).program
         }
@@ -111,18 +111,18 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test ability call with String without implementation should fail`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            let test = Show.show {val = "hello"}
+            let test = "hello".show {}
 
             test
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Should fail because "hello" is String but there's no impl Show Str
+        // Should fail because "hello" is String but there's no impl Show for Str
         val exception = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program).program
         }
@@ -134,22 +134,22 @@ class AbilityImplementationVerificationTest {
     @Test
     fun `test nested ability calls with missing implementation`() {
         val source = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Str where {
-                show: {val: Str} -> Str = {val} -> "\"$(val)\""
+            impl Show for Str where {
+                show = {} -> "\"$(it)\""
             }
 
-            let test = Show.show {val = Show.show {val = True}}
+            let test = True.show {}.show {}
 
             test
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Inner call Show.show {val = true} should fail - no impl Show Bool
+        // Inner call true.show {} should fail - no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program).program
         }

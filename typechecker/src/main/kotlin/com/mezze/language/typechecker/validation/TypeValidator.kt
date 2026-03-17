@@ -357,7 +357,7 @@ class TypeValidator(
      * After constraint solving, we check if concrete types have implementations
      * for the required abilities.
      *
-     * Example: Show.show {val = 42} generates AbilityRequired(typeVar='a, abilityName=Show)
+     * Example: 42.show {} generates AbilityRequired(typeVar='a, abilityName=Show)
      * After substitution, 'a = Int, so we check if Show_Int implementation exists.
      */
     private fun validateAbilityConstraints(

@@ -587,7 +587,7 @@ class FormatterTest {
     @Test
     fun `format ability declaration`() {
         val input = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 eq: {l: 'a, r: 'a} -> Bool
             }
         """.trimIndent()
@@ -604,12 +604,12 @@ class FormatterTest {
     @Test
     fun `format impl ability declaration`() {
         val input = """
-            impl NumAdd Int where {
+            impl NumAdd for Int where {
                 add = {l, r} -> l + r
             }
         """.trimIndent()
         val output = formatter.format(input)
-        assertTrue(output.contains("impl NumAdd Int"))
+        assertTrue(output.contains("impl NumAdd for Int"))
         assertTrue(output.contains("add ="))
     }
 

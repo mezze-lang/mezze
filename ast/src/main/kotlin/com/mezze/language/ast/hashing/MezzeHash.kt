@@ -179,6 +179,27 @@ data class MezzeHash private constructor(
         }
 
         /**
+         * Derive a content hash for an individual ability impl operation.
+         * Hash(implHash || operationName)
+         */
+        fun operationHash(implHash: MezzeHash, operationName: String): MezzeHash {
+            val builder = MezzeHashBuilder()
+            builder.append(implHash.bytes)
+            builder.append(operationName)
+            return builder.build()
+        }
+
+        /**
+         * Derive a content hash for an individual ability impl operation from the impl's string key.
+         */
+        fun operationHash(implHashKey: String, operationName: String): String {
+            val builder = MezzeHashBuilder()
+            builder.append(implHashKey)
+            builder.append(operationName)
+            return builder.build().toString()
+        }
+
+        /**
          * Null hash for cases where hashing is not yet performed.
          * This is a sentinel value, not a valid content hash.
          */

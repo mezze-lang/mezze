@@ -5,13 +5,12 @@ import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
  * Tests for ability method access without calling them.
- * Ability methods like Inspect.to_str, Eq.eq should return proper function types
- * when accessed without being called.
+ * Direct ability method access like Ability.method (e.g., Inspect.to_dbg_str, Eq.eq)
+ * is now BLOCKED by the typechecker — it throws TypeCheckError with "not allowed".
  */
 class AbilityMethodAccessTest {
     private lateinit var parser: MezzeParser
@@ -25,40 +24,33 @@ class AbilityMethodAccessTest {
 
     private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
 
-    private fun getVariableType(code: String, varName: String): String {
-        val program = parseAndTypeCheck(code)
-        val binding = program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }
-        assertNotNull(binding)
-        assertNotNull(binding.inferredType)
-        return prettyPrintType(binding.inferredType!!)
-    }
-
     // ========== INSPECT ABILITY ==========
 
     @Test
-    fun `test Inspect to_str access should return function type`() {
+    fun `test Inspect to_dbg_str access should return function type`() {
         val code = """
-            let x = Inspect.to_str
+            let x = Inspect.to_dbg_str
         """.trimIndent()
 
-        val type = getVariableType(code, "x")
-        assertTrue(type.contains("val") && type.contains("Str"),
-            "Expected function type { val: 'a } -> Str, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     @Test
-    fun `test Inspect to_str can be stored and called later`() {
+    fun `test Inspect to_dbg_str can be stored and called later`() {
         val code = """
-            let stringify = Inspect.to_str
-            let result = stringify {val = 42}
+            let stringify = Inspect.to_dbg_str
+            let result = stringify {}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
-
-        val resultType = getVariableType(code, "result")
-        assertTrue(resultType == "Str", "Expected Str, got: $resultType")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== EQ ABILITY ==========
@@ -69,23 +61,25 @@ class AbilityMethodAccessTest {
             let my_eq = Eq.eq
         """.trimIndent()
 
-        val type = getVariableType(code, "my_eq")
-        assertTrue(type.contains("l") && type.contains("r") && type.contains("Bool"),
-            "Expected function type { l: 'a, r: 'a } -> Bool, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     @Test
     fun `test Eq eq can be stored and called later`() {
         val code = """
             let equals = Eq.eq
-            let result = equals {l = 1, r = 2}
+            let result = equals {r = 2}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
-
-        val resultType = getVariableType(code, "result")
-        assertTrue(resultType == "Bool", "Expected Bool, got: $resultType")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== NUMADD ABILITY ==========
@@ -96,23 +90,25 @@ class AbilityMethodAccessTest {
             let add = NumAdd.add
         """.trimIndent()
 
-        val type = getVariableType(code, "add")
-        assertTrue(type.contains("l") && type.contains("r"),
-            "Expected function type { l: 'a, r: 'a } -> 'a, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     @Test
     fun `test NumAdd add can be stored and called later`() {
         val code = """
             let add = NumAdd.add
-            let result = add {l = 1, r = 2}
+            let result = add {r = 2}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
-
-        val resultType = getVariableType(code, "result")
-        assertTrue(resultType == "Int", "Expected Int, got: $resultType")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== NUMSUB ABILITY ==========
@@ -123,9 +119,11 @@ class AbilityMethodAccessTest {
             let sub = NumSub.sub
         """.trimIndent()
 
-        val type = getVariableType(code, "sub")
-        assertTrue(type.contains("l") && type.contains("r"),
-            "Expected function type { l: 'a, r: 'a } -> 'a, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== NUMMUL ABILITY ==========
@@ -136,9 +134,11 @@ class AbilityMethodAccessTest {
             let mul = NumMul.mul
         """.trimIndent()
 
-        val type = getVariableType(code, "mul")
-        assertTrue(type.contains("l") && type.contains("r"),
-            "Expected function type { l: 'a, r: 'a } -> 'a, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== NUMDIV ABILITY ==========
@@ -149,9 +149,11 @@ class AbilityMethodAccessTest {
             let div = NumDiv.div
         """.trimIndent()
 
-        val type = getVariableType(code, "div")
-        assertTrue(type.contains("l") && type.contains("r"),
-            "Expected function type { l: 'a, r: 'a } -> 'a, got: $type")
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("not allowed") == true,
+            "Expected error containing 'not allowed', got: ${exception.message}")
     }
 
     // ========== ERROR CASES ==========

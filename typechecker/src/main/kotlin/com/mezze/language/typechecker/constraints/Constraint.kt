@@ -129,7 +129,7 @@ sealed interface Constraint {
      * with their concrete bindings from the matching impl.
      *
      * Example: For `Container.get {container = intArray}` where `intArray: [Int]`
-     * and `impl Container [Int] having 'item = Int`:
+     * and `impl Container for [Int] having 'item = Int`:
      * - primaryTypeVar is resolved to [Int]
      * - associatedTypeVars = {'item -> TypeVar}
      * - Once [Int] is known, we look up the impl and unify 'item with Int

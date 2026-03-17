@@ -61,7 +61,7 @@ object ContentHashValidator {
         if (impl.contentHash == null) {
             errors.add(
                 ValidationError.MissingContentHash(
-                    identifierName = "${impl.ability.localName} for ${impl.targetTypes.joinToString()}",
+                    identifierName = "${impl.abilityName ?: "inherent"} for ${impl.targetTypes.joinToString()}",
                     kind = "ability implementation",
                     sourceLocation = impl.sourceLocation
                 )

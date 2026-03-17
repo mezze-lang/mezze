@@ -7,14 +7,14 @@ package com.mezze.language.parser
  * Used by the parser for desugaring, and exposed publicly for typechecker/interpreter use.
  *
  * ## Binary Operators
- * Binary operators desugar to ability method calls with {l, r} arguments:
- * - `x + y` -> `NumAdd.add {l = x, r = y}`
- * - `x == y` -> `Eq.eq {l = x, r = y}`
+ * Binary operators desugar to method-call syntax with the left operand as receiver:
+ * - `x + y` -> `x.add {r = y}`  (resolved to NumAdd ability)
+ * - `x == y` -> `x.eq {r = y}`  (resolved to Eq ability)
  *
  * ## Unary Operators
- * Unary operators desugar to ability method calls:
- * - `-x` -> `NumSub.neg {n = x}`
- * - `!x` -> `LogicalNot.not {val = x}`
+ * Unary operators desugar to method-call syntax:
+ * - `-x` -> `x.neg {}`  (resolved to NumSub ability)
+ * - `!x` -> `x.not {}`  (resolved to LogicalNot ability)
  *
  * ## Special Cases
  * - `//` is NOT an operator - it creates fraction literals (e.g., `1//2` is a Frac)

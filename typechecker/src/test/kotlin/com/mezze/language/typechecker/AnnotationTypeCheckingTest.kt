@@ -964,7 +964,7 @@ class AnnotationTypeCheckingTest {
     fun `test function with single ability constraint annotation`() {
         val program = parseAndTypeCheck(
             """
-            let show: { x: 'a } with Inspect 'a -> Str = {x} -> Inspect.to_str {val = x}
+            let show: { x: 'a } with Inspect 'a -> Str = {x} -> x.to_dbg_str {}
             show {x = 42}
             """.trimIndent()
         )
@@ -977,7 +977,7 @@ class AnnotationTypeCheckingTest {
         val program = parseAndTypeCheck(
             """
             let showSum: { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> Str =
-              {x, y} -> Inspect.to_str {val = x + y}
+              {x, y} -> (x + y).to_dbg_str {}
             showSum {x = 1, y = 2}
             """.trimIndent()
         )
@@ -1013,7 +1013,7 @@ class AnnotationTypeCheckingTest {
         val program = parseAndTypeCheck(
             """
             let fst: { a: 'a, b: 'b } with Inspect 'a -> 'a = {a, b} -> do
-              Inspect.to_str {val = a}
+              a.to_dbg_str {}
               a
             fst {a = 1, b = "hello"}
             """.trimIndent()
@@ -1049,7 +1049,7 @@ class AnnotationTypeCheckingTest {
     fun `test ability annotation with concrete type`() {
         val program = parseAndTypeCheck(
             """
-            let showInt: { x: Int } with Inspect Int -> Str = {x} -> Inspect.to_str {val = x}
+            let showInt: { x: Int } with Inspect Int -> Str = {x} -> x.to_dbg_str {}
             showInt {x = 42}
             """.trimIndent()
         )

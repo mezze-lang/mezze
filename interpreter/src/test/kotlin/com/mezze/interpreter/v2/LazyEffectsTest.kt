@@ -627,7 +627,7 @@ class LazyEffectsTest {
     // ========================================================================
 
     @Test
-    fun `test Inspect to_str on result of lazy effect`() {
+    fun `test Inspect to_dbg_str on result of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
             use std::effects::log::{Log, Console, info}
@@ -640,7 +640,7 @@ class LazyEffectsTest {
             let handle = {} -> perform ExceptionToResult in Ok {val = res}
 
             let main = {} -> perform Console in
-                info {msg = "Result: $(Inspect.to_str {val = handle {}})"}
+                info {msg = "Result: $((handle {}).to_dbg_str {})"}
             main {}
         """.trimIndent()
 
@@ -650,7 +650,7 @@ class LazyEffectsTest {
     }
 
     @Test
-    fun `test Inspect to_str on success path of lazy effect`() {
+    fun `test Inspect to_dbg_str on success path of lazy effect`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
             use std::effects::log::{Log, Console, info}
@@ -663,7 +663,7 @@ class LazyEffectsTest {
             let handle = {} -> perform ExceptionToResult in Ok {val = res}
 
             let main = {} -> perform Console in
-                info {msg = "Result: $(Inspect.to_str {val = handle {}})"}
+                info {msg = "Result: $((handle {}).to_dbg_str {})"}
             main {}
         """.trimIndent()
 
@@ -1021,14 +1021,14 @@ class LazyEffectsTest {
             use std::effects::log::{Console, info}
 
             let get_name = {id} ->
-                if id == 0 then Exception.throw {error = "invalid id"} else "User$(Inspect.to_str {val = id})"
+                if id == 0 then Exception.throw {error = "invalid id"} else "User$(id.to_dbg_str {})"
 
             let name = get_name {id = 42}
 
             let handle = {} -> perform ExceptionToResult in Ok {val = "Hello, $(name)!"}
 
             let main = {} -> perform Console in
-                info {msg = Inspect.to_str {val = handle {}}}
+                info {msg = (handle {}).to_dbg_str {}}
             main {}
         """.trimIndent()
 

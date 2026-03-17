@@ -15,8 +15,8 @@ import kotlin.test.assertTrue
  * Exhaustive tests for METHOD-LEVEL ability constraints.
  *
  * Key Design Decision:
- * - Ability-level constraints are DISALLOWED: `ability Ord 'a with Eq 'a where {...}`
- * - Method-level constraints are REQUIRED: `ability Ord 'a where { compare: {...} with Eq 'a -> ... }`
+ * - Ability-level constraints are DISALLOWED: `ability Ord for 'a with Eq 'a where {...}`
+ * - Method-level constraints are REQUIRED: `ability Ord for 'a where { compare: {...} with Eq 'a -> ... }`
  *
  * This provides a uniform constraint model where all constraints are on functions.
  */
@@ -45,23 +45,23 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `single method-level constraint works`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show = {val} -> "Int"
+            impl Show for Int where {
+                show = {} -> "Int"
             }
 
-            ability Printer 'a where {
-                print: {prefix: 'a, item: 'b} with Show 'b -> Str
+            ability Printer for 'a where {
+                print: {item: 'b} with Show 'b -> Str
             }
 
-            impl Printer Str where {
-                print = {prefix, item} -> "printed"
+            impl Printer for Str where {
+                print = {item} -> "printed"
             }
 
-            let test = {} -> Printer.print {prefix = "Value", item = 42}
+            let test = {} -> "Value".print {item = 42}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -70,10 +70,10 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `multiple method-level constraints on single method parsed correctly`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Show for 'a where { show: {} -> Str }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Formatter 'a where {
+            ability Formatter for 'a where {
                 format: {val: 'b} with Show 'b, Eq 'b -> Str
             }
         """.trimIndent()
@@ -90,13 +90,13 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `different methods with different constraints`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Show for 'a where { show: {} -> Str }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Collection 'c where {
-                length: {col: 'c} -> Int,
-                contains: {col: 'c, item: 'a} with Eq 'a -> Bool,
-                display: {col: 'c, item: 'a} with Show 'a -> Str
+            ability Collection for 'c where {
+                length: {} -> Int,
+                contains: {item: 'a} with Eq 'a -> Bool,
+                display: {item: 'a} with Show 'a -> Str
             }
         """.trimIndent()
 
@@ -121,22 +121,22 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint fails when type does not implement ability`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where { show = {val} -> "Int" }
+            impl Show for Int where { show = {} -> "Int" }
 
-            ability Printer 'a where {
-                print: {prefix: 'a, item: 'b} with Show 'b -> Str
+            ability Printer for 'a where {
+                print: {item: 'b} with Show 'b -> Str
             }
 
-            impl Printer Str where {
-                print = {prefix, item} -> "result"
+            impl Printer for Str where {
+                print = {item} -> "result"
             }
 
             # Float does NOT implement Show
-            let test = {} -> Printer.print {prefix = "hi", item = 3.14}
+            let test = {} -> "hi".print {item = 3.14}
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
@@ -147,19 +147,19 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint fails for record type without impl`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
+            ability Show for 'a where { show: {} -> Str }
 
             type Person = {name: Str, age: Int}
 
-            ability Printer 'a where {
-                print: {prefix: 'a, item: 'b} with Show 'b -> Str
+            ability Printer for 'a where {
+                print: {item: 'b} with Show 'b -> Str
             }
 
-            impl Printer Str where {
-                print = {prefix, item} -> "result"
+            impl Printer for Str where {
+                print = {item} -> "result"
             }
 
-            let test = {} -> Printer.print {prefix = "hi", item = {name = "Alice", age = 30}}
+            let test = {} -> "hi".print {item = {name = "Alice", age = 30}}
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
@@ -173,20 +173,20 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `method introduces its own type variable with constraint`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
-            impl Show Int where { show = {val} -> "Int" }
-            impl Show Bool where { show = {val} -> "Bool" }
+            ability Show for 'a where { show: {} -> Str }
+            impl Show for Int where { show = {} -> "Int" }
+            impl Show for Bool where { show = {} -> "Bool" }
 
-            ability Formatter 'a where {
-                format: {tag: 'a, val: 'b} with Show 'b -> Str
+            ability Formatter for 'a where {
+                format: {val: 'b} with Show 'b -> Str
             }
 
-            impl Formatter Str where {
-                format = {tag, val} -> "formatted"
+            impl Formatter for Str where {
+                format = {val} -> "formatted"
             }
 
-            let test1 = {} -> Formatter.format {tag = "A", val = 42}
-            let test2 = {} -> Formatter.format {tag = "B", val = True}
+            let test1 = {} -> "A".format {val = 42}
+            let test2 = {} -> "B".format {val = True}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -195,19 +195,19 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `multiple method-local type variables`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
-            impl Show Int where { show = {val} -> "Int" }
-            impl Show Str where { show = {val} -> "Str" }
+            ability Show for 'a where { show: {} -> Str }
+            impl Show for Int where { show = {} -> "Int" }
+            impl Show for Str where { show = {} -> "Str" }
 
-            ability Combiner 'a where {
-                combine: {sep: 'a, left: 'b, right: 'c} with Show 'b, Show 'c -> Str
+            ability Combiner for 'a where {
+                combine: {left: 'b, right: 'c} with Show 'b, Show 'c -> Str
             }
 
-            impl Combiner Str where {
-                combine = {sep, left, right} -> "combined"
+            impl Combiner for Str where {
+                combine = {left, right} -> "combined"
             }
 
-            let test = {} -> Combiner.combine {sep = "-", left = 42, right = "hello"}
+            let test = {} -> "-".combine {left = 42, right = "hello"}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -220,18 +220,18 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint on ability type parameter works`() {
         val code = """
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
-            impl Eq Int where { eq = {l, r} -> l == r }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
+            impl Eq for Int where { eq = {r} -> it == r }
 
-            ability Comparable 'a where {
-                compare: {l: 'a, r: 'a} with Eq 'a -> Int
+            ability Comparable for 'a where {
+                compare: {r: 'a} with Eq 'a -> Int
             }
 
-            impl Comparable Int where {
-                compare = {l, r} -> if Eq.eq {l = l, r = r} then 0 else 1
+            impl Comparable for Int where {
+                compare = {r} -> if it.eq {r = r} then 0 else 1
             }
 
-            let test = {} -> Comparable.compare {l = 1, r = 2}
+            let test = {} -> 1.compare {r = 2}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -240,18 +240,18 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint fails when ability type param doesnt satisfy it`() {
         val code = """
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
-            impl Eq Int where { eq = {l, r} -> l == r }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
+            impl Eq for Int where { eq = {r} -> it == r }
 
-            ability Comparable 'a where {
-                compare: {l: 'a, r: 'a} with Eq 'a -> Int
+            ability Comparable for 'a where {
+                compare: {r: 'a} with Eq 'a -> Int
             }
 
-            impl Comparable Float where {
-                compare = {l, r} -> 0
+            impl Comparable for Float where {
+                compare = {r} -> 0
             }
 
-            let test = {} -> Comparable.compare {l = 1.0, r = 2.0}
+            let test = {} -> 1.0.compare {r = 2.0}
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
@@ -265,10 +265,10 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `ability-level constraint is rejected`() {
         val code = """
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Ord 'a with Eq 'a where {
-                compare: {l: 'a, r: 'a} -> Int
+            ability Ord for 'a with Eq 'a where {
+                compare: {r: 'a} -> Int
             }
         """.trimIndent()
 
@@ -280,11 +280,11 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `multiple ability-level constraints are rejected`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Show for 'a where { show: {} -> Str }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Serializable 'a with Show 'a, Eq 'a where {
-                serialize: {val: 'a} -> Str
+            ability Serializable for 'a with Show 'a, Eq 'a where {
+                serialize: {} -> Str
             }
         """.trimIndent()
 
@@ -295,10 +295,10 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `error message suggests method-level alternative`() {
         val code = """
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Ord 'a with Eq 'a where {
-                compare: {l: 'a, r: 'a} -> Int
+            ability Ord for 'a with Eq 'a where {
+                compare: {r: 'a} -> Int
             }
         """.trimIndent()
 
@@ -313,12 +313,12 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `associated type with method-level constraint`() {
         val code = """
-            ability Eq 'a where { eq: {l: 'a, r: 'a} -> Bool }
+            ability Eq for 'a where { eq: {r: 'a} -> Bool }
 
-            ability Container 'c having 'item where {
+            ability Container for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {container: 'c, elem: 'item} -> 'c,
-                contains: {container: 'c, elem: 'item} with Eq 'item -> Bool
+                add: {elem: 'item} -> 'c,
+                contains: {elem: 'item} with Eq 'item -> Bool
             }
         """.trimIndent()
 
@@ -338,23 +338,23 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `chained ability methods with constraints`() {
         val code = """
-            ability Inner 'a where {
-                inner: {val: 'a} -> Int
+            ability Inner for 'a where {
+                inner: {} -> Int
             }
 
-            impl Inner Int where {
-                inner = {val} -> val
+            impl Inner for Int where {
+                inner = {} -> it
             }
 
-            ability Outer 'a where {
-                outer: {val: 'a} with Inner 'a -> Int
+            ability Outer for 'a where {
+                outer: {} with Inner 'a -> Int
             }
 
-            impl Outer Int where {
-                outer = {val} -> Inner.inner {val = val} + 10
+            impl Outer for Int where {
+                outer = {} -> it.inner {} + 10
             }
 
-            let test = {} -> Outer.outer {val = 5}
+            let test = {} -> 5.outer {}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -367,15 +367,15 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `empty constraint list is valid`() {
         val code = """
-            ability Simple 'a where {
-                op: {val: 'a} -> Str
+            ability Simple for 'a where {
+                op: {} -> Str
             }
 
-            impl Simple Int where {
-                op = {val} -> "simple"
+            impl Simple for Int where {
+                op = {} -> "simple"
             }
 
-            let test = {} -> Simple.op {val = 42}
+            let test = {} -> 42.op {}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }
@@ -384,9 +384,9 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `ability without any impls is valid`() {
         val code = """
-            ability Show 'a where { show: {val: 'a} -> Str }
+            ability Show for 'a where { show: {} -> Str }
 
-            ability Printer 'a where {
+            ability Printer for 'a where {
                 print: {item: 'b} with Show 'b -> Str
             }
         """.trimIndent()
@@ -397,12 +397,12 @@ class MethodLevelAbilityConstraintTest {
     @Test
     fun `constraint type arg is correctly parsed`() {
         val code = """
-            ability Container 'c 'elem where {
-                contains: {c: 'c, elem: 'elem} -> Bool
+            ability Container 'elem for 'c where {
+                contains: {elem: 'elem} -> Bool
             }
 
-            ability Searchable 'a where {
-                search: {data: 'c, item: 'b} with Container 'c 'b -> Bool
+            ability Searchable for 'a where {
+                search: {data: 'c, item: 'b} with Container 'b 'c -> Bool
             }
         """.trimIndent()
 

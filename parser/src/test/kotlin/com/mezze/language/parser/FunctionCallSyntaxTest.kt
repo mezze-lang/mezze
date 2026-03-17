@@ -96,8 +96,8 @@ class FunctionCallSyntaxTest {
     fun `test member access followed by identifier on new line is valid`() {
         // Complex expression followed by identifier on new line should not error
         val code = """
-            ability Show 'a where {
-              show: {val: 'a} -> String
+            ability Show for 'a where {
+              show: {} -> String
             }
 
             let x = Show.show
@@ -610,7 +610,7 @@ class FunctionCallSyntaxTest {
     @Test
     fun `test ability definition with function call syntax in body`() {
         val code = """
-            ability Num 'a where {
+            ability Num for 'a where {
                 add: {x: 'a, y: 'a} -> 'a
             }
         """.trimIndent()
@@ -759,8 +759,8 @@ class FunctionCallSyntaxTest {
     @Test
     fun `test member access function call with string literal should fail`() {
         val code = """
-            ability Parse 'a where {
-              decode: {val: String} -> 'a
+            ability Parse for 'a where {
+              decode: {} -> 'a
             }
 
             let result = Parse.decode "1233"

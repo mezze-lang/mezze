@@ -356,7 +356,7 @@ object ASTNormalizer {
      * Normalize an ImplAbilityDeclaration for hashing.
      */
     fun normalizeImplAbilityDeclaration(decl: ImplAbilityDeclaration): ImplAbilityDeclaration = ImplAbilityDeclaration(
-        ability = decl.ability,  // QualifiedRef doesn't need normalization - it's structural
+        target = decl.target,  // ImplTarget doesn't need normalization - it's structural
         targetTypes = decl.targetTypes,
         forallVars = decl.forallVars,
         associatedTypeBindings = decl.associatedTypeBindings,

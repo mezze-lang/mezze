@@ -42,9 +42,22 @@ public abstract class DirectEqualNode extends MezzeNode {
         return left.equals(right);
     }
 
-    @Specialization
+    @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
+    protected static boolean eqFractions(MezzeRecord left, MezzeRecord right) {
+        return FractionHelper.equalFractions(left, right);
+    }
+
+    @Specialization(replaces = "eqFractions")
     protected static boolean eqRecords(MezzeRecord left, MezzeRecord right) {
+        // Check for fractions even in generic path
+        if (FractionHelper.isFraction(left) && FractionHelper.isFraction(right)) {
+            return FractionHelper.equalFractions(left, right);
+        }
         return left.equals(right);
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     @Specialization

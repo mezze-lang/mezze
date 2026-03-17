@@ -53,20 +53,20 @@ effect IO where {
 # Ability Declarations
 # ==========================================
 
-ability Eq 'a where {
-    eq: {left: 'a, right: 'a} -> Bool
+ability Eq for 'a where {
+    eq: {r: 'a} -> Bool
 }
 
-ability Ord 'a with Eq 'a where {
-    compare: {left: 'a, right: 'a} -> Int
+ability Ord for 'a with Eq 'a where {
+    compare: {r: 'a} -> Int
 }
 
-ability Show 'a where {
-    show: {val: 'a} -> String
+ability Show for 'a where {
+    show: {} -> String
 }
 
-ability Encoder 'a having 'output where {
-    encode: {val: 'a} -> 'output
+ability Encoder for 'a having 'output where {
+    encode: {} -> 'output
 }
 
 # ==========================================
@@ -87,16 +87,16 @@ impl State for Counter having 'state = Int where {
 # Ability Implementations
 # ==========================================
 
-impl Eq Int where {
-    eq = {left, right} -> left == right
+impl Eq for Int where {
+    eq = {r} -> it == r
 }
 
-impl Show Int where {
-    show = {val} -> "Int"
+impl Show for Int where {
+    show = {} -> "Int"
 }
 
-impl Show String where {
-    show = {val} -> val
+impl Show for String where {
+    show = {} -> it
 }
 
 # ==========================================
@@ -329,8 +329,8 @@ let processUser: {user: {name: String, age: Int, ...}} -> String =
 # Ability Method Calls
 # ==========================================
 
-let showInt = Show.show {val = 42}
-let eqResult = Eq.eq {left = 1, right = 2}
+let showInt = 42.show {}
+let eqResult = 1.eq {r = 2}
 
 # ==========================================
 # Comments

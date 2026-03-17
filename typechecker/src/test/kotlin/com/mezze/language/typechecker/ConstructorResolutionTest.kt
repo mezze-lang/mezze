@@ -127,56 +127,63 @@ class ConstructorResolutionTest {
     // ============================================================================
 
     @Test
-    fun `test builtin ability Inspect is resolved as AbilityReference`() {
+    fun `test builtin ability Inspect method call typechecks correctly`() {
+        // With method-call syntax, ability methods are called on values directly.
+        // The typechecker resolves the method as an ability method and infers the result type.
         val typedProgram = typeCheckAndGetProgram("""
-            let test = Inspect.to_str {val = 42}
+            let test = 42.to_dbg_str {}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "Inspect")
-
-        assertNotNull(resolution, "Should find Inspect in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "Inspect should be resolved as AbilityReference, got: $resolution")
-        assertEquals("Inspect", (resolution as ConstructorResolution.AbilityReference).abilityName)
+        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "test" }
+        assertNotNull(testBinding, "Should find test binding")
+        assertNotNull(testBinding!!.inferredType, "test should have an inferred type")
+        assertTrue(testBinding.inferredType is MezzeType.StringType,
+            "to_dbg_str should return Str, got: ${testBinding.inferredType}")
     }
 
     @Test
-    fun `test builtin ability Eq is resolved as AbilityReference`() {
+    fun `test builtin ability Eq method call typechecks correctly`() {
         val typedProgram = typeCheckAndGetProgram("""
-            let test = Eq.eq {l = 1, r = 2}
+            let test = 1.eq {r = 2}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "Eq")
-
-        assertNotNull(resolution, "Should find Eq in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "Eq should be resolved as AbilityReference, got: $resolution")
+        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "test" }
+        assertNotNull(testBinding, "Should find test binding")
+        assertNotNull(testBinding!!.inferredType, "test should have an inferred type")
+        assertTrue(testBinding.inferredType is MezzeType.BoolType ||
+            (testBinding.inferredType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(testBinding.inferredType!!)),
+            "eq should return Bool, got: ${testBinding.inferredType}")
     }
 
     @Test
-    fun `test builtin ability Ord is resolved as AbilityReference`() {
+    fun `test builtin ability Ord method call typechecks correctly`() {
         val typedProgram = typeCheckAndGetProgram("""
-            let test = Ord.lt {l = 1, r = 2}
+            let test = 1.lt {r = 2}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "Ord")
-
-        assertNotNull(resolution, "Should find Ord in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "Ord should be resolved as AbilityReference, got: $resolution")
+        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "test" }
+        assertNotNull(testBinding, "Should find test binding")
+        assertNotNull(testBinding!!.inferredType, "test should have an inferred type")
+        assertTrue(testBinding.inferredType is MezzeType.BoolType ||
+            (testBinding.inferredType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(testBinding.inferredType!!)),
+            "lt should return Bool, got: ${testBinding.inferredType}")
     }
 
     @Test
-    fun `test builtin ability NumAdd is resolved as AbilityReference`() {
+    fun `test builtin ability NumAdd method call typechecks correctly`() {
         val typedProgram = typeCheckAndGetProgram("""
-            let test = NumAdd.add {l = 1, r = 2}
+            let test = 1.add {r = 2}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "NumAdd")
-
-        assertNotNull(resolution, "Should find NumAdd in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "NumAdd should be resolved as AbilityReference, got: $resolution")
+        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "test" }
+        assertNotNull(testBinding, "Should find test binding")
+        assertNotNull(testBinding!!.inferredType, "test should have an inferred type")
+        assertTrue(testBinding.inferredType is MezzeType.IntType,
+            "add on Int should return Int, got: ${testBinding.inferredType}")
     }
 
     // ============================================================================
@@ -185,23 +192,21 @@ class ConstructorResolutionTest {
 
     @Test
     fun `test user-defined ability declaration creates ability`() {
-        // Note: User-defined abilities need to be accessed via member access
-        // The resolution is set when the ability name appears in a MemberAccess receiver
+        // Verify that declaring an ability creates a recognized AbilityDeclaration in the program.
+        // With method-call syntax (value.show {}), the ability name doesn't appear as a
+        // VariantConstruction in the AST. Instead, verify the AbilityDeclaration is preserved.
         val typedProgram = typeCheckAndGetProgram("""
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
-
-            # Lambda that uses the ability (deferred resolution)
-            let show_something = {x} -> Show.show {val = x}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "Show")
-
-        assertNotNull(resolution, "Should find Show in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "Show should be resolved as AbilityReference, got: $resolution")
-        assertEquals("Show", (resolution as ConstructorResolution.AbilityReference).abilityName)
+        val abilityDecl = typedProgram.items.filterIsInstance<AbilityDeclaration>()
+            .find { it.name == "Show" }
+        assertNotNull(abilityDecl, "Should find Show ability declaration in typed program")
+        assertEquals("Show", abilityDecl!!.name)
+        assertTrue(abilityDecl.operations.any { it.name == "show" },
+            "Show ability should have 'show' operation")
     }
 
     // ============================================================================
@@ -314,20 +319,25 @@ class ConstructorResolutionTest {
     // ============================================================================
 
     @Test
-    fun `test ability and variant in same expression are resolved correctly`() {
+    fun `test ability method call and variant in same expression are resolved correctly`() {
         val typedProgram = typeCheckAndGetProgram("""
             type Option 'a = | None, Some { val: 'a } |
 
-            let test = Inspect.to_str {val = Some { val = 42 }}
+            let x = Some { val = 42 }
+            let test = 42.to_dbg_str {}
         """.trimIndent())
 
-        val inspectResolution = findResolution(typedProgram, "Inspect")
+        // Variant constructor Some should still be resolved
         val someResolution = findResolution(typedProgram, "Some")
-
-        assertTrue(inspectResolution is ConstructorResolution.AbilityReference,
-            "Inspect should be AbilityReference, got: $inspectResolution")
         assertTrue(someResolution is ConstructorResolution.VariantConstructor,
             "Some should be VariantConstructor, got: $someResolution")
+
+        // Ability method call should typecheck correctly
+        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "test" }
+        assertNotNull(testBinding, "Should find test binding")
+        assertTrue(testBinding!!.inferredType is MezzeType.StringType,
+            "to_dbg_str should return Str, got: ${testBinding.inferredType}")
     }
 
     @Test
@@ -384,20 +394,37 @@ class ConstructorResolutionTest {
     }
 
     @Test
-    fun `test multiple abilities in same program are all resolved correctly`() {
+    fun `test multiple ability method calls in same program all typecheck correctly`() {
         val typedProgram = typeCheckAndGetProgram("""
-            let test1 = Inspect.to_str {val = 42}
-            let test2 = Eq.eq {l = 1, r = 2}
-            let test3 = Ord.lt {l = 1, r = 2}
-            let test4 = NumAdd.add {l = 1, r = 2}
+            let test1 = 42.to_dbg_str {}
+            let test2 = 1.eq {r = 2}
+            let test3 = 1.lt {r = 2}
+            let test4 = 1.add {r = 2}
         """.trimIndent())
 
-        listOf("Inspect", "Eq", "Ord", "NumAdd").forEach { abilityName ->
-            val resolution = findResolution(typedProgram, abilityName)
-            assertNotNull(resolution, "Should find $abilityName in typed program")
-            assertTrue(resolution is ConstructorResolution.AbilityReference,
-                "$abilityName should be AbilityReference, got: $resolution")
-        }
+        val bindings = typedProgram.items.filterIsInstance<LetBinding>()
+
+        val test1 = bindings.find { (it.pattern as? VariablePattern)?.name == "test1" }
+        assertNotNull(test1, "Should find test1 binding")
+        assertTrue(test1!!.inferredType is MezzeType.StringType,
+            "to_dbg_str should return Str, got: ${test1.inferredType}")
+
+        val test2 = bindings.find { (it.pattern as? VariablePattern)?.name == "test2" }
+        assertNotNull(test2, "Should find test2 binding")
+        assertTrue(test2!!.inferredType is MezzeType.BoolType ||
+            (test2.inferredType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(test2.inferredType!!)),
+            "eq should return Bool, got: ${test2.inferredType}")
+
+        val test3 = bindings.find { (it.pattern as? VariablePattern)?.name == "test3" }
+        assertNotNull(test3, "Should find test3 binding")
+        assertTrue(test3!!.inferredType is MezzeType.BoolType ||
+            (test3.inferredType is MezzeType.VariantType && BuiltinTypes.isBoolVariant(test3.inferredType!!)),
+            "lt should return Bool, got: ${test3.inferredType}")
+
+        val test4 = bindings.find { (it.pattern as? VariablePattern)?.name == "test4" }
+        assertNotNull(test4, "Should find test4 binding")
+        assertTrue(test4!!.inferredType is MezzeType.IntType,
+            "add on Int should return Int, got: ${test4.inferredType}")
     }
 
     @Test
@@ -416,19 +443,19 @@ class ConstructorResolutionTest {
     }
 
     @Test
-    fun `test ability method access still works when variant with same name exists`() {
-        // The ability method access should still work
+    fun `test ability method call works when variant with same name exists`() {
+        // Ability method call via method-call syntax should still work
         val typedProgram = typeCheckAndGetProgram("""
             type MyType = | SomeVariant { data: Int } |
 
-            # This is an ability method access (not a variant)
-            let ability_call = Inspect.to_str {val = 1}
+            # This is an ability method call on a value
+            let ability_call = 42.to_dbg_str {}
         """.trimIndent())
 
-        val resolution = findResolution(typedProgram, "Inspect")
-
-        assertNotNull(resolution, "Should find Inspect in typed program")
-        assertTrue(resolution is ConstructorResolution.AbilityReference,
-            "Inspect.to_str should resolve Inspect as AbilityReference, got: $resolution")
+        val binding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { (it.pattern as? VariablePattern)?.name == "ability_call" }
+        assertNotNull(binding, "Should find ability_call binding")
+        assertTrue(binding!!.inferredType is MezzeType.StringType,
+            "to_dbg_str should return Str, got: ${binding.inferredType}")
     }
 }

@@ -39,7 +39,7 @@ class AbilityVsVariantResolutionTest {
         val source = """
             let test_val = 42
             let main = {} -> do
-                let str = Inspect.to_str {val = test_val}
+                let str = test_val.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -58,7 +58,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = tree}
+                let str = tree.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -73,7 +73,7 @@ class AbilityVsVariantResolutionTest {
             let nested = Just { val = Just { val = 42 } }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = nested}
+                let str = nested.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -86,7 +86,7 @@ class AbilityVsVariantResolutionTest {
             let person = { name = "Alice", age = 30 }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = person}
+                let str = person.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -108,10 +108,10 @@ class AbilityVsVariantResolutionTest {
 
             let main = {} -> do
                 # Variant construction should work
-                let str1 = Inspect.to_str {val = success}
-                let str2 = Inspect.to_str {val = failure}
+                let str1 = success.to_dbg_str {}
+                let str2 = failure.to_dbg_str {}
                 # Ability member access should work
-                let str3 = Inspect.to_str {val = 100}
+                let str3 = 100.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -127,8 +127,8 @@ class AbilityVsVariantResolutionTest {
             let something = Some { val = 42 }
 
             let main = {} -> do
-                let str1 = Inspect.to_str {val = nothing}
-                let str2 = Inspect.to_str {val = something}
+                let str1 = nothing.to_dbg_str {}
+                let str2 = something.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -144,7 +144,7 @@ class AbilityVsVariantResolutionTest {
         val source = """
             # NO perform, NO handler - ability should still work
             let main = {} -> do
-                let str = Inspect.to_str {val = 42}
+                let str = 42.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -180,7 +180,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> perform Console in do
-                println {msg = "Tree: $(Inspect.to_str {val = tree})"}
+                println {msg = "Tree: $(tree.to_dbg_str {})"}
                 {}
         """.trimIndent()
 
@@ -203,7 +203,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = small_tree}
+                let str = small_tree.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -213,7 +213,7 @@ class AbilityVsVariantResolutionTest {
     @Test
     fun `test ability in function argument`() {
         val source = """
-            let show = {val} -> Inspect.to_str {val = val}
+            let show = {val} -> val.to_dbg_str {}
 
             let main = {} -> do
                 let result = show {val = [1, 2, 3]}
@@ -229,7 +229,7 @@ class AbilityVsVariantResolutionTest {
             let numbers = [1, 2, 3, 4, 5]
             let to_strs = {xs} -> match xs is
                 [] -> []
-                [x, ...rest] -> [...to_strs {xs = rest}, Inspect.to_str {val = x}]
+                [x, ...rest] -> [...to_strs {xs = rest}, x.to_dbg_str {}]
 
             let main = {} -> do
                 let strings = to_strs {xs = numbers}
@@ -259,7 +259,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = tree}
+                let str = tree.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -274,7 +274,7 @@ class AbilityVsVariantResolutionTest {
             let color = Red
 
             let main = {} -> do
-                let str = Inspect.to_str {val = color}
+                let str = color.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -298,7 +298,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = list}
+                let str = list.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -315,7 +315,7 @@ class AbilityVsVariantResolutionTest {
             let arr = [1, 2, 3, 4, 5]
 
             let main = {} -> do
-                let str = Inspect.to_str {val = arr}
+                let str = arr.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -328,7 +328,7 @@ class AbilityVsVariantResolutionTest {
             let str = "Hello, World!"
 
             let main = {} -> do
-                let result = Inspect.to_str {val = str}
+                let result = str.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -339,8 +339,8 @@ class AbilityVsVariantResolutionTest {
     fun `test ability on booleans`() {
         val source = """
             let main = {} -> do
-                let str1 = Inspect.to_str {val = True}
-                let str2 = Inspect.to_str {val = False}
+                let str1 = True.to_dbg_str {}
+                let str2 = False.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -353,7 +353,7 @@ class AbilityVsVariantResolutionTest {
             let unit = {}
 
             let main = {} -> do
-                let str = Inspect.to_str {val = unit}
+                let str = unit.to_dbg_str {}
                 {}
         """.trimIndent()
 
@@ -418,7 +418,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> do
-                let str = Inspect.to_str {val = deep}
+                let str = deep.to_dbg_str {}
                 {}
         """.trimIndent()
 

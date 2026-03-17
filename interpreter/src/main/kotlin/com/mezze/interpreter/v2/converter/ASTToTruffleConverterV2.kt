@@ -3,6 +3,8 @@ package com.mezze.interpreter.v2.converter
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
 import com.mezze.language.ast.*
+import com.mezze.language.ast.hashing.MezzeHash
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.interpreter.v2.nodes.MezzeNode
 import com.mezze.interpreter.v2.nodes.control.BlockNode
 import com.mezze.interpreter.v2.nodes.control.IfNode
@@ -40,7 +42,7 @@ import com.mezze.interpreter.v2.nodes.builtin.BuiltinUnaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.v2.nodes.inline.*
 import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as OptimizedAbilityCallNode
-import com.mezze.interpreter.v2.nodes.ability.DictionaryAbilityCallNode
+import com.mezze.interpreter.v2.nodes.ability.AbilityForNode
 import com.mezze.interpreter.v2.nodes.ability.DirectDictionaryCallNode
 import com.mezze.interpreter.v2.nodes.function.RuntimeAbilityCallNode
 import com.mezze.interpreter.v2.nodes.function.DictionaryPassingInvokeNode
@@ -103,6 +105,9 @@ class ASTToTruffleConverterV2(
     }
 
     private val contentHashToSlot = mutableMapOf<String, Int>()
+
+    // Maps ability name -> list of operation names (populated from AbilityDeclaration items)
+    private val abilityOperationNames = mutableMapOf<String, List<String>>()
 
     /**
      * Tracks scoped effect info for impls by content hash.
@@ -184,7 +189,10 @@ class ASTToTruffleConverterV2(
             is TypeDeclaration -> UnitLiteralNode()
             is EffectDeclaration -> UnitLiteralNode()
             is ImplDeclaration -> convertImplDeclaration(item)
-            is AbilityDeclaration -> UnitLiteralNode()
+            is AbilityDeclaration -> {
+                abilityOperationNames[item.name] = item.operations.map { it.name }
+                UnitLiteralNode()
+            }
             is ImplAbilityDeclaration -> convertImplAbilityDeclaration(item)
             is UseDeclaration -> convertUseDeclaration(item)
             is PubUseDeclaration -> convertPubUseDeclaration(item)
@@ -519,18 +527,28 @@ class ASTToTruffleConverterV2(
         val fieldNames = mutableListOf<String>()
         val fieldValueNodes = mutableListOf<MezzeNode>()
 
+        val contentHash = impl.contentHash
+            ?: throw RuntimeException("Content hash required for ability implementation: ${impl.abilityName ?: "inherent"}")
+
         for (op in impl.operations) {
             fieldNames.add(op.name)
-            fieldValueNodes.add(convertExpression(op.implementation))
+            // Convert the operation lambda with `it` injected as an implicit parameter.
+            // The typechecker allows impl bodies to reference `it` (the receiver), but
+            // the lambda's declared params don't include it. We inject it at the Truffle level
+            // by converting a modified lambda that has `it` prepended to its parameter list.
+            fieldValueNodes.add(convertImplOperationLambda(op))
+
+            // Also register a slot for each individual operation so ability calls
+            // can be desugared into direct function calls without runtime record lookup.
+            val opKey = MezzeHash.operationHash(contentHash, op.name)
+            val opSlot = getOrCreateSlot(opKey)
+            contentHashToSlot[opKey] = opSlot
         }
 
         val recordNode = RecordLiteralNode.allObjects(
             fieldNames.toTypedArray(),
             fieldValueNodes.toTypedArray()
         )
-
-        val contentHash = impl.contentHash
-            ?: throw RuntimeException("Content hash required for ability implementation: ${impl.ability.localName}")
 
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
@@ -539,8 +557,49 @@ class ASTToTruffleConverterV2(
             recordChild = recordNode,
             hashSlot = hashSlot,
             contentHash = contentHash,
-            abilityName = impl.ability.localName
+            abilityName = impl.abilityName ?: "inherent",
+            operationNames = fieldNames.toTypedArray()
         )
+    }
+
+    /**
+     * Convert an impl operation's lambda, injecting `it` as an implicit first parameter.
+     * This allows impl bodies like `{} -> int::to_str {n = it}` to work at runtime —
+     * `it` is bound by the caller when dispatching the ability method.
+     */
+    private fun convertImplOperationLambda(op: ImplAbilityOperation): MezzeNode {
+        val lambda = op.implementation as? LambdaExpression
+            ?: return convertExpression(op.implementation)
+
+        // Add "it" to the parameter list so the lambda can reference it
+        val modifiedLambda = when (val params = lambda.parameters) {
+            is UntypedParameters -> {
+                // Prepend "it" only if it's not already a parameter
+                if (Keywords.IT !in params.names) {
+                    lambda.copy(parameters = UntypedParameters(
+                        names = listOf(Keywords.IT) + params.names,
+                        isOpen = params.isOpen
+                    ))
+                } else {
+                    lambda
+                }
+            }
+            is TypedParameters -> {
+                // For typed params, check if "it" is already declared
+                if (params.recordType.entries.none { it.name == Keywords.IT }) {
+                    // Add "it" as an untyped entry — we switch to untyped params
+                    // since the "it" type is the ability's receiver type (already type-checked)
+                    val existingNames = params.recordType.entries.map { it.name }
+                    lambda.copy(parameters = UntypedParameters(
+                        names = listOf(Keywords.IT) + existingNames
+                    ))
+                } else {
+                    lambda
+                }
+            }
+        }
+
+        return convertExpression(modifiedLambda)
     }
 
     /**
@@ -1231,53 +1290,86 @@ class ASTToTruffleConverterV2(
                 else -> null
             }
 
-            if (receiverName != null) {
-                val operationName = memberAccess.member
+            val operationName = memberAccess.member
 
+            // NEW: Handle method-call syntax from operator desugaring.
+            // Parser desugars `x + y` → `x.add { r = y }` where receiver is the left operand.
+            // Check if the method name maps to a built-in ability operation and create
+            // Direct*Node that takes operands directly (bypasses record allocation).
+            val methodCallBuiltinNode = tryCreateMethodCallBuiltinOp(operationName, memberAccess, funcCall)
+            if (methodCallBuiltinNode != null) {
+                return methodCallBuiltinNode
+            }
+
+            // CRITICAL: Check resolvedAbilities FIRST before any other dispatch.
+            // The typechecker resolves ability method calls and populates resolvedAbilities.
+            // This handles both Ability.method {} and value.method {} syntax.
+            if (funcCall.resolvedAbilities.isNotEmpty()) {
+                return convertResolvedAbilityCall(funcCall)
+            }
+
+            if (receiverName != null) {
                 // Check if this is a known builtin ability+operation combination
-                // Only use builtin path if we have a matching builtin operation
+                // (legacy path: AbilityName.method { args })
                 val builtinNode = tryCreateBuiltinOp(receiverName, operationName, funcCall)
                 if (builtinNode != null) {
                     return builtinNode
                 }
 
-                // CRITICAL: Check resolvedAbilities FIRST before falling back to effect dispatch
-                // The type checker resolves ability method calls and populates resolvedAbilities
-                // If present, this is an ability call, not an effect call
-                if (funcCall.resolvedAbilities.isNotEmpty()) {
-                    return convertResolvedAbilityCall(funcCall)
-                }
-
                 // Check if this is an ability call inside a polymorphic function
                 // (i.e., we're inside a function with ability constraints like "with Encoder 'a")
                 // This handles BOTH builtin codec abilities AND user-defined abilities.
-                val constraintIndex = constraintAbilityNames.indexOf(receiverName)
+                // Check two patterns:
+                //   1. Ability.method {} — receiver IS the ability name
+                //   2. value.method {} — receiver is an expression, look up method → ability mapping
+                var constraintIndex = constraintAbilityNames.indexOf(receiverName)
+                var isMethodCallOnValue = false
+                if (constraintIndex < 0) {
+                    // Pattern 2: value.method {} — find which constraint ability owns this operation
+                    constraintIndex = findConstraintByOperationName(operationName)
+                    if (constraintIndex >= 0) isMethodCallOnValue = true
+                }
                 if (constraintIndex >= 0) {
                     // We're inside a polymorphic function with this ability constraint.
                     // Use dictionary passing - the caller will provide the operation function.
                     val operationSlot = getOrCreateAbilityOperationSlot(constraintIndex, operationName)
-                    val argsNode = convertExpression(funcCall.arguments)
-                    // DirectDictionaryCallNode reads the operation function from the frame slot
-                    return DirectDictionaryCallNode.create(operationSlot, receiverName, operationName, argsNode)
+                    val abilityName = constraintAbilityNames[constraintIndex]
+                    if (isMethodCallOnValue) {
+                        // value.method {} — inject `it = receiver` into args
+                        val receiverNode = convertExpression(receiver)
+                        val explicitArgs = funcCall.arguments
+                        val fieldNames = mutableListOf(Keywords.IT)
+                        val fieldNodes = mutableListOf(receiverNode)
+                        if (explicitArgs is RecordLiteral) {
+                            for (entry in explicitArgs.entries.filterIsInstance<RecordFieldEntry>()) {
+                                fieldNames.add(entry.name)
+                                fieldNodes.add(convertExpression(entry.value!!))
+                            }
+                        }
+                        val argsNode = RecordLiteralNode.allObjects(
+                            fieldNames.toTypedArray(),
+                            fieldNodes.toTypedArray()
+                        )
+                        return DirectDictionaryCallNode.create(operationSlot, abilityName, operationName, argsNode)
+                    } else {
+                        val argsNode = convertExpression(funcCall.arguments)
+                        return DirectDictionaryCallNode.create(operationSlot, abilityName, operationName, argsNode)
+                    }
                 }
 
                 // Check if this is a codec ability call outside a polymorphic function
                 // These use runtime lookup based on argument types
-                val codecAbilities = setOf(
-                    "Encode", "EncodeRepr", "Decode", "DecodeRepr",
-                    "Format", "DecodeFormat",
-                    "StreamFormat", "StreamDecodeFormat"
-                )
-                if (receiverName in codecAbilities) {
+                if (receiverName in BuiltinAbilities.CODEC_ABILITIES) {
                     // Not inside a polymorphic function - fall back to runtime lookup
                     val argsNode = convertExpression(funcCall.arguments)
                     return RuntimeAbilityCallNode.create(receiverName, operationName, argsNode)
                 }
 
-                // If the receiver is a VariantConstruction (like Log, FileSystem), it's an effect call
-                // Even if the effect name is in variableInfo (from use declarations), we need dynamic dispatch
-                // because the actual handler is determined by the enclosing perform block
-                val isEffectCall = receiver is VariantConstruction || !variableInfo.containsKey(receiverName)
+                // If the receiver is an effect reference (like Log, FileSystem), it's an effect call.
+                // VariantConstructions that are NOT effect references (True, False, None, Some, etc.)
+                // should not be treated as effects — they may be ability method calls with resolvedAbilities.
+                val isEffectCall = (receiver is VariantConstruction && (receiver as VariantConstruction).resolution is ConstructorResolution.EffectReference) ||
+                    (receiver !is VariantConstruction && !variableInfo.containsKey(receiverName))
                 if (isEffectCall) {
                     val argsNode = convertExpression(funcCall.arguments)
                     // Get effect content hash from the receiver's resolution (if available)
@@ -1382,10 +1474,77 @@ class ASTToTruffleConverterV2(
                 val implementationHash = resolvedAbility.implementationHash
                     ?: throw RuntimeException("Content hash required for ability call: ${resolvedAbility.abilityName}")
 
-                val argsNode = convertExpression(funcCall.arguments)
-                val localSlot = contentHashToSlot[implementationHash]
+                // Handle Ability.for { it = value } — returns a record of all bound methods
+                if (operationName == Keywords.FOR) {
+                    val abilityName = resolvedAbility.abilityName
+                    val opNames = abilityOperationNames[abilityName]
+                        ?: throw RuntimeException("Unknown ability operations for: $abilityName")
 
-                // Use OPTIMIZED ability call node with DirectCallNode caching
+                    // Extract the `it` value from the { it = value } argument
+                    val itValueNode = if (funcCall.arguments is RecordLiteral) {
+                        val itEntry = (funcCall.arguments as RecordLiteral).entries
+                            .filterIsInstance<RecordFieldEntry>()
+                            .find { it.name == Keywords.IT }
+                        if (itEntry != null) {
+                            convertExpression(itEntry.value!!)
+                        } else {
+                            convertExpression(funcCall.arguments)
+                        }
+                    } else {
+                        convertExpression(funcCall.arguments)
+                    }
+
+                    return AbilityForNode.create(
+                        itValueNode,
+                        implementationHash,
+                        opNames.toTypedArray()
+                    )
+                }
+
+                // Build the args record with `it` injected for the receiver
+                val receiver = memberAccess.receiver
+                val receiverIsAbilityName = when (receiver) {
+                    is Identifier -> receiver.localName == resolvedAbility.abilityName
+                    else -> false
+                }
+
+                val argsNode = if (!receiverIsAbilityName) {
+                    // Method-call syntax: inject `it = receiver` into args
+                    val receiverNode = convertExpression(receiver)
+                    if (funcCall.arguments is RecordLiteral) {
+                        val explicitArgs = funcCall.arguments as RecordLiteral
+                        val fieldNames = mutableListOf(Keywords.IT)
+                        val fieldNodes = mutableListOf(receiverNode)
+                        for (entry in explicitArgs.entries.filterIsInstance<RecordFieldEntry>()) {
+                            fieldNames.add(entry.name)
+                            fieldNodes.add(convertExpression(entry.value!!))
+                        }
+                        RecordLiteralNode.allObjects(
+                            fieldNames.toTypedArray(),
+                            fieldNodes.toTypedArray()
+                        )
+                    } else {
+                        RecordLiteralNode.allObjects(
+                            arrayOf(Keywords.IT),
+                            arrayOf(convertExpression(receiver))
+                        )
+                    }
+                } else {
+                    convertExpression(funcCall.arguments)
+                }
+
+                // Direct desugaring: if the individual operation was stored by our
+                // convertImplAbilityDeclaration, look it up directly by content hash key.
+                // Otherwise fall back to record-based dispatch (for codec/generated impls).
+                val opKey = MezzeHash.operationHash(implementationHash, operationName)
+                val opSlot = contentHashToSlot[opKey]
+                if (opSlot != null) {
+                    val functionNode = ReadLocalWithFallbackNode.create(opSlot, opKey)
+                    return InvokeNode.create(functionNode, arrayOf(argsNode))
+                }
+
+                // Fallback: use record-based dispatch for impls not stored individually
+                val localSlot = contentHashToSlot[implementationHash]
                 return OptimizedAbilityCallNode.create(
                     argsNode,
                     localSlot ?: -1,
@@ -1427,6 +1586,111 @@ class ASTToTruffleConverterV2(
      * This allows user-defined abilities with builtin names (like Eq) to use regular ability dispatch
      * if they have different operation names than the builtins.
      */
+
+    /**
+     * Handle method-call syntax for built-in ability operations.
+     *
+     * The parser desugars operators to method calls on the receiver:
+     *   x + y  →  x.add { r = y }
+     *   -x     →  x.neg {}
+     *   x == y →  x.eq { r = y }
+     *   x && y →  x.and { r = y }
+     *   !x     →  x.not {}
+     *   x.to_dbg_str {} → Inspect
+     *
+     * This function detects these patterns and creates Direct*Node instances
+     * that take operands directly, bypassing record allocation.
+     *
+     * Returns null if the method name doesn't correspond to a built-in ability operation.
+     */
+    private fun tryCreateMethodCallBuiltinOp(
+        operationName: String,
+        memberAccess: MemberAccess,
+        funcCall: FunctionCall
+    ): MezzeNode? {
+        // Map method names to their operation types
+        // Binary ops: receiver is left operand, args contain { r = rightOperand }
+        // Unary ops: receiver is the operand, args is {}
+        val isBinaryOp = operationName in setOf("add", "sub", "mul", "div", "mod", "eq", "neq", "lt", "gt", "le", "ge", "and", "or")
+        val isUnaryOp = operationName in setOf("neg", "not", "to_dbg_str")
+
+        if (!isBinaryOp && !isUnaryOp) return null
+
+        // Don't match if receiver is an ability name (handled by tryCreateBuiltinOp)
+        val receiver = memberAccess.receiver
+        val receiverIsAbilityName = when (receiver) {
+            is Identifier -> receiver.localName in setOf(
+                "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
+                "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot", "Inspect"
+            )
+            else -> false
+        }
+        if (receiverIsAbilityName) return null
+
+        val receiverNode = convertExpression(receiver)
+
+        if (isBinaryOp) {
+            // Extract the right operand from { r = value }
+            val rightNode = extractFieldFromArgs(funcCall.arguments, "r") ?: return null
+
+            return when (operationName) {
+                "add" -> DirectAddNode.create(receiverNode, rightNode)
+                "sub" -> DirectSubtractNode.create(receiverNode, rightNode)
+                "mul" -> DirectMultiplyNode.create(receiverNode, rightNode)
+                "div" -> DirectDivideNode.create(receiverNode, rightNode)
+                "mod" -> DirectModuloNode.create(receiverNode, rightNode)
+                "eq" -> DirectEqualNode.create(receiverNode, rightNode)
+                "neq" -> DirectNotEqualNode.create(receiverNode, rightNode)
+                "lt" -> DirectLessThanNode.create(receiverNode, rightNode)
+                "gt" -> DirectGreaterThanNode.create(receiverNode, rightNode)
+                "le" -> DirectLessThanOrEqualNode.create(receiverNode, rightNode)
+                "ge" -> DirectGreaterThanOrEqualNode.create(receiverNode, rightNode)
+                "and" -> DirectAndNode.create(receiverNode, rightNode)
+                "or" -> DirectOrNode.create(receiverNode, rightNode)
+                else -> null
+            }
+        }
+
+        if (isUnaryOp) {
+            return when (operationName) {
+                "neg" -> DirectNegateNode.create(receiverNode)
+                "not" -> DirectNotNode.create(receiverNode)
+                "to_dbg_str" -> DirectInspectNode.create(receiverNode)
+                else -> null
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Extract a field value node from an arguments expression.
+     * If the arguments are a RecordLiteral, finds the field by name and converts it.
+     * Returns null if the field is not found.
+     */
+    private fun extractFieldFromArgs(args: Expression, fieldName: String): MezzeNode? {
+        if (args !is RecordLiteral) return null
+        val fieldEntries = args.entries.filterIsInstance<RecordFieldEntry>()
+        val field = fieldEntries.find { it.name == fieldName } ?: return null
+        val value = field.value ?: return null
+        return convertExpression(value)
+    }
+
+    /**
+     * Find which constraint ability (by index) defines the given operation name.
+     * Used for method-call syntax inside polymorphic functions: value.encode {} → Encoder constraint.
+     */
+    private fun findConstraintByOperationName(operationName: String): Int {
+        for ((index, abilityName) in constraintAbilityNames.withIndex()) {
+            val ops = abilityOperationNames[abilityName]
+            if (ops != null && operationName in ops) return index
+            // Also check built-in ability operations
+            val builtinOps = BuiltInAbilities.getAvailableMethods(abilityName)
+            if (operationName in builtinOps) return index
+        }
+        return -1
+    }
+
     private fun tryCreateBuiltinOp(abilityName: String, operationName: String, funcCall: FunctionCall): MezzeNode? {
         // Check if this is a known builtin combination
         val isBuiltin = when {
@@ -1440,7 +1704,7 @@ class ASTToTruffleConverterV2(
             abilityName == "LogicalAnd" && operationName == "and" -> true
             abilityName == "LogicalOr" && operationName == "or" -> true
             abilityName == "LogicalNot" && operationName == "not" -> true
-            abilityName == "Inspect" && operationName == "to_str" -> true
+            abilityName == "Inspect" && operationName == "to_dbg_str" -> true
             else -> false
         }
 
@@ -1468,7 +1732,7 @@ class ASTToTruffleConverterV2(
             abilityName == "LogicalAnd" && operationName == "and" -> BuiltinAndNode.create(argsNode)
             abilityName == "LogicalOr" && operationName == "or" -> BuiltinOrNode.create(argsNode)
             abilityName == "LogicalNot" && operationName == "not" -> BuiltinNotNode.create(argsNode)
-            abilityName == "Inspect" && operationName == "to_str" -> BuiltinInspectToStrNode.create(argsNode)
+            abilityName == "Inspect" && operationName == "to_dbg_str" -> BuiltinInspectToStrNode.create(argsNode)
             else -> throw RuntimeException("Unknown builtin: $abilityName.$operationName")
         }
     }
@@ -1679,6 +1943,8 @@ class ASTToTruffleConverterV2(
             parentVariableSlots = this.getVariableSlots(),
             parentScopedEffectInfo = this.scopedEffectInfo.toMap()
         )
+        // Inherit ability operation name mappings so method-call syntax resolves inside lambdas
+        functionConverter.abilityOperationNames.putAll(this.abilityOperationNames)
 
         // Extract ability constraints from the lambda's inferred type
         // These are populated by the typechecker for polymorphic functions

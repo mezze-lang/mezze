@@ -165,21 +165,25 @@ class ContextBuilder {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
-        // 4. Validate ability implementations (associated types, etc.)
+        // 4. Validate ability implementations (associated types, field/method conflicts, etc.)
         // CRITICAL: Merge local and imported abilities to support qualified ability names
         // e.g., `impl codec::EncodeFormat MyType where { ... }` needs access to imported abilities
         val allAbilityDecls = abilityDecls + importedAbilities
+        val allTypeDecls = typeDecls + importedTypes
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                abilityDeclarations = allAbilityDecls
+                abilityDeclarations = allAbilityDecls,
+                typeDeclarations = allTypeDecls
             )
         }
 
         // 5. Validate orphan rules for ability implementations
         // An impl must be in the same module as either the ability or one of the target types
+        // CRITICAL: Use only types actually declared in source, NOT injected built-ins (Bool, Option, Result).
+        // Built-in types are not "owned" by user modules, so users cannot impl for them.
         val localAbilityNames = abilityDecls.keys
-        val localTypeNames = typeDecls.keys
+        val localTypeNames = program.items.filterIsInstance<TypeDeclaration>().map { it.name }.toSet()
         val importedAbilityNames = importedAbilities.keys
         val importedTypeNames = importedTypes.keys
 
@@ -708,13 +712,18 @@ class ContextBuilder {
         // Content hashes are computed in Phase 0.5 before ContextBuilder runs
         val implKey = implDecl.contentHash
             ?: throw IllegalStateException(
-                "Content hash not computed for impl: ${implDecl.ability.localName} ${implDecl.targetTypes}. " +
+                "Content hash not computed for impl: ${implDecl.abilityName ?: "inherent"} ${implDecl.targetTypes}. " +
                 "Ensure computeDeclarationHashes was called before ContextBuilder."
             )
 
+        // Handle inherent impls: impl Type where { methods }
+        if (implDecl.isInherent) {
+            return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey)
+        }
+
         // Create impl info
         val implInfo = TypingContext.AbilityImplInfo(
-            abilityName = implDecl.ability.localName,
+            abilityName = implDecl.abilityName!!,  // safe: not inherent
             targetTypes = targetTypeNames,
             targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
             associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings like 'item = Int
@@ -724,6 +733,67 @@ class ContextBuilder {
 
         // Store in context by content hash
         return ctx.extendWithImpl(implKey, implInfo)
+    }
+
+    /**
+     * Register anonymous impl methods in context.
+     * Anonymous impls (`impl Type where { ... }`) attach methods directly to types.
+     */
+    private fun addAnonymousImpl(
+        ctx: TypingContext,
+        implDecl: ImplAbilityDeclaration,
+        targetTypeNames: List<String>,
+        implKey: String
+    ): TypingContext {
+        var result = ctx
+        val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
+
+        for (op in implDecl.operations) {
+            // Build method type from annotations if available
+            val opParamType = op.paramType
+            val paramType = if (opParamType != null) {
+                convertTypeAnnotation(opParamType)
+            } else {
+                // Default: empty record (no args besides receiver)
+                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+            }
+
+            val opReturnType = op.returnType
+            val returnType = if (opReturnType != null) {
+                convertTypeAnnotation(opReturnType)
+            } else {
+                // Return type unknown at registration time — use a fresh type variable.
+                // The actual type will be inferred during typechecking of the method call.
+                MezzeType.VarType(TypeVar.fresh())
+            }
+
+            val methodType = MezzeType.FunctionType(
+                paramType = paramType,
+                returnType = returnType
+            )
+
+            val methodInfo = TypingContext.InherentMethodInfo(
+                targetTypeName = targetTypeName,
+                methodName = op.name,
+                methodType = methodType,
+                implContentHash = implKey
+            )
+
+            result = result.extendWithAnonymousMethod(methodInfo)
+        }
+
+        // Also register as a regular impl so the interpreter can find it by content hash
+        val implInfo = TypingContext.AbilityImplInfo(
+            abilityName = null,  // inherent impl
+            targetTypes = targetTypeNames,
+            targetTypeAnnotations = implDecl.targetTypes,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
+            sourceModule = null,
+            contentHash = implKey
+        )
+        result = result.extendWithImpl(implKey, implInfo)
+
+        return result
     }
 
     /**

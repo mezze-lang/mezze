@@ -2,55 +2,55 @@
 # Inspect is available for all primitive types
 
 # Inspect with Int (polymorphic, Inspect is implicit)
-let inspectInt = {x} -> Inspect.to_str {val = x}                      # expected: inspectInt : { x: 'a } -> Str
+let inspectInt = {x} -> x.to_dbg_str {}                      # expected: inspectInt : { x: 'a } -> Str
 
 # Inspect with Bool (polymorphic, Inspect is implicit)
-let inspectBool = {b} -> Inspect.to_str {val = b}                     # expected: inspectBool : { b: 'a } -> Str
+let inspectBool = {b} -> b.to_dbg_str {}                     # expected: inspectBool : { b: 'a } -> Str
 
 # Inspect with String (polymorphic, Inspect is implicit)
-let inspectStr = {s} -> Inspect.to_str {val = s}                   # expected: inspectStr : { s: 'a } -> Str
+let inspectStr = {s} -> s.to_dbg_str {}                   # expected: inspectStr : { s: 'a } -> Str
 
 # Inspect with Float (polymorphic, Inspect is implicit)
-let inspectFloat = {f} -> Inspect.to_str {val = f}                    # expected: inspectFloat : { f: 'a } -> Str
+let inspectFloat = {f} -> f.to_dbg_str {}                    # expected: inspectFloat : { f: 'a } -> Str
 
 # Inspect with Nat (polymorphic, Inspect is implicit)
-let inspectNat = {n} -> Inspect.to_str {val = n}                      # expected: inspectNat : { n: 'a } -> Str
+let inspectNat = {n} -> n.to_dbg_str {}                      # expected: inspectNat : { n: 'a } -> Str
 
 # Inspect with Frac (polymorphic, Inspect is implicit)
-let inspectFrac = {fr} -> Inspect.to_str {val = fr}                   # expected: inspectFrac : { fr: 'a } -> Str
+let inspectFrac = {fr} -> fr.to_dbg_str {}                   # expected: inspectFrac : { fr: 'a } -> Str
 
 # Polymorphic inspect - Inspect is implicit, no constraint shown
-let polyInspect = {x} -> Inspect.to_str {val = x}                     # expected: polyInspect : { x: 'a } -> Str
+let polyInspect = {x} -> x.to_dbg_str {}                     # expected: polyInspect : { x: 'a } -> Str
 
 # Using inspect in a match expression - Inspect is implicit
 let inspectMatch = {opt} -> match opt is
-  Some {val} -> Inspect.to_str {val = val}
+  Some {val} -> val.to_dbg_str {}
   None -> "none"                                                        # expected: inspectMatch : { opt: Option 'a } -> Str
 
 # Inspect with conditional - Inspect is implicit, x and y can be different types
 let inspectCond = {flag, x, y} ->
-  if flag then Inspect.to_str {val = x}
-  else Inspect.to_str {val = y}                                       # expected: inspectCond : { flag: Bool, x: 'a, y: 'b } -> Str
+  if flag then x.to_dbg_str {}
+  else y.to_dbg_str {}                                       # expected: inspectCond : { flag: Bool, x: 'a, y: 'b } -> Str
 
 # Inspect in combination with other abilities - only NumAdd shown (Inspect is implicit)
 let inspectAndAdd = {x, y} ->
-  Inspect.to_str {val = x + y}                                        # expected: inspectAndAdd : { x: 'a, y: 'a } with NumAdd 'a -> Str
+  (x + y).to_dbg_str {}                                        # expected: inspectAndAdd : { x: 'a, y: 'a } with NumAdd 'a -> Str
 
 # Inspect with record field access - Inspect is implicit
-let inspectField = {r} -> Inspect.to_str {val = r.value}              # expected: inspectField : { r: { value: 'a } } -> Str
+let inspectField = {r} -> r.value.to_dbg_str {}              # expected: inspectField : { r: { value: 'a } } -> Str
 
 # Inspect with pattern matching on variants with data - Inspect is implicit
 let inspectVariantData = {v} -> match v is
-  Value {x} -> Inspect.to_str {val = x}
+  Value {x} -> x.to_dbg_str {}
   Empty -> "empty"                                                      # expected: inspectVariantData : { v: | Value { x: 'a }, Empty | } -> Str
 
 # Multiple inspect calls - Inspect is implicit, each param can be different type
 let multiInspect = {a, b, c} ->
-  "$(Inspect.to_str {val = a})$(Inspect.to_str {val = b})$(Inspect.to_str {val = c})"  # expected: multiInspect : { a: 'a, b: 'b, c: 'c } -> Str
+  "$(a.to_dbg_str {})$(b.to_dbg_str {})$(c.to_dbg_str {})"  # expected: multiInspect : { a: 'a, b: 'b, c: 'c } -> Str
 
 # Inspect with list elements - Inspect is implicit
 let inspectListHead = {lst} -> match lst is
-  Cons {head, tail} -> Inspect.to_str {val = head}
+  Cons {head, tail} -> head.to_dbg_str {}
   Nil -> "empty"                                                        # expected: inspectListHead : { lst: List 'a } -> Str
 
 inspectInt {x = 42}

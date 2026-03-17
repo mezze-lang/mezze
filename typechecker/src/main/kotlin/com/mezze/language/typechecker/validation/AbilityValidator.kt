@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.validation
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.ast.PrimitiveTypes
 
 /**
  * Validates ability declarations and implementations.
@@ -97,12 +98,26 @@ object AbilityValidator {
      */
     fun validateAbilityImplementation(
         impl: ImplAbilityDeclaration,
-        abilityDeclarations: Map<String, AbilityDeclaration>
+        abilityDeclarations: Map<String, AbilityDeclaration>,
+        typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
     ) {
+        // Rule 0: Check impl method names don't conflict with target type's record fields.
+        // e.g., if Button has field `onClick`, you can't impl an ability with method `onClick` for Button.
+        validateNoFieldMethodConflict(impl, typeDeclarations)
+
+        // Inherent impls don't implement an ability — validate target type exists, then return
+        if (impl.isInherent) {
+            validateInherentImplTargetType(impl, typeDeclarations)
+            return
+        }
+
+        val abilityName = impl.abilityName!!  // safe: not inherent
+        val abilityQualifier = impl.abilityRef?.qualifier
+
         // Find the ability declaration
         // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
-        val qualifiedAbilityName = impl.ability.qualifier?.let { "${it.fullPath}::${impl.ability.localName}" } ?: impl.ability.localName
-        val abilityDeclaration = abilityDeclarations[impl.ability.localName]
+        val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
+        val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw TypeCheckError(
                 "Ability '${qualifiedAbilityName}' not found - cannot validate implementation",
@@ -112,7 +127,7 @@ object AbilityValidator {
         // Rule 1: Check type parameter count matches
         if (impl.targetTypes.size != abilityDeclaration.typeParams.size) {
             throw TypeCheckError(
-                "Type parameter count mismatch in ability implementation for '${impl.ability.localName}': " +
+                "Type parameter count mismatch in ability implementation for '${abilityName}': " +
                 "ability expects ${abilityDeclaration.typeParams.size} type parameters, " +
                 "but implementation provides ${impl.targetTypes.size}",
                 impl.sourceLocation
@@ -127,9 +142,9 @@ object AbilityValidator {
         if (abilityAssociatedTypes.isNotEmpty() && implAssociatedTypeBindings.isEmpty()) {
             val typesList = abilityAssociatedTypes.joinToString(", ")
             throw TypeCheckError(
-                "Ability '${impl.ability.localName}' declares associated types [$typesList] " +
+                "Ability '${abilityName}' declares associated types [$typesList] " +
                 "but implementation does not provide bindings. " +
-                "Use: impl ${impl.ability.localName} ${impl.targetTypes.joinToString(" ")} " +
+                "Use: impl ${abilityName} ${impl.targetTypes.joinToString(" ")} " +
                 "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
                 impl.sourceLocation
             )
@@ -140,7 +155,7 @@ object AbilityValidator {
             val bindingsList = implAssociatedTypeBindings.keys.joinToString(", ")
             throw TypeCheckError(
                 "Implementation provides associated type bindings [$bindingsList] " +
-                "but ability '${impl.ability.localName}' does not declare associated types. " +
+                "but ability '${abilityName}' does not declare associated types. " +
                 "Remove the 'having' clause or add it to the ability declaration.",
                 impl.sourceLocation
             )
@@ -150,7 +165,7 @@ object AbilityValidator {
         val missingBindings = abilityAssociatedTypes.filter { it !in implAssociatedTypeBindings.keys }
         if (missingBindings.isNotEmpty()) {
             throw TypeCheckError(
-                "Ability '${impl.ability.localName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
+                "Ability '${abilityName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
                 "but implementation is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                 "All associated types must be bound in the implementation.",
                 impl.sourceLocation
@@ -162,7 +177,7 @@ object AbilityValidator {
         if (extraBindings.isNotEmpty()) {
             throw TypeCheckError(
                 "Implementation provides bindings for ${extraBindings.joinToString(", ")} " +
-                "but ability '${impl.ability.localName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
+                "but ability '${abilityName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
                 "Remove the extra bindings or add them to the ability declaration.",
                 impl.sourceLocation
             )
@@ -177,7 +192,7 @@ object AbilityValidator {
             val missing = missingOps.joinToString(", ")
             val example = missingOps.first()
             throw TypeCheckError(
-                "Implementation of '${impl.ability.localName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
+                "Implementation of '${abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
                 "Add: $example = {args} -> ...",
                 impl.sourceLocation
             )
@@ -190,7 +205,7 @@ object AbilityValidator {
             // Get source location from first extra operation
             val extraOpLocation = impl.operations.find { it.name in extraOps }?.implementation?.sourceLocation
             throw TypeCheckError(
-                "Implementation of '${impl.ability.localName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
+                "Implementation of '${abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
                 "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
                 extraOpLocation
             )
@@ -212,7 +227,7 @@ object AbilityValidator {
         abilityDeclaration: AbilityDeclaration
     ) {
         // Build type parameter substitution map
-        // e.g., for impl Show Int: 'a -> Int
+        // e.g., for impl Show for Int: 'a -> Int
         val substitution = abilityDeclaration.typeParams.zip(impl.targetTypes).toMap()
 
         for (implOp in impl.operations) {
@@ -251,7 +266,7 @@ object AbilityValidator {
             // Check parameter type matches
             if (!typeAnnotationsMatch(actualParamType, expectedParamType)) {
                 throw TypeCheckError(
-                    "Wrong parameter type for '${implOp.name}' in impl ${impl.ability.localName}: " +
+                    "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${typeAnnotationToString(expectedParamType)}, " +
                     "but got ${typeAnnotationToString(actualParamType)}.",
                     sourceLocation
@@ -261,7 +276,7 @@ object AbilityValidator {
             // Check return type matches
             if (!typeAnnotationsMatch(actualReturnType, expectedReturnType)) {
                 throw TypeCheckError(
-                    "Wrong return type for '${implOp.name}' in impl ${impl.ability.localName}: " +
+                    "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${typeAnnotationToString(expectedReturnType)}, " +
                     "but got ${typeAnnotationToString(actualReturnType)}.",
                     sourceLocation
@@ -438,7 +453,7 @@ object AbilityValidator {
      * - NONE of the target types are defined in the current module
      *
      * Following Rust/Roc coherence rules:
-     * - impl Ability Type must be in the same module as either the ability or one of the types
+     * - impl Ability for Type must be in the same module as either the ability or one of the types
      * - This prevents third-party modules from defining impls for types they don't own
      *
      * @param impl The ability implementation to validate
@@ -455,7 +470,13 @@ object AbilityValidator {
         importedAbilityNames: Set<String>,
         importedTypeNames: Set<String>
     ) {
-        val abilityName = impl.ability.localName
+        // Inherent impls: target type must be defined locally
+        if (impl.isInherent) {
+            validateInherentImplLocality(impl, localTypeNames)
+            return
+        }
+
+        val abilityName = impl.abilityName!!  // safe: not inherent
 
         // Check if ability is defined locally
         val isAbilityLocal = localAbilityNames.contains(abilityName)
@@ -675,6 +696,105 @@ object AbilityValidator {
                             "Variant constructors and effects must have unique names."
                         )
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * Validate that an inherent impl's target type exists.
+     *
+     * For primitive types (Int, Float, Str, Bool, etc.), the type always exists.
+     * For user-defined types, the type must be declared.
+     */
+    private fun validateInherentImplTargetType(
+        impl: ImplAbilityDeclaration,
+        typeDeclarations: Map<String, TypeDeclaration>
+    ) {
+        for (targetType in impl.targetTypes) {
+            val typeName = getTypeNameFromAnnotation(targetType)
+
+            // Primitive types always exist
+            if (PrimitiveTypes.isPrimitiveName(typeName)) continue
+
+            // Built-in compound types always exist
+            if (typeName in setOf("Option", "Result", "List", "Map", "Set", "Seq", "Promise")) continue
+
+            // User-defined type must be declared
+            if (!typeDeclarations.containsKey(typeName)) {
+                throw TypeCheckError(
+                    "Cannot define inherent impl for unknown type '$typeName'. " +
+                    "The type must be declared before implementing methods on it.",
+                    impl.sourceLocation
+                )
+            }
+        }
+    }
+
+    /**
+     * Validate that an inherent impl is defined in the same module as the target type.
+     *
+     * Inherent impls can only be defined where the type is defined:
+     * - The target type must be locally defined in this module
+     * - Primitive/built-in types are NOT exempted — only stdlib can impl for them
+     *   (stdlib modules will have those types in their localTypeNames)
+     */
+    private fun validateInherentImplLocality(
+        impl: ImplAbilityDeclaration,
+        localTypeNames: Set<String>
+    ) {
+        for (targetType in impl.targetTypes) {
+            val typeName = getTypeNameFromAnnotation(targetType)
+
+            // Target type must be locally defined — no exceptions
+            if (!localTypeNames.contains(typeName)) {
+                throw TypeCheckError(
+                    "Cannot define inherent impl for type '$typeName' in this module. " +
+                    "Inherent impls can only be defined where the type is defined. " +
+                    "Move this impl to the module where '$typeName' is declared.",
+                    impl.sourceLocation
+                )
+            }
+        }
+    }
+
+    /**
+     * Validate that impl method names don't conflict with fields on the target type.
+     *
+     * For example, if `type Button = { onClick: {} -> {} }`, then:
+     *   impl Button where { onClick = ... }           — ERROR
+     *   impl Handler for Button where { onClick = ... } — ERROR
+     *
+     * The target type's record fields and the impl's method names must be disjoint.
+     */
+    private fun validateNoFieldMethodConflict(
+        impl: ImplAbilityDeclaration,
+        typeDeclarations: Map<String, TypeDeclaration>
+    ) {
+        if (typeDeclarations.isEmpty()) return
+
+        // Get the impl's method names
+        val implMethodNames = impl.operations.map { it.name }.toSet()
+        if (implMethodNames.isEmpty()) return
+
+        // Check each target type for field conflicts
+        for (targetType in impl.targetTypes) {
+            val typeName = getTypeNameFromAnnotation(targetType)
+            val typeDecl = typeDeclarations[typeName] ?: continue
+            val definition = typeDecl.definition
+
+            // Only record types have fields to conflict with
+            if (definition is RecordDefinition) {
+                val fieldNames = definition.fields.map { it.name }.toSet()
+                val conflicts = implMethodNames.intersect(fieldNames)
+                if (conflicts.isNotEmpty()) {
+                    val conflictList = conflicts.joinToString(", ") { "'$it'" }
+                    throw TypeCheckError(
+                        "Cannot implement ${if (impl.isInherent) "methods" else "ability '${impl.abilityName}'"} " +
+                            "for type '$typeName': method names $conflictList conflict with fields " +
+                            "already defined on '$typeName'. Rename the fields or the ability methods to avoid ambiguity.",
+                        impl.sourceLocation
+                    )
                 }
             }
         }

@@ -21,7 +21,7 @@ class AbilityTypeCheckerTest {
     @Test
     fun testSimpleAbilityDeclaration() {
         val source = """
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
               encode : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -44,11 +44,11 @@ class AbilityTypeCheckerTest {
         val source = """
             use std::int
 
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
               encode : {val: 'a} -> Str
             }
 
-            impl Encoder Int where {
+            impl Encoder for Int where {
               encode : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
@@ -72,12 +72,12 @@ class AbilityTypeCheckerTest {
     @Test
     fun testMultipleAbilityOperations() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
               show : {val: 'a} -> Str,
               debug : {val: 'a} -> Str
             }
 
-            impl Show Str where {
+            impl Show for Str where {
               show : {val: Str} -> Str = {val} -> val,
               debug : {val: Str} -> Str = {val} -> "\"$(val)\""
             }
@@ -104,7 +104,7 @@ class AbilityTypeCheckerTest {
     @Test
     fun testAbilityWithComplexTypes() {
         val source = """
-            ability Serializer 'a where {
+            ability Serializer for 'a where {
               serialize : {val: 'a} -> Str,
               deserialize : {str: Str} -> 'a
             }
@@ -128,15 +128,15 @@ class AbilityTypeCheckerTest {
     @Test
     fun testAbilityDoesNotThrowErrors() {
         val source = """
-            ability Encoder 'a where {
+            ability Encoder for 'a where {
               encode : {val: 'a} -> Str
             }
             
-            impl Encoder Int where {
+            impl Encoder for Int where {
               encode : {val: Int} -> Str = {val} -> "number"
             }
             
-            impl Encoder Str where {
+            impl Encoder for Str where {
               encode : {val: Str} -> Str = {val} -> val
             }
         """.trimIndent()

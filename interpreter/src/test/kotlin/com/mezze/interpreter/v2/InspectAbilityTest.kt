@@ -46,7 +46,7 @@ class InspectAbilityTest {
     fun `test Inspect on Int`() {
         val source = """
             let test_val = 42
-            let result = Inspect.to_str {val = test_val}
+            let result = test_val.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -57,7 +57,7 @@ class InspectAbilityTest {
     fun `test Inspect on String`() {
         val source = """
             let test_val = "Hello"
-            let result = Inspect.to_str {val = test_val}
+            let result = test_val.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -67,8 +67,8 @@ class InspectAbilityTest {
     @Test
     fun `test Inspect on Boolean`() {
         val source = """
-            let result1 = Inspect.to_str {val = True}
-            let result2 = Inspect.to_str {val = False}
+            let result1 = True.to_dbg_str {}
+            let result2 = False.to_dbg_str {}
             result1
         """.trimIndent()
 
@@ -79,7 +79,7 @@ class InspectAbilityTest {
     fun `test Inspect on Array`() {
         val source = """
             let arr = [1, 2, 3, 4, 5]
-            let result = Inspect.to_str {val = arr}
+            let result = arr.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -90,7 +90,7 @@ class InspectAbilityTest {
     fun `test Inspect on Record`() {
         val source = """
             let person = { name = "Alice", age = 30 }
-            let result = Inspect.to_str {val = person}
+            let result = person.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -101,7 +101,7 @@ class InspectAbilityTest {
     fun `test Inspect on Unit`() {
         val source = """
             let unit = {}
-            let result = Inspect.to_str {val = unit}
+            let result = unit.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -122,7 +122,7 @@ class InspectAbilityTest {
             let variant_val = Inspect
 
             # This should use the builtin ability
-            let inspect_result = Inspect.to_str {val = 42}
+            let inspect_result = 42.to_dbg_str {}
 
             inspect_result
         """.trimIndent()
@@ -141,7 +141,7 @@ class InspectAbilityTest {
     fun `test Inspect works without import`() {
         val source = """
             # NO imports - Inspect should still be available
-            let result = Inspect.to_str {val = 100}
+            let result = 100.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -153,7 +153,7 @@ class InspectAbilityTest {
         val source = """
             do
                 let x = 42
-                let str = Inspect.to_str {val = x}
+                let str = x.to_dbg_str {}
                 str
         """.trimIndent()
 
@@ -163,7 +163,7 @@ class InspectAbilityTest {
     @Test
     fun `test Inspect works in lambda`() {
         val source = """
-            let to_str = {val} -> Inspect.to_str {val = val}
+            let to_str = {val} -> val.to_dbg_str {}
             let result = to_str {val = 42}
             result
         """.trimIndent()
@@ -183,8 +183,8 @@ class InspectAbilityTest {
             let nothing = Nothing
             let something = Just { val = 42 }
 
-            let str1 = Inspect.to_str {val = nothing}
-            let str2 = Inspect.to_str {val = something}
+            let str1 = nothing.to_dbg_str {}
+            let str2 = something.to_dbg_str {}
 
             str2
         """.trimIndent()
@@ -203,7 +203,7 @@ class InspectAbilityTest {
                 right = Node { value = 15, left = Leaf, right = Leaf }
             }
 
-            let result = Inspect.to_str {val = tree}
+            let result = tree.to_dbg_str {}
 
             result
         """.trimIndent()
@@ -222,7 +222,7 @@ class InspectAbilityTest {
     fun `test Inspect in string interpolation`() {
         val source = """
             let val = 42
-            let msg = "Value: $(Inspect.to_str {val = val})"
+            let msg = "Value: $(val.to_dbg_str {})"
             msg
         """.trimIndent()
 
@@ -235,7 +235,7 @@ class InspectAbilityTest {
             let nested = {
                 a = { b = { c = { d = { e = 42 } } } }
             }
-            let result = Inspect.to_str {val = nested}
+            let result = nested.to_dbg_str {}
             result
         """.trimIndent()
 
@@ -253,7 +253,7 @@ class InspectAbilityTest {
                 Point { x = 30, y = 40 }
             ]
 
-            let result = Inspect.to_str {val = points}
+            let result = points.to_dbg_str {}
 
             result
         """.trimIndent()

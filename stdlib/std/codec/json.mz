@@ -307,10 +307,10 @@ let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t}
 # ============================================================================
 # The Format implementation for Json is defined here (where Json is defined)
 # to satisfy the orphan rule: impl must be in the module that defines the type.
-# Format 'fmt 'repr - first param is format type, second is representation type
+# Format 'repr 'fmt - first param is representation type, second is format type
 # For JSON, both are Json (the AST is the representation)
 
-impl Format JsonFmt Json where {
+impl Format for Json JsonFmt where {
     encode_int = {val, config, path} ->
         Ok {val = JInt {val = val}},
 
@@ -386,7 +386,7 @@ impl Format JsonFmt Json where {
 # DECODE FORMAT IMPLEMENTATION
 # ============================================================================
 
-impl DecodeFormat JsonFmt Json where {
+impl DecodeFormat for Json JsonFmt where {
     decode_int = {val, config, path} ->
         match val is
             JInt {val = v} -> Ok {val = v}

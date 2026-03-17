@@ -124,16 +124,11 @@ class ArithmeticWithFunctionsTest {
 
     @Test
     fun `should reject polymorphic function in arithmetic`() {
+        // Direct ability method access (Parse.decode) is now blocked.
+        // Instead, test that a function value cannot be used in arithmetic.
         val code = """
-            ability Parse 'a where {
-               decode: {val: Str} -> 'a
-            }
-
-            impl Parse Int where {
-               decode = {val} -> 42
-            }
-
-            let x = Parse.decode
+            let decode = {val: Str} -> val
+            let x = decode
             let result = 10 + x
         """.trimIndent()
 

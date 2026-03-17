@@ -82,8 +82,8 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test user-defined ability cannot be used as value`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             let x = Show
@@ -185,8 +185,8 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test variant constructor cannot conflict with user-defined ability`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
             type MyType = | Show, Other |
@@ -202,8 +202,8 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test type name cannot conflict with user-defined ability`() {
         val code = """
-            ability Display 'a where {
-                display: {val: 'a} -> Str
+            ability Display for 'a where {
+                display: {} -> Str
             }
 
             type Display = { text: Str }
@@ -236,9 +236,9 @@ class AbilityEffectNameCollisionTest {
     // ========== POSITIVE TESTS: ABILITY METHOD ACCESS STILL WORKS ==========
 
     @Test
-    fun `test Eq method access still works`() {
+    fun `test Eq method call still works`() {
         val code = """
-            let my_eq = Eq.eq
+            let my_eq = 1.eq {r = 2}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -246,9 +246,9 @@ class AbilityEffectNameCollisionTest {
     }
 
     @Test
-    fun `test Inspect method access still works`() {
+    fun `test Inspect method call still works`() {
         val code = """
-            let my_str = Inspect.to_str
+            let my_str = 42.to_dbg_str {}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -256,13 +256,17 @@ class AbilityEffectNameCollisionTest {
     }
 
     @Test
-    fun `test user-defined ability method access still works`() {
+    fun `test user-defined ability method call still works`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            let my_show = Show.show
+            impl Show for Int where {
+                show: {} -> Str = {} -> "int"
+            }
+
+            let my_show = 42.show {}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -273,17 +277,17 @@ class AbilityEffectNameCollisionTest {
     fun `test ability can be redefined by user`() {
         // Users should be able to define their own ability with the same name as a built-in
         val code = """
-            ability Eq 'a where {
-                eq: {l: 'a, r: 'a} -> Bool,
-                neq: {l: 'a, r: 'a} -> Bool
+            ability Eq for 'a where {
+                eq: {r: 'a} -> Bool,
+                neq: {r: 'a} -> Bool
             }
 
-            impl Eq Bool where {
-                eq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then r else if r then False else True,
-                neq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then if r then False else True else r
+            impl Eq for Bool where {
+                eq: {r: Bool} -> Bool = {r} -> if it then r else if r then False else True,
+                neq: {r: Bool} -> Bool = {r} -> if it then if r then False else True else r
             }
 
-            let test = Eq.eq {l = True, r = False}
+            let test = True.eq {r = False}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

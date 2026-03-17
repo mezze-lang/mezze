@@ -24,7 +24,7 @@ class BasicAbilitiesTest {
     @Test
     fun testSimpleAbilityDeclaration() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
               show : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -46,11 +46,11 @@ class BasicAbilitiesTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
+            ability Show for 'a where {
               show : {val: 'a} -> Str
             }
 
-            impl Show Int where {
+            impl Show for Int where {
               show : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
@@ -61,7 +61,7 @@ class BasicAbilitiesTest {
         // Verify implementation is processed  
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
-        assertEquals("Show", implDecl.ability.localName)
+        assertEquals("Show", implDecl.abilityName)
         assertEquals(1, implDecl.targetTypes.size)
         assertEquals(1, implDecl.operations.size)
     }
@@ -69,7 +69,7 @@ class BasicAbilitiesTest {
     @Test
     fun testMultiParameterAbilityDeclaration() {
         val source = """
-            ability Convert 'a 'b where {
+            ability Convert 'b for 'a where {
               convert : {val: 'a} -> 'b
             }
         """.trimIndent()
@@ -78,22 +78,23 @@ class BasicAbilitiesTest {
         val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify multi-parameter ability declaration
-        val convertDecl = typedProgram.items.find { 
-            it is AbilityDeclaration && it.name == "Convert" 
+        val convertDecl = typedProgram.items.find {
+            it is AbilityDeclaration && it.name == "Convert"
         } as AbilityDeclaration?
         assertNotNull(convertDecl)
-        assertEquals(listOf("'a", "'b"), convertDecl.typeParams)
+        assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
+        assertEquals("'a", convertDecl.receiverTypeParam)
         assertEquals(1, convertDecl.operations.size)
     }
 
     @Test
     fun testAbilityWithMethodLevelConstraints() {
         val source = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
               equals : {left: 'a, right: 'a} -> Boolean
             }
 
-            ability Ord 'a where {
+            ability Ord for 'a where {
               compare : {left: 'a, right: 'a} with Eq 'a -> Int
             }
         """.trimIndent()

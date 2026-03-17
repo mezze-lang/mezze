@@ -366,11 +366,11 @@ class NonFunctionCallTypeErrorTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
+            ability Show for 'a where {
                 show: { val: 'a } -> Str
             }
 
-            impl Show Int where {
+            impl Show for Int where {
                 show = { val } -> do
                     int::to_str { n = val } {}
             }

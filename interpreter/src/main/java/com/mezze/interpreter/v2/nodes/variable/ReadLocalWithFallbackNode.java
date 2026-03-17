@@ -63,13 +63,15 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     @Override
     public Object execute(VirtualFrame frame) {
         // First try reading from frame slot using getValue() which handles all types
-        Object value = frame.getValue(slot);
+        if (slot >= 0) {
+            Object value = frame.getValue(slot);
 
-        if (value != null) {
-            return maybeForce(value);
+            if (value != null) {
+                return maybeForce(value);
+            }
         }
 
-        // Frame slot is null - fall back to global lookup
+        // Frame slot is null or not available - fall back to global lookup
         Object globalValue = lookupGlobal();
         return maybeForce(globalValue);
     }

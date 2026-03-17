@@ -39,15 +39,15 @@ pub let radians_to_degrees = { radians: Float } ->
 # Additional trigonometric functions
 pub let tanh = { n: Float } -> do
     let exp_pos = core::exp { n = n }
-    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    let exp_neg = core::exp { n = -n }
     (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
 pub let sinh = { n: Float } -> do
     let exp_pos = core::exp { n = n }
-    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    let exp_neg = core::exp { n = -n }
     (exp_pos - exp_neg) / 2.0
 
 pub let cosh = { n: Float } -> do
     let exp_pos = core::exp { n = n }
-    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    let exp_neg = core::exp { n = -n }
     (exp_pos + exp_neg) / 2.0

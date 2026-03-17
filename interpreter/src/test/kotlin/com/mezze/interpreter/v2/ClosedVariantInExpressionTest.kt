@@ -343,9 +343,9 @@ class ClosedVariantInExpressionTest {
 
             match handle {} is
                 Err {error} -> match error is
-                    DivisionError {dividend} -> "Cannot divide $(Inspect.to_str {val = dividend}) by zero"
+                    DivisionError {dividend} -> "Cannot divide $(dividend.to_dbg_str {}) by zero"
                     _ -> "Unknown error"
-                Ok {val} -> "Result: $(Inspect.to_str {val = val})"
+                Ok {val} -> "Result: $(val.to_dbg_str {})"
         """.trimIndent()
 
         val result = eval(source)
@@ -365,7 +365,7 @@ class ClosedVariantInExpressionTest {
 
             match handle {} is
                 Err {error} -> "Error"
-                Ok {val} -> "Result: $(Inspect.to_str {val = val})"
+                Ok {val} -> "Result: $(val.to_dbg_str {})"
         """.trimIndent()
 
         val result = eval(source)

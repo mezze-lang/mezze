@@ -211,16 +211,16 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             effect Math where {
-                add: {x: Int, y: Int} -> Int <Math>
+                compute: {x: Int, y: Int} -> Int <Math>
             }
 
             impl Math for Calculator where {
-                add: {x: Int, y: Int} -> Int = {x, y} -> x + y
+                compute: {x: Int, y: Int} -> Int = {x, y} -> x + y
             }
 
             let test = {} -> do
                 let promise = spawn {f = {} ->
-                    perform Calculator in Math.add {x = 10, y = 32}
+                    perform Calculator in Math.compute {x = 10, y = 32}
                 }
                 await {p =promise}
 

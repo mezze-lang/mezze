@@ -116,7 +116,8 @@ class MezzeParser(
 
             return when (val result = programParser(stream)) {
                 is ParseResult.Success -> {
-                    val programWithComments = result.value.copy(comments = comments.toList())
+                    val resolvedProgram = resolveImplDeclarations(result.value)
+                    val programWithComments = resolvedProgram.copy(comments = comments.toList())
                     if (desugar) desugarProgram(programWithComments) else programWithComments
                 }
                 is ParseResult.Failure -> throw ParseException(
@@ -182,7 +183,7 @@ class MezzeParser(
                 }
             }
 
-            val program = Program(items, comments.toList())
+            val program = resolveImplDeclarations(Program(items, comments.toList()))
             val finalProgram = if (desugar && errors.isEmpty()) desugarProgram(program) else program
 
             return ParseResultWithRecovery(finalProgram, errors, warnings.toList())
@@ -352,8 +353,8 @@ class MezzeParser(
                 { s -> parseTypeDeclaration(s, visibility) },
                 { s -> parseNewtypeDeclaration(s, visibility) },
                 { s -> parseAbilityDeclaration(s) },
-                { s -> parseImplAbilityDeclaration(s) },  // Try ability impl first
-                { s -> parseImplDeclaration(s) },          // Then effect impl
+                { s -> parseImplDeclaration(s) },          // Try effect impl first (same syntax as ability impl)
+                { s -> parseImplAbilityDeclaration(s) },  // Then ability impl
                 { s -> parseUseDeclaration(s, visibility) },
                 { s -> parseLetBindingWithVisibility(s, visibility) },
                 { s -> parseConstrainedLambda(s) },  // Try constrained lambda before general expression
@@ -489,6 +490,16 @@ class MezzeParser(
 
 
     internal val identifierParser: Parser<Token> = tok(TokenType.IDENTIFIER)
+
+    /**
+     * Parser for member names after `.` in member access expressions.
+     * Accepts identifiers and keywords that are valid as member names (e.g., `for` in `Show.for`).
+     */
+    internal val memberIdentifierParser: Parser<Token> =
+        Parsers.token(
+            { it.type == TokenType.IDENTIFIER || it.type == TokenType.FOR },
+            "identifier or keyword member"
+        )
 
     /**
      * Parse a qualified name: module::name or just name

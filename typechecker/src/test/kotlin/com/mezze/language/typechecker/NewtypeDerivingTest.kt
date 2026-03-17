@@ -72,7 +72,7 @@ class NewtypeDerivingTest {
         val source = """
             newtype Email = Email String
 
-            let show = {e: Email} -> Inspect.to_str {val = e}
+            let show = {e: Email} -> e.to_dbg_str {}
         """.trimIndent()
 
         val ast = parser.parse(source)

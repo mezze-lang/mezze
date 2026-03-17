@@ -64,11 +64,11 @@ class DebugTest {
 
     @Test
     fun `format ability with associated types`() {
-        val input = """ability Encoder 'a having 'output where {
+        val input = """ability Encoder for 'a having 'output where {
     encode: { val: 'a } -> 'output
 }"""
         val output = formatter.format(input)
-        val expected = """ability Encoder 'a having 'output where {
+        val expected = """ability Encoder for 'a having 'output where {
   encode: { val: 'a } -> 'output
 }
 """
@@ -77,11 +77,11 @@ class DebugTest {
 
     @Test
     fun `format ability with dependencies`() {
-        val input = """ability Ord 'a with Eq 'a where {
+        val input = """ability Ord for 'a with Eq 'a where {
     compare: { left: 'a, right: 'a } -> Int
 }"""
         val output = formatter.format(input)
-        val expected = """ability Ord 'a with Eq 'a where {
+        val expected = """ability Ord for 'a with Eq 'a where {
   compare: { left: 'a, right: 'a } -> Int
 }
 """
@@ -90,11 +90,11 @@ class DebugTest {
 
     @Test
     fun `format ability with multiple type params`() {
-        val input = """ability Encode 'repr 'a where {
+        val input = """ability Encode 'repr for 'a where {
     encode: { val: 'a, config: CodecConfig } -> (Result 'repr EncodeError)
 }"""
         val output = formatter.format(input)
-        val expected = """ability Encode 'repr 'a where {
+        val expected = """ability Encode 'repr for 'a where {
   encode: { val: 'a, config: CodecConfig } -> Result 'repr EncodeError
 }
 """
@@ -150,11 +150,11 @@ class DebugTest {
     @Test
     fun `format ability impl single-line`() {
         // impl bodies always go multi-line, but single operation = no trailing comma
-        val input = """impl Eq Int where {
+        val input = """impl Eq for Int where {
     eq = {left, right} -> left == right
 }"""
         val output = formatter.format(input)
-        val expected = """impl Eq Int where {
+        val expected = """impl Eq for Int where {
   eq = { left, right } -> left == right
 }
 """

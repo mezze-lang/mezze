@@ -286,7 +286,8 @@ data class PerformerOperation(
 @Serializable
 data class AbilityDeclaration(
     val name: String,
-    val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
+    val typeParams: List<String>,                // ALL type parameters including receiver, e.g. ['b, 'a] for "ability Convert 'b for 'a"
+    val receiverTypeParam: String? = null,       // The 'for' type param that becomes `it` in impl bodies. e.g. "'a" in "ability Show for 'a"
     val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'item, 'iter'
     val constraints: List<AbilityConstraint> = emptyList(),
     val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
@@ -366,9 +367,22 @@ data class AbilityOperation(
     val isPure: Boolean get() = !hasEffects
 }
 
+/**
+ * Distinguishes named ability impls from inherent impls.
+ * - Named: `impl Show for Int where { ... }` — implements an ability
+ * - Inherent: `impl Int where { ... }` — attaches methods directly to a type
+ */
+@Serializable
+sealed class ImplTarget {
+    @Serializable
+    data class Named(val ability: QualifiedRef) : ImplTarget()
+    @Serializable
+    data object Inherent : ImplTarget()
+}
+
 @Serializable
 data class ImplAbilityDeclaration(
-    val ability: QualifiedRef,
+    val target: ImplTarget,
     val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
     val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
@@ -376,7 +390,16 @@ data class ImplAbilityDeclaration(
     val inferredType: MezzeType? = null,           // From typechecker
     val sourceLocation: SourceLocation? = null,   // For error reporting
     val contentHash: String? = null               // Content-addressable hash
-) : ProgramItem
+) : ProgramItem {
+    /** Convenience: get the ability name for named impls, or null for inherent impls */
+    val abilityName: String? get() = (target as? ImplTarget.Named)?.ability?.localName
+
+    /** Convenience: get the ability QualifiedRef for named impls */
+    val abilityRef: QualifiedRef? get() = (target as? ImplTarget.Named)?.ability
+
+    /** Whether this is an inherent impl (no ability) */
+    val isInherent: Boolean get() = target is ImplTarget.Inherent
+}
 
 @Serializable
 data class ImplAbilityOperation(

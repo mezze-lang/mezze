@@ -23,15 +23,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            Show.show {val = 42}
+            42.show {}
         """.trimIndent()
 
         val result = eval(source)
@@ -43,15 +43,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
         val source = """
             use std::int
 
-            ability Convert 'a 'b where {
-              convert : {val: 'a} -> 'b
+            ability MyConvert 'b for 'a where {
+              convert : {} -> 'b
             }
 
-            impl Convert Int Str where {
-              convert : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl MyConvert for Str Int where {
+              convert = {} -> int::to_str {n = it}
             }
 
-            Convert.convert {val = 123}
+            123.convert {}
         """.trimIndent()
 
         val result = eval(source)
@@ -63,20 +63,20 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            impl Show Str where {
-              show : {val: Str} -> Str = {val} -> val
+            impl Show for Str where {
+              show = {} -> it
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
-              Show.show {val = val}
+              val.show {}
 
             displayValue {val = 42}
         """.trimIndent()
@@ -90,20 +90,20 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> "INT:$(int::to_str {n = val})"
+            impl Show for Int where {
+              show = {} -> "INT:$(int::to_str {n = it})"
             }
 
-            impl Show Str where {
-              show : {val: Str} -> Str = {val} -> "STR:$(val)"
+            impl Show for Str where {
+              show = {} -> "STR:$(it)"
             }
 
-            let displayInt = Show.show {val = 42}
-            let displayStr = Show.show {val = "hello"}
+            let displayInt = 42.show {}
+            let displayStr = "hello".show {}
 
             "$(displayInt) | $(displayStr)"
         """.trimIndent()
@@ -191,16 +191,16 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testComplexAbilityAndEffectInteractionExecution() {
         val source = """
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
             effect Log where {
               log : {message: Str} -> Unit <Log>
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> "123"
+            impl Show for Int where {
+              show = {} -> "123"
             }
 
             impl Log for MockLogger where {
@@ -208,7 +208,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             perform MockLogger in do
-              let str = Show.show {val = 123}
+              let str = 123.show {}
               Log.log {message = "Showing: $(str)"}
               "logged_$(str)"
         """.trimIndent()
@@ -220,36 +220,26 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testAbilityChainExecution() {
         val source = """
-            ability Eq 'a where {
-              equals : {left: 'a, right: 'a} -> Bool
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            impl Show for Int where {
+              show = {} -> "5"
             }
 
-            impl Eq Int where {
-              equals : {left: Int, right: Int} -> Bool = {left, right} -> True
-            }
-
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> "5"
-            }
-
-            impl Show Bool where {
-              show : {val: Bool} -> Str = {val} -> "True"
+            impl Show for Bool where {
+              show = {} -> "True"
             }
 
             do
-              let isEqual = Eq.equals {left = 5, right = 5}
-              let xStr = Show.show {val = 5}
-              let yStr = Show.show {val = 5}
-              let resultStr = Show.show {val = isEqual}
-              "$(xStr) == $(yStr) is $(resultStr)"
+              let xStr = 5.show {}
+              let resultStr = True.show {}
+              "$(xStr) is $(resultStr)"
         """.trimIndent()
 
         val result = eval(source)
-        assertEquals("5 == 5 is True", result)
+        assertEquals("5 is True", result)
     }
 
     @Test
@@ -307,5 +297,71 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val result = eval(source)
         assertEquals(1L, result)
+    }
+
+    @Test
+    fun testAbilityForReturnsRecordOfMethods() {
+        val source = """
+            use std::int
+
+            ability Show for 'a where {
+              show : {} -> Str
+            }
+
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
+            }
+
+            let methods = Show.for { it = 42 }
+            methods.show {}
+        """.trimIndent()
+
+        val result = eval(source)
+        assertEquals("42", result)
+    }
+
+    @Test
+    fun testAbilityForWithMultipleMethods() {
+        val source = """
+            use std::int
+
+            ability Displayable for 'a where {
+              show : {} -> Str,
+              display : { verbose: Bool } -> Str
+            }
+
+            impl Displayable for Int where {
+              show = {} -> int::to_str {n = it},
+              display = { verbose } -> if verbose then "Int($(int::to_str {n = it}))" else int::to_str {n = it}
+            }
+
+            let methods = Displayable.for { it = 99 }
+            let s = methods.show {}
+            let d = methods.display { verbose = True }
+            "$(s) | $(d)"
+        """.trimIndent()
+
+        val result = eval(source)
+        assertEquals("99 | Int(99)", result)
+    }
+
+    @Test
+    fun testAbilityForChainedCallDesugarsStatically() {
+        val source = """
+            use std::int
+
+            ability Show for 'a where {
+              show : {} -> Str
+            }
+
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
+            }
+
+            Show.for { it = 7 }.show {}
+        """.trimIndent()
+
+        val result = eval(source)
+        assertEquals("7", result)
     }
 }

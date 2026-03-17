@@ -157,12 +157,12 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test duplicate ability declaration should fail`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            ability Show 'a where {
-                display: {val: 'a} -> Str
+            ability Show for 'a where {
+                display: {} -> Str
             }
         """.trimIndent()
 
@@ -176,12 +176,12 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test different ability names should pass`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            ability Display 'a where {
-                display: {val: 'a} -> Str
+            ability Display for 'a where {
+                display: {} -> Str
             }
         """.trimIndent()
 
@@ -196,16 +196,16 @@ class DuplicateDeclarationExtendedTest {
         val code = """
             use std::int
 
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+                show = {} -> int::to_str {n = it}
             }
 
-            impl Show Int where {
-                show: {val: Int} -> Str = {val} -> "number"
+            impl Show for Int where {
+                show = {} -> "number"
             }
         """.trimIndent()
 
@@ -221,19 +221,19 @@ class DuplicateDeclarationExtendedTest {
         val code = """
             use std::int
 
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show: {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+                show = {} -> int::to_str {n = it}
             }
 
-            impl Show Str where {
-                show: {val: Str} -> Str = {val} -> val
+            impl Show for Str where {
+                show = {} -> it
             }
 
-            Show.show {val = 42}
+            42.show {}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -243,16 +243,16 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test duplicate ability implementation for generic type should fail`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show (List Int) where {
-                show: {val: List Int} -> Str = {val} -> "list"
+            impl Show for (List Int) where {
+                show = {} -> "list"
             }
 
-            impl Show (List Int) where {
-                show: {val: List Int} -> Str = {val} -> "[...]"
+            impl Show for (List Int) where {
+                show = {} -> "[...]"
             }
         """.trimIndent()
 
@@ -266,16 +266,16 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test ability implementation for different generic types should pass`() {
         val code = """
-            ability Show 'a where {
-                show: {val: 'a} -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show (List Int) where {
-                show: {val: List Int} -> Str = {val} -> "list of ints"
+            impl Show for (List Int) where {
+                show = {} -> "list of ints"
             }
 
-            impl Show (List Str) where {
-                show: {val: List Str} -> Str = {val} -> "list of strings"
+            impl Show for (List Str) where {
+                show = {} -> "list of strings"
             }
         """.trimIndent()
 
@@ -288,16 +288,16 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test duplicate multi-parameter ability implementation should fail`() {
         val code = """
-            ability Convert 'from 'to where {
-                convert: {value: 'from} -> 'to
+            ability Convert 'to for 'from where {
+                convert: {} -> 'to
             }
 
-            impl Convert Str Int where {
-                convert: {value: Str} -> Int = {value} -> 0
+            impl Convert for Int Str where {
+                convert = {} -> 0
             }
 
-            impl Convert Str Int where {
-                convert: {value: Str} -> Int = {value} -> 1
+            impl Convert for Int Str where {
+                convert = {} -> 1
             }
         """.trimIndent()
 
@@ -313,19 +313,19 @@ class DuplicateDeclarationExtendedTest {
         val code = """
             use std::int
 
-            ability Convert 'from 'to where {
-                convert: {value: 'from} -> 'to
+            ability Convert 'to for 'from where {
+                convert: {} -> 'to
             }
 
-            impl Convert Str Int where {
-                convert: {value: Str} -> Int = {value} -> 0
+            impl Convert for Int Str where {
+                convert = {} -> 0
             }
 
-            impl Convert Int Str where {
-                convert: {value: Int} -> Str = {value} -> int::to_str {n = value}
+            impl Convert for Str Int where {
+                convert = {} -> int::to_str {n = it}
             }
 
-            Convert.convert {value = "hello"}
+            "hello".convert {}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

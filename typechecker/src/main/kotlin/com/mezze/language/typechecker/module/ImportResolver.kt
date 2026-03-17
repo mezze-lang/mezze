@@ -617,7 +617,7 @@ class ImportResolver(
                     for (abilityImpl in abilityImplsList) {
                         val implKey = abilityImpl.contentHash
                             ?: throw IllegalStateException(
-                                "Content hash not computed for imported impl: ${abilityImpl.ability.localName} ${abilityImpl.targetTypes}"
+                                "Content hash not computed for imported impl: ${abilityImpl.abilityName ?: "inherent"} ${abilityImpl.targetTypes}"
                             )
                         abilityImpls[implKey] = abilityImpl
                     }
@@ -627,7 +627,7 @@ class ImportResolver(
             // ALSO import all ability impls from the module, even if the ability
             // is defined elsewhere. This allows impls to be defined in separate
             // modules from their abilities (e.g., Show in abilities/show.mz,
-            // impl Show Int in impls/show_impls.mz).
+            // impl Show for Int in impls/show_impls.mz).
             // O(1) access via index instead of filterIsInstance scan
             abilityImpls.putAll(index.abilityImplsByHash)
 

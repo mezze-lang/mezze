@@ -285,17 +285,17 @@ class EffectPropagationTest {
               log : {msg: Str} -> {} <Log>
             }
 
-            ability Math 'a where {
-              add : {x: 'a, y: 'a} -> 'a
+            ability Math for 'a where {
+              compute : {r: 'a} -> 'a
             }
 
-            impl Math Int where {
-              add : {x: Int, y: Int} -> Int = {x, y} -> x + y
+            impl Math for Int where {
+              compute : {r: Int} -> Int = {r} -> it + r
             }
 
             # This function should have no effects since Math is an ability, not an effect
             let pureCalculation : {a: Int, b: Int} -> Int <> = {a, b} ->
-              Math.add {x = a, y = b}
+              a.compute {r = b}
         """.trimIndent()
 
         val program = parser.parse(source)

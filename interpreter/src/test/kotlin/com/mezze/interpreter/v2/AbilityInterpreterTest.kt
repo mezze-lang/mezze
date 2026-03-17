@@ -21,8 +21,8 @@ class AbilityInterpreterTest {
     @Test
     fun testSimpleAbilityDeclaration() {
         val code = """
-            ability Encoder 'a where {
-              encode : {val: 'a} -> Str
+            ability Encoder for 'a where {
+              encode : {} -> Str
             }
 
             1
@@ -34,12 +34,12 @@ class AbilityInterpreterTest {
     @Test
     fun testImplAbilityDeclaration() {
         val code = """
-            ability Encoder 'a where {
-              encode : {val: 'a} -> Str
+            ability Encoder for 'a where {
+              encode : {} -> Str
             }
 
-            impl Encoder Int where {
-              encode : {val: Int} -> Str = {val} -> "number"
+            impl Encoder for Int where {
+              encode : {} -> Str = {} -> "number"
             }
 
             1
@@ -51,16 +51,16 @@ class AbilityInterpreterTest {
     @Test
     fun testMultipleAbilityImplementations() {
         val code = """
-            ability Encoder 'a where {
-              encode : {val: 'a} -> Str
+            ability Encoder for 'a where {
+              encode : {} -> Str
             }
 
-            impl Encoder Int where {
-              encode : {val: Int} -> Str = {val} -> "number"
+            impl Encoder for Int where {
+              encode : {} -> Str = {} -> "number"
             }
 
-            impl Encoder Str where {
-              encode : {val: Str} -> Str = {val} -> val
+            impl Encoder for Str where {
+              encode : {} -> Str = {} -> it
             }
 
             1
@@ -72,14 +72,14 @@ class AbilityInterpreterTest {
     @Test
     fun testAbilityWithMultipleOperations() {
         val code = """
-            ability Show 'a where {
-              show : {val: 'a} -> Str,
-              debug : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str,
+              debug : {} -> Str
             }
 
-            impl Show Str where {
-              show : {val: Str} -> Str = {val} -> val,
-              debug : {val: Str} -> Str = {val} -> "\"$(val)\""
+            impl Show for Str where {
+              show : {} -> Str = {} -> it,
+              debug : {} -> Str = {} -> "\"$(it)\""
             }
 
             1
@@ -92,12 +92,12 @@ class AbilityInterpreterTest {
         val code = """
             use std::int
 
-            ability Serializer 'a where {
-              serialize : {val: 'a} -> Str
+            ability Serializer for 'a where {
+              serialize : {} -> Str
             }
 
-            impl Serializer Int where {
-              serialize : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Serializer for Int where {
+              serialize : {} -> Str = {} -> int::to_str {n = it}
             }
 
             1
@@ -110,12 +110,12 @@ class AbilityInterpreterTest {
         val code = """
             use std::int
 
-            ability Encoder 'a where {
-              encode : {val: 'a} -> Str
+            ability Encoder for 'a where {
+              encode : {} -> Str
             }
 
-            impl Encoder Int where {
-              encode : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Encoder for Int where {
+              encode : {} -> Str = {} -> int::to_str {n = it}
             }
 
             42

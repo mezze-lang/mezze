@@ -248,7 +248,7 @@ object CodebasePopulator {
 
         // Create a name that includes ability and types for uniqueness
         val typeNames = decl.targetTypes.joinToString(",") { printTypeAnnotation(it) }
-        val implName = "${decl.ability.localName}::[$typeNames]"
+        val implName = "${decl.abilityName ?: "inherent"}::[$typeNames]"
 
         codebase.putDefinition(StoredDefinition(
             hash = hash,

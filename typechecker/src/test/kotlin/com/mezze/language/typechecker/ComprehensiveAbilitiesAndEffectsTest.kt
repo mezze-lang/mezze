@@ -29,15 +29,15 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> Show.show {val = val}
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -52,7 +52,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         // Verify implementation is processed  
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
-        assertEquals("Show", implDecl.ability.localName)
+        assertEquals("Show", implDecl.abilityName)
 
         // Verify the displayValue binding has correct type
         val displayValueBinding = typedProgram.items.find { 
@@ -66,21 +66,21 @@ class ComprehensiveAbilitiesAndEffectsTest {
     fun testAbilityWithMethodLevelConstraints() {
         // Note: Using MyEq/MyOrd to avoid conflict with built-in Eq ability
         val source = """
-            ability MyEq 'a where {
-              equals : {left: 'a, right: 'a} -> Bool
+            ability MyEq for 'a where {
+              equals : {right: 'a} -> Bool
             }
 
-            ability MyOrd 'a where {
-              compare : {left: 'a, right: 'a} with MyEq 'a -> Int
+            ability MyOrd for 'a where {
+              compare : {right: 'a} with MyEq 'a -> Int
             }
 
-            impl MyEq Int where {
-              equals : {left: Int, right: Int} -> Bool = {left, right} -> left == right
+            impl MyEq for Int where {
+              equals = {right} -> it == right
             }
 
-            impl MyOrd Int where {
-              compare : {left: Int, right: Int} -> Int = {left, right} ->
-                if MyEq.equals {left = left, right = right} then 0 else 1
+            impl MyOrd for Int where {
+              compare = {right} ->
+                if it.equals {right = right} then 0 else 1
             }
         """.trimIndent()
 
@@ -102,15 +102,15 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> Show.show {val = val}
+            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -125,16 +125,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
-              Show.show {val = val}
+              val.show {}
 
             let result = displayValue {val = 42}
         """.trimIndent()
@@ -159,26 +159,26 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Convert 'a 'b where {
-              convert : {val: 'a} -> 'b
+            ability Convert 'b for 'a where {
+              convert : {} -> 'b
             }
 
-            impl Convert Int Str where {
-              convert : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Convert for Str Int where {
+              convert = {} -> int::to_str {n = it}
             }
 
-            let result = Convert.convert {val = 42}
+            let result = 42.convert {}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify multi-parameter ability declaration
-        val convertDecl = typedProgram.items.find { 
-            it is AbilityDeclaration && it.name == "Convert" 
+        val convertDecl = typedProgram.items.find {
+            it is AbilityDeclaration && it.name == "Convert"
         } as AbilityDeclaration?
         assertNotNull(convertDecl)
-        assertEquals(listOf("'a", "'b"), convertDecl.typeParams)
+        assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
 
         // Verify implementation with multiple target types
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
@@ -314,20 +314,20 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            impl Show Bool where {
-              show : {val: Bool} -> Str = {val} -> if val then "True" else "False"
+            impl Show for Bool where {
+              show = {} -> if it then "True" else "False"
             }
 
             let showValue: {val: 'a} -> Str with Show 'a = {val} ->
-              Show.show {val = val}
+              val.show {}
 
             let result = showValue {val = True}
         """.trimIndent()
@@ -344,16 +344,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show : {val: 'a} -> Str
+            ability Show for 'a where {
+              show : {} -> Str
             }
 
             effect Log where {
               log : {message: Str} -> Unit <Log>
             }
 
-            impl Show Int where {
-              show : {val: Int} -> Str = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
             impl Log for ConsoleLogger where {
@@ -361,7 +361,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let loggedShow: {val: 'a} -> Str <Log> with Show 'a = {val} -> do
-              let str = Show.show {val = val}
+              let str = val.show {}
               Log.log {message = "Showing value: $(str)"}
               str
 

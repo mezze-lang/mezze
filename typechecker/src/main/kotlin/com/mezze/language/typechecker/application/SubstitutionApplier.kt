@@ -93,14 +93,20 @@ class SubstitutionApplier(
     // Track generated codec implementations that need to be added to the program
     private val generatedCodecImpls = mutableListOf<ImplAbilityDeclaration>()
 
+    // Map from content hash → processed ImplAbilityDeclaration (with substitutions applied to operation bodies).
+    // Built during applyToProgram as we encounter ImplAbilityDeclaration items.
+    // Used to inline ability calls: instead of emitting ability dispatch nodes,
+    // we replace calls with the concrete impl body wrapped in a let-binding for `it`.
+    private val processedImplBodies = mutableMapOf<String, ImplAbilityDeclaration>()
+
     // Mutable version of abilityImpls that includes generated codec impls
     // This allows nested Encode/Decode calls to find impls generated in the same pass
     private val mutableAbilityImpls = abilityImpls.toMutableMap()
 
     // Secondary index: abilityName -> list of content hashes for O(1) lookup
     // Mirrors TypingContext.abilityImplsByName pattern
-    private val mutableAbilityImplsByName: MutableMap<String, MutableList<String>> = run {
-        val index = mutableMapOf<String, MutableList<String>>()
+    private val mutableAbilityImplsByName: MutableMap<String?, MutableList<String>> = run {
+        val index = mutableMapOf<String?, MutableList<String>>()
         for ((hash, info) in abilityImpls) {
             index.getOrPut(info.abilityName) { mutableListOf() }.add(hash)
         }
@@ -125,7 +131,7 @@ class SubstitutionApplier(
 
         // Also add to mutableAbilityImpls so nested calls can find it
         // Use content hash as the key (same key format as TypingContext)
-        val abilityName = impl.ability.localName
+        val abilityName = impl.abilityName ?: return impl  // inherent impls: nothing to substitute
         val targetTypes = impl.targetTypes.map { com.mezze.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
         val contentHashKey = hash.toFullHexString()
 
@@ -541,10 +547,30 @@ class SubstitutionApplier(
      * Creates a RecordType from the impl's operations, matching old typechecker behavior.
      */
     private fun applyToImplAbilityDeclaration(implDecl: ImplAbilityDeclaration): ImplAbilityDeclaration {
+        // Inject `it` into identifierContext for impl body processing.
+        // This allows method calls like `it.inner {}` inside impl bodies to resolve correctly.
+        val originalContext = identifierContext.toMap()
+        val abilityDecl = implDecl.abilityName?.let { abilityDeclarations[it] }
+        if (abilityDecl != null && implDecl.targetTypes.isNotEmpty()) {
+            val receiverIndex = if (abilityDecl.receiverTypeParam != null) {
+                abilityDecl.typeParams.indexOf(abilityDecl.receiverTypeParam)
+            } else {
+                abilityDecl.typeParams.size - 1
+            }
+            val safeIndex = receiverIndex.coerceIn(0, implDecl.targetTypes.size - 1)
+            val receiverAnnotation = implDecl.targetTypes[safeIndex]
+            val receiverType = convertTypeAnnotation(receiverAnnotation)
+            identifierContext[BindingKey.unqualified(Keywords.IT)] = receiverType
+        }
+
         val updatedOperations = implDecl.operations.map { op ->
             val updatedImpl = applyToExpression(op.implementation)
             op.copy(implementation = updatedImpl)
         }
+
+        // Restore original context
+        identifierContext.clear()
+        identifierContext.putAll(originalContext)
 
         // Create a RecordType from the impl operations (old typechecker pattern)
         // This matches OldTypeChecker.kt:1744-1766
@@ -569,10 +595,19 @@ class SubstitutionApplier(
         // Apply substitution to the record type
         val updatedInferredType = substitution.apply(implRecordType)
 
-        return implDecl.copy(
+        val result = implDecl.copy(
             operations = updatedOperations,
             inferredType = updatedInferredType
         )
+
+        // Store the processed impl for ability inlining.
+        // This allows applyToFunctionCall to replace ability calls with concrete impl bodies.
+        val contentHash = result.contentHash
+        if (contentHash != null) {
+            processedImplBodies[contentHash] = result
+        }
+
+        return result
     }
 
     /**
@@ -994,11 +1029,8 @@ class SubstitutionApplier(
             // Try to compute the type based on the constructor name
             when (expr.constructor) {
                 "True", "False" -> {
-                    // Bool constructor: | True, False |
-                    MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
-                    )
+                    // Bool is a primitive type, use BoolType for consistent matching
+                    MezzeType.BoolType
                 }
                 "None" -> {
                     // Option None: Option 'a = | Some { val: 'a }, None |
@@ -1144,7 +1176,7 @@ class SubstitutionApplier(
         return expr.copy(body = updatedBody, inferredType = updatedType)
     }
 
-    private fun applyToFunctionCall(expr: FunctionCall): FunctionCall {
+    private fun applyToFunctionCall(expr: FunctionCall): Expression {
         val updatedFunction = applyToExpression(expr.function)
         val updatedArguments = applyToExpression(expr.arguments)
 
@@ -1186,17 +1218,136 @@ class SubstitutionApplier(
             }
         }
 
-        // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
-        // In this case, we need to resolve based on the argument types, not the function type constraints
+        // Direct ability method call: Ability.method { args }
+        // Handles codec abilities (Encode.encode, Decode.decode) and operator desugaring.
+        // User-defined abilities go through resolveMethodCallByReceiverType instead.
         if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
             resolvedAbilities = resolveDirectAbilityMethodCall(updatedFunction, updatedArguments, updatedType)
         }
 
-        // TCO: Check if this call is a self-recursive tail call
-        val isTailCall = expr.sourceLocation != null && tailCallLocations.contains(expr.sourceLocation)
+        // Method-call syntax: value.method { args } where receiver is an expression (not ability name).
+        // The typechecker's tryGenerateMethodCall handled constraints, but resolveDirectAbilityMethodCall
+        // only handles Identifier receivers. Resolve using the receiver's inferred type.
+        if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
+            val receiver = (updatedFunction as MemberAccess).receiver
+            val receiverIsAbilityName = when (receiver) {
+                is Identifier -> {
+                    val name = receiver.localName
+                    mutableAbilityImpls.values.any { it.abilityName == name } ||
+                        BuiltinAbilities.isBuiltin(name) ||
+                        name in BuiltinAbilities.CODEC_ABILITIES
+                }
+                is VariantConstruction -> false
+                else -> false
+            }
+            if (!receiverIsAbilityName) {
+                resolvedAbilities = resolveMethodCallByReceiverType(updatedFunction as MemberAccess, updatedType)
+            }
+        }
 
-        // Get content hash for cross-module function references
-        // This allows the interpreter to lookup by hash instead of string
+        // STATIC DESUGARING: Ability.for { it = value }.method { args }
+        // When the function is MemberAccess(forCall, method) and forCall is a .for call,
+        // rewrite to value.method { args } — avoiding runtime dictionary materialization.
+        if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
+            val outerReceiver = (updatedFunction as MemberAccess).receiver
+            val outerMethod = (updatedFunction as MemberAccess).member
+            if (outerReceiver is FunctionCall &&
+                outerReceiver.function is MemberAccess &&
+                (outerReceiver.function as MemberAccess).member == Keywords.FOR &&
+                outerReceiver.resolvedAbilities.isNotEmpty()
+            ) {
+                // Extract the `it` value from the .for call's arguments
+                val forArgs = outerReceiver.arguments
+                val itValue = if (forArgs is RecordLiteral) {
+                    forArgs.entries.filterIsInstance<RecordFieldEntry>()
+                        .find { it.name == Keywords.IT }?.value ?: forArgs
+                } else {
+                    forArgs
+                }
+                // Rewrite: value.method { args } with the .for call's resolvedAbilities
+                val rewrittenFunction = MemberAccess(
+                    receiver = itValue,
+                    member = outerMethod,
+                    sourceLocation = updatedFunction.sourceLocation,
+                    inferredType = updatedFunction.inferredType
+                )
+                resolvedAbilities = outerReceiver.resolvedAbilities
+                // Fall through to inlining below (don't return early)
+                return inlineOrEmit(expr, rewrittenFunction, updatedArguments, updatedType, resolvedAbilities)
+            }
+        }
+
+        return inlineOrEmit(expr, updatedFunction, updatedArguments, updatedType, resolvedAbilities)
+    }
+
+    /**
+     * Try to inline a resolved ability call by replacing it with the concrete impl body.
+     * If inlining is possible (we have the impl body in processedImplBodies), produces:
+     *   DoExpression(let it = receiver, opBody(args))
+     * Otherwise falls back to emitting the FunctionCall with resolvedAbilities for the interpreter.
+     *
+     * For Ability.for { it = value } calls, produces a RecordLiteral of closures.
+     */
+    private fun inlineOrEmit(
+        expr: FunctionCall,
+        updatedFunction: Expression,
+        updatedArguments: Expression,
+        updatedType: MezzeType?,
+        resolvedAbilities: Map<String, ResolvedAbility>
+    ): Expression {
+        // Try to inline non-builtin ability method calls
+        if (resolvedAbilities.isNotEmpty() && updatedFunction is MemberAccess) {
+            val methodName = updatedFunction.member
+            val receiver = updatedFunction.receiver
+
+            // Find the first non-builtin resolved ability with an implementation hash
+            val resolved = resolvedAbilities.values.firstOrNull { !it.isBuiltin && it.implementationHash != null }
+            if (resolved != null) {
+                val implDecl = processedImplBodies[resolved.implementationHash]
+                if (implDecl != null) {
+                    // Handle Ability.for { it = value } — produce a record of closures
+                    if (methodName == Keywords.FOR) {
+                        return inlineAbilityFor(expr, implDecl, updatedArguments, updatedType)
+                    }
+
+                    // Handle value.method { args } — inline the operation body
+                    val operation = implDecl.operations.find { it.name == methodName }
+                    if (operation != null) {
+                        val receiverIsAbilityName = when (receiver) {
+                            is Identifier -> {
+                                val name = receiver.localName
+                                mutableAbilityImpls.values.any { it.abilityName == name } ||
+                                    BuiltinAbilities.isBuiltin(name)
+                            }
+                            is VariantConstruction -> {
+                                val name = receiver.constructor
+                                mutableAbilityImpls.values.any { it.abilityName == name } ||
+                                    BuiltinAbilities.isBuiltin(name)
+                            }
+                            else -> false
+                        }
+
+                        // For method-call syntax (value.method {}), bind `it` to the receiver
+                        // For direct ability name calls (Ability.method {args}), skip inlining
+                        // (these go through the interpreter's built-in dispatch or codec path)
+                        val itValue = if (!receiverIsAbilityName) {
+                            receiver
+                        } else {
+                            null
+                        }
+
+                        if (itValue != null) {
+                            return inlineAbilityMethodCall(
+                                expr, operation, itValue, updatedArguments, updatedType
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: emit FunctionCall with resolvedAbilities for the interpreter
+        val isTailCall = expr.sourceLocation != null && tailCallLocations.contains(expr.sourceLocation)
         val functionContentHash = when (val func = expr.function) {
             is Identifier -> identifierContentHashes[func.toBindingKey()]
             else -> null
@@ -1213,9 +1364,100 @@ class SubstitutionApplier(
     }
 
     /**
-     * Resolve a direct ability method call like Show.show {val = 42}.
-     * The receiver (Show) is an ability name, and we need to find the implementation
-     * based on the argument types.
+     * Inline a method call: value.method { args }
+     * Produces: DoExpression(let it = value in opBody(args))
+     *
+     * The operation's implementation is a lambda like {} -> int::to_str { n = it }.
+     * We wrap it in a DoExpression that binds `it` to the receiver, then call the lambda with args.
+     */
+    private fun inlineAbilityMethodCall(
+        expr: FunctionCall,
+        operation: ImplAbilityOperation,
+        itValue: Expression,
+        arguments: Expression,
+        returnType: MezzeType?
+    ): Expression {
+        val opBody = operation.implementation
+
+        // Produce: (do { let it = receiver; opBody })(arguments)
+        // This binds `it` in scope, then the opBody lambda can reference it
+        val letIt = LetStatement(
+            pattern = VariablePattern(Keywords.IT),
+            expression = itValue
+        )
+        val wrappedBody = DoExpression(
+            statements = listOf(letIt),
+            result = opBody,
+            inferredType = opBody.inferredType,
+            sourceLocation = expr.sourceLocation
+        )
+
+        // The result is a plain function call: wrappedBody(arguments)
+        // No resolvedAbilities needed — the interpreter sees a direct lambda call
+        return expr.copy(
+            function = wrappedBody,
+            arguments = arguments,
+            inferredType = returnType,
+            resolvedAbilities = emptyMap(),
+            isTailCall = false,
+            resolvedFunctionContentHash = null
+        )
+    }
+
+    /**
+     * Inline Ability.for { it = value } — produces a RecordLiteral of closures.
+     * Each ability operation becomes a field in the record, with `it` captured.
+     *
+     * Show.for { it = 42 } → { show = (do { let it = 42; show_impl_body }) }
+     */
+    private fun inlineAbilityFor(
+        expr: FunctionCall,
+        implDecl: ImplAbilityDeclaration,
+        arguments: Expression,
+        returnType: MezzeType?
+    ): Expression {
+        // Extract the `it` value from the { it = value } argument
+        val itValue = if (arguments is RecordLiteral) {
+            arguments.entries.filterIsInstance<RecordFieldEntry>()
+                .find { it.name == Keywords.IT }?.value ?: arguments
+        } else {
+            arguments
+        }
+
+        // Build a record literal with each operation as a field
+        val entries = implDecl.operations.map { op ->
+            val opBody = op.implementation
+            // Wrap each operation body so `it` is bound
+            val letIt = LetStatement(
+                pattern = VariablePattern(Keywords.IT),
+                expression = itValue
+            )
+            val wrappedBody = DoExpression(
+                statements = listOf(letIt),
+                result = opBody,
+                inferredType = opBody.inferredType,
+                sourceLocation = expr.sourceLocation
+            )
+            RecordFieldEntry(name = op.name, value = wrappedBody)
+        }
+
+        // Return a RecordLiteral directly — the FunctionCall is eliminated entirely
+        return RecordLiteral(
+            entries = entries,
+            inferredType = returnType,
+            sourceLocation = expr.sourceLocation
+        )
+    }
+
+    /**
+     * Resolve a direct ability method call where the receiver is an ability name: Ability.method { args }.
+     *
+     * Primary use cases:
+     * - Codec abilities: Encode.encode {val = x}, Decode.decode {val = bytes}
+     * - Operator desugaring: NumAdd.add {l = x, r = y} (from parser's x + y)
+     *
+     * For user-defined non-codec abilities, the preferred path is value.method {}
+     * which goes through resolveMethodCallByReceiverType.
      *
      * @param returnType The inferred return type of the call (for Decode, contains the target type)
      */
@@ -1252,7 +1494,7 @@ class SubstitutionApplier(
 
         // For Encode/EncodeRepr/Decode/DecodeRepr abilities, the type we need is in the "val" field specifically
         // For other abilities like Show, use the first field's type
-        val primaryType = if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
+        val primaryType = if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
             // Encode/Decode use {val: 'a, config: 'cfg} where 'a is the data type
             val valFieldType = argType.fields["val"]
             if (valFieldType != null) {
@@ -1272,9 +1514,9 @@ class SubstitutionApplier(
         // The format type comes from the Format/DecodeFormat impl in scope
         var impl: com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo? = null
 
-        if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
+        if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
             // Find the format type from Format/DecodeFormat impl
-            val formatAbility = if (abilityName in setOf("Encode", "EncodeRepr")) "Format" else "DecodeFormat"
+            val formatAbility = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) "Format" else "DecodeFormat"
             val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
             val formatTypeName = formatImpl?.targetTypes?.firstOrNull()
 
@@ -1334,17 +1576,17 @@ class SubstitutionApplier(
                     // No implementationHash for builtins - they're handled specially by interpreter
                 )
             }
-        } else if (abilityName in setOf("Encode", "EncodeRepr", "Decode", "DecodeRepr")) {
+        } else if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
             // Auto-derive Encode/EncodeRepr/Decode/DecodeRepr for serializable types
             // First, find the format type from the Format/DecodeFormat impl in scope
-            val formatAbility = if (abilityName in setOf("Encode", "EncodeRepr")) "Format" else "DecodeFormat"
+            val formatAbility = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) "Format" else "DecodeFormat"
             val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
 
             // For Encode/EncodeRepr: primaryType is the data type from the argument (correct)
             // For Decode/DecodeRepr: primaryType is the format type from the argument (wrong!)
             //             We need the return type, which is Result 'a DecodeError
             //             The 'a is what we need to decode to
-            val dataType = if (abilityName in setOf("Decode", "DecodeRepr")) {
+            val dataType = if (abilityName in BuiltinAbilities.DECODE_ABILITIES) {
                 // BIDIRECTIONAL INFERENCE: For Decode without type annotation, the target type
                 // is inferred from usage (e.g., field access like val.name). This creates
                 // HasField constraints that bind type variables to record types in the substitution.
@@ -1411,7 +1653,7 @@ class SubstitutionApplier(
                         }
                     }
                 for (nestedType in allTypesToGenerate) {
-                    val nestedImpl = if (abilityName in setOf("Encode", "EncodeRepr")) {
+                    val nestedImpl = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) {
                         codecGenerator.generateEncodeImpl(formatType, nestedType)
                     } else {
                         codecGenerator.generateDecodeImpl(formatType, nestedType)
@@ -1420,7 +1662,7 @@ class SubstitutionApplier(
                 }
 
                 // Generate the main implementation using the closed type
-                val generatedImpl = if (abilityName in setOf("Encode", "EncodeRepr")) {
+                val generatedImpl = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) {
                     codecGenerator.generateEncodeImpl(formatType, closedType)
                 } else {
                     codecGenerator.generateDecodeImpl(formatType, closedType)
@@ -1431,6 +1673,155 @@ class SubstitutionApplier(
                 val implWithHash = registerGeneratedCodecImpl(generatedImpl)
 
                 // Create the resolved ability reference using content hash as key
+                val implHash = implWithHash.contentHash
+                    ?: throw IllegalStateException("Content hash not computed for generated codec impl: $abilityName")
+
+                resolvedAbilities[implHash] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = listOf(formatType, closedType),
+                    isBuiltin = false,
+                    implementationHash = implHash
+                )
+            }
+        }
+
+        return resolvedAbilities
+    }
+
+    /**
+     * Resolve ability for method-call syntax: value.method { args }
+     * where the receiver is an expression (not an ability name).
+     * Uses the receiver's inferred type to find the matching ability implementation.
+     */
+    private fun resolveMethodCallByReceiverType(memberAccess: MemberAccess, callReturnType: MezzeType? = null): Map<String, ResolvedAbility> {
+        val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
+        val methodName = memberAccess.member
+        val receiverType = memberAccess.receiver.inferredType?.let { substitution.apply(it) } ?: return resolvedAbilities
+
+        // If the receiver is a record type that already has this field, it's a plain field access + call,
+        // not an ability method call. This correctly handles dictionaries from Ability.for { it = x }
+        // and any record that happens to have a field matching an ability method name.
+        if (receiverType is MezzeType.RecordType && methodName in receiverType.fields) {
+            return resolvedAbilities
+        }
+
+        // Find which ability defines this method
+        // Check user-defined abilities first
+        var abilityName: String? = null
+        for ((_, abilityDecl) in abilityDeclarations) {
+            if (abilityDecl.operations.any { it.name == methodName }) {
+                abilityName = abilityDecl.name
+                break
+            }
+        }
+
+        // Check built-in abilities (typechecker registry)
+        if (abilityName == null) {
+            abilityName = BuiltInAbilities.getAllAbilityNames().firstOrNull { name ->
+                BuiltInAbilities.getAbilityMethodType(name, methodName, MezzeType.VarType(TypeVar.fresh())) != null
+            }
+        }
+
+        if (abilityName == null) return resolvedAbilities
+
+        // Always try user-defined impls first — this handles cases like `impl NumAdd for Money`
+        // where the user provides a custom impl for a built-in ability on their newtype.
+        var impl = findAbilityImplementation(abilityName, listOf(receiverType))
+        if (impl == null) {
+            impl = findAbilityImplementationByFirstType(abilityName, receiverType)
+        }
+        // If only one impl exists for a non-builtin ability, use it
+        if (impl == null && !BuiltinAbilities.isBuiltin(abilityName)) {
+            val implHashes = mutableAbilityImplsByName[abilityName] ?: emptyList()
+            if (implHashes.size == 1) {
+                impl = mutableAbilityImpls[implHashes.first()]
+            }
+        }
+        if (impl != null) {
+            val contentHash = impl.contentHash
+                ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
+            resolvedAbilities[contentHash] = ResolvedAbility(
+                abilityName = abilityName,
+                typeArgs = impl.targetTypes.map { typeName ->
+                    PrimitiveTypes.fromName(typeName) ?: MezzeType.TypeApplication(typeName, emptyList())
+                },
+                isBuiltin = false,
+                implementationHash = contentHash
+            )
+        } else if (BuiltinAbilities.isBuiltin(abilityName)) {
+            // Fall back to built-in automatic implementation (e.g., Int + Int)
+            if (BuiltinAbilities.typeHasAutomaticImplementation(receiverType, abilityName)) {
+                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(receiverType)}"
+                resolvedAbilities[builtinKey] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = listOf(receiverType),
+                    isBuiltin = true
+                )
+            }
+        } else if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
+            // Auto-derive codec impls for method-call syntax: value.encode_repr { fmt, config }
+            val formatAbility = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) "Format" else "DecodeFormat"
+            val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
+
+            // For Encode/EncodeRepr: receiver type IS the data type
+            // For Decode/DecodeRepr: receiver is the repr type, data type comes from FunctionCall return type
+            val dataType = if (abilityName in BuiltinAbilities.DECODE_ABILITIES) {
+                // For method-call decode, the target type is extracted from the FunctionCall's inferredType
+                // which is set by CodecGenerator's typedDecodeCall as Result targetType DecodeError
+                val extractedTarget = extractDecodeTargetType(callReturnType)
+                if (extractedTarget != null && !containsVarType(extractedTarget)) {
+                    extractedTarget
+                } else {
+                    findDecodeTargetFromSubstitution() ?: extractedTarget ?: receiverType
+                }
+            } else {
+                receiverType // For Encode/EncodeRepr, receiver IS the data
+            }
+
+            val resolvedDataType = if (dataType is MezzeType.TypeApplication &&
+                (dataType.constructor == "Option" || dataType.constructor == "Result")) {
+                dataType
+            } else {
+                resolveTypeAlias(dataType)
+            }
+            val closedType = closeOpenRecords(resolvedDataType)
+
+            val formatTypes = setOf("Json", "JString", "JInt", "JBool", "JArray", "JObject", "JNull", "JFloat")
+            val isFormatType = when (closedType) {
+                is MezzeType.TypeApplication -> closedType.constructor in formatTypes
+                is MezzeType.VariantType -> closedType.constructors.keys.all { it in formatTypes }
+                else -> false
+            }
+
+            if (formatImpl != null && codecGenerator.isSerializable(closedType) && !containsVarType(closedType) && !isFormatType) {
+                val formatTypeName = formatImpl.targetTypes.firstOrNull() ?: return resolvedAbilities
+                val formatType = MezzeType.TypeApplication(formatTypeName, emptyList())
+
+                val allTypesToGenerate = collectNestedTypes(closedType)
+                    .filter { !containsVarType(it) }
+                    .filter { nestedType ->
+                        when (nestedType) {
+                            is MezzeType.TypeApplication -> nestedType.constructor !in formatTypes
+                            is MezzeType.VariantType -> !nestedType.constructors.keys.all { it in formatTypes }
+                            else -> true
+                        }
+                    }
+                for (nestedType in allTypesToGenerate) {
+                    val nestedImpl = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) {
+                        codecGenerator.generateEncodeImpl(formatType, nestedType)
+                    } else {
+                        codecGenerator.generateDecodeImpl(formatType, nestedType)
+                    }
+                    registerGeneratedCodecImpl(nestedImpl)
+                }
+
+                val generatedImpl = if (abilityName in BuiltinAbilities.ENCODE_ABILITIES) {
+                    codecGenerator.generateEncodeImpl(formatType, closedType)
+                } else {
+                    codecGenerator.generateDecodeImpl(formatType, closedType)
+                }
+
+                val implWithHash = registerGeneratedCodecImpl(generatedImpl)
                 val implHash = implWithHash.contentHash
                     ?: throw IllegalStateException("Content hash not computed for generated codec impl: $abilityName")
 

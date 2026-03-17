@@ -1069,7 +1069,7 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
     // ===== ABILITY DECLARATION =====
 
 internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
-        // Parse: ability Encoder 'a where { operations }
+        // Parse: ability Show for 'a where { operations }
         val abilityToken = tok(TokenType.ABILITY)(stream)
         return when (abilityToken) {
             is ParseResult.Success -> {
@@ -1080,19 +1080,44 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(name.remaining)
 
-                        // Parse type parameters: 'a 'b
-                        val typeParams = mutableListOf<String>()
-                        var currentStream = stream2
+                        // Parse optional generic type params BEFORE 'for': ability Convert 'b for 'a where { ... }
+                        val genericParams = mutableListOf<String>()
+                        var preForStream = stream2
                         while (true) {
-                            val typeVar = currentStream.current()
+                            val typeVar = preForStream.current()
                             if (typeVar?.type == TokenType.IDENTIFIER && typeVar.text.startsWith("'")) {
-                                typeParams.add(typeVar.text)
-                                currentStream = currentStream.advance()
-                                currentStream = skipNewlines(currentStream)
+                                genericParams.add(typeVar.text)
+                                preForStream = preForStream.advance()
+                                preForStream = skipNewlines(preForStream)
                             } else {
                                 break
                             }
                         }
+
+                        // Require 'for' keyword before receiver type parameter
+                        val forToken = tok(TokenType.FOR)(preForStream)
+                        if (forToken is ParseResult.Failure) {
+                            return preForStream.failure(
+                                "Expected 'for' keyword in ability declaration. " +
+                                "Syntax: ability ${name.value.text} for 'a where { ... }"
+                            )
+                        }
+                        forToken as ParseResult.Success
+                        val streamAfterFor = skipNewlines(forToken.remaining)
+
+                        // Parse the receiver type param (the 'for' param that becomes `it`)
+                        val receiverVar = streamAfterFor.current()
+                        if (receiverVar?.type != TokenType.IDENTIFIER || !receiverVar.text.startsWith("'")) {
+                            return streamAfterFor.failure(
+                                "Expected type variable after 'for' keyword (e.g., 'a). " +
+                                "Syntax: ability ${name.value.text} for 'a where { ... }"
+                            )
+                        }
+                        val receiverTypeParam = receiverVar.text
+                        var currentStream = skipNewlines(streamAfterFor.advance())
+
+                        // Combine: all type params = generics + receiver (receiver last for backward compat)
+                        val typeParams = genericParams + listOf(receiverTypeParam)
 
                         // Check for optional 'having' keyword for multiple associated types
                         val associatedTypes = mutableListOf<String>()
@@ -1285,6 +1310,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                                 AbilityDeclaration(
                                                     name = name.value.text,
                                                     typeParams = typeParams,
+                                                    receiverTypeParam = receiverTypeParam,
                                                     associatedTypes = associatedTypes,  // list of associated types from 'having' clause
                                                     constraints = emptyList(),  // constraints (for function ability constraints)
                                                     dependencies = dependencies,  // dependencies from 'with' clause
@@ -1366,154 +1392,213 @@ internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() 
     // ===== IMPL ABILITY DECLARATION =====
 
 internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
-        // Parse: impl Encoder Int where { operations }
-        // Also supports: impl module::Encoder Int where { operations }
+        // Parse named: impl Show for Int where { operations }
+        // Parse anonymous: impl Int where { operations }
+        // Also supports qualified: impl module::Encode for Int where { operations }
         val implToken = tok(TokenType.IMPL)(stream)
         return when (implToken) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
 
-                // Parse ability reference, possibly qualified (e.g., codec::EncodeFormat)
-                val abilityRefResult = parseQualifiedRef(stream1)
+                // Parse the first reference (could be ability name or target type for anonymous impl)
+                val firstRefResult = parseQualifiedRef(stream1)
 
-                when (abilityRefResult) {
+                when (firstRefResult) {
                     is ParseResult.Success -> {
-                        val abilityRef = abilityRefResult.value
-                        val stream2 = skipNewlines(abilityRefResult.remaining)
+                        val firstRef = firstRefResult.value
+                        val stream2 = skipNewlines(firstRefResult.remaining)
 
-                        // Parse target types (one or more)
-                        // Use simpleTypeArgument to avoid type applications consuming multiple types
-                        val targetTypes = mutableListOf<TypeAnnotation>()
-                        var currentStream = stream2
+                        // Check for 'for' keyword to distinguish named vs anonymous impl
+                        val forToken = tok(TokenType.FOR)(stream2)
 
-                        // Parse first type
-                        val firstType = simpleTypeArgument(currentStream)
-                        when (firstType) {
+                        when (forToken) {
                             is ParseResult.Success -> {
-                                targetTypes.add(firstType.value)
-                                currentStream = skipNewlines(firstType.remaining)
+                                // Named impl: impl AbilityName for TargetType where { ... }
+                                val abilityRef = firstRef
+                                val streamAfterFor = skipNewlines(forToken.remaining)
 
-                                // Parse additional types until we hit 'where' or 'having' keyword
-                                while (true) {
-                                    // Check if next token is 'where' or 'having' - if so, we're done with types
-                                    val nextToken = currentStream.current()
-                                    if (nextToken?.type == TokenType.WHERE || nextToken?.type == TokenType.HAVING) {
-                                        break
-                                    }
+                                parseImplAbilityBody(implToken, abilityRef, streamAfterFor)
+                            }
+                            is ParseResult.Failure -> {
+                                // Could be anonymous impl: impl Type where { ... }
+                                // Or could be the old syntax (impl Show for Int where) — give a helpful error
+                                val nextToken = stream2.current()
+                                if (nextToken?.type == TokenType.WHERE) {
+                                    // Anonymous impl: impl Type where { ... }
+                                    // Convert the firstRef to a type annotation
+                                    val targetType = IdentifierTypeAnnotation(firstRef.localName)
+                                    val targetTypes = listOf(targetType)
 
-                                    // Try to parse another type
-                                    val nextType = simpleTypeArgument(currentStream)
-                                    when (nextType) {
+                                    val whereToken = tok(TokenType.WHERE)(stream2)
+                                    when (whereToken) {
                                         is ParseResult.Success -> {
-                                            targetTypes.add(nextType.value)
-                                            currentStream = skipNewlines(nextType.remaining)
+                                            parseImplAbilityOperationsBlock(implToken, null, targetTypes, emptyMap(), whereToken)
                                         }
-                                        is ParseResult.Failure -> break
+                                        is ParseResult.Failure -> whereToken
                                     }
-                                }
-
-                                val stream3 = skipNewlines(currentStream)
-
-                                // Parse optional 'having' clause with associated type bindings
-                                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityRef.localName, "impl")
-                                val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
-                                    is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
-                                    is ParseResult.Failure -> return bindingsResult
-                                }
-
-                                val stream3d = skipNewlines(streamAfterHaving)
-                                val whereToken = tok(TokenType.WHERE)(stream3d)
-
-                                when (whereToken) {
-                                    is ParseResult.Success -> {
-                                        val stream4 = skipNewlines(whereToken.remaining)
-                                        val lbrace = tok(TokenType.LBRACE)(stream4)
-
-                                        when (lbrace) {
-                                            is ParseResult.Success -> {
-                                                val stream5 = skipNewlines(lbrace.remaining)
-
-                                                // Parse operations separated by commas (trailing comma allowed)
-                                                val operations = mutableListOf<ImplAbilityOperation>()
-                                                var opStream = stream5
-
-                                                // Parse first operation (if any)
-                                                when (val firstOp = implAbilityOperationParser(opStream)) {
-                                                    is ParseResult.Success -> {
-                                                        operations.add(firstOp.value)
-                                                        opStream = skipNewlines(firstOp.remaining)
-
-                                                        // Parse remaining operations, each preceded by comma
-                                                        while (true) {
-                                                            when (val comma = tok(TokenType.COMMA)(opStream)) {
-                                                                is ParseResult.Success -> {
-                                                                    opStream = skipNewlines(comma.remaining)
-                                                                    // Check if this is a trailing comma (next token is })
-                                                                    if (opStream.current()?.type == TokenType.RBRACE) {
-                                                                        break  // Trailing comma, done
-                                                                    }
-                                                                    // Parse next operation
-                                                                    when (val op = implAbilityOperationParser(opStream)) {
-                                                                        is ParseResult.Success -> {
-                                                                            operations.add(op.value)
-                                                                            opStream = skipNewlines(op.remaining)
-                                                                        }
-                                                                        is ParseResult.Failure -> {
-                                                                            return op  // Return error from operation parsing
-                                                                        }
-                                                                    }
-                                                                }
-                                                                is ParseResult.Failure -> {
-                                                                    // No comma - check if there's another operation (error) or }
-                                                                    val next = opStream.current()
-                                                                    if (next?.type == TokenType.IDENTIFIER) {
-                                                                        return opStream.failure(
-                                                                            "Missing ',' between ability impl methods. " +
-                                                                            "Methods must be comma-separated."
-                                                                        )
-                                                                    }
-                                                                    break  // No comma and no identifier, done
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    is ParseResult.Failure -> {
-                                                        // No operations, that's fine - empty impl
-                                                    }
-                                                }
-
-                                                val stream6 = skipNewlines(opStream)
-                                                val rbrace = tok(TokenType.RBRACE)(stream6)
-
-                                                when (rbrace) {
-                                                    is ParseResult.Success -> ParseResult.Success(
-                                                        ImplAbilityDeclaration(
-                                                            ability = abilityRef,
-                                                            targetTypes = targetTypes,
-                                                            forallVars = emptyList(),  // forallVars - deferred for later
-                                                            associatedTypeBindings = associatedTypeBindings,
-                                                            operations = operations,
-                                                            inferredType = null,
-                                                            sourceLocation = implToken.value.toSourceLocation()
-                                                        ),
-                                                        rbrace.remaining
-                                                    )
-                                                    is ParseResult.Failure -> rbrace
-                                                }
-                                            }
-                                            is ParseResult.Failure -> lbrace
-                                        }
-                                    }
-                                    is ParseResult.Failure -> whereToken
+                                } else {
+                                    // Not 'for' and not 'where' — fail so effect impl parser can try
+                                    forToken
                                 }
                             }
-                            is ParseResult.Failure -> firstType
                         }
                     }
-                    is ParseResult.Failure -> abilityRefResult
+                    is ParseResult.Failure -> firstRefResult
                 }
             }
             is ParseResult.Failure -> implToken
+        }
+    }
+
+    /**
+     * Parse the body of a named impl ability declaration (after 'for' keyword).
+     * Handles: impl AbilityName for TargetType [having ...] where { operations }
+     */
+    private fun MezzeParser.parseImplAbilityBody(
+        implToken: ParseResult.Success<Token>,
+        abilityRef: QualifiedRef,
+        streamAfterFor: TokenStream
+    ): ParseResult<ProgramItem> {
+        // Parse target types (one or more)
+        val targetTypes = mutableListOf<TypeAnnotation>()
+        var currentStream = streamAfterFor
+
+        // Parse first type
+        val firstType = simpleTypeArgument(currentStream)
+        return when (firstType) {
+            is ParseResult.Success -> {
+                targetTypes.add(firstType.value)
+                currentStream = skipNewlines(firstType.remaining)
+
+                // Parse additional types until we hit 'where' or 'having' keyword
+                while (true) {
+                    val nextToken = currentStream.current()
+                    if (nextToken?.type == TokenType.WHERE || nextToken?.type == TokenType.HAVING) {
+                        break
+                    }
+                    val nextType = simpleTypeArgument(currentStream)
+                    when (nextType) {
+                        is ParseResult.Success -> {
+                            targetTypes.add(nextType.value)
+                            currentStream = skipNewlines(nextType.remaining)
+                        }
+                        is ParseResult.Failure -> break
+                    }
+                }
+
+                val stream3 = skipNewlines(currentStream)
+
+                // Parse optional 'having' clause with associated type bindings
+                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityRef.localName, "impl")
+                val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
+                    is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
+                    is ParseResult.Failure -> return bindingsResult
+                }
+
+                val stream3d = skipNewlines(streamAfterHaving)
+                val whereToken = tok(TokenType.WHERE)(stream3d)
+
+                when (whereToken) {
+                    is ParseResult.Success -> {
+                        parseImplAbilityOperationsBlock(implToken, abilityRef, targetTypes, associatedTypeBindings, whereToken)
+                    }
+                    is ParseResult.Failure -> whereToken
+                }
+            }
+            is ParseResult.Failure -> firstType
+        }
+    }
+
+    /**
+     * Parse the operations block { op1 = ..., op2 = ... } for impl ability declarations.
+     */
+    private fun MezzeParser.parseImplAbilityOperationsBlock(
+        implToken: ParseResult.Success<Token>,
+        abilityRef: QualifiedRef?,
+        targetTypes: List<TypeAnnotation>,
+        associatedTypeBindings: Map<String, TypeAnnotation>,
+        whereToken: ParseResult.Success<Token>
+    ): ParseResult<ProgramItem> {
+        val stream4 = skipNewlines(whereToken.remaining)
+        val lbrace = tok(TokenType.LBRACE)(stream4)
+
+        return when (lbrace) {
+            is ParseResult.Success -> {
+                val stream5 = skipNewlines(lbrace.remaining)
+
+                // Parse operations separated by commas (trailing comma allowed)
+                val operations = mutableListOf<ImplAbilityOperation>()
+                var opStream = stream5
+
+                // Parse first operation (if any)
+                when (val firstOp = implAbilityOperationParser(opStream)) {
+                    is ParseResult.Success -> {
+                        operations.add(firstOp.value)
+                        opStream = skipNewlines(firstOp.remaining)
+
+                        // Parse remaining operations, each preceded by comma
+                        while (true) {
+                            when (val comma = tok(TokenType.COMMA)(opStream)) {
+                                is ParseResult.Success -> {
+                                    opStream = skipNewlines(comma.remaining)
+                                    if (opStream.current()?.type == TokenType.RBRACE) {
+                                        break  // Trailing comma, done
+                                    }
+                                    when (val op = implAbilityOperationParser(opStream)) {
+                                        is ParseResult.Success -> {
+                                            operations.add(op.value)
+                                            opStream = skipNewlines(op.remaining)
+                                        }
+                                        is ParseResult.Failure -> {
+                                            return op
+                                        }
+                                    }
+                                }
+                                is ParseResult.Failure -> {
+                                    val next = opStream.current()
+                                    if (next?.type == TokenType.IDENTIFIER) {
+                                        return opStream.failure(
+                                            "Missing ',' between ability impl methods. " +
+                                            "Methods must be comma-separated."
+                                        )
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // No operations, that's fine - empty impl
+                    }
+                }
+
+                val stream6 = skipNewlines(opStream)
+                val rbrace = tok(TokenType.RBRACE)(stream6)
+
+                when (rbrace) {
+                    is ParseResult.Success -> {
+                        val implTarget = if (abilityRef != null) {
+                            ImplTarget.Named(abilityRef)
+                        } else {
+                            ImplTarget.Inherent
+                        }
+                        ParseResult.Success(
+                            ImplAbilityDeclaration(
+                                target = implTarget,
+                                targetTypes = targetTypes,
+                                forallVars = emptyList(),
+                                associatedTypeBindings = associatedTypeBindings,
+                                operations = operations,
+                                inferredType = null,
+                                sourceLocation = implToken.value.toSourceLocation()
+                            ),
+                            rbrace.remaining
+                        )
+                    }
+                    is ParseResult.Failure -> rbrace
+                }
+            }
+            is ParseResult.Failure -> lbrace
         }
     }
 

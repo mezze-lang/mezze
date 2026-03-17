@@ -22,25 +22,25 @@ class FunctionAbilityConstraintTypeCheckerTest {
     @Test
     fun testAbilityDeclarationTypeChecking() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         assertEquals(1, typedProgram.items.size)
         val item = typedProgram.items[0]
         assertTrue(item is AbilityDeclaration)
-        
+
         val ability = item as AbilityDeclaration
         assertNotNull(ability.inferredType)
         assertTrue(ability.inferredType is MezzeType.RecordType)
-        
+
         val recordType = ability.inferredType as MezzeType.RecordType
         assertTrue(recordType.fields.containsKey("show"))
-        
+
         val showType = recordType.fields["show"]
         assertTrue(showType is MezzeType.FunctionType)
     }
@@ -48,12 +48,12 @@ class FunctionAbilityConstraintTypeCheckerTest {
     @Test
     fun testAbilityImplementationTypeChecking() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
-            
-            impl Show Int where {
-                show : {val: Int} -> Str = {val} -> "INT"
+
+            impl Show for Int where {
+                show = {} -> "INT"
             }
         """.trimIndent()
         
@@ -76,8 +76,8 @@ class FunctionAbilityConstraintTypeCheckerTest {
     @Test
     fun testLambdaExpressionWithAbilityConstraints() {
         val source = """
-            ability Encoder 'a where {
-                encode : {val: 'a} -> Str
+            ability Encoder for 'a where {
+                encode : {} -> Str
             }
 
             { val: 'a } -> Str with Encoder 'a = {val} -> "test"
@@ -106,14 +106,14 @@ class FunctionAbilityConstraintTypeCheckerTest {
     @Test
     fun testMultipleAbilityConstraints() {
         val source = """
-            ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+            ability Eq for 'a where {
+                equals : {right: 'a} -> Boolean
             }
-            
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+
+            ability Show for 'a where {
+                show : {} -> Str
             }
-            
+
             { left: 'a, right: 'a } -> Str with Eq 'a, Show 'a = {left, right} -> "test"
         """.trimIndent()
         
@@ -141,46 +141,36 @@ class FunctionAbilityConstraintTypeCheckerTest {
     }
 
     @Test
-    fun testAbilityOperationAccess() {
+    fun testAbilityOperationAccessIsBlocked() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
-            
+
             Show.show
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val topLevel = typedProgram.items[1] as TopLevelExpression
-        assertTrue(topLevel.expression is MemberAccess)
-        
-        val memberAccess = topLevel.expression as MemberAccess
-        // Note: The ability operation access may not have inferredType set yet
-        // as automatic resolution is still being implemented
-        // For now, just verify the structure is correct
-        
-        // Handle both Identifier and VariantConstruction cases
-        val receiverName = when (memberAccess.receiver) {
-            is Identifier -> (memberAccess.receiver as Identifier).localName
-            is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
-            else -> fail("Expected receiver to be Identifier or VariantConstruction, got ${memberAccess.receiver::class.simpleName}")
+
+        // Direct ability access is now blocked
+        val error = assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(program).program
         }
-        assertEquals("Show", receiverName)
-        assertEquals("show", memberAccess.member)
+
+        assertTrue(error.message?.contains("Direct ability access") == true,
+            "Error should mention direct ability access: ${error.message}")
+        assertTrue(error.message?.contains("Show.show") == true,
+            "Error should mention 'Show.show': ${error.message}")
     }
 
     @Test
     fun testMultiParameterAbilityConstraints() {
         val source = """
-            ability KVStore 'a 'b where {
-                store : {key: 'a, value: 'b} -> {}
+            ability KVStore 'b for 'a where {
+                store : {value: 'b} -> {}
             }
-            
-            { key: 'a, value: 'b } -> {} with KVStore 'a 'b = {key, value} -> {}
+
+            { key: 'a, value: 'b } -> {} with KVStore 'b 'a = {key, value} -> {}
         """.trimIndent()
         
         val program = parser.parse(source)
@@ -207,10 +197,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
     @Test
     fun testAbilityConstraintWithConcreteTypes() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
-            
+
             { val: Int } -> Str with Show Int = {val} -> "test"
         """.trimIndent()
         

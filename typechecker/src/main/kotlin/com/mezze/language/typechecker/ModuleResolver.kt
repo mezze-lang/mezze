@@ -67,7 +67,7 @@ data class ProgramIndex(
                 effectDeclarations = effectDecls.associateBy { it.name },
                 implsByPerformer = implDecls.associateBy { it.performerName },
                 implsByEffect = implDecls.groupBy { it.effect.localName },
-                abilityImplsByAbility = abilityImplDecls.groupBy { it.ability.localName },
+                abilityImplsByAbility = abilityImplDecls.filter { !it.isInherent }.groupBy { it.abilityName!! },
                 abilityImplsByHash = abilityImplDecls.mapNotNull { impl ->
                     impl.contentHash?.let { hash -> hash to impl }
                 }.toMap(),
@@ -907,21 +907,28 @@ class ModuleResolver(
                         "ImplDeclaration '$performerName' missing content hash - ContentHashComputer.computeHashes() must be called before extractExports()"
                     }
 
-                    exports[performerName] = ExportedItem(
-                        name = performerName,
-                        type = ExportedItemType.FUNCTION, // Handlers are treated as values
-                        mezzeType = mezzeType,
-                        originalName = performerName,
-                        contentHash = contentHash
-                    )
-                    // Register hash for debugging
-                    val qualifiedName = if (modulePath != null) "$modulePath::$performerName" else performerName
-                    ContentHashRegistry.register(
-                        hash = contentHash,
-                        qualifiedName = qualifiedName,
-                        modulePath = modulePath,
-                        kind = DeclarationKind.EFFECT_HANDLER
-                    )
+                    // Don't overwrite TYPE exports with handler FUNCTION exports.
+                    // This can happen when an ability impl is initially parsed as ImplDeclaration
+                    // (e.g., `impl Show for Person` where Show is imported) — the performerName
+                    // is the target type name and would overwrite the TypeDeclaration export.
+                    val existingExport = exports[performerName]
+                    if (existingExport?.type != ExportedItemType.TYPE) {
+                        exports[performerName] = ExportedItem(
+                            name = performerName,
+                            type = ExportedItemType.FUNCTION, // Handlers are treated as values
+                            mezzeType = mezzeType,
+                            originalName = performerName,
+                            contentHash = contentHash
+                        )
+                        // Register hash for debugging
+                        val qualifiedName = if (modulePath != null) "$modulePath::$performerName" else performerName
+                        ContentHashRegistry.register(
+                            hash = contentHash,
+                            qualifiedName = qualifiedName,
+                            modulePath = modulePath,
+                            kind = DeclarationKind.EFFECT_HANDLER
+                        )
+                    }
                 }
                 is AbilityDeclaration -> {
                     // Abilities are ALWAYS public - no visibility check needed

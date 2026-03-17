@@ -31,15 +31,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Show 'a where {
-              show: {val: 'a} -> Str
+            ability Show for 'a where {
+              show: {} -> Str
             }
 
-            impl Show Int where {
-              show = {val} -> int::to_str {n = val}
+            impl Show for Int where {
+              show = {} -> int::to_str {n = it}
             }
 
-            let display = {value} -> Show.show {val = value}
+            let display = {value} -> value.show {}
 
             display {value = 42}
         """.trimIndent()
@@ -55,15 +55,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Display 'a where {
-              display: {val: 'a} -> {text: Str}
+            ability Display for 'a where {
+              display: {} -> {text: Str}
             }
 
-            impl Display Int where {
-              display = {val} -> {text = int::to_str {n = val}}
+            impl Display for Int where {
+              display = {} -> {text = int::to_str {n = it}}
             }
 
-            let render = {value} -> Display.display {val = value}
+            let render = {value} -> value.display {}
 
             render {value = 100}
         """.trimIndent()
@@ -77,15 +77,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with polymorphic operation should pass`() {
         val source = """
-            ability Identity 'a where {
-              identity: {val: 'a} -> 'a
+            ability Identity for 'a where {
+              identity: {} -> 'a
             }
 
-            impl Identity Int where {
-              identity = {val} -> val
+            impl Identity for Int where {
+              identity = {} -> it
             }
 
-            let id = {x} -> Identity.identity {val = x}
+            let id = {x} -> x.identity {}
 
             id {x = 42}
         """.trimIndent()
@@ -99,15 +99,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with numeric operations should pass`() {
         val source = """
-            ability Double 'a where {
-              double: {val: 'a} -> 'a
+            ability Double for 'a where {
+              double: {} -> 'a
             }
 
-            impl Double Int where {
-              double = {val} -> val + val
+            impl Double for Int where {
+              double = {} -> it + it
             }
 
-            let d = {x} -> Double.double {val = x}
+            let d = {x} -> x.double {}
 
             d {x = 21}
         """.trimIndent()
@@ -121,15 +121,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with conditional should pass`() {
         val source = """
-            ability Sign 'a where {
-              sign: {val: 'a} -> Str
+            ability Sign for 'a where {
+              sign: {} -> Str
             }
 
-            impl Sign Int where {
-              sign = {val} -> if val > 0 then "positive" else "non-positive"
+            impl Sign for Int where {
+              sign = {} -> if it > 0 then "positive" else "non-positive"
             }
 
-            let getSign = {x} -> Sign.sign {val = x}
+            let getSign = {x} -> x.sign {}
 
             getSign {x = 5}
         """.trimIndent()
@@ -143,19 +143,19 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with pattern matching should pass`() {
         val source = """
-            ability DefaultValue 'a where {
+            ability DefaultValue for 'a where {
               default: {opt: Option 'a} -> 'a
             }
 
-            impl DefaultValue Int where {
+            impl DefaultValue for Int where {
               default = {opt} -> match opt is
                 Some {val} -> val
                 None -> 0
             }
 
-            let getDefault = {x} -> DefaultValue.default {opt = x}
+            let getDefault = {d, x} -> d.default {opt = x}
 
-            getDefault {x = None}
+            getDefault {d = 0, x = None}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -167,15 +167,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with multiple parameters should pass`() {
         val source = """
-            ability Combine 'a where {
-              combine: {left: 'a, right: 'a} -> 'a
+            ability Combine for 'a where {
+              combine: {right: 'a} -> 'a
             }
 
-            impl Combine Int where {
-              combine = {left, right} -> left + right
+            impl Combine for Int where {
+              combine = {right} -> it + right
             }
 
-            let add = {x, y} -> Combine.combine {left = x, right = y}
+            let add = {x, y} -> x.combine {right = y}
 
             add {x = 10, y = 20}
         """.trimIndent()
@@ -191,20 +191,20 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Parse 'a where {
+            ability Parse for 'a where {
               parse: {str: Str} -> Int
             }
 
-            impl Parse Str where {
+            impl Parse for Str where {
               parse = {str} ->
                 match int::from_string {s = str} is
                   Some {val} -> val
                   None -> 0
             }
 
-            let p = {s} -> Parse.parse {str = s}
+            let p = {v, s} -> v.parse {str = s}
 
-            p {s = "123"}
+            p {v = "", s = "123"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -218,15 +218,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body returning wrong primitive type should fail`() {
         val source = """
-            ability Show 'a where {
-              show: {val: 'a} -> Str
+            ability Show for 'a where {
+              show: {} -> Str
             }
 
-            impl Show Int where {
-              show = {val} -> val
+            impl Show for Int where {
+              show = {} -> it
             }
 
-            let display = {value} -> Show.show {val = value}
+            let display = {value} -> value.show {}
 
             display {value = 42}
         """.trimIndent()
@@ -241,15 +241,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body returning wrong type in conditional should fail`() {
         val source = """
-            ability Process 'a where {
-              process: {val: 'a} -> Str
+            ability Process for 'a where {
+              process: {} -> Str
             }
 
-            impl Process Int where {
-              process = {val} -> if val > 0 then "positive" else 0
+            impl Process for Int where {
+              process = {} -> if it > 0 then "positive" else 0
             }
 
-            let p = {x} -> Process.process {val = x}
+            let p = {x} -> x.process {}
 
             p {x = 5}
         """.trimIndent()
@@ -264,19 +264,19 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body returning wrong type in pattern match should fail`() {
         val source = """
-            ability Extract 'a where {
+            ability Extract for 'a where {
               extract: {opt: Option 'a} -> Str
             }
 
-            impl Extract Int where {
+            impl Extract for Int where {
               extract = {opt} -> match opt is
                 Some {val} -> val
                 None -> "none"
             }
 
-            let e = {x} -> Extract.extract {opt = x}
+            let e = {d, x} -> d.extract {opt = x}
 
-            e {opt = None}
+            e {d = 0, x = None}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -291,15 +291,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Display 'a where {
-              display: {val: 'a} -> {text: Str}
+            ability Display for 'a where {
+              display: {} -> {text: Str}
             }
 
-            impl Display Int where {
-              display = {val} -> {message = int::to_str {n = val}}
+            impl Display for Int where {
+              display = {} -> {message = int::to_str {n = it}}
             }
 
-            let render = {value} -> Display.display {val = value}
+            let render = {value} -> value.display {}
 
             render {value = 100}
         """.trimIndent()
@@ -314,15 +314,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body with wrong record field type should fail`() {
         val source = """
-            ability Display 'a where {
-              display: {val: 'a} -> {text: Str}
+            ability Display for 'a where {
+              display: {} -> {text: Str}
             }
 
-            impl Display Int where {
-              display = {val} -> {text = val}
+            impl Display for Int where {
+              display = {} -> {text = it}
             }
 
-            let render = {value} -> Display.display {val = value}
+            let render = {value} -> value.display {}
 
             render {value = 100}
         """.trimIndent()
@@ -337,23 +337,23 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body not using all parameters should fail`() {
         val source = """
-            ability Combine 'a where {
-              combine: {left: 'a, right: 'a} -> 'a
+            ability Combine for 'a where {
+              combine: {right: 'a} -> 'a
             }
 
-            impl Combine Int where {
-              combine = {left, right} -> left
+            impl Combine for Int where {
+              combine = {right} -> it
             }
 
-            let add = {x, y} -> Combine.combine {left = x, right = y}
+            let add = {x, y} -> x.combine {right = y}
 
             add {x = 10, y = 20}
         """.trimIndent()
 
         val program = parser.parse(source)
 
-        // Note: This should actually PASS because using only 'left' is valid
-        // The body type-checks correctly as Int -> Int -> Int
+        // Note: This should actually PASS because using only 'right' is valid
+        // The body type-checks correctly as Int -> Int
         val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram, "Using subset of parameters is valid")
     }
@@ -361,15 +361,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body with undefined function should fail`() {
         val source = """
-            ability Process 'a where {
-              process: {val: 'a} -> Str
+            ability Process for 'a where {
+              process: {} -> Str
             }
 
-            impl Process Int where {
-              process = {val} -> undefinedFunction {x = val}
+            impl Process for Int where {
+              process = {} -> undefinedFunction {x = it}
             }
 
-            let p = {x} -> Process.process {val = x}
+            let p = {x} -> x.process {}
 
             p {x = 5}
         """.trimIndent()
@@ -384,15 +384,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body with wrong numeric operation should fail`() {
         val source = """
-            ability StringLength 'a where {
-              length: {val: 'a} -> Int
+            ability StringLength for 'a where {
+              length: {} -> Int
             }
 
-            impl StringLength Str where {
-              length = {val} -> val + val
+            impl StringLength for Str where {
+              length = {} -> it + it
             }
 
-            let len = {s} -> StrLength.length {val = s}
+            let len = {s} -> s.length {}
 
             len {s = "hello"}
         """.trimIndent()
@@ -407,15 +407,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test multi-parameter ability body returning wrong type should fail`() {
         val source = """
-            ability Eq 'a where {
-              eq: {l: 'a, r: 'a} -> Bool
+            ability Eq for 'a where {
+              eq: {r: 'a} -> Bool
             }
 
-            impl Eq Int where {
-              eq = {l, r} -> l + r
+            impl Eq for Int where {
+              eq = {r} -> it + r
             }
 
-            let areEqual = {x, y} -> Eq.eq {l = x, r = y}
+            let areEqual = {x, y} -> x.eq {r = y}
 
             areEqual {x = 5, y = 10}
         """.trimIndent()
@@ -430,15 +430,15 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body returning function when value expected should fail`() {
         val source = """
-            ability GetValue 'a where {
-              getValue: {val: 'a} -> Int
+            ability GetValue for 'a where {
+              getValue: {} -> Int
             }
 
-            impl GetValue Int where {
-              getValue = {val} -> {x} -> x + val
+            impl GetValue for Int where {
+              getValue = {} -> {x} -> x + it
             }
 
-            let g = {v} -> GetValue.getValue {val = v}
+            let g = {v} -> v.getValue {}
 
             g {v = 10}
         """.trimIndent()
@@ -455,15 +455,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Transform 'a where {
-              transform: {val: 'a} -> Str
+            ability Transform for 'a where {
+              transform: {} -> Str
             }
 
-            impl Transform Int where {
-              transform = {val} -> int::to_str {n = "not an int"}
+            impl Transform for Int where {
+              transform = {} -> int::to_str {n = "not an int"}
             }
 
-            let t = {x} -> Transform.transform {val = x}
+            let t = {x} -> x.transform {}
 
             t {x = 42}
         """.trimIndent()
@@ -480,20 +480,20 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability with identity implementation should pass`() {
         val source = """
-            ability Identity 'a where {
-              identity: {val: 'a} -> 'a
+            ability Identity for 'a where {
+              identity: {} -> 'a
             }
 
-            impl Identity Bool where {
-              identity = {val} -> val
+            impl Identity for Bool where {
+              identity = {} -> it
             }
 
-            impl Identity Str where {
-              identity = {val} -> val
+            impl Identity for Str where {
+              identity = {} -> it
             }
 
-            let idBool = {x} -> Identity.identity {val = x}
-            let idStr = {s} -> Identity.identity {val = s}
+            let idBool = {x} -> x.identity {}
+            let idStr = {s} -> s.identity {}
 
             idBool {x = True}
         """.trimIndent()
@@ -509,15 +509,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Format 'a where {
-              format: {val: 'a} -> Str
+            ability Format for 'a where {
+              format: {} -> Str
             }
 
-            impl Format Int where {
-              format = {val} -> int::to_str {n = val + 1}
+            impl Format for Int where {
+              format = {} -> int::to_str {n = it + 1}
             }
 
-            let f = {x} -> Format.format {val = x}
+            let f = {x} -> x.format {}
 
             f {x = 41}
         """.trimIndent()
@@ -533,15 +533,15 @@ class AbilityImplementationBodyValidationTest {
         val source = """
             use std::int
 
-            ability Calculate 'a where {
-              calculate: {x: 'a, y: 'a} -> Str
+            ability Calculate for 'a where {
+              calculate: {y: 'a} -> Str
             }
 
-            impl Calculate Int where {
-              calculate = {x, y} -> int::to_str {n = (x + y) * 2}
+            impl Calculate for Int where {
+              calculate = {y} -> int::to_str {n = (it + y) * 2}
             }
 
-            let calc = {a, b} -> Calculate.calculate {x = a, y = b}
+            let calc = {a, b} -> a.calculate {y = b}
 
             calc {a = 10, b = 15}
         """.trimIndent()

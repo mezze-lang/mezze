@@ -229,14 +229,14 @@ class TruffleBasicsTest {
     fun testEffectWithReturnValue() {
         val code = """
             effect Math where {
-                add: {x: Int, y: Int} -> Int <Math>
+                compute: {x: Int, y: Int} -> Int <Math>
             }
 
             impl Math for Calculator where {
-                add: {x: Int, y: Int} -> Int = {x, y} -> x + y
+                compute: {x: Int, y: Int} -> Int = {x, y} -> x + y
             }
 
-            perform Calculator in Math.add {x = 10, y = 32}
+            perform Calculator in Math.compute {x = 10, y = 32}
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -246,17 +246,17 @@ class TruffleBasicsTest {
     fun testNestedEffectCalls() {
         val code = """
             effect Math where {
-                add: {x: Int, y: Int} -> Int <Math>,
+                compute: {x: Int, y: Int} -> Int <Math>,
                 mul: {x: Int, y: Int} -> Int <Math>
             }
 
             impl Math for Calculator where {
-                add: {x: Int, y: Int} -> Int = {x, y} -> x + y,
+                compute: {x: Int, y: Int} -> Int = {x, y} -> x + y,
                 mul: {x: Int, y: Int} -> Int = {x, y} -> x * y
             }
 
             perform Calculator in do
-                let sum = Math.add {x = 2, y = 3}
+                let sum = Math.compute {x = 2, y = 3}
                 Math.mul {x = sum, y = 4}
         """
         val result = eval(code)

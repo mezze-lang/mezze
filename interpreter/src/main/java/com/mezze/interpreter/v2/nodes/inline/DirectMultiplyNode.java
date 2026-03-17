@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.inline;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -34,6 +35,15 @@ public abstract class DirectMultiplyNode extends MezzeNode {
     @Specialization(replaces = "mulLongsOverflow")
     protected static double mulDoubles(double left, double right) {
         return left * right;
+    }
+
+    @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
+    protected static MezzeRecord mulFractions(MezzeRecord left, MezzeRecord right) {
+        return FractionHelper.multiplyFractions(left, right);
+    }
+
+    protected static boolean isFrac(Object value) {
+        return FractionHelper.isFraction(value);
     }
 
     @Fallback

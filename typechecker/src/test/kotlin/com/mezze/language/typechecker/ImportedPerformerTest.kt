@@ -373,15 +373,15 @@ class ImportedPerformerTest {
     @Test
     fun `custom ability and impl in same file should work`() {
         val source = """
-            ability Show 'a where {
-                show: { val: 'a } -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show: { val: Int } -> Str = { val } -> "an integer"
+            impl Show for Int where {
+                show = {} -> "an integer"
             }
 
-            let result = Show.show { val = 42 }
+            let result = 42.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -398,28 +398,28 @@ class ImportedPerformerTest {
     @Test
     fun `ability with multiple impls for different types should work`() {
         val source = """
-            ability Show 'a where {
-                show: { val: 'a } -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show: { val: Int } -> Str = { val } -> "an integer"
+            impl Show for Int where {
+                show = {} -> "an integer"
             }
 
-            impl Show Str where {
-                show: { val: Str } -> Str = { val } -> val
+            impl Show for Str where {
+                show = {} -> it
             }
 
-            impl Show Bool where {
-                show: { val: Bool } -> Str = { val } ->
-                    match val is
+            impl Show for Bool where {
+                show = {} ->
+                    match it is
                         True -> "true"
                         False -> "false"
             }
 
-            let intStr = Show.show { val = 42 }
-            let strStr = Show.show { val = "hello" }
-            let boolStr = Show.show { val = True }
+            let intStr = 42.show {}
+            let strStr = "hello".show {}
+            let boolStr = True.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -445,19 +445,19 @@ class ImportedPerformerTest {
     @Test
     fun `ability with multiple methods should work`() {
         val source = """
-            ability Serializable 'a where {
-                serialize: { val: 'a } -> Str,
+            ability Serializable for 'a where {
+                serialize: {} -> Str,
                 deserialize: { str: Str } -> 'a
             }
 
-            impl Serializable Int where {
-                serialize: { val: Int } -> Str = { val } -> "int",
-                deserialize: { str: Str } -> Int = { str } -> 0
+            impl Serializable for Int where {
+                serialize = {} -> "int",
+                deserialize = { str } -> 0
             }
 
-            let serialized = Serializable.serialize { val = 42 }
+            let serialized = 42.serialize {}
             # Use deserialized value to constrain its type to Int
-            let deserialized: Int = Serializable.deserialize { str = "42" }
+            let deserialized: Int = 0.deserialize { str = "42" }
             let sum = deserialized + 1
         """.trimIndent()
 
@@ -498,17 +498,17 @@ class ImportedPerformerTest {
 
     @Test
     fun `error message should suggest ability qualifier for local ability operation`() {
-        // User wrote "show" instead of "Show.show"
+        // User wrote "show" instead of "42.show"
         val source = """
-            ability Show 'a where {
-                show: { val: 'a } -> Str
+            ability Show for 'a where {
+                show: {} -> Str
             }
 
-            impl Show Int where {
-                show: { val: Int } -> Str = { val } -> "int"
+            impl Show for Int where {
+                show = {} -> "int"
             }
 
-            let result = show { val = 42 }
+            let result = show {}
         """.trimIndent()
 
         val program = parser.parse(source)

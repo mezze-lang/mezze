@@ -11,7 +11,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithSingleDependency() {
         val source = """
-            ability Ord 'a with Eq 'a where {
+            ability Ord for 'a with Eq 'a where {
                 compare : {left: 'a, right: 'a} -> String
             }
         """.trimIndent()
@@ -37,7 +37,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithMultipleDependencies() {
         val source = """
-            ability Serializable 'a with Show 'a, Eq 'a where {
+            ability Serializable for 'a with Show 'a, Eq 'a where {
                 serialize : {val: 'a} -> String,
                 deserialize : {str: String} -> 'a,
             }
@@ -67,7 +67,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithMultiParameterDependency() {
         val source = """
-            ability ComplexStore 'a 'b with KVStore 'a 'b, Show 'a where {
+            ability ComplexStore 'b for 'a with KVStore 'a 'b, Show 'a where {
                 complexStore : {key: 'a, value: 'b, metadata: String} -> {}
             }
         """.trimIndent()
@@ -77,7 +77,7 @@ class AbilityDependencyParserTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("ComplexStore", ability.name)
-        assertEquals(listOf("'a", "'b"), ability.typeParams)
+        assertEquals(listOf("'b", "'a"), ability.typeParams)
         assertEquals(2, ability.dependencies.size)
 
         val kvStoreDep = ability.dependencies[0]
@@ -95,7 +95,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithConcreteDependency() {
         val source = """
-            ability Logger 'a with Show String where {
+            ability Logger for 'a with Show String where {
                 log : {val: 'a, message: String} -> {}
             }
         """.trimIndent()
@@ -118,7 +118,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithoutDependencies() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
                 show : {val: 'a} -> String
             }
         """.trimIndent()
@@ -137,7 +137,7 @@ class AbilityDependencyParserTest {
     @Test
     fun testAbilityWithTypeApplicationDependency() {
         val source = """
-            ability Container 'a with Show (Maybe 'a) where {
+            ability Container for 'a with Show (Maybe 'a) where {
                 wrap : {val: 'a} -> (Maybe 'a)
             }
         """.trimIndent()
@@ -165,15 +165,15 @@ class AbilityDependencyParserTest {
     @Test
     fun testMultipleAbilitiesWithDependencies() {
         val source = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Boolean,
             }
 
-            ability Ord 'a with Eq 'a where {
+            ability Ord for 'a with Eq 'a where {
                 compare : {left: 'a, right: 'a} -> String,
             }
 
-            ability Bounded 'a with Ord 'a where {
+            ability Bounded for 'a with Ord 'a where {
                 minBound : {} -> 'a,
                 maxBound : {} -> 'a,
             }

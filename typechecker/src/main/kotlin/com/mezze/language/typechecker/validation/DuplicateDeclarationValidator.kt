@@ -38,6 +38,7 @@ object DuplicateDeclarationValidator {
         validateDuplicatePerformers(program)
         validateDuplicateAbilities(program)
         validateDuplicateAbilityImpls(program)
+        validateDuplicateInherentMethods(program)
         validateDuplicateVariables(program)
         // Note: 'pub' validation for effects, abilities, and impls is handled by the parser.
         // The parser rejects 'pub' before these declarations with a helpful error message.
@@ -402,16 +403,52 @@ object DuplicateDeclarationValidator {
         for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
             // Create a key from ability name + target type names
             val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
-            val key = "${impl.ability.localName}_${targetTypeNames.joinToString("_")}"
+            val implLabel = impl.abilityName ?: "inherent"
+            val key = "${implLabel}_${targetTypeNames.joinToString("_")}"
 
             if (abilityImplKeys.contains(key)) {
                 throw TypeCheckError(
-                    "Duplicate ability implementation: '${impl.ability.localName}' is already implemented " +
+                    "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
                     "for type(s) ${targetTypeNames.joinToString(", ")}",
                     impl.sourceLocation
                 )
             }
             abilityImplKeys.add(key)
+        }
+    }
+
+    /**
+     * Validate no duplicate method names across inherent impls on the same type.
+     *
+     * Even though we prevent duplicate `impl Type where { ... }` blocks above,
+     * if that check is relaxed in the future (e.g., allowing extension impls),
+     * this catches method name collisions.
+     * Also catches method names that appear in both an inherent impl and an ability impl
+     * for the same type, which would be ambiguous at call sites.
+     */
+    private fun validateDuplicateInherentMethods(program: Program) {
+        // Track method names per type across all inherent impls
+        val methodsByType = mutableMapOf<String, MutableMap<String, SourceLocation?>>()
+
+        for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
+            if (!impl.isInherent) continue
+
+            val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
+            val typeKey = targetTypeNames.joinToString("_")
+
+            val existingMethods = methodsByType.getOrPut(typeKey) { mutableMapOf() }
+
+            for (op in impl.operations) {
+                val existing = existingMethods[op.name]
+                if (existing != null) {
+                    throw TypeCheckError(
+                        "Duplicate method '${op.name}' in inherent impl for type(s) ${targetTypeNames.joinToString(", ")}. " +
+                        "Each method name must be unique across all inherent impls for a type.",
+                        op.implementation.sourceLocation
+                    )
+                }
+                existingMethods[op.name] = op.implementation.sourceLocation
+            }
         }
     }
 

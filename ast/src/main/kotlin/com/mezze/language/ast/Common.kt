@@ -434,6 +434,25 @@ data class BindingKey(
     }
 }
 
+// ============================================================================
+// LANGUAGE KEYWORDS
+// ============================================================================
+
+/**
+ * Language keyword constants shared across parser, typechecker, and interpreter.
+ * Centralizes keyword strings so they're never hardcoded as magic strings.
+ */
+object Keywords {
+    /** The `for` keyword — used in `ability X for 'a` and `Ability.for { it = value }` */
+    const val FOR = "for"
+
+    /** The `it` implicit receiver binding in ability impl bodies */
+    const val IT = "it"
+
+    /** The Inspect ability's debug string method */
+    const val TO_DBG_STR = "to_dbg_str"
+}
+
 /**
  * A qualified reference to a named item (effect, ability, performer, etc.).
  *

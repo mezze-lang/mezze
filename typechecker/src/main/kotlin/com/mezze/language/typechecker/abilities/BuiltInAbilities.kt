@@ -13,13 +13,13 @@ import com.mezze.language.ast.TypeVar
  * - NumAdd, NumSub, NumMul, NumDiv, NumMod, NumNeg (arithmetic)
  * - Eq (equality comparison)
  * - Ord (ordering comparison)
- * - Inspect (to_str conversion)
+ * - Inspect (to_dbg_str conversion)
  * - LogicalAnd, LogicalOr, LogicalNot (boolean operations)
  *
- * Operators are desugared to ability method calls:
- * - x + y  →  NumAdd.add {l = x, r = y}
- * - x == y →  Eq.eq {l = x, r = y}
- * - x < y  →  Ord.lt {l = x, r = y}
+ * Operators are desugared to method-call syntax (receiver is implicit `it`):
+ * - x + y  →  x.add {r = y}   (NumAdd ability)
+ * - x == y →  x.eq {r = y}    (Eq ability)
+ * - x < y  →  x.lt {r = y}    (Ord ability)
  */
 object BuiltInAbilities {
     /**
@@ -33,16 +33,11 @@ object BuiltInAbilities {
      * Each method is a function that takes a type variable and returns the method's function type.
      */
     private val abilities = mapOf(
+        // Arithmetic: receiver is `it`, second operand is `r`
         "NumAdd" to mapOf(
             "add" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = typeVar
                 )
             }
@@ -50,24 +45,13 @@ object BuiltInAbilities {
         "NumSub" to mapOf(
             "sub" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = typeVar
                 )
             },
             "neg" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "n" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
                     returnType = typeVar
                 )
             }
@@ -75,13 +59,7 @@ object BuiltInAbilities {
         "NumMul" to mapOf(
             "mul" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = typeVar
                 )
             }
@@ -89,13 +67,7 @@ object BuiltInAbilities {
         "NumDiv" to mapOf(
             "div" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = typeVar
                 )
             }
@@ -103,116 +75,67 @@ object BuiltInAbilities {
         "NumMod" to mapOf(
             "mod" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = typeVar
                 )
             }
         ),
+        // Equality: receiver is `it`, second operand is `r`
         "Eq" to mapOf(
             "eq" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             },
             "neq" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             }
         ),
+        // Ordering: receiver is `it`, second operand is `r`
         "Ord" to mapOf(
             "lt" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             },
             "le" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             },
             "gt" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             },
             "ge" to { typeVar: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to typeVar,
-                            "r" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
                     returnType = boolType
                 )
             }
         ),
+        // Inspect: receiver is `it`, no explicit params
         "Inspect" to mapOf(
-            "to_str" to { typeVar: MezzeType.VarType ->
+            "to_dbg_str" to { _: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "val" to typeVar
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
                     returnType = MezzeType.StringType
                 )
             }
         ),
+        // Logical: receiver is `it` (Bool), second operand is `r`
         "LogicalAnd" to mapOf(
             "and" to { _: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to boolType,
-                            "r" to boolType
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to boolType), rowVar = null),
                     returnType = boolType
                 )
             }
@@ -220,26 +143,16 @@ object BuiltInAbilities {
         "LogicalOr" to mapOf(
             "or" to { _: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "l" to boolType,
-                            "r" to boolType
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = mapOf("r" to boolType), rowVar = null),
                     returnType = boolType
                 )
             }
         ),
+        // LogicalNot: receiver is `it` (Bool), no explicit params
         "LogicalNot" to mapOf(
             "not" to { _: MezzeType.VarType ->
                 MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(
-                        fields = mapOf(
-                            "val" to boolType
-                        ),
-                        rowVar = null
-                    ),
+                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
                     returnType = boolType
                 )
             }

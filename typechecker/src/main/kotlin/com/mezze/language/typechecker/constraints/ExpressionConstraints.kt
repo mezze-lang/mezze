@@ -12,6 +12,7 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.ast.Keywords
 
 /**
  * Expression constraint generator - generates constraints for all expression types.
@@ -691,10 +692,21 @@ class ExpressionConstraintGenerator {
         }
 
         if (receiverName != null) {
+            // Special case: Ability.for — returns a function that binds the receiver
+            // Show.for has type: {it: 'a} -> {show: {} -> Str, ...}
+            if (expr.member == Keywords.FOR) {
+                val isAbility = context.abilityDeclarations.containsKey(receiverName) ||
+                    BuiltInAbilities.isBuiltInAbility(receiverName)
+                if (isAbility) {
+                    return generateAbilityFor(expr, receiverName, context)
+                }
+            }
+
             // Check if user has defined their own ability with this name (shadowing built-in)
             val userDefinedAbility = context.abilityDeclarations[receiverName]
 
-            // Only use built-in ability if there's no user-defined ability with the same name
+            // Block direct Ability.method access for built-in abilities.
+            // Use value.method { args } or Ability.for { it = value }.method instead.
             if (userDefinedAbility == null && BuiltInAbilities.isBuiltInAbility(receiverName)) {
                 val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
                 val methodType = BuiltInAbilities.getAbilityMethodType(
@@ -704,20 +716,11 @@ class ExpressionConstraintGenerator {
                 )
 
                 if (methodType != null) {
-                    // Found the method - create ability constraint
-                    // CRITICAL FIX: Built-in abilities need ability constraints too!
-                    val abilityConstraint = Constraint.AbilityRequired(
-                        typeVar = freshTypeVar.variable,
-                        abilityName = receiverName,
-                        typeArgs = emptyList(),
-                        context = "Built-in ability method call: $receiverName.${expr.member}",
-                        sourceLocation = expr.sourceLocation
-                    )
-
-                    return ConstraintResult(
-                        type = methodType,
-                        constraints = emptyList(),
-                        abilityConstraints = listOf(abilityConstraint)
+                    throw TypeCheckError(
+                        message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
+                            "Use 'value.${expr.member} { args }' or '${receiverName}.for { it = value }.${expr.member}' instead.",
+                        expression = expr,
+                        errorType = ErrorType.MISSING_FIELD
                     )
                 } else {
                     // Method not found on built-in ability - throw error with suggestion
@@ -735,8 +738,12 @@ class ExpressionConstraintGenerator {
             // Check if this is a user-defined ability (using dedicated map)
             val abilityOperationType = context.typingContext.getAbilityOperationType(receiverName)
             if (abilityOperationType != null) {
-                val binding = TypingContext.Binding.Monomorphic(abilityOperationType)
-                return generateAbilityMethodCall(expr, receiverName, binding, context)
+                throw TypeCheckError(
+                    message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
+                        "Use 'value.${expr.member} { args }' or '${receiverName}.for { it = value }.${expr.member}' instead.",
+                    expression = expr,
+                    errorType = ErrorType.MISSING_FIELD
+                )
             }
 
             // Check if this is an effect (using dedicated map)
@@ -896,173 +903,499 @@ class ExpressionConstraintGenerator {
     }
 
     /**
-     * Generate constraints for ability method calls.
+     * Generate constraints for `Ability.for` — returns a function that binds the receiver
+     * and returns a record of the ability's methods with receiver stripped.
      *
-     * Example: Show.show {val = person}
+     * Type: `Show.for` has type `{it: 'a} -> {show: {} -> Str, ...}`
+     *   where 'a must have a Show impl.
      *
-     * Steps:
-     * 1. Get ability type (RecordType with methods as fields)
-     * 2. Instantiate with fresh type variables
-     * 3. Look up method
-     * 4. Add ability constraint to function type
+     * The returned record's methods have the receiver parameter removed from their signatures,
+     * since the receiver is bound via `it` in the `.for` call.
      */
-    private fun generateAbilityMethodCall(
+    private fun generateAbilityFor(
         expr: MemberAccess,
         abilityName: String,
-        abilityBinding: TypingContext.Binding,
         context: ConstraintContext
     ): ConstraintResult {
-        // Get ability type from binding
-        val abilityType = when (abilityBinding) {
-            is TypingContext.Binding.Monomorphic -> abilityBinding.type
-            is TypingContext.Binding.Polymorphic -> {
-                // Instantiate polymorphic ability type with fresh type variables
-                abilityBinding.scheme.instantiate().type
+        val methodFields = mutableMapOf<String, MezzeType>()
+        val receiverTypeVar: MezzeType.VarType
+
+        val abilityDecl = context.abilityDeclarations[abilityName]
+        if (abilityDecl != null) {
+            // User-defined ability — instantiate the operations record with fresh vars
+            val abilityOperationType = context.typingContext.getAbilityOperationType(abilityName)
+            if (abilityOperationType == null || abilityOperationType !is MezzeType.RecordType) {
+                throw TypeCheckError(
+                    message = "Ability '$abilityName' has no methods",
+                    expression = expr,
+                    errorType = ErrorType.MISSING_FIELD
+                )
             }
-        }
 
-        // Ability should be stored as RecordType with methods as fields
-        if (abilityType !is MezzeType.RecordType) {
-            // Shouldn't happen if ContextBuilder is working correctly
-            throw IllegalStateException("Ability '$abilityName' is not properly registered")
-        }
+            val associatedTypeNames = abilityDecl.associatedTypes
+            val (instantiated, originalToFresh) = instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(
+                abilityOperationType, associatedTypeNames
+            )
 
-        // Look up method in ability
-        val methodName = expr.member
-        val methodType = abilityType.fields[methodName]
+            // Find the fresh var for the ability's primary type param
+            val primaryTypeParam = abilityDecl.typeParams.firstOrNull()?.removePrefix("'")
+            val primaryFreshVar = if (primaryTypeParam != null) originalToFresh[primaryTypeParam] else null
+            receiverTypeVar = if (primaryFreshVar != null) {
+                MezzeType.VarType(primaryFreshVar)
+            } else {
+                MezzeType.VarType(TypeVar.fresh())
+            }
 
-        if (methodType == null) {
-            // Method not found - suggest similar method names
-            val availableMethods = abilityType.fields.keys
-            val suggestion = findClosestMatch(methodName, availableMethods)
-            val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
+            if (instantiated is MezzeType.RecordType) {
+                for ((opName, opType) in instantiated.fields) {
+                    methodFields[opName] = stripReceiverFromMethodType(opType, receiverTypeVar)
+                }
+            }
+        } else if (BuiltInAbilities.isBuiltInAbility(abilityName)) {
+            // Built-in ability — signatures are already receiver-less (no stripping needed)
+            receiverTypeVar = MezzeType.VarType(TypeVar.fresh())
+            val availableMethods = BuiltInAbilities.getAvailableMethods(abilityName)
+            for (methodName in availableMethods) {
+                val methodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, receiverTypeVar)
+                if (methodType != null) {
+                    methodFields[methodName] = methodType
+                }
+            }
+        } else {
             throw TypeCheckError(
-                message = "Method '$methodName' not found in ability '$abilityName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
+                message = "Ability '$abilityName' is not defined",
+                expression = expr,
+                errorType = ErrorType.UNDEFINED_VARIABLE
+            )
+        }
+
+        if (methodFields.isEmpty()) {
+            throw TypeCheckError(
+                message = "Ability '$abilityName' has no methods",
                 expression = expr,
                 errorType = ErrorType.MISSING_FIELD
             )
         }
 
-        // Get ability declaration to check for associated types
-        val abilityDecl = context.abilityDeclarations[abilityName]
-        val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
+        val methodRecordType = MezzeType.RecordType(methodFields)
 
-        // Instantiate method type with fresh type variables
-        // This prevents type variable pollution across different method calls
-        // BUT: We need to preserve associated type variable names so we can match them later
-        // ALSO: We need the mapping from original names to fresh vars to correctly categorize them
-        val (instantiatedMethodType, originalToFresh) = instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(methodType, associatedTypeNames)
+        // The `.for` function type: {it: 'a} -> {method1: ..., method2: ..., ...}
+        val forParamType = MezzeType.RecordType(mapOf(Keywords.IT to receiverTypeVar))
+        val forFunctionType = MezzeType.FunctionType(
+            paramType = forParamType,
+            returnType = methodRecordType
+        )
 
-        // Add ability constraint to the function type
-        if (instantiatedMethodType is MezzeType.FunctionType) {
-            // CRITICAL: Use distinct() to avoid duplicate type variables
-            // Example: {val: 'a} -> 'a has 'a in both param and return, but we only want ['a] not ['a, 'a]
-            val typeVars = extractTypeVariables(instantiatedMethodType).distinct()
+        // Add ability constraint: 'a must have this ability
+        val abilityConstraint = Constraint.AbilityRequired(
+            typeVar = receiverTypeVar.variable,
+            abilityName = abilityName,
+            typeArgs = emptyList(),
+            context = "Ability.${Keywords.FOR}: $abilityName",
+            sourceLocation = expr.sourceLocation
+        )
 
-            if (typeVars.isEmpty()) {
-                // No type variables, no constraint needed
-                return ConstraintResult.simple(instantiatedMethodType)
-            }
+        return ConstraintResult(
+            type = forFunctionType,
+            constraints = emptyList(),
+            abilityConstraints = listOf(abilityConstraint)
+        )
+    }
 
-            // Separate type params from associated types using the originalToFresh mapping
-            val typeParamNames = abilityDecl?.typeParams?.map { it.removePrefix("'") }?.toSet() ?: emptySet()
-            val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
+    /**
+     * Strip the receiver parameter from a method's function type.
+     *
+     * Convention: the first field of an ability method's param record is the receiver.
+     * - `show: {val: 'a} -> Str` → `{} -> Str`
+     * - `eq: {l: 'a, r: 'a} -> Bool` → `{r: 'a} -> Bool`
+     * - `and: {l: Bool, r: Bool} -> Bool` → `{r: Bool} -> Bool`
+     */
+    private fun stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
+        // In the new ability design, method signatures already don't include the receiver.
+        // The receiver is implicit `it`, bound via `for`. No stripping needed.
+        return methodType
+    }
 
-            // Find the type variables that correspond to associated types vs ability type params
-            val associatedTypeVarsMap = mutableMapOf<String, TypeVar>()
-            val abilityTypeVarsMap = mutableMapOf<String, TypeVar>()
-            val methodLocalTypeVars = mutableListOf<TypeVar>()
+    /**
+     * Try to generate constraints for method call syntax: `value.method { args }`.
+     *
+     * Desugars through the `.for` model: `42.show {}` is equivalent to
+     * `Show.for { it = 42 }.show {}`.
+     *
+     * The method's receiver parameter is stripped (bound via `it`), and the explicit
+     * arguments are matched against the remaining parameters.
+     *
+     * Returns null if no matching ability method is found (fall through to field access).
+     */
+    private fun tryGenerateMethodCall(
+        expr: FunctionCall,
+        memberAccess: MemberAccess,
+        context: ConstraintContext
+    ): ConstraintResult? {
+        val methodName = memberAccess.member
 
-            // Use the originalToFresh mapping to categorize fresh type vars by their original role
-            for (typeVar in typeVars) {
-                // Find which original name this fresh var came from
-                val matchedOrigName = originalToFresh.entries.find { it.value == typeVar }?.key
-                when {
-                    matchedOrigName != null && associatedTypeNamesNormalized.contains(matchedOrigName) -> {
-                        associatedTypeVarsMap[matchedOrigName] = typeVar
-                    }
-                    matchedOrigName != null && typeParamNames.contains(matchedOrigName) -> {
-                        abilityTypeVarsMap[matchedOrigName] = typeVar
-                    }
-                    else -> {
-                        // Method-local type variable (from method-level constraints like `with Show 'b`)
-                        methodLocalTypeVars.add(typeVar)
-                    }
+        // FIELD ACCESS: If the receiver is known to have a field with this name,
+        // it's plain field access — skip method call resolution.
+        if (memberAccess.receiver is Identifier) {
+            val receiverVarName = (memberAccess.receiver as Identifier).localName
+            val lookupResult = context.typingContext.lookup(receiverVarName)
+            if (lookupResult is TypingContext.LookupResult.Found) {
+                val receiverType = when (val binding = lookupResult.binding) {
+                    is TypingContext.Binding.Monomorphic -> binding.type
+                    is TypingContext.Binding.Polymorphic -> binding.scheme.instantiate().type
+                }
+                if (receiverType is MezzeType.RecordType && receiverType.fields.containsKey(methodName)) {
+                    return null // It's a field — let normal field access handle it
                 }
             }
-
-            // CRITICAL FIX: Extract ability type vars by NAME matching, preserving declaration order
-            // The ability declaration defines the order: `ability DecodeRepr 'a` means ['a]
-            // We must use this order, not extraction order from the function type
-            val abilityTypeVars = abilityDecl?.typeParams?.mapNotNull { paramName ->
-                val normalizedName = paramName.removePrefix("'")
-                abilityTypeVarsMap[normalizedName]
-            } ?: abilityTypeVarsMap.values.toList()
-
-            // Build constraints
-            val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-            val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-
-            // Create ability constraint for the primary type variable
-            // Convert type variables to type arguments (wrapped in VarType)
-            // For single-parameter abilities (like Identity 'a), typeArgs will be empty
-            // For multi-parameter abilities (like Convert 'a 'b), typeArgs will be ['b]
-            if (abilityTypeVars.isNotEmpty()) {
-                val typeArgs = abilityTypeVars.drop(1).map { MezzeType.VarType(it) }
-
-                val abilityConstraint = Constraint.AbilityRequired(
-                    typeVar = abilityTypeVars.first(),
-                    abilityName = abilityName,
-                    typeArgs = typeArgs,  // Additional type arguments if multi-parameter ability
-                    context = "Ability method call: $abilityName.$methodName",
-                    sourceLocation = expr.sourceLocation
-                )
-                abilityConstraints.add(abilityConstraint)
-
-                // If there are associated types, add AssociatedTypeResolution constraint
-                if (associatedTypeVarsMap.isNotEmpty()) {
-                    val associatedTypeConstraint = Constraint.AssociatedTypeResolution(
-                        abilityName = abilityName,
-                        primaryTypeVar = abilityTypeVars.first(),
-                        associatedTypeVars = associatedTypeVarsMap,
-                        context = "Associated type resolution for $abilityName.$methodName",
-                        sourceLocation = expr.sourceLocation
-                    )
-                    associatedTypeConstraints.add(associatedTypeConstraint)
-                }
-            }
-
-            // CRITICAL: Also extract method-level ability constraints from the function type
-            // These are constraints like `with Show 'b` declared on the method itself
-            // They need to be added as AbilityRequired constraints so they get validated at call time
-            if (instantiatedMethodType.abilityConstraints.isNotEmpty()) {
-                for (constraint in instantiatedMethodType.abilityConstraints) {
-                    // Extract the type variable from typeArgs (first VarType is the constrained type)
-                    val constrainedType = constraint.typeArgs.firstOrNull()
-                    if (constrainedType is MezzeType.VarType) {
-                        abilityConstraints.add(
-                            Constraint.AbilityRequired(
-                                typeVar = constrainedType.variable,
-                                abilityName = constraint.abilityName,
-                                typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
-                                context = "Method-level constraint: ${constraint.abilityName} on ${abilityName}.$methodName",
-                                sourceLocation = expr.sourceLocation
-                            )
-                        )
-                    }
-                }
-            }
-
-            return ConstraintResult(
-                type = instantiatedMethodType,
-                constraints = emptyList(),
-                abilityConstraints = abilityConstraints,
-                associatedTypeConstraints = associatedTypeConstraints
-            )
         }
 
-        // Non-function type (shouldn't happen for ability methods)
-        return ConstraintResult.simple(instantiatedMethodType)
+        // Find abilities that have this method name
+        val matchingAbilities = context.typingContext.findAbilitiesByMethodName(methodName)
+
+        // Also check built-in abilities
+        val builtInMatches = BuiltInAbilities.getAllAbilityNames()
+            .filter { BuiltInAbilities.getAbilityMethodType(it, methodName, MezzeType.VarType(TypeVar.fresh())) != null }
+
+        // Check inherent impl methods (impl Type where { ... })
+        val inherentMethods = context.typingContext.findAnonymousMethodsByName(methodName)
+
+        if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isEmpty()) {
+            return null // No matching ability or inherent method — fall through to field access
+        }
+
+        // If ONLY inherent methods match (no ability methods), handle them directly
+        if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isNotEmpty()) {
+            return generateInherentMethodCall(expr, memberAccess, inherentMethods, context)
+        }
+
+        // Generate constraints for the receiver expression
+        val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
+
+        // Generate constraints for the arguments
+        val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+
+        // Resolve to the matching ability and get the receiver-stripped method type
+        val strippedMethodType: MezzeType.FunctionType
+        val receiverConstraintType: MezzeType  // The type the receiver must match (first field's type)
+        // Collect ability constraints: from this method call AND from nested sub-expressions
+        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
+        abilityConstraints.addAll(receiverResult.abilityConstraints)
+        abilityConstraints.addAll(argumentResult.abilityConstraints)
+        associatedTypeConstraints.addAll(receiverResult.associatedTypeConstraints)
+        associatedTypeConstraints.addAll(argumentResult.associatedTypeConstraints)
+
+        // When both user-defined and built-in abilities match the same method name,
+        // disambiguate by checking which ability's parameter fields match the call-site arguments.
+        // e.g., `x + y` desugars to `x.add {r = y}` which should match NumAdd.add {r} not Math.add {x, y}.
+        val callSiteFieldNames: Set<String>? = when (val args = expr.arguments) {
+            is RecordLiteral -> args.entries.filterIsInstance<RecordFieldEntry>().map { entry -> entry.name }.toSet()
+            else -> null
+        }
+        val filteredMatchingAbilities = if (callSiteFieldNames != null && matchingAbilities.isNotEmpty() && builtInMatches.isNotEmpty()) {
+            matchingAbilities.filter { (_, rawMethodType) ->
+                val methodParamFields = when (rawMethodType) {
+                    is MezzeType.FunctionType -> when (val pt = rawMethodType.paramType) {
+                        is MezzeType.RecordType -> pt.fields.keys
+                        else -> null
+                    }
+                    else -> null
+                }
+                // Keep the ability if we can't determine fields (conservative) or if fields match
+                methodParamFields == null || methodParamFields == callSiteFieldNames
+            }
+        } else {
+            matchingAbilities
+        }
+
+        if (builtInMatches.size == 1 && filteredMatchingAbilities.isEmpty()) {
+            // Built-in ability — use when no user-defined ability matches the call-site argument fields.
+            val abilityName = builtInMatches.first()
+            val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
+            val methodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, freshTypeVar)!!
+
+            // For monomorphic abilities (LogicalAnd/Or/Not), the receiver must be Bool.
+            // For polymorphic abilities, use a fresh type var.
+            receiverConstraintType = when (abilityName) {
+                "LogicalAnd", "LogicalOr", "LogicalNot" -> MezzeType.BoolType
+                else -> freshTypeVar
+            }
+
+            if (methodType !is MezzeType.FunctionType) return null
+            strippedMethodType = methodType
+
+            abilityConstraints.add(Constraint.AbilityRequired(
+                typeVar = freshTypeVar.variable,
+                abilityName = abilityName,
+                typeArgs = emptyList(),
+                context = "Method call: $methodName",
+                sourceLocation = expr.sourceLocation
+            ))
+        } else if (filteredMatchingAbilities.isNotEmpty()) {
+            // User-defined ability
+            val (abilityName, rawMethodType) = filteredMatchingAbilities.first()
+            val abilityDecl = context.abilityDeclarations[abilityName]
+            val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
+
+            val (instantiatedMethodType, originalToFreshFromMethod) = instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(
+                rawMethodType, associatedTypeNames
+            )
+
+            // Ensure ALL ability type params have fresh vars, not just those in the method type.
+            // The receiver type param (e.g. 'a in `ability Convert 'b for 'a`) may not appear
+            // in the method signature (`convert : {} -> 'b`) but is needed for the ability constraint.
+            val originalToFresh = originalToFreshFromMethod.toMutableMap()
+            if (abilityDecl != null) {
+                for (paramName in abilityDecl.typeParams) {
+                    val normalizedName = paramName.removePrefix("'")
+                    if (normalizedName !in originalToFresh) {
+                        originalToFresh[normalizedName] = TypeVar.fresh()
+                    }
+                }
+            }
+
+            // Find the fresh var for the ability's primary type param
+            val abilityTypeVars = abilityDecl?.typeParams?.mapNotNull { paramName ->
+                originalToFresh[paramName.removePrefix("'")]
+            } ?: emptyList()
+
+            // The receiver type comes from the ability's `for` type param (receiverTypeParam).
+            // In the new design, method signatures don't contain the receiver — it's implicit `it`.
+            // Find the fresh var that corresponds to the receiverTypeParam.
+            val receiverParamName = abilityDecl?.receiverTypeParam?.removePrefix("'")
+            val receiverFreshVar = if (receiverParamName != null) {
+                originalToFresh[receiverParamName]
+            } else {
+                // Fallback: use last type param (receiver is always last in typeParams)
+                abilityTypeVars.lastOrNull()
+            }
+
+            receiverConstraintType = if (receiverFreshVar != null) {
+                MezzeType.VarType(receiverFreshVar)
+            } else if (abilityTypeVars.isNotEmpty()) {
+                MezzeType.VarType(abilityTypeVars.last())
+            } else {
+                MezzeType.VarType(TypeVar.fresh())
+            }
+
+            val receiverTypeVar = if (receiverFreshVar != null) {
+                MezzeType.VarType(receiverFreshVar)
+            } else if (abilityTypeVars.isNotEmpty()) {
+                MezzeType.VarType(abilityTypeVars.last())
+            } else {
+                MezzeType.VarType(TypeVar.fresh())
+            }
+
+            if (instantiatedMethodType !is MezzeType.FunctionType) return null
+            val stripped = stripReceiverFromMethodType(instantiatedMethodType, receiverTypeVar)
+            if (stripped !is MezzeType.FunctionType) return null
+            strippedMethodType = stripped
+
+            if (abilityTypeVars.isNotEmpty()) {
+                val typeArgs = abilityTypeVars.drop(1).map { MezzeType.VarType(it) }
+                abilityConstraints.add(Constraint.AbilityRequired(
+                    typeVar = abilityTypeVars.first(),
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,
+                    context = "Method call: $methodName",
+                    sourceLocation = expr.sourceLocation
+                ))
+
+                // Build associated type vars map and add AssociatedTypeResolution constraint
+                if (associatedTypeNames.isNotEmpty()) {
+                    val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
+                    val associatedTypeVarsMap = mutableMapOf<String, TypeVar>()
+                    for ((origName, freshVar) in originalToFresh) {
+                        if (associatedTypeNamesNormalized.contains(origName)) {
+                            associatedTypeVarsMap[origName] = freshVar
+                        }
+                    }
+                    if (associatedTypeVarsMap.isNotEmpty()) {
+                        associatedTypeConstraints.add(Constraint.AssociatedTypeResolution(
+                            abilityName = abilityName,
+                            primaryTypeVar = abilityTypeVars.first(),
+                            associatedTypeVars = associatedTypeVarsMap,
+                            context = "Associated type resolution for $abilityName.$methodName",
+                            sourceLocation = expr.sourceLocation
+                        ))
+                    }
+                }
+            }
+
+            // Handle method-level constraints
+            if (instantiatedMethodType.abilityConstraints.isNotEmpty()) {
+                for (constraint in instantiatedMethodType.abilityConstraints) {
+                    val constrainedType = constraint.typeArgs.firstOrNull()
+                    if (constrainedType is MezzeType.VarType) {
+                        abilityConstraints.add(Constraint.AbilityRequired(
+                            typeVar = constrainedType.variable,
+                            abilityName = constraint.abilityName,
+                            typeArgs = constraint.typeArgs.drop(1),
+                            context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
+                            sourceLocation = expr.sourceLocation
+                        ))
+                    }
+                }
+            }
+        } else {
+            return null
+        }
+
+        // Now we have:
+        // - receiverConstraintType: the type the receiver must match (first field's type)
+        // - strippedMethodType: method with receiver removed, e.g. {r: 'a} -> Bool or {} -> Str
+        // - receiverResult: the receiver expression (e.g., 42)
+        // - argumentResult: the explicit arguments (e.g., { r = 10 })
+
+        val resultType = MezzeType.VarType(TypeVar.fresh())
+        val constraints = mutableListOf<Constraint>()
+        constraints.addAll(receiverResult.constraints)
+        constraints.addAll(argumentResult.constraints)
+
+        // Unwrap SuspendedType from receiver — effects are orthogonal to data types.
+        // An effectful expression like `may_fail {x}` has type Suspended<Int, {Exception}>,
+        // but for method dispatch we want the value type (Int) and propagate the effects.
+        val receiverType: MezzeType
+        val extraEffects: Set<String>
+        val extraEffectInstances: Set<MezzeType.EffectInstance>
+        when (val rt = receiverResult.type) {
+            is MezzeType.SuspendedType -> {
+                receiverType = rt.valueType
+                extraEffects = rt.effects.effects
+                extraEffectInstances = rt.effects.effectInstances
+            }
+            else -> {
+                receiverType = rt
+                extraEffects = emptySet()
+                extraEffectInstances = emptySet()
+            }
+        }
+
+        // Constrain: receiver type = first field's type (the receiver parameter)
+        constraints.add(Constraint.Equality(
+            left = receiverType,
+            right = receiverConstraintType,
+            context = "Method call receiver binds ${Keywords.IT}",
+            sourceLocation = expr.sourceLocation
+        ))
+
+        // Constrain: explicit args = stripped method's param type
+        constraints.add(Constraint.Equality(
+            left = argumentResult.type,
+            right = strippedMethodType.paramType,
+            context = "Method call arguments for $methodName",
+            sourceLocation = expr.sourceLocation
+        ))
+
+        // Constrain: result type = method's return type
+        constraints.add(Constraint.Equality(
+            left = resultType,
+            right = strippedMethodType.returnType,
+            context = "Method call return type",
+            sourceLocation = expr.sourceLocation
+        ))
+
+        return ConstraintResult(
+            type = resultType,
+            constraints = constraints,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
+            undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
+            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables
+        )
+    }
+
+    /**
+     * Generate constraints for an inherent method call.
+     *
+     * Inherent methods come from `impl Type where { method = ... }` — no ability constraint needed.
+     * The receiver type is unified with the target type from the inherent impl.
+     */
+    private fun generateInherentMethodCall(
+        expr: FunctionCall,
+        memberAccess: MemberAccess,
+        inherentMethods: List<TypingContext.InherentMethodInfo>,
+        context: ConstraintContext
+    ): ConstraintResult {
+        val methodName = memberAccess.member
+
+        // Generate constraints for receiver and arguments
+        val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
+        val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+
+        // Unwrap SuspendedType from receiver
+        val receiverType: MezzeType
+        val extraEffects: Set<String>
+        val extraEffectInstances: Set<MezzeType.EffectInstance>
+        when (val rt = receiverResult.type) {
+            is MezzeType.SuspendedType -> {
+                receiverType = rt.valueType
+                extraEffects = rt.effects.effects
+                extraEffectInstances = rt.effects.effectInstances
+            }
+            else -> {
+                receiverType = rt
+                extraEffects = emptySet()
+                extraEffectInstances = emptySet()
+            }
+        }
+
+        val resultType = MezzeType.VarType(TypeVar.fresh())
+        val constraints = mutableListOf<Constraint>()
+        constraints.addAll(receiverResult.constraints)
+        constraints.addAll(argumentResult.constraints)
+
+        // If there's exactly one matching inherent method, use it directly.
+        // If multiple, use the receiver type to disambiguate via unification.
+        val methodInfo = if (inherentMethods.size == 1) {
+            inherentMethods.first()
+        } else {
+            // Multiple types have this method — let unification pick the right one.
+            // We add equality constraints for each candidate; the solver will resolve.
+            inherentMethods.firstOrNull()  // TODO: proper disambiguation with multiple candidates
+        }
+
+        if (methodInfo != null) {
+            // Re-instantiate the method type with fresh type variables.
+            // The type stored in InherentMethodInfo may have stale vars from context-building time.
+            val freshMethodType = instantiateTypeWithFreshVars(methodInfo.methodType)
+
+            // No receiver type constraint needed — the inherent method was already matched
+            // by type name during lookup. The receiver's actual type flows through naturally
+            // from the receiver expression's constraint generation.
+
+            if (freshMethodType is MezzeType.FunctionType) {
+                // Constrain arguments
+                constraints.add(Constraint.Equality(
+                    left = argumentResult.type,
+                    right = freshMethodType.paramType,
+                    context = "Inherent method call arguments for $methodName",
+                    sourceLocation = expr.sourceLocation
+                ))
+
+                // Constrain return type
+                constraints.add(Constraint.Equality(
+                    left = resultType,
+                    right = freshMethodType.returnType,
+                    context = "Inherent method call return type",
+                    sourceLocation = expr.sourceLocation
+                ))
+            }
+        }
+
+        return ConstraintResult(
+            type = resultType,
+            constraints = constraints,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
+            associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
+            undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
+            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables
+        )
     }
 
     /**
@@ -1738,7 +2071,7 @@ class ExpressionConstraintGenerator {
      *
      * This implements bidirectional matching from OldTypeChecker.kt lines 16246-16300:
      * - Type variables in `typeArgs` can match concrete types in implementation
-     * - This enables inference: Convert Int 'a can match impl Convert Int String
+     * - This enables inference: Convert Int 'a can match impl Convert for Int String
      *
      * Uses structural type matching via targetTypeAnnotations for correctness,
      * falling back to string-based matching only when annotations are not available.
@@ -2493,6 +2826,47 @@ class ExpressionConstraintGenerator {
                         "spreadVariable" to spreadVarName
                     )
                 )
+            }
+        }
+
+        // METHOD CALL RESOLUTION: Detect `value.method { args }` pattern
+        // When the function is MemberAccess(receiver, methodName) and receiver is NOT an ability/effect,
+        // check if methodName matches an ability operation. If so, transform into an ability method call
+        // where the receiver is injected as the first argument.
+        if (expr.function is MemberAccess) {
+            val memberAccess = expr.function as MemberAccess
+            val receiverName = when (memberAccess.receiver) {
+                is Identifier -> (memberAccess.receiver as Identifier).localName
+                is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
+                else -> null
+            }
+            val isAbilityOrEffect = receiverName != null && receiverName.first().isUpperCase() &&
+                (context.typingContext.getAbilityOperationType(receiverName) != null ||
+                 context.typingContext.getEffectOperationType(receiverName) != null ||
+                 context.performerToEffect.containsKey(receiverName) ||
+                 BuiltInAbilities.isBuiltInAbility(receiverName))
+
+            // If receiver is a VariantConstruction (uppercase) that's NOT a known ability/effect,
+            // check if it's a known value (variant constructor like True, Some, etc.).
+            // If it's not a known value either, it's likely a misspelled ability —
+            // skip method resolution and let the normal error path handle it.
+            val isUnknownUppercaseName = !isAbilityOrEffect &&
+                memberAccess.receiver is VariantConstruction &&
+                context.typingContext.lookup(receiverName ?: "") is TypingContext.LookupResult.NotFound
+
+            // Skip method resolution if the receiver is an Ability.for { ... } call —
+            // the result is a record of methods, so .method is field access, not method dispatch.
+            val isAbilityForCall = memberAccess.receiver is FunctionCall &&
+                (memberAccess.receiver as FunctionCall).function is MemberAccess &&
+                ((memberAccess.receiver as FunctionCall).function as MemberAccess).member == Keywords.FOR
+
+            // Only try method resolution if receiver is NOT an ability/effect/performer
+            // and not an unknown uppercase name and not an Ability.for call
+            if (!isAbilityOrEffect && !isUnknownUppercaseName && !isAbilityForCall) {
+                val methodCallResult = tryGenerateMethodCall(expr, memberAccess, context)
+                if (methodCallResult != null) {
+                    return methodCallResult
+                }
             }
         }
 

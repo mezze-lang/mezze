@@ -91,7 +91,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit NumAdd call shows method name in error`() {
         val source = """
-            let x: Str = NumAdd.add {l = 5, r = 3}
+            let x: Str = 1.add {r = 3}
             x
         """.trimIndent()
 
@@ -107,7 +107,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit Eq call error`() {
         val source = """
-            let x: Str = Eq.eq {l = 5, r = 5}
+            let x: Str = 1.eq {r = 5}
             x
         """.trimIndent()
 
@@ -118,7 +118,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit LogicalAnd call error`() {
         val source = """
-            let x: Str = LogicalAnd.and {l = True, r = False}
+            let x: Str = True.and {r = False}
             x
         """.trimIndent()
 
@@ -138,7 +138,7 @@ class OperatorErrorMessageTest {
         """.trimIndent()
 
         val explicitSource = """
-            let x: Str = NumAdd.add {l = 5, r = 3}
+            let x: Str = 1.add {r = 3}
             x
         """.trimIndent()
 
@@ -238,7 +238,7 @@ class OperatorErrorMessageTest {
     fun `test mixed operators and explicit calls`() {
         val source = """
             let a = 5 + 3
-            let b = NumMul.mul {l = a, r = 2}
+            let b = 3.mul {r = 2}
             let x: Str = b
             x
         """.trimIndent()
@@ -259,7 +259,7 @@ class OperatorErrorMessageTest {
         // 3. Explicit calls don't have operator metadata
 
         val operatorCode = "let x = 1 + 2\nx"
-        val explicitCode = "let x = NumAdd.add {l = 1, r = 2}\nx"
+        val explicitCode = "let x = 1.add {r = 2}\nx"
 
         // Both should parse and type-check successfully
         val operatorProgram = parser.parse(operatorCode)

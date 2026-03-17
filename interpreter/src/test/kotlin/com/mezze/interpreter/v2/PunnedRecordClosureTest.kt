@@ -320,7 +320,7 @@ class PunnedRecordClosureTest {
 
             impl Formatter for PrefixSuffixFormatter {prefix: Str, suffix: Str} where {
                 format = {value} -> do
-                    let mid = Inspect.to_str {val = value}
+                    let mid = value.to_dbg_str {}
                     "$(prefix)$(mid)$(suffix)"
             }
 

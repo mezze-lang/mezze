@@ -14,8 +14,8 @@ import kotlin.test.assertContains
  * Key rule: Ability-level constraints are NOT allowed.
  * All constraints must be on individual methods (method-level constraints).
  *
- * OLD (rejected): ability Ord 'a with Eq 'a where { compare: ... }
- * NEW (accepted): ability Ord 'a where { compare: {...} with Eq 'a -> ... }
+ * OLD (rejected): ability Ord for 'a with Eq 'a where { compare: ... }
+ * NEW (accepted): ability Ord for 'a where { compare: {...} with Eq 'a -> ... }
  */
 class AbilityDependencyTypeCheckerTest {
 
@@ -42,11 +42,11 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `ability-level constraint is rejected with helpful error`() {
         val source = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Ord 'a with Eq 'a where {
+            ability Ord for 'a with Eq 'a where {
                 compare : {left: 'a, right: 'a} -> Str
             }
         """.trimIndent()
@@ -64,15 +64,15 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `multiple ability-level constraints are rejected`() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
                 show : {val: 'a} -> Str
             }
 
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Serializable 'a with Show 'a, Eq 'a where {
+            ability Serializable for 'a with Show 'a, Eq 'a where {
                 serialize : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -89,11 +89,11 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `circular ability-level constraints are rejected`() {
         val source = """
-            ability A 'a with B 'a where {
+            ability A for 'a with B 'a where {
                 opA : {val: 'a} -> Str
             }
 
-            ability B 'a with A 'a where {
+            ability B for 'a with A 'a where {
                 opB : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -109,7 +109,7 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `self-referential ability-level constraint is rejected`() {
         val source = """
-            ability SelfRef 'a with SelfRef 'a where {
+            ability SelfRef for 'a with SelfRef 'a where {
                 op : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -128,11 +128,11 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `method-level constraint is accepted`() {
         val source = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Ord 'a where {
+            ability Ord for 'a where {
                 compare : {left: 'a, right: 'a} with Eq 'a -> Str
             }
         """.trimIndent()
@@ -157,15 +157,15 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `multiple method-level constraints are accepted`() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
                 show : {val: 'a} -> Str
             }
 
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Serializable 'a where {
+            ability Serializable for 'a where {
                 serialize : {val: 'a} with Show 'a, Eq 'a -> Str
             }
         """.trimIndent()
@@ -184,7 +184,7 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `ability without constraints works`() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
                 show : {val: 'a} -> Str
             }
         """.trimIndent()
@@ -203,23 +203,23 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `method-level constraint on different type param works`() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
 
-            impl Show Int where {
-                show = {val} -> "Int"
+            impl Show for Int where {
+                show = {} -> "Int"
             }
 
-            ability Printer 'a where {
-                print : {prefix: 'a, item: 'b} with Show 'b -> Str
+            ability Printer for 'a where {
+                print : {item: 'b} with Show 'b -> Str
             }
 
-            impl Printer Str where {
-                print = {prefix, item} -> "printed"
+            impl Printer for Str where {
+                print = {item} -> "printed"
             }
 
-            let test = {} -> Printer.print {prefix = "Value", item = 42}
+            let test = {} -> "Value".print {item = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -232,24 +232,24 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `method-level constraint fails when not satisfied`() {
         val source = """
-            ability Show 'a where {
-                show : {val: 'a} -> Str
+            ability Show for 'a where {
+                show : {} -> Str
             }
 
-            impl Show Int where {
-                show = {val} -> "Int"
+            impl Show for Int where {
+                show = {} -> "Int"
             }
 
-            ability Printer 'a where {
-                print : {prefix: 'a, item: 'b} with Show 'b -> Str
+            ability Printer for 'a where {
+                print : {item: 'b} with Show 'b -> Str
             }
 
-            impl Printer Str where {
-                print = {prefix, item} -> "printed"
+            impl Printer for Str where {
+                print = {item} -> "printed"
             }
 
             # Float does NOT implement Show - should fail
-            let test = {} -> Printer.print {prefix = "Value", item = 3.14}
+            let test = {} -> "Value".print {item = 3.14}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -265,19 +265,19 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `impl with method-level constraints works`() {
         val source = """
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Ord 'a where {
+            ability Ord for 'a where {
                 compare : {left: 'a, right: 'a} with Eq 'a -> Str
             }
 
-            impl Eq Int where {
+            impl Eq for Int where {
                 equals = {left, right} -> True
             }
 
-            impl Ord Int where {
+            impl Ord for Int where {
                 compare = {left, right} -> "equal"
             }
         """.trimIndent()
@@ -300,15 +300,15 @@ class AbilityDependencyTypeCheckerTest {
     @Test
     fun `different methods can have different constraints`() {
         val source = """
-            ability Show 'a where {
+            ability Show for 'a where {
                 show : {val: 'a} -> Str
             }
 
-            ability Eq 'a where {
+            ability Eq for 'a where {
                 equals : {left: 'a, right: 'a} -> Bool
             }
 
-            ability Collection 'c where {
+            ability Collection for 'c where {
                 length : {col: 'c} -> Int,
                 contains : {col: 'c, item: 'a} with Eq 'a -> Bool,
                 show_all : {col: 'c, items: 'a} with Show 'a -> Str
