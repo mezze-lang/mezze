@@ -1,6 +1,7 @@
-use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumMod}
+use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
+use std::abilities::default::{Default}
 
 impl NumAdd for Int where { add = {it, r} -> __native_int_add {l = it, r = r} }
 impl NumSub for Int where { sub = {it, r} -> __native_int_subtract {l = it, r = r}, neg = {it} -> __native_int_neg {n = it} }
@@ -22,6 +23,9 @@ impl TryInto Int |ConversionError {msg: Str}| for Str where {
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "invalid integer"}}
 }
+impl NumZero for Int where { zero = {} -> 0, is_zero = {it} -> it == 0 }
+impl NumOne for Int where { one = {} -> 1 }
+impl Default for Int where { default = {} -> 0 }
 
 # Integer utility functions
 # This module provides utility functions for working with integers

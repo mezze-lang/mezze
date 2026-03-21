@@ -4,8 +4,8 @@
 let wrapColor = {c} -> match c is
   Red -> Wrapped {val = 1}
   Green -> Wrapped {val = 2}
-  Blue -> Default
-  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int }, Default, Other |
+  Blue -> Fallback
+  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int }, Fallback, Other |
 
 # Open variant parameter, closed variant return
 let unwrapSafely = {w} -> match w is
@@ -31,9 +31,9 @@ let branch = {choice} -> match choice is
   _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha, Beta, Gamma |
 
 # Function matching closed Option type - all constructors covered, no wildcard needed
-let handleWithDefault = {opt} -> match opt is
+let handleWithFallback = {opt} -> match opt is
   Some {val} -> val
-  None -> 42                                                    # expected: handleWithDefault : { opt: Option Int } -> Int
+  None -> 42                                                    # expected: handleWithFallback : { opt: Option Int } -> Int
 
 # Closed variant with polymorphic operations
 let closedMath = {op, x, y} -> match op is

@@ -144,16 +144,16 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with pattern matching should pass`() {
         val source = """
             ability DefaultValue for 'a where {
-              default: {it: 'a, opt: Option 'a} -> 'a
+              get_default: {it: 'a, opt: Option 'a} -> 'a
             }
 
             impl DefaultValue for Int where {
-              default = {it, opt} -> match opt is
+              get_default = {it, opt} -> match opt is
                 Some {val} -> val
                 None -> 0
             }
 
-            let getDefault = {d, x} -> d.default {opt = x}
+            let getDefault = {d, x} -> d.get_default {opt = x}
 
             getDefault {d = 0, x = None}
         """.trimIndent()

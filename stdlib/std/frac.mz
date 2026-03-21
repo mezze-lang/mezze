@@ -1,6 +1,7 @@
-use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv}
+use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into}
+use std::abilities::default::{Default}
 
 impl NumAdd for Frac where { add = {it, r} -> __native_frac_add {l = it, r = r} }
 impl NumSub for Frac where { sub = {it, r} -> __native_frac_subtract {l = it, r = r}, neg = {it} -> __native_negate_frac {n = it} }
@@ -10,6 +11,9 @@ impl Eq for Frac where { eq = {it, r} -> __native_frac_equals {l = it, r = r}, n
 impl Ord for Frac where { lt = {it, r} -> __native_frac_less_than {l = it, r = r}, le = {it, r} -> if __native_frac_greater_than {l = it, r = r} then False else True, gt = {it, r} -> __native_frac_greater_than {l = it, r = r}, ge = {it, r} -> if __native_frac_less_than {l = it, r = r} then False else True }
 impl Into Float for Frac where { into = {it} -> __native_frac_to_float {n = it} }
 impl Into Str for Frac where { into = {it} -> __native_frac_to_str {n = it} }
+impl NumZero for Frac where { zero = {} -> __native_int_to_frac {n = 0}, is_zero = {it} -> __native_frac_equals {l = it, r = __native_int_to_frac {n = 0}} }
+impl NumOne for Frac where { one = {} -> __native_int_to_frac {n = 1} }
+impl Default for Frac where { default = {} -> __native_int_to_frac {n = 0} }
 
 # std/types/frac.mezze - Fraction type operations
 
@@ -86,8 +90,8 @@ impl Frac where {
     abs = {it} -> __native_abs_frac {n = it},
     numerator = {it} -> __native_frac_numerator {n = it},
     denominator = {it} -> __native_frac_denominator {n = it},
-    is_zero = {it} -> __native_frac_is_zero {n = it},
-    is_positive = {it} -> __native_frac_is_positive {n = it},
-    is_negative = {it} -> __native_frac_is_negative {n = it},
-    reciprocal = {it} -> __native_frac_reciprocal {n = it}
+    is_zero = {it} -> __native_frac_equals {l = it, r = __native_int_to_frac {n = 0}},
+    is_positive = {it} -> __native_frac_greater_than {l = it, r = __native_int_to_frac {n = 0}},
+    is_negative = {it} -> __native_frac_less_than {l = it, r = __native_int_to_frac {n = 0}},
+    reciprocal = {it} -> __native_frac_divide {l = __native_int_to_frac {n = 1}, r = it}
 }

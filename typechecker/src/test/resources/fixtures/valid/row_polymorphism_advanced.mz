@@ -27,7 +27,7 @@ let processList = {items} -> match items is
 # Row extension with return polymorphism
 let returnVariant = {v} -> match v is
   Input {x} -> Output {y = x}
-  _ -> Default                                                  # expected: returnVariant : { v: | Input { x: 'a }, ... | } -> | Output { y: 'a }, Default |
+  _ -> Fallback                                                  # expected: returnVariant : { v: | Input { x: 'a }, ... | } -> | Output { y: 'a }, Fallback |
 
 # Multiple constructors with same field names
 let sameFields = {v} -> match v is

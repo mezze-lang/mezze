@@ -29,3 +29,17 @@ ability NumDiv for 'a where {
 ability NumMod for 'a where {
     mod: {it: 'a, r: 'a} -> 'a
 }
+
+# Additive identity — zero value and zero check
+# zero: no `it` (construction), is_zero: has `it` (method on value)
+# Usage: NumZero.zero {}  or  x.is_zero {}
+ability NumZero for 'a where {
+    zero: {} -> 'a,
+    is_zero: {it: 'a} -> Bool
+}
+
+# Multiplicative identity
+# Usage: NumOne.one {}
+ability NumOne for 'a where {
+    one: {} -> 'a
+}

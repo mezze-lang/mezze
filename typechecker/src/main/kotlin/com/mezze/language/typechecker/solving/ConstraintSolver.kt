@@ -2165,6 +2165,26 @@ class ConstraintSolver(
                 isBoolLikeVariant(unwrappedType)
             }
 
+            // NumZero/NumOne - numeric types only
+            "NumZero", "NumOne" -> {
+                unwrappedType is MezzeType.IntType ||
+                unwrappedType is MezzeType.FloatType ||
+                unwrappedType is MezzeType.NatType ||
+                unwrappedType is MezzeType.FracType
+            }
+
+            // Default - types with sensible default values
+            "Default" -> {
+                unwrappedType is MezzeType.IntType ||
+                unwrappedType is MezzeType.FloatType ||
+                unwrappedType is MezzeType.NatType ||
+                unwrappedType is MezzeType.FracType ||
+                unwrappedType is MezzeType.StringType ||
+                unwrappedType is MezzeType.BoolType ||
+                unwrappedType is MezzeType.SeqType ||
+                unwrappedType is MezzeType.ListType
+            }
+
             else -> false
         }
     }

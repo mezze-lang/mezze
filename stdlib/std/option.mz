@@ -2,6 +2,7 @@
 # Note: Option type is now built-in to the language
 
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 
 impl Eq 'a for Option 'a where {
     eq = {it, r} -> match it is
@@ -46,6 +47,7 @@ impl Ord 'a for Option 'a where {
             None -> True
             Some {val = _} -> False
 }
+impl Default for Option where { default = {} -> None }
 
 # Map a function over the Option value
 pub let map: { opt: Option 'a, f: {val: 'a} -> 'b <...> } -> Option 'b <...> = { opt, f } ->

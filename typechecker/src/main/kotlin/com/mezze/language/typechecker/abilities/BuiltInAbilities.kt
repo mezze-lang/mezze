@@ -44,6 +44,7 @@ object BuiltInAbilities {
             "std/abilities/logic.mz",
             "std/abilities/inspect.mz",
             "std/abilities/convert.mz",
+            "std/abilities/default.mz",
         )
 
         val result = mutableMapOf<String, Map<String, (MezzeType.VarType) -> MezzeType>>()

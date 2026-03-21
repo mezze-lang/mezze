@@ -1,6 +1,7 @@
-use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv}
+use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
+use std::abilities::default::{Default}
 
 impl NumAdd for Float where { add = {it, r} -> __native_float_add {l = it, r = r} }
 impl NumSub for Float where { sub = {it, r} -> __native_float_subtract {l = it, r = r}, neg = {it} -> 0.0 - it }
@@ -19,6 +20,9 @@ impl TryInto Float |ConversionError {msg: Str}| for Str where {
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "invalid float"}}
 }
+impl NumZero for Float where { zero = {} -> 0.0, is_zero = {it} -> it == 0.0 }
+impl NumOne for Float where { one = {} -> 1.0 }
+impl Default for Float where { default = {} -> 0.0 }
 
 # Float utility functions
 # This module provides utility functions for working with floats

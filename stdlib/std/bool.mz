@@ -1,12 +1,14 @@
 use std::abilities::compare::{Eq}
 use std::abilities::logic::{LogicalAnd, LogicalOr, LogicalNot}
 use std::abilities::convert::{Into}
+use std::abilities::default::{Default}
 
 impl Eq for Bool where { eq = {it, r} -> __native_bool_eq {l = it, r = r}, neq = {it, r} -> __native_bool_neq {l = it, r = r} }
 impl LogicalAnd for Bool where { and = {it, r} -> __native_bool_and {l = it, r = r} }
 impl LogicalOr for Bool where { or = {it, r} -> __native_bool_or {l = it, r = r} }
 impl LogicalNot for Bool where { not = {it} -> __native_bool_not {b = it} }
 impl Into Str for Bool where { into = {it} -> if it then "True" else "False" }
+impl Default for Bool where { default = {} -> False }
 
 # Bool utility functions
 # This module provides utility functions for working with bools

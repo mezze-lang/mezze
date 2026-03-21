@@ -1,6 +1,7 @@
-use std::abilities::numeric::{NumAdd, NumMul, NumDiv, NumMod}
+use std::abilities::numeric::{NumAdd, NumMul, NumDiv, NumMod, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
+use std::abilities::default::{Default}
 
 impl NumAdd for Nat where { add = {it, r} -> __native_nat_add {l = it, r = r} }
 impl NumMul for Nat where { mul = {it, r} -> __native_nat_multiply {l = it, r = r} }
@@ -15,6 +16,9 @@ impl TryInto Nat |ConversionError {msg: Str}| for Str where {
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "invalid nat"}}
 }
+impl NumZero for Nat where { zero = {} -> 0n, is_zero = {it} -> it == 0n }
+impl NumOne for Nat where { one = {} -> 1n }
+impl Default for Nat where { default = {} -> 0n }
 
 # Natural number utility functions
 # This module provides utility functions for working with natural numbers
