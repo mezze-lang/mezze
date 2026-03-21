@@ -26,7 +26,7 @@ private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
  * - std/float.mz
  * - std/nat.mz
  * - std/bool.mz
- * - std/string.mz
+ * - std/str.mz
  * - std/frac.mz
  */
 object BasicTypes {
@@ -66,6 +66,11 @@ object BasicTypes {
             MezzeType.IntType
         )
 
+        context["__native_int_neg"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
         context["__native_int_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
             MezzeType.StringType
@@ -81,8 +86,31 @@ object BasicTypes {
             MezzeType.IntType
         )
 
-        // Note: __native_int_equals, __native_int_less_than, __native_int_greater_than
-        // are handled by Truffle operator nodes, not native functions
+        // Comparison native functions for Eq/Ord ability impls
+        context["__native_int_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+        context["__native_int_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+        context["__native_int_lt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+        context["__native_int_le"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+        context["__native_int_gt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+        context["__native_int_ge"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
 
         // Module-qualified arithmetic functions for int
         context["int::add"] = MezzeType.FunctionType(
@@ -163,11 +191,78 @@ object BasicTypes {
         )
 
         // Note: __native_int_pow and __native_int_sign are registered in MathCoreTypes.kt
+
+        context["__native_int_gcd"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
+        context["__native_int_lcm"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
+        context["__native_int_is_even"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
+
+        context["__native_int_is_odd"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
+            MezzeType.BoolType
+        )
     }
 
     private fun registerFloatTypes(context: MutableMap<String, MezzeType>) {
-        // Note: Float arithmetic (__native_float_add, etc.) is handled by Truffle operator nodes
         // Note: Math functions (__native_float_pow, sqrt, floor, ceil, round) are in MathCoreTypes.kt
+
+        // Float arithmetic for ability impls
+        context["__native_float_add"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+        context["__native_float_subtract"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+        context["__native_float_multiply"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+        context["__native_float_divide"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+        context["__native_float_neg"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+
+        // Float comparisons for ability impls
+        context["__native_float_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
+        context["__native_float_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
+        context["__native_float_lt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
+        context["__native_float_le"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
+        context["__native_float_gt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
+        context["__native_float_ge"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.BoolType
+        )
 
         context["__native_float_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
@@ -301,6 +396,49 @@ object BasicTypes {
     }
 
     private fun registerNatTypes(context: MutableMap<String, MezzeType>) {
+        // Nat arithmetic for ability impls
+        context["__native_nat_add"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+        context["__native_nat_multiply"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+        context["__native_nat_divide"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+        context["__native_nat_modulo"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+        // Nat comparisons for ability impls
+        context["__native_nat_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+        context["__native_nat_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+        context["__native_nat_lt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+        context["__native_nat_le"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+        context["__native_nat_gt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+        context["__native_nat_ge"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.BoolType
+        )
+
         // Native nat operations
         context["__native_nat_subtract_to_int"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
@@ -417,6 +555,16 @@ object BasicTypes {
     }
 
     private fun registerBoolTypes(context: MutableMap<String, MezzeType>) {
+        // Bool comparisons for ability impls
+        context["__native_bool_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
+        )
+        context["__native_bool_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
+            MezzeType.BoolType
+        )
+
         // Native bool operations for stdlib bool module
         context["__native_bool_and"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("l" to MezzeType.BoolType, "r" to MezzeType.BoolType)),
@@ -484,6 +632,32 @@ object BasicTypes {
     }
 
     private fun registerStringTypes(context: MutableMap<String, MezzeType>) {
+        // String comparisons for ability impls
+        context["__native_string_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+        context["__native_string_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+        context["__native_string_lt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+        context["__native_string_le"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+        context["__native_string_gt"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+        context["__native_string_ge"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
+            MezzeType.BoolType
+        )
+
         context["__native_string_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("value" to MezzeType.StringType)),
             MezzeType.StringType
@@ -564,67 +738,67 @@ object BasicTypes {
         )
 
         // Module-qualified functions for string
-        context["string::concat"] = MezzeType.FunctionType(
+        context["str::concat"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("l" to MezzeType.StringType, "r" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
-        context["string::length"] = MezzeType.FunctionType(
+        context["str::length"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.IntType
         )
 
-        context["string::is_empty"] = MezzeType.FunctionType(
+        context["str::is_empty"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.BoolType
         )
 
-        context["string::to_upper"] = MezzeType.FunctionType(
+        context["str::to_upper"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
-        context["string::to_lower"] = MezzeType.FunctionType(
+        context["str::to_lower"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
-        context["string::trim"] = MezzeType.FunctionType(
+        context["str::trim"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
-        context["string::reverse"] = MezzeType.FunctionType(
+        context["str::reverse"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.StringType
         )
 
-        context["string::starts_with"] = MezzeType.FunctionType(
+        context["str::starts_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "prefix" to MezzeType.StringType)),
             MezzeType.BoolType
         )
 
-        context["string::ends_with"] = MezzeType.FunctionType(
+        context["str::ends_with"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "suffix" to MezzeType.StringType)),
             MezzeType.BoolType
         )
 
-        context["string::contains"] = MezzeType.FunctionType(
+        context["str::contains"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "substring" to MezzeType.StringType)),
             MezzeType.BoolType
         )
 
-        context["string::repeat"] = MezzeType.FunctionType(
+        context["str::repeat"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "n" to MezzeType.IntType)),
             MezzeType.StringType
         )
 
-        context["string::split"] = MezzeType.FunctionType(
+        context["str::split"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "delimiter" to MezzeType.StringType)),
             MezzeType.SeqType(MezzeType.StringType)
         )
 
-        context["string::join"] = MezzeType.FunctionType(
+        context["str::join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("strings" to MezzeType.SeqType(MezzeType.StringType), "separator" to MezzeType.StringType)),
             MezzeType.StringType
         )

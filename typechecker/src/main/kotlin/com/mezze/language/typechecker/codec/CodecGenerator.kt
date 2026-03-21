@@ -1459,11 +1459,11 @@ class CodecGenerator {
                     condition = call(
                         member(id("int"), "eq"),
                         record(
-                            "a" to call(member(id("string"), "length"), record("s" to id("str_val"))),
+                            "a" to call(member(id("str"), "length"), record("s" to id("str_val"))),
                             "b" to IntLiteral(1)
                         )
                     ),
-                    thenBranch = ok(call(member(id("string"), "char_at"), record("s" to id("str_val"), "index" to IntLiteral(0)))),
+                    thenBranch = ok(call(member(id("str"), "char_at"), record("s" to id("str_val"), "index" to IntLiteral(0)))),
                     elseBranch = call(
                         member(id("codec"), "decode_error"),
                         record(
@@ -1471,10 +1471,10 @@ class CodecGenerator {
                             "message" to str("Expected single character string for Char"),
                             "expected" to str("Char"),
                             "found" to some(call(
-                                member(id("string"), "concat"),
+                                member(id("str"), "concat"),
                                 record("a" to str("String of length "), "b" to call(
                                     member(id("int"), "to_string"),
-                                    record("n" to call(member(id("string"), "length"), record("s" to id("str_val"))))
+                                    record("n" to call(member(id("str"), "length"), record("s" to id("str_val"))))
                                 ))
                             ))
                         )
@@ -1706,7 +1706,7 @@ class CodecGenerator {
 
         return IfExpression(
             condition = call(
-                member(id("string"), "eq"),
+                member(id("str"), "eq"),
                 record("a" to member(id("variant_info"), "tag"), "b" to str(constructorName))
             ),
             thenBranch = thenBranch,
@@ -1952,7 +1952,7 @@ class CodecGenerator {
                 okPat("variant_info"),
                 IfExpression(
                     condition = call(
-                        member(id("string"), "eq"),
+                        member(id("str"), "eq"),
                         record("a" to member(id("variant_info"), "tag"), "b" to str("Ok"))
                     ),
                     thenBranch = match(
@@ -1981,7 +1981,7 @@ class CodecGenerator {
                     ),
                     elseBranch = IfExpression(
                         condition = call(
-                            member(id("string"), "eq"),
+                            member(id("str"), "eq"),
                             record("a" to member(id("variant_info"), "tag"), "b" to str("Err"))
                         ),
                         thenBranch = match(
@@ -2536,13 +2536,13 @@ class CodecGenerator {
                     condition = call(
                         member(id("int"), "eq"),
                         record(
-                            "a" to call(member(id("string"), "length"), record("s" to member(id("result"), "value"))),
+                            "a" to call(member(id("str"), "length"), record("s" to member(id("result"), "value"))),
                             "b" to IntLiteral(1)
                         )
                     ),
                     thenBranch = ok(record(
                         "val" to call(
-                            member(id("string"), "char_at"),
+                            member(id("str"), "char_at"),
                             record("s" to member(id("result"), "value"), "index" to IntLiteral(0))
                         ),
                         "offset" to member(id("result"), "offset")
@@ -2740,7 +2740,7 @@ class CodecGenerator {
 
         return IfExpression(
             condition = call(
-                member(id("string"), "eq"),
+                member(id("str"), "eq"),
                 record("a" to member(id(resultVar), "tag"), "b" to str(constructorName))
             ),
             thenBranch = thenBranch,

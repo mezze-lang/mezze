@@ -117,6 +117,41 @@ public final class SortedSetNatives {
         return set1.equals(set2);
     }
 
+    /**
+     * Lexicographic comparison of two sorted sets (by their sorted element order).
+     * Returns -1, 0, or 1.
+     */
+    @TruffleBoundary
+    public static long compare(MezzeSortedSet set1, MezzeSortedSet set2) {
+        int minLen = Math.min(set1.size(), set2.size());
+        for (int i = 0; i < minLen; i++) {
+            int cmp = compareElements(set1.get(i), set2.get(i));
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+        }
+        return Integer.compare(set1.size(), set2.size());
+    }
+
+    private static int compareElements(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
+        }
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        if (a instanceof Long && b instanceof Double) {
+            return Double.compare(((Long) a).doubleValue(), (Double) b);
+        }
+        if (a instanceof Double && b instanceof Long) {
+            return Double.compare((Double) a, ((Long) b).doubleValue());
+        }
+        return 0;
+    }
+
     // ==================== Conversion ====================
 
     @TruffleBoundary

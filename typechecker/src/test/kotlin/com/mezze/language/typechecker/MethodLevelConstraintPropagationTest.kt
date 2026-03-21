@@ -37,6 +37,7 @@ class MethodLevelConstraintPropagationTest {
         parser = MezzeParser()
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
         typeChecker = TypeChecker()
     }
 
@@ -394,6 +395,96 @@ class MethodLevelConstraintPropagationTest {
 
             # Polymorphic call - WOULD need Show constraint
             # let printAny: {x: 'z} -> Str = {x} -> "test".print {item = x}  # would fail
+        """.trimIndent()
+
+        assertDoesNotThrow { typeCheck(code) }
+    }
+
+    // ========================================================================
+    // SECTION 9: Generic Ability Impls
+    // ========================================================================
+
+    @Test
+    fun `generic impl for seq type matches concrete seq`() {
+        // impl Eq 'a for ['a] with method-level constraint
+        // When checking Eq [Int], should match if Eq Int is satisfied
+        val code = """
+            ability MyEq for 'a where {
+                my_eq: {r: 'a} -> Bool
+            }
+
+            impl MyEq for Int where {
+                my_eq = {r} -> True
+            }
+
+            impl MyEq 'a for ['a] where {
+                my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
+            }
+
+            let test = {} -> [1, 2].my_eq {r = [3, 4]}
+        """.trimIndent()
+
+        assertDoesNotThrow { typeCheck(code) }
+    }
+
+    @Test
+    fun `generic impl fails when element type lacks ability`() {
+        // impl MyEq 'a for ['a] requires MyEq 'a
+        // If MyEq is NOT implemented for the element type, should fail
+        val code = """
+            type Wrapper = { val: Int }
+
+            ability MyEq for 'a where {
+                my_eq: {r: 'a} -> Bool
+            }
+
+            # No impl MyEq for Wrapper!
+
+            impl MyEq 'a for ['a] where {
+                my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
+            }
+
+            let w1: Wrapper = { val = 1 }
+            let w2: Wrapper = { val = 2 }
+            let test = {} -> [w1].my_eq {r = [w2]}
+        """.trimIndent()
+
+        val error = assertThrows<TypeCheckError> { typeCheck(code) }
+        assertContains(error.message!!, "MyEq")
+    }
+
+    @Test
+    fun `generic impl for Option type`() {
+        val code = """
+            ability MyEq for 'a where {
+                my_eq: {r: 'a} -> Bool
+            }
+
+            impl MyEq for Int where { my_eq = {r} -> True }
+
+            impl MyEq 'a for Option 'a where {
+                my_eq: {r: Option 'a} with MyEq 'a -> Bool = {r} -> True
+            }
+
+            let test = {} -> (Some {val = 42}).my_eq {r = Some {val = 43}}
+        """.trimIndent()
+
+        assertDoesNotThrow { typeCheck(code) }
+    }
+
+    @Test
+    fun `generic impl without constraints matches any element`() {
+        // A generic impl with NO constraints should match any element type
+        val code = """
+            ability HasLength for 'a where {
+                len: {} -> Int
+            }
+
+            impl HasLength 'a for ['a] where {
+                len = {} -> 0
+            }
+
+            let test = {} -> [1, 2, 3].len {}
         """.trimIndent()
 
         assertDoesNotThrow { typeCheck(code) }

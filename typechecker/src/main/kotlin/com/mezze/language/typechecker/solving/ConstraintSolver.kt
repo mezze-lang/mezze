@@ -1405,7 +1405,8 @@ class ConstraintSolver(
             // For abilities with associated types, only match the primary type
             // (associated types are handled separately)
             if (annotations.size == 1) {
-                typeMatchesAnnotation(primaryType, annotations.first())
+                val typeVarBindings = mutableMapOf<String, MezzeType>()
+                typeMatchesAnnotation(primaryType, annotations.first(), impl.typeVars, typeVarBindings)
             } else {
                 false
             }
@@ -1467,13 +1468,11 @@ class ConstraintSolver(
      * Also checks for built-in ability implementations.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>): Boolean {
-        // Check if the user has defined their own version of this ability.
-        // If so, the user-defined ability SHADOWS the built-in one, and we must NOT
-        // use the built-in implementation. The user must provide an explicit impl.
-        val isUserDefinedAbility = abilityDeclarations.containsKey(abilityName)
-
-        // Check built-in abilities ONLY if there's no user-defined ability with the same name
-        if (!isUserDefinedAbility && typeArgs.size == 1) {
+        // Built-in ability auto-derivation for core abilities (Eq, Ord, NumAdd, etc.)
+        // This runs for abilities recognized by BuiltinAbilities regardless of whether
+        // they're also declared in .mz files. This ensures that primitive types always
+        // satisfy core ability constraints, even when the explicit .mz impl isn't in scope.
+        if (typeArgs.size == 1 && BuiltinAbilities.isBuiltin(abilityName)) {
             if (isBuiltInAbilityImplementation(abilityName, typeArgs.first())) {
                 return true
             }
@@ -1510,8 +1509,33 @@ class ConstraintSolver(
 
             if (annotations.size != typeArgs.size) return@any false
 
-            typeArgs.zip(annotations).all { (actualType, annotation) ->
-                typeMatchesAnnotation(actualType, annotation)
+            // For generic impls, track type variable bindings during matching
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+
+            val matches = typeArgs.zip(annotations).all { (actualType, annotation) ->
+                typeMatchesAnnotation(actualType, annotation, implInfo.typeVars, typeVarBindings)
+            }
+
+            if (!matches) return@any false
+
+            // If this is a generic impl, check method-level constraints with resolved bindings
+            if (typeVarBindings.isNotEmpty() && implInfo.operationConstraints.isNotEmpty()) {
+                implInfo.operationConstraints.all { constraint ->
+                    // Resolve the constraint's type args using bindings
+                    val resolvedTypeArgs = constraint.typeArgs.map { typeArg ->
+                        when (typeArg) {
+                            is IdentifierTypeAnnotation -> {
+                                val bound = typeVarBindings[typeArg.name]
+                                if (bound != null) bound
+                                else typeAnnotationToMezzeType(typeArg)
+                            }
+                            else -> typeAnnotationToMezzeType(typeArg)
+                        }
+                    }
+                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs)
+                }
+            } else {
+                true
             }
         }
 
@@ -1526,13 +1550,23 @@ class ConstraintSolver(
      * matches `TypeApplicationAnnotation("Maybe", [IdentifierTypeAnnotation("Int")])`.
      *
      * OPTIMIZATION: Uses memoization cache to avoid repeated matching of same pairs.
+     * Note: caching is skipped when type variables are in play (bindings are mutable).
      */
-    private fun typeMatchesAnnotation(type: MezzeType, annotation: TypeAnnotation): Boolean {
+    private fun typeMatchesAnnotation(
+        type: MezzeType,
+        annotation: TypeAnnotation,
+        typeVars: Set<String> = emptySet(),
+        typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
+    ): Boolean {
+        // Skip caching when type variables are involved (bindings are stateful)
+        if (typeVars.isNotEmpty()) {
+            return typeMatchesAnnotationImpl(type, annotation, typeVars, typeVarBindings)
+        }
         // OPTIMIZATION: Check cache first
         val cacheKey = Pair(System.identityHashCode(type), System.identityHashCode(annotation))
         typeMatchesAnnotationCache[cacheKey]?.let { return it }
 
-        val result = typeMatchesAnnotationImpl(type, annotation)
+        val result = typeMatchesAnnotationImpl(type, annotation, typeVars, typeVarBindings)
         typeMatchesAnnotationCache[cacheKey] = result
         return result
     }
@@ -1540,11 +1574,28 @@ class ConstraintSolver(
     /**
      * Implementation of typeMatchesAnnotation without caching.
      */
-    private fun typeMatchesAnnotationImpl(type: MezzeType, annotation: TypeAnnotation): Boolean {
+    private fun typeMatchesAnnotationImpl(
+        type: MezzeType,
+        annotation: TypeAnnotation,
+        typeVars: Set<String> = emptySet(),
+        typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
+    ): Boolean {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
+                // Check if this is a type variable from a generic impl
+                if (annotation.name in typeVars) {
+                    val existing = typeVarBindings[annotation.name]
+                    if (existing != null) {
+                        // Already bound — check consistency
+                        existing == type
+                    } else {
+                        // First occurrence — bind it
+                        typeVarBindings[annotation.name] = type
+                        true
+                    }
+                }
                 // Check if annotation refers to a primitive type
-                when (annotation.name) {
+                else when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "Str" -> type is MezzeType.StringType
@@ -1579,7 +1630,7 @@ class ConstraintSolver(
                         // Check type arguments
                         type.args.size == annotation.args.size &&
                         type.args.zip(annotation.args).all { (argType, argAnnotation) ->
-                            typeMatchesAnnotation(argType, argAnnotation)
+                            typeMatchesAnnotation(argType, argAnnotation, typeVars, typeVarBindings)
                         }
                     }
                     type is MezzeType.VariantType && type.typeName == null -> {
@@ -1599,7 +1650,7 @@ class ConstraintSolver(
                             val inferredArgs = inferTypeArgsFromVariant(type, typeDecl, definition)
                             if (inferredArgs != null && inferredArgs.size == annotation.args.size) {
                                 inferredArgs.zip(annotation.args).all { (inferredType, argAnnotation) ->
-                                    typeMatchesAnnotation(inferredType, argAnnotation)
+                                    typeMatchesAnnotation(inferredType, argAnnotation, typeVars, typeVarBindings)
                                 }
                             } else {
                                 false
@@ -1609,18 +1660,18 @@ class ConstraintSolver(
                         }
                     }
                     type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
+                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     type is MezzeType.ListType && annotation.constructor == "List" -> {
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
+                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     type is MezzeType.SetType && annotation.constructor == "Set" -> {
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
+                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     type is MezzeType.MapType && annotation.constructor == "Map" -> {
                         annotation.args.size == 2 &&
-                        typeMatchesAnnotation(type.keyType, annotation.args[0]) &&
-                        typeMatchesAnnotation(type.valueType, annotation.args[1])
+                        typeMatchesAnnotation(type.keyType, annotation.args[0], typeVars, typeVarBindings) &&
+                        typeMatchesAnnotation(type.valueType, annotation.args[1], typeVars, typeVarBindings)
                     }
                     else -> false
                 }
@@ -1631,7 +1682,7 @@ class ConstraintSolver(
 
                 annotation.entries.all { entry ->
                     val fieldType = type.fields[entry.name] ?: return false
-                    typeMatchesAnnotation(fieldType, entry.type)
+                    typeMatchesAnnotation(fieldType, entry.type, typeVars, typeVarBindings)
                 }
             }
             is VariantTypeAnnotation -> {
@@ -1646,12 +1697,12 @@ class ConstraintSolver(
                     } else if (concretePayload == null) {
                         false
                     } else {
-                        typeMatchesAnnotation(concretePayload, dataType)
+                        typeMatchesAnnotation(concretePayload, dataType, typeVars, typeVarBindings)
                     }
                 }
             }
             is SeqTypeAnnotation -> {
-                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType)
+                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType, typeVars, typeVarBindings)
             }
             else -> false
         }
@@ -2054,8 +2105,8 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType
             }
-            // NumSub and NumNeg don't work with Nat (result can be negative)
-            "NumSub", "NumNeg" -> {
+            // NumSub (includes neg) doesn't work with Nat (result can be negative)
+            "NumSub" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.FracType
@@ -2107,10 +2158,11 @@ class ConstraintSolver(
             // Inspect - built-in ability for displaying values
             "Inspect" -> true  // All types can be inspected
 
-            // Logical operators - only Bool
+            // Logical operators - Bool (including partial Bool variants from unification)
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType ||
-                isBoolVariant(unwrappedType)
+                isBoolVariant(unwrappedType) ||
+                isBoolLikeVariant(unwrappedType)
             }
 
             else -> false
@@ -2140,7 +2192,7 @@ class ConstraintSolver(
                 "NumMul" -> "*"
                 "NumDiv" -> "/"
                 "NumMod" -> "%"
-                "NumNeg" -> "-"
+                // NumNeg removed — neg is a method of NumSub
                 else -> null
             }
 
@@ -2202,6 +2254,15 @@ class ConstraintSolver(
 
     private fun isBoolVariant(type: MezzeType): Boolean {
         return BuiltInAbilities.isBoolVariant(type)
+    }
+
+    /** Matches partial Bool variants (e.g., just {True} or just {False}) during constraint solving. */
+    private fun isBoolLikeVariant(type: MezzeType): Boolean {
+        if (type !is MezzeType.VariantType) return false
+        val keys = type.constructors.keys
+        return keys.all { it == "True" || it == "False" } &&
+               keys.isNotEmpty() &&
+               type.constructors.values.all { it == null }
     }
 
     /**

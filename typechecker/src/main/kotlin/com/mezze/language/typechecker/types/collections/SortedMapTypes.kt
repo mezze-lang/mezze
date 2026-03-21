@@ -210,6 +210,19 @@ object SortedMapTypes {
             )
         }
 
+        // __native_sorted_map_compare: {m1: SortedMap 'k 'v, m2: SortedMap 'k 'v} -> Int
+        run {
+            val keyType = MezzeType.VarType(TypeVar("k"))
+            val valueType = MezzeType.VarType(TypeVar("v"))
+            context["__native_sorted_map_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "m1" to MezzeType.SortedMapType(keyType, valueType),
+                    "m2" to MezzeType.SortedMapType(keyType, valueType)
+                )),
+                MezzeType.IntType
+            )
+        }
+
         // __native_sorted_map_singleton: {k: 'k, v: 'v} -> SortedMap 'k 'v
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))

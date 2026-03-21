@@ -1,3 +1,17 @@
+use std::abilities::compare::{Eq, Ord}
+
+impl Eq 'a for List 'a where {
+    eq: {r: List 'a} with Eq 'a -> Bool = {r} -> __native_list_equals {xs = it, ys = r},
+    neq: {r: List 'a} with Eq 'a -> Bool = {r} -> if __native_list_equals {xs = it, ys = r} then False else True
+}
+
+impl Ord 'a for List 'a where {
+    lt: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} == (0 - 1),
+    le: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} != 1,
+    gt: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} == 1,
+    ge: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} != (0 - 1)
+}
+
 # std/collections/list.mezze - Immutable linked list operations
 #
 # List 'a is a built-in type conceptually defined as:
@@ -498,3 +512,39 @@ pub let equal_range: { xs: List 'a, target: 'a } -> { lower: Int, upper: Int } =
 # List MUST be sorted according to comparator
 pub let binary_search_by: { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = {xs, target, cmp} ->
     __native_list_binary_search_by { xs = xs, target = target, cmp = cmp }
+
+impl List 'a where {
+    is_empty = {} -> is_empty {xs = it},
+    head = {} -> head {xs = it},
+    tail = {} -> tail {xs = it},
+    length = {} -> length {xs = it},
+    push = {x} -> push {x = x, xs = it},
+    append = {ys} -> append {xs = it, ys = ys},
+    get = {index} -> get {xs = it, index = index},
+    take = {n} -> take {xs = it, n = n},
+    drop = {n} -> drop {xs = it, n = n},
+    map = {f} -> map {xs = it, f = f},
+    filter = {p} -> filter {xs = it, p = p},
+    fold_left = {init, f} -> fold_left {xs = it, init = init, f = f},
+    reduce = {f} -> reduce {xs = it, f = f},
+    flat_map = {f} -> flat_map {xs = it, f = f},
+    any = {p} -> any {xs = it, p = p},
+    all = {p} -> all {xs = it, p = p},
+    contains = {x} -> contains {xs = it, x = x},
+    reverse = {} -> reverse {xs = it},
+    sort = {} -> sort {xs = it},
+    sort_by = {cmp} -> sort_by {xs = it, cmp = cmp},
+    find = {p} -> find {xs = it, p = p},
+    last = {} -> last {xs = it},
+    zip = {ys} -> zip {xs = it, ys = ys},
+    for_each = {f} -> for_each {xs = it, f = f},
+    partition = {p} -> partition {xs = it, p = p},
+    unique = {} -> unique {xs = it},
+    flatten = {xss} -> flatten {xss = it},
+    enumerate = {} -> enumerate {xs = it},
+    min = {} -> min {xs = it},
+    max = {} -> max {xs = it},
+    sum = {} -> sum {xs = it},
+    to_seq = {} -> to_seq {xs = it},
+    to_set = {} -> to_set {xs = it}
+}

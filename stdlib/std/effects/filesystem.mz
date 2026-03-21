@@ -1,6 +1,6 @@
 # std/effects/filesystem.mezze - File system effects (async by default)
 
-use std::string::{split, join}
+use std::str::{split, join}
 use std::collections::seq
 
 # FileSystem error types (exported for pattern matching)

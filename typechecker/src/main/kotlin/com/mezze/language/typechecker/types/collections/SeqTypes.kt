@@ -713,6 +713,19 @@ object SeqTypes {
             )
         }
 
+        // __native_seq_compare: {xs: ['a], ys: ['a]} -> Int
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val seqType = MezzeType.SeqType(elemType)
+            context["__native_seq_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "xs" to seqType,
+                    "ys" to seqType
+                )),
+                MezzeType.IntType
+            )
+        }
+
         // ==================== Min/Max/Sum/Product ====================
 
         // __native_seq_min: {xs: ['a]} -> Option 'a

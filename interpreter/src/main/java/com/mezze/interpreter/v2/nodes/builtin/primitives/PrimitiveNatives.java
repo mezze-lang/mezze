@@ -322,6 +322,15 @@ public final class PrimitiveNatives {
 
     // ==================== Bool Operations ====================
 
+    // Bool comparisons
+    public static boolean boolEq(boolean l, boolean r) {
+        return l == r;
+    }
+
+    public static boolean boolNeq(boolean l, boolean r) {
+        return l != r;
+    }
+
     // Direct implementations - boolean operations are single instructions
     public static boolean boolAnd(boolean l, boolean r) {
         return l && r;
@@ -340,6 +349,31 @@ public final class PrimitiveNatives {
     }
 
     // ==================== String Operations ====================
+
+    // String comparisons
+    public static boolean strEq(String l, String r) {
+        return l.equals(r);
+    }
+
+    public static boolean strNeq(String l, String r) {
+        return !l.equals(r);
+    }
+
+    public static boolean strLt(String l, String r) {
+        return l.compareTo(r) < 0;
+    }
+
+    public static boolean strLte(String l, String r) {
+        return l.compareTo(r) <= 0;
+    }
+
+    public static boolean strGt(String l, String r) {
+        return l.compareTo(r) > 0;
+    }
+
+    public static boolean strGte(String l, String r) {
+        return l.compareTo(r) >= 0;
+    }
 
     public static int stringLength(String s) {
         return s.length();
@@ -547,5 +581,30 @@ public final class PrimitiveNatives {
 
     public static long natMax(long l, long r) {
         return Math.max(l, r);
+    }
+
+    // Nat comparisons (same as int since both are long)
+    public static boolean natEq(long l, long r) {
+        return l == r;
+    }
+
+    public static boolean natNeq(long l, long r) {
+        return l != r;
+    }
+
+    public static boolean natLt(long l, long r) {
+        return l < r;
+    }
+
+    public static boolean natLte(long l, long r) {
+        return l <= r;
+    }
+
+    public static boolean natGt(long l, long r) {
+        return l > r;
+    }
+
+    public static boolean natGte(long l, long r) {
+        return l >= r;
     }
 }

@@ -1288,13 +1288,13 @@ class MutationRuntimeTest {
     fun `test MutString to_mut and to_immut`() {
         val code = """
             use std::effects::mutation::{LocalMut, string_to_mut, string_to_immut}
-            use std::string
+            use std::str
 
             let main = {} ->
                 perform LocalMut in do
                     let s = string_to_mut { s = "hello" }
                     let result = string_to_immut { s = s }
-                    string::length { s = result }
+                    str::length { s = result }
 
             main {}
         """.trimIndent()
@@ -1305,7 +1305,7 @@ class MutationRuntimeTest {
     fun `test MutString read and write`() {
         val code = """
             use std::effects::mutation::{LocalMut, string_to_mut, read_string, write_string}
-            use std::string
+            use std::str
 
             let main = {} ->
                 perform LocalMut in do
@@ -1313,7 +1313,7 @@ class MutationRuntimeTest {
                     let v1 = read_string { s = s }
                     write_string { s = s, v = "world" }
                     let v2 = read_string { s = s }
-                    string::length { s = v1 } * 10 + string::length { s = v2 }
+                    str::length { s = v1 } * 10 + str::length { s = v2 }
 
             main {}
         """.trimIndent()
@@ -1346,7 +1346,7 @@ class MutationRuntimeTest {
     fun `test MutString append and prepend`() {
         val code = """
             use std::effects::mutation::{LocalMut, string_to_mut, string_append, string_prepend, read_string}
-            use std::string
+            use std::str
 
             let main = {} ->
                 perform LocalMut in do
@@ -1354,7 +1354,7 @@ class MutationRuntimeTest {
                     string_prepend { s = s, prefix = "hello " }
                     string_append { s = s, suffix = "!" }
                     let result = read_string { s = s }
-                    string::length { s = result }
+                    str::length { s = result }
 
             main {}
         """.trimIndent()
@@ -1383,7 +1383,7 @@ class MutationRuntimeTest {
     fun `test MutString insert and delete`() {
         val code = """
             use std::effects::mutation::{LocalMut, string_to_mut, string_insert, string_delete, read_string}
-            use std::string
+            use std::str
 
             let main = {} ->
                 perform LocalMut in do
@@ -1392,7 +1392,7 @@ class MutationRuntimeTest {
                     let v1 = read_string { s = s }
                     string_delete { s = s, start = 0, end = 6 }
                     let v2 = read_string { s = s }
-                    string::length { s = v1 } * 10 + string::length { s = v2 }
+                    str::length { s = v1 } * 10 + str::length { s = v2 }
 
             main {}
         """.trimIndent()

@@ -239,23 +239,29 @@ class MethodLevelAbilityConstraintTest {
 
     @Test
     fun `constraint fails when ability type param doesnt satisfy it`() {
+        // Use a custom type (not a built-in primitive) to test that constraint
+        // checking works — built-in primitives always satisfy core abilities.
         val code = """
-            ability Eq for 'a where { eq: {r: 'a} -> Bool }
-            impl Eq for Int where { eq = {r} -> it == r }
+            type Wrapper = { val: Int }
+
+            ability MyEq for 'a where { my_eq: {r: 'a} -> Bool }
+            impl MyEq for Int where { my_eq = {r} -> it == r }
 
             ability Comparable for 'a where {
-                compare: {r: 'a} with Eq 'a -> Int
+                compare: {r: 'a} with MyEq 'a -> Int
             }
 
-            impl Comparable for Float where {
+            impl Comparable for Wrapper where {
                 compare = {r} -> 0
             }
 
-            let test = {} -> 1.0.compare {r = 2.0}
+            let w1: Wrapper = { val = 1 }
+            let w2: Wrapper = { val = 2 }
+            let test = {} -> w1.compare {r = w2}
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "Eq")
+        assertContains(error.message!!, "MyEq")
     }
 
     // ========================================================================

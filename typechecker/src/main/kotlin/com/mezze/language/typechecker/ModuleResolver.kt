@@ -272,6 +272,20 @@ class ModuleResolver(
         private val moduleLoadingLocks = mutableMapOf<String, Any>()
 
         /**
+         * Read a stdlib file from classpath resources.
+         * Path is relative to resources root, e.g. "stdlib/std/abilities/numeric.mz".
+         */
+        @JvmStatic
+        fun readStdlibFile(path: String): String? {
+            return try {
+                val resourceStream = ModuleResolver::class.java.classLoader.getResourceAsStream(path)
+                resourceStream?.bufferedReader()?.use { it.readText() }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
          * Clear the module cache. This is useful for tests to ensure clean state between runs.
          */
         @JvmStatic
@@ -330,6 +344,13 @@ class ModuleResolver(
          * Get all cached modules as a map of module paths to Programs.
          * Used for bundling modules into compiled JARs.
          */
+        @JvmStatic
+        fun getCacheKeys(): Set<String> {
+            synchronized(cacheLock) {
+                return moduleCache.keys.toSet()
+            }
+        }
+
         @JvmStatic
         fun getAllModules(): Map<String, Program> {
             synchronized(cacheLock) {

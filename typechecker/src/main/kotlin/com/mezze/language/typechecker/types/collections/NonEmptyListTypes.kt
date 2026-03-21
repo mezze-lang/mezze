@@ -54,6 +54,24 @@ object NonEmptyListTypes {
     }
 
     private fun registerBasicOperations(context: MutableMap<String, MezzeType>) {
+        // __native_nel_equals: {xs: NonEmptyList 'a, ys: NonEmptyList 'a} -> Bool
+        run {
+            val a = MezzeType.VarType(TypeVar("a"))
+            context["__native_nel_equals"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to nelType(a), "ys" to nelType(a))),
+                MezzeType.BoolType
+            )
+        }
+
+        // __native_nel_compare: {xs: NonEmptyList 'a, ys: NonEmptyList 'a} -> Int
+        run {
+            val a = MezzeType.VarType(TypeVar("a"))
+            context["__native_nel_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to nelType(a), "ys" to nelType(a))),
+                MezzeType.IntType
+            )
+        }
+
         // __native_nel_singleton: {x: 'a} -> NonEmptyList 'a
         run {
             val a = MezzeType.VarType(TypeVar("a"))

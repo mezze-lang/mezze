@@ -160,11 +160,45 @@ public final class DequeNatives {
         return deque1.concat(deque2);
     }
 
-    // ==================== Equality ====================
+    // ==================== Equality & Comparison ====================
 
     @TruffleBoundary
     public static boolean equals(MezzeDeque deque1, MezzeDeque deque2) {
         return deque1.equals(deque2);
+    }
+
+    /**
+     * Lexicographic comparison returning -1, 0, or 1.
+     */
+    @TruffleBoundary
+    public static long compare(MezzeDeque deque1, MezzeDeque deque2) {
+        int minLen = Math.min(deque1.size(), deque2.size());
+        for (int i = 0; i < minLen; i++) {
+            int cmp = compareElements(deque1.get(i), deque2.get(i));
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+        }
+        return Integer.compare(deque1.size(), deque2.size());
+    }
+
+    private static int compareElements(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
+        }
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        if (a instanceof Long && b instanceof Double) {
+            return Double.compare(((Long) a).doubleValue(), (Double) b);
+        }
+        if (a instanceof Double && b instanceof Long) {
+            return Double.compare((Double) a, ((Long) b).doubleValue());
+        }
+        return 0;
     }
 
     // ==================== Conversion ====================

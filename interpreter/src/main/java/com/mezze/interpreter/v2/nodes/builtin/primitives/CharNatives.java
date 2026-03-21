@@ -156,4 +156,29 @@ public final class CharNatives {
             return MezzeVariant.eq();
         }
     }
+
+    /**
+     * Compare two characters, returning -1, 0, or 1 as a long.
+     * Used by Ord ability impl which compares against integers.
+     */
+    @TruffleBoundary
+    public static long compareInt(String c1, String c2) {
+        if (c1 == null || c1.isEmpty()) {
+            if (c2 == null || c2.isEmpty()) {
+                return 0L;
+            }
+            return -1L;
+        }
+        if (c2 == null || c2.isEmpty()) {
+            return 1L;
+        }
+        int cmp = c1.charAt(0) - c2.charAt(0);
+        if (cmp < 0) {
+            return -1L;
+        } else if (cmp > 0) {
+            return 1L;
+        } else {
+            return 0L;
+        }
+    }
 }

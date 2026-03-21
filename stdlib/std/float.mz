@@ -1,3 +1,25 @@
+use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv}
+use std::abilities::compare::{Eq, Ord}
+use std::abilities::convert::{Into, TryInto}
+
+impl NumAdd for Float where { add = {r} -> __native_float_add {l = it, r = r} }
+impl NumSub for Float where { sub = {r} -> __native_float_subtract {l = it, r = r}, neg = {} -> 0.0 - it }
+impl NumMul for Float where { mul = {r} -> __native_float_multiply {l = it, r = r} }
+impl NumDiv for Float where { div = {r} -> __native_float_divide {l = it, r = r} }
+impl Eq for Float where { eq = {r} -> __native_float_eq {l = it, r = r}, neq = {r} -> __native_float_neq {l = it, r = r} }
+impl Ord for Float where { lt = {r} -> __native_float_lt {l = it, r = r}, le = {r} -> __native_float_le {l = it, r = r}, gt = {r} -> __native_float_gt {l = it, r = r}, ge = {r} -> __native_float_ge {l = it, r = r} }
+impl Into Str for Float where { into = {} -> __native_float_to_str {n = it} }
+impl TryInto Int |ConversionError {msg: Str}| for Float where {
+    try_into = {} -> match __native_float_to_int {n = it} is
+        Some {val} -> Ok {val = val}
+        None -> Err {error = ConversionError {msg = "float cannot be exactly converted to Int"}}
+}
+impl TryInto Float |ConversionError {msg: Str}| for Str where {
+    try_into = {} -> match __native_float_from_string {s = it} is
+        Some {val} -> Ok {val = val}
+        None -> Err {error = ConversionError {msg = "invalid float"}}
+}
+
 # Float utility functions
 # This module provides utility functions for working with floats
 # Note: The Float type and basic operations are now built-in
@@ -66,3 +88,20 @@ pub let clamp = { n: Float, min: Float, max: Float } ->
 # Example: to_int {n = 1.0 / 0.0} -> None
 pub let to_int = { n: Float } ->
     __native_float_to_int { n = n }
+
+impl Float where {
+    to_int = {} -> __native_float_to_int {n = it},
+    to_str = {} -> __native_float_to_str {n = it},
+    abs = {} -> __native_float_abs {n = it},
+    sign = {} -> __native_float_sign {n = it},
+    clamp = {min, max} -> __native_float_clamp {n = it, min = min, max = max},
+    min = {r} -> __native_float_min {l = it, r = r},
+    max = {r} -> __native_float_max {l = it, r = r},
+    is_nan = {} -> __native_float_is_nan {n = it},
+    ceil = {} -> __native_float_ceil {n = it},
+    floor = {} -> __native_float_floor {n = it},
+    round = {} -> __native_float_round {n = it},
+    is_infinite = {} -> __native_float_is_infinite {n = it},
+    is_finite = {} -> __native_float_is_finite {n = it},
+    sqrt = {} -> __native_float_sqrt {n = it}
+}

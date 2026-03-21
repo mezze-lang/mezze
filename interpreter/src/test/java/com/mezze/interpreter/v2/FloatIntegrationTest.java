@@ -185,9 +185,9 @@ class FloatIntegrationTest {
     void toStringConvertsFloatToString() {
         Object result = MezzeTestHelper.run("""
             use std::float
-            use std::string
+            use std::str
             let s = float::to_str { n = 3.14 }
-            string::starts_with { s = s, prefix = "3.14" }
+            str::starts_with { s = s, prefix = "3.14" }
             """);
         assertEquals(true, result);
     }

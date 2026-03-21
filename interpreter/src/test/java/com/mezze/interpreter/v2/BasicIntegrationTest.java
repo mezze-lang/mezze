@@ -343,8 +343,8 @@ public class BasicIntegrationTest {
     void testStringLength() {
         // Test string length using stdlib
         Object result = MezzeTestHelper.run("""
-            use std::string
-            string::length { s = "hello" }
+            use std::str
+            str::length { s = "hello" }
             """);
         assertEquals(5L, result);
     }

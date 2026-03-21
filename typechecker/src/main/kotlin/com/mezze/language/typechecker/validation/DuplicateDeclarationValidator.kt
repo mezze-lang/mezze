@@ -401,15 +401,19 @@ object DuplicateDeclarationValidator {
         val abilityImplKeys = mutableSetOf<String>()
 
         for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
-            // Create a key from ability name + target type names
+            // Create a key from ability name + ability type args + target type names
+            // For `impl Into Str for Int`: abilityTypeArgs=[Str], targetTypes=[Int] → key="Into_Str_Int"
+            // For `impl Into Float for Int`: abilityTypeArgs=[Float], targetTypes=[Int] → key="Into_Float_Int"
+            val abilityTypeArgNames = impl.abilityTypeArgs.map { typeAnnotationToString(it) }
             val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
+            val allTypeNames = abilityTypeArgNames + targetTypeNames
             val implLabel = impl.abilityName ?: "inherent"
-            val key = "${implLabel}_${targetTypeNames.joinToString("_")}"
+            val key = "${implLabel}_${allTypeNames.joinToString("_")}"
 
             if (abilityImplKeys.contains(key)) {
                 throw TypeCheckError(
                     "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
-                    "for type(s) ${targetTypeNames.joinToString(", ")}",
+                    "for type(s) ${allTypeNames.joinToString(", ")}",
                     impl.sourceLocation
                 )
             }

@@ -574,7 +574,7 @@ class StructuredConcurrencyTest {
     @Timeout(10)
     fun `should complete all tasks before scope exits`() {
         val code = """
-            use std::string
+            use std::str
             $loomSetup
             $atomSetup
 
@@ -582,15 +582,15 @@ class StructuredConcurrencyTest {
 
             let t1 = spawn {f = {} -> do
                 let _ = sleep {ms = 50}
-                swap {atom = results, f = {current} -> string::concat {l = current, r = "A"}}
+                swap {atom = results, f = {current} -> str::concat {l = current, r = "A"}}
             }
             let t2 = spawn {f = {} -> do
                 let _ = sleep {ms = 30}
-                swap {atom = results, f = {current} -> string::concat {l = current, r = "B"}}
+                swap {atom = results, f = {current} -> str::concat {l = current, r = "B"}}
             }
             let t3 = spawn {f = {} -> do
                 let _ = sleep {ms = 10}
-                swap {atom = results, f = {current} -> string::concat {l = current, r = "C"}}
+                swap {atom = results, f = {current} -> str::concat {l = current, r = "C"}}
             }
 
             let _ = await {p = t1}
@@ -599,7 +599,7 @@ class StructuredConcurrencyTest {
 
             let final = deref {atom = results}
             # All should complete, order may vary but length should be 3
-            string::length {s = final}
+            str::length {s = final}
         """
         val result = eval(code)
         assertEquals(3L, result)

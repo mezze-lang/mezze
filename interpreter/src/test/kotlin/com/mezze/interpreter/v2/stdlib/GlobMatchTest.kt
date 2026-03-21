@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Comprehensive tests for string::glob_match function.
+ * Comprehensive tests for str::glob_match function.
  * Migrated from V1 to V2 with unboxed values.
  *
  * Glob patterns support:
@@ -27,8 +27,8 @@ class GlobMatchTest {
 
     private fun globMatch(pattern: String, text: String): Boolean {
         val source = """
-            use std::string
-            string::glob_match { pattern = "$pattern", s = "$text" }
+            use std::str
+            str::glob_match { pattern = "$pattern", s = "$text" }
         """.trimIndent()
 
         return MezzeTestHelper.run(source) as Boolean

@@ -183,10 +183,10 @@ class JsonModuleTest {
     fun `test to_str with JObject`() {
         val result = eval("""
             use std::codec::json::{Json, to_str}
-            use std::string
+            use std::str
 
             let str = to_str {json = JObject {fields = [{key = "name", value = JString {val = "Alice"}}]}}
-            string::contains {s = str, substring = "name"}
+            str::contains {s = str, substring = "name"}
         """)
         assertEquals(true, result)
     }
@@ -382,7 +382,7 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, transform_fields, to_str}
             use std::codec::core::{FieldTransform}
-            use std::string
+            use std::str
 
             let obj: Json = JObject {fields = [
                 {key = "firstName", value = JString {val = "Alice"}},
@@ -390,7 +390,7 @@ class JsonModuleTest {
             ]}
             let transformed = transform_fields {json = obj, transform = SnakeCase}
             let str = to_str {json = transformed}
-            string::contains {s = str, substring = "first_name"}
+            str::contains {s = str, substring = "first_name"}
         """)
         assertEquals(true, result)
     }
@@ -400,13 +400,13 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, transform_fields, to_str}
             use std::codec::core::{FieldTransform}
-            use std::string
+            use std::str
 
             let inner: Json = JObject {fields = [{key = "createdAt", value = JString {val = "2024"}}]}
             let outer: Json = JObject {fields = [{key = "userData", value = inner}]}
             let transformed = transform_fields {json = outer, transform = SnakeCase}
             let str = to_str {json = transformed}
-            string::contains {s = str, substring = "user_data"}
+            str::contains {s = str, substring = "user_data"}
         """)
         assertEquals(true, result)
     }
@@ -416,12 +416,12 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, transform_fields, to_str}
             use std::codec::core::{FieldTransform}
-            use std::string
+            use std::str
 
             let obj: Json = JObject {fields = [{key = "userName", value = JString {val = "Alice"}}]}
             let transformed = transform_fields {json = obj, transform = Identity}
             let str = to_str {json = transformed}
-            string::contains {s = str, substring = "userName"}
+            str::contains {s = str, substring = "userName"}
         """)
         assertEquals(true, result)
     }
@@ -465,12 +465,12 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, serialize_to_str, JsonConfig}
             use std::codec::core::{FieldTransform}
-            use std::string
+            use std::str
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = True, indent = 2, field_transform = Identity, skip_null = False}
             let s = serialize_to_str {json = obj, config = cfg}
-            string::contains {s = s, substring = "\n"}
+            str::contains {s = s, substring = "\n"}
         """)
         assertEquals(true, result)
     }
@@ -480,12 +480,12 @@ class JsonModuleTest {
         val result = eval("""
             use std::codec::json::{Json, serialize_to_str, JsonConfig}
             use std::codec::core::{FieldTransform}
-            use std::string
+            use std::str
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = False, indent = 2, field_transform = Identity, skip_null = False}
             let s = serialize_to_str {json = obj, config = cfg}
-            string::contains {s = s, substring = "\n"}
+            str::contains {s = s, substring = "\n"}
         """)
         assertEquals(false, result)
     }

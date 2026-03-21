@@ -3,7 +3,7 @@
 let
   pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
 
-  # Prebuilt GraalVM for Linux
+  # Prebuilt GraalVM 24 — pinned to avoid Gradle/Kotlin DSL incompatibilities with JDK 25+
   graalvm-oracle-linux-prebuilt =
     if pkgs.stdenv.isLinux then
       pkgs.stdenv.mkDerivation rec {
@@ -24,10 +24,42 @@ let
 
         installPhase = "true";
 
-        # Expose 'home' attribute for devenv
+        home = "$out";
+      }
+    else if pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64 then
+      pkgs.stdenv.mkDerivation rec {
+        pname = "graalvm-oracle-24-darwin-aarch64";
+        version = "24.0.2";
+
+        src = pkgs.fetchurl {
+          url = "https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_macos-aarch64_bin.tar.gz";
+          sha256 = "1p4l6iz10dk95bqnfwspzgr70bpk7x276grm3ba2birrv5767ird";
+        };
+
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+
+        # Tarball contains: graalvm-jdk-24.0.2+11.1/Contents/Home/{bin,lib,...}
+        # Strip the top-level directory, then symlink Contents/Home/* to $out/
+        unpackPhase = ''
+          mkdir -p $out/Contents
+          tar -xzf $src --strip-components=1 -C $out
+        '';
+
+        installPhase = ''
+          # JAVA_HOME needs bin/ at the top level
+          ln -s $out/Contents/Home/bin $out/bin
+          ln -s $out/Contents/Home/lib $out/lib
+          ln -s $out/Contents/Home/include $out/include
+          ln -s $out/Contents/Home/conf $out/conf
+          ln -s $out/Contents/Home/jmods $out/jmods
+          ln -s $out/Contents/Home/legal $out/legal
+          ln -s $out/Contents/Home/release $out/release
+        '';
+
         home = "$out";
       }
     else
+      # Fallback for other Darwin (x86_64) or unknown platforms
       pkgs-unstable.graalvmPackages.graalvm-oracle;
 
 in

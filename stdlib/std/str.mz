@@ -1,7 +1,69 @@
 # String utility functions
 # This module provides utility functions for working with strings
-# Note: The String type and basic operations are now built-in
-# Built-in ability implementations (Eq, Display) are automatically available
+# Note: The Str type is built-in but ability impls live here (Str's home module)
+
+use std::abilities::compare::{Eq, Ord}
+use std::abilities::convert::{Into}
+use std::collections::bytes
+
+# =============================================================================
+# Ability implementations for Str
+# =============================================================================
+
+impl Into Bytes for Str where {
+    into = {it} -> bytes::from_string {s = it}
+}
+
+impl Eq for Str where {
+    eq = {it, r} -> __native_string_eq {l = it, r = r},
+    neq = {it, r} -> __native_string_neq {l = it, r = r}
+}
+
+impl Ord for Str where {
+    lt = {it, r} -> __native_string_lt {l = it, r = r},
+    le = {it, r} -> __native_string_le {l = it, r = r},
+    gt = {it, r} -> __native_string_gt {l = it, r = r},
+    ge = {it, r} -> __native_string_ge {l = it, r = r}
+}
+
+# =============================================================================
+# Inherent methods on Str (called as value.method {args})
+# =============================================================================
+impl Str where {
+    length = {} -> length {s = it},
+    is_empty = {} -> is_empty {s = it},
+    to_upper = {} -> to_upper {s = it},
+    to_lower = {} -> to_lower {s = it},
+    trim = {} -> trim {s = it},
+    trim_start = {} -> trim_start {s = it},
+    trim_end = {} -> trim_end {s = it},
+    reverse = {} -> reverse {s = it},
+    starts_with = {prefix: Str} -> starts_with {s = it, prefix = prefix},
+    ends_with = {suffix: Str} -> ends_with {s = it, suffix = suffix},
+    contains = {substring: Str} -> contains {s = it, substring = substring},
+    index_of = {sub: Str} -> index_of {s = it, sub = sub},
+    last_index_of = {sub: Str} -> last_index_of {s = it, sub = sub},
+    substring = {start: Int, end: Int} -> substring {s = it, start = start, end = end},
+    replace = {old: Str, new: Str} -> replace {s = it, old = old, new = new},
+    replace_all = {old: Str, new: Str} -> replace_all {s = it, old = old, new = new},
+    split = {delimiter: Str} -> split {s = it, delimiter = delimiter},
+    lines = {} -> lines {s = it},
+    words = {} -> words {s = it},
+    chars = {} -> chars {s = it},
+    char_at = {i: Int} -> char_at {s = it, i = i},
+    repeat = {n: Int} -> repeat {s = it, n = n},
+    pad_left = {len: Int, c: Char} -> pad_left {s = it, len = len, c = c},
+    pad_right = {len: Int, c: Char} -> pad_right {s = it, len = len, c = c},
+    glob_match = {pattern: Str} -> glob_match {pattern = pattern, s = it},
+    to_snake_case = {} -> to_snake_case {s = it},
+    to_camel_case = {} -> to_camel_case {s = it},
+    to_kebab_case = {} -> to_kebab_case {s = it},
+    to_screaming_snake_case = {} -> to_screaming_snake_case {s = it}
+}
+
+# =============================================================================
+# String operations
+# =============================================================================
 
 # String concatenation
 pub let concat = { l: Str, r: Str } ->

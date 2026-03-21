@@ -78,7 +78,9 @@ data class TypingContext(
         val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
         val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
-        val contentHash: String  // Content hash (same as the map key) - required for O(1) lookup
+        val contentHash: String,  // Content hash (same as the map key) - required for O(1) lookup
+        val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`
+        val operationConstraints: List<FunctionAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
     )
 
     /**

@@ -41,7 +41,7 @@ use std::codec::core::{EncodeRepr, Decode, DecodeError, EncodeError, CodecConfig
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
-use std::string
+use std::str
 use std::int
 
 # =============================================================================
@@ -442,7 +442,7 @@ pub let is_server_error: { resp: Response } -> Bool = { resp } ->
 
 # Get header value (case-insensitive)
 pub let get_header: { resp: Response, name: Str } -> Option Str = { resp, name } ->
-    map::get { m = resp.headers, k = string::to_lower { s = name } }
+    map::get { m = resp.headers, k = str::to_lower { s = name } }
 
 # Get Content-Type header
 pub let get_content_type: { resp: Response } -> Option Str = { resp } ->
@@ -626,13 +626,13 @@ pub let patch_body_with: { url: Str, body: 'a, config: HttpConfig } -> Result Re
 
 # Create bearer auth header
 pub let bearer_auth: { token: Str } -> Map Str Str = { token } ->
-    map::insert { m = map::empty {}, k = "Authorization", v = string::concat { l = "Bearer ", r = token } }
+    map::insert { m = map::empty {}, k = "Authorization", v = str::concat { l = "Bearer ", r = token } }
 
 # Create basic auth header
 pub let basic_auth: { username: Str, password: Str } -> Map Str Str = { username, password } -> do
-    let credentials = string::concat { l = username, r = string::concat { l = ":", r = password } }
+    let credentials = str::concat { l = username, r = str::concat { l = ":", r = password } }
     let encoded = __native_base64_encode { s = credentials }
-    map::insert { m = map::empty {}, k = "Authorization", v = string::concat { l = "Basic ", r = encoded } }
+    map::insert { m = map::empty {}, k = "Authorization", v = str::concat { l = "Basic ", r = encoded } }
 
 # Create API key header
 pub let api_key_header: { key: Str, value: Str } -> Map Str Str = { key, value } ->
@@ -817,19 +817,19 @@ let collect_results_loop: { results: [Result 'a 'e], idx: Int, len: Int, acc: ['
 pub let format_error: { err: HttpError } -> Str = { err } ->
     match err is
         ConnectionFailed { url, reason } ->
-            string::concat { l = "Connection failed to ", r = string::concat { l = url, r = string::concat { l = ": ", r = reason } } }
+            str::concat { l = "Connection failed to ", r = str::concat { l = url, r = str::concat { l = ": ", r = reason } } }
         Timeout { url, ms } ->
-            string::concat { l = "Request timed out after ", r = string::concat { l = int::to_str { n = ms }, r = string::concat { l = "ms: ", r = url } } }
+            str::concat { l = "Request timed out after ", r = str::concat { l = int::to_str { n = ms }, r = str::concat { l = "ms: ", r = url } } }
         InvalidUrl { url, reason } ->
-            string::concat { l = "Invalid URL '", r = string::concat { l = url, r = string::concat { l = "': ", r = reason } } }
+            str::concat { l = "Invalid URL '", r = str::concat { l = url, r = str::concat { l = "': ", r = reason } } }
         TlsError { url, reason } ->
-            string::concat { l = "TLS error for ", r = string::concat { l = url, r = string::concat { l = ": ", r = reason } } }
+            str::concat { l = "TLS error for ", r = str::concat { l = url, r = str::concat { l = ": ", r = reason } } }
         RequestFailed { url, status, body } ->
-            string::concat { l = "Request failed with status ", r = string::concat { l = int::to_str { n = status }, r = string::concat { l = ": ", r = body } } }
+            str::concat { l = "Request failed with status ", r = str::concat { l = int::to_str { n = status }, r = str::concat { l = ": ", r = body } } }
         DecodeError { url, message } ->
-            string::concat { l = "Failed to decode response from ", r = string::concat { l = url, r = string::concat { l = ": ", r = message } } }
+            str::concat { l = "Failed to decode response from ", r = str::concat { l = url, r = str::concat { l = ": ", r = message } } }
         EncodeError { url, message } ->
-            string::concat { l = "Failed to encode request for ", r = string::concat { l = url, r = string::concat { l = ": ", r = message } } }
+            str::concat { l = "Failed to encode request for ", r = str::concat { l = url, r = str::concat { l = ": ", r = message } } }
         Cancelled -> "Request was cancelled"
 
 # Check if error is retryable

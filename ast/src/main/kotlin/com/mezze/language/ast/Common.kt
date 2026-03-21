@@ -78,6 +78,18 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int = 0) {
             scopeCounters.clear()
         }
 
+        /** Save TypeVar counter state so it can be restored after a side operation (e.g., prelude loading). */
+        data class State(val globalCounter: Int, val currentLevel: Int, val scopeCounters: Map<Int, Int>)
+
+        fun saveState(): State = State(globalCounter, currentLevel, scopeCounters.toMap())
+
+        fun restoreState(state: State) {
+            globalCounter = state.globalCounter
+            currentLevel = state.currentLevel
+            scopeCounters.clear()
+            scopeCounters.putAll(state.scopeCounters)
+        }
+
         fun resetScope(level: Int = 0) {
             // Reset counter for a specific scope level (useful for per-function reset)
             scopeCounters[level] = 0

@@ -1,3 +1,17 @@
+use std::abilities::compare::{Eq, Ord}
+
+impl Eq 'a for NonEmptyList 'a where {
+    eq: {r: NonEmptyList 'a} with Eq 'a -> Bool = {r} -> __native_nel_equals {xs = it, ys = r},
+    neq: {r: NonEmptyList 'a} with Eq 'a -> Bool = {r} -> if __native_nel_equals {xs = it, ys = r} then False else True
+}
+
+impl Ord 'a for NonEmptyList 'a where {
+    lt: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} == (0 - 1),
+    le: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} != 1,
+    gt: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} == 1,
+    ge: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} != (0 - 1)
+}
+
 # std/collections/nonemptylist.mezze - Non-empty list operations
 #
 # NonEmptyList 'a is a list that is guaranteed to have at least one element
@@ -99,3 +113,22 @@ pub let sort: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
 
 pub let sort_by: { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int } -> NonEmptyList 'a = { xs, cmp } ->
     __native_nel_sort_by { xs = xs, cmp = cmp }
+
+impl NonEmptyList 'a where {
+    head = {} -> head {xs = it},
+    tail = {} -> tail {xs = it},
+    length = {} -> length {xs = it},
+    last = {} -> last {xs = it},
+    map = {f} -> map {xs = it, f = f},
+    flat_map = {f} -> flat_map {xs = it, f = f},
+    fold_left = {init, f} -> fold_left {xs = it, init = init, f = f},
+    reduce = {f} -> reduce {xs = it, f = f},
+    any = {p} -> any {xs = it, p = p},
+    all = {p} -> all {xs = it, p = p},
+    contains = {x} -> contains {xs = it, x = x},
+    reverse = {} -> reverse {xs = it},
+    sort = {} -> sort {xs = it},
+    sort_by = {cmp} -> sort_by {xs = it, cmp = cmp},
+    to_list = {} -> to_list {xs = it},
+    to_seq = {} -> to_seq {xs = it}
+}

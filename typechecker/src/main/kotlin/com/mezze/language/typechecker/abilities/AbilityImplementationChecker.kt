@@ -49,8 +49,8 @@ object AbilityImplementationChecker {
                 unwrappedType is MezzeType.FracType
             }
 
-            // NumSub and NumNeg don't work with Nat (result can be negative)
-            AstAbilities.NUM_SUB, AstAbilities.NUM_NEG -> {
+            // NumSub (includes neg) doesn't work with Nat (result can be negative)
+            AstAbilities.NUM_SUB -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.FracType

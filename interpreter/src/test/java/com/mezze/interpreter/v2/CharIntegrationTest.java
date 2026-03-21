@@ -84,9 +84,9 @@ class CharIntegrationTest {
     void toStringConvertsToSingleCharString() {
         Object result = MezzeTestHelper.run("""
             use std::char
-            use std::string
+            use std::str
             match char::from_int { code = 65 } is
-                Some { val } -> string::length { s = char::to_str { c = val } }
+                Some { val } -> str::length { s = char::to_str { c = val } }
                 None -> -1
             """);
         assertEquals(1L, result);

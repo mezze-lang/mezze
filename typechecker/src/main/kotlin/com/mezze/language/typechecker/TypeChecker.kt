@@ -180,7 +180,7 @@ class TypeChecker(
      * @param program The program to type-check
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
-    fun checkProgram(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResult {
+    fun checkProgram(program: Program, currentPath: Path = Paths.get("."), currentModulePath: String? = null, enablePrelude: Boolean = false): TypeCheckResult {
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
 
@@ -193,7 +193,12 @@ class TypeChecker(
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<String, TypedModule> = emptyMap()
-        val enhancedContext = if (hasImports(program)) {
+        // Prelude auto-import: loads inherent impls from all stdlib modules so
+        // method syntax works without explicit `use` (e.g., [1,2,3].map {f = ...}).
+        // Only inherent impls are imported — named ability impls (Eq, NumAdd) are handled
+        // by the existing hardcoded isBuiltInAbilityImplementation() system.
+        val shouldInjectPrelude = enablePrelude && (currentModulePath == null || !currentModulePath.startsWith("std::"))
+        val enhancedContext = if (hasImports(program) || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             // CRITICAL FIX: Pass the ModuleResolver to ModuleTypeChecker so it can update
             // the resolver's cache with real inferred types after type-checking
@@ -203,14 +208,31 @@ class TypeChecker(
             )
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
-            val importResult = importResolver.resolveImports(program)
+            // First resolve user's explicit imports
+            val importResult = if (hasImports(program)) {
+                importResolver.resolveImports(program)
+            } else {
+                ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
+            }
 
             when (importResult) {
                 is ImportResolutionResult.Success -> {
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
-                    // Merge import context with parent context
-                    mergeImportContext(parentContext, importResult.importContext)
+
+                    // PRELUDE: Load inherent impls from all stdlib modules.
+                    // Wrap in TypeVar save/restore so prelude loading + merging
+                    // doesn't shift type variable IDs in the user's program.
+                    if (shouldInjectPrelude) {
+                        val preludeContext = loadPreludeModules(importResolver, importContext!!)
+                        importContext = importContext!!.merge(preludeContext)
+                        // Reset TypeVar counter after prelude loading so user program
+                        // gets deterministic type variable names/IDs
+                        TypeVar.resetCounter()
+                        mergeImportContext(parentContext, importContext!!)
+                    } else {
+                        mergeImportContext(parentContext, importContext!!)
+                    }
                 }
                 is ImportResolutionResult.Failure -> {
                     // Throw the new module error directly - tests will see it
@@ -250,7 +272,8 @@ class TypeChecker(
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap(),
             importedTypes = importContext?.importedTypes ?: emptyMap(),
-            importedEffects = importContext?.importedEffects ?: emptyMap()
+            importedEffects = importContext?.importedEffects ?: emptyMap(),
+            currentModulePath = currentModulePath
         )
         val context = buildResult.context
 
@@ -529,6 +552,15 @@ class TypeChecker(
                     buildResult.implDeclarations,  // For populating resolvedHandlers with content hashes
                     context.getContentHashes()  // Content hashes for identifier resolution
                 )
+                // Pre-populate imported ability impl bodies so they can be inlined.
+                // This enables the SubstitutionApplier to replace method calls like 42.abs {}
+                // with the concrete impl body (e.g., int::abs {n = 42}).
+                // Use the map KEY as the content hash (not impl.contentHash which may be null)
+                val importedImplBodies = importContext?.importedAbilityImpls
+                    ?.map { (hash, impl) -> hash to impl }
+                    ?.toMap() ?: emptyMap()
+                applier.registerImportedImplBodies(importedImplBodies)
+
                 // Add generated codec implementations to the program BEFORE applying substitution
                 // This ensures they go through the same processing as user-defined impls
                 val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
@@ -1043,9 +1075,9 @@ class TypeChecker(
      * @param program The program to type-check
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
-    fun checkProgramForExecution(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResult {
-        // First, do normal type-checking
-        val result = checkProgram(program, currentPath)
+    fun checkProgramForExecution(program: Program, currentPath: Path = Paths.get("."), enablePrelude: Boolean = false): TypeCheckResult {
+        // First, do normal type-checking (with prelude if enabled for CLI/project mode)
+        val result = checkProgram(program, currentPath, enablePrelude = enablePrelude)
 
         // If type-checking failed, return the failure
         if (result is TypeCheckResult.Failure) {
@@ -1159,6 +1191,57 @@ class TypeChecker(
             item is UseDeclaration || item is PubUseDeclaration
         }
     }
+
+    /**
+     * Load prelude modules and return a combined ModuleImportContext.
+     * Cached globally — computed once per JVM process since stdlib doesn't change.
+     */
+    private fun loadPreludeModules(
+        importResolver: ImportResolver,
+        userImportContext: ModuleImportContext
+    ): ModuleImportContext {
+        // Return cached prelude if available
+        cachedPreludeContext?.let { return it }
+
+        val preludeModules = listOf(
+            listOf("std", "int"), listOf("std", "float"), listOf("std", "nat"), listOf("std", "frac"),
+            listOf("std", "bool"), listOf("std", "str"), listOf("std", "char"),
+            listOf("std", "option"), listOf("std", "result"),
+            listOf("std", "collections", "seq"), listOf("std", "collections", "list"),
+            listOf("std", "collections", "map"), listOf("std", "collections", "set"),
+            listOf("std", "collections", "deque"), listOf("std", "collections", "sorted_map"),
+            listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
+            listOf("std", "collections", "bytes"),
+        )
+
+        val syntheticUses = preludeModules
+            .map { UseDeclaration(path = ModulePath(it)) }
+        val syntheticProgram = Program(items = syntheticUses)
+
+        val result = importResolver.resolveImports(syntheticProgram)
+        val preludeContext = when (result) {
+            is ImportResolutionResult.Success -> {
+                // Import inherent impls for method syntax + named ability impls for
+                // context-based constraint solving (replacing hardcoded checks).
+                // No bindings — prevents name collisions (option::fold vs seq::fold).
+                val ctx = result.importContext
+                ModuleImportContext(
+                    importedBindings = emptyMap(),
+                    importedTypes = emptyMap(),
+                    importedAbilities = emptyMap(),
+                    importedEffects = emptyMap(),
+                    importedImpls = emptyMap(),
+                    importedAbilityImpls = ctx.importedAbilityImpls.filter { (_, impl) -> impl.isInherent }
+                )
+            }
+            is ImportResolutionResult.Failure -> ModuleImportContext.empty()
+        }
+
+        cachedPreludeContext = preludeContext
+        return preludeContext
+    }
+
+    // Prelude cache is in the companion object below
 
     /**
      * Check if a qualified name (like "module::function") refers to an item
@@ -1311,16 +1394,22 @@ class TypeChecker(
         // Add imported ability implementations
         // These are needed for ability method dispatch (e.g., EncodeFormat.encode_int)
         for ((implKey, implDecl) in importContext.importedAbilityImpls) {
-            // implKey is the content hash (map is keyed by content hash)
-            val implInfo = TypingContext.AbilityImplInfo(
-                abilityName = implDecl.abilityName,  // null for inherent impls
-                targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
-                targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
-                associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
-                sourceModule = null,  // TODO: Track source module
-                contentHash = implKey  // Use map key which is the content hash
-            )
-            context = context.extendWithImpl(implKey, implInfo)
+            if (implDecl.isInherent) {
+                // Inherent impls need both AbilityImplInfo AND InherentMethodInfo registered.
+                // Use registerImportedInherentImpl to bypass validation (already validated in home module).
+                context = contextBuilder.registerImportedInherentImpl(context, implDecl, implKey)
+            } else {
+                // Named ability impls only need AbilityImplInfo
+                val implInfo = TypingContext.AbilityImplInfo(
+                    abilityName = implDecl.abilityName,  // null for inherent impls
+                    targetTypes = implDecl.allTypeArgs.map { typeAnnotationToString(it) },
+                    targetTypeAnnotations = implDecl.allTypeArgs,  // Store original annotations for structural matching
+                    associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
+                    sourceModule = null,  // TODO: Track source module
+                    contentHash = implKey  // Use map key which is the content hash
+                )
+                context = context.extendWithImpl(implKey, implInfo)
+            }
         }
 
         return context
@@ -1641,14 +1730,17 @@ class TypeChecker(
      * This method mimics the old TypeChecker API for backward compatibility.
      * It throws TypeCheckError on failure instead of returning a sealed result.
      *
+     * @param enablePrelude If true, auto-imports inherent impls from all stdlib modules.
+     *                      Used by CLI/project execution, not by unit tests.
      * @throws TypeCheckError if type checking fails
      */
-    fun typeCheck(program: Program, currentPath: Path): com.mezze.language.ast.TypeCheckResult {
+    @JvmOverloads
+    fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false): com.mezze.language.ast.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
 
         // Note: checkProgram() clears the unification cache internally
-        val result = checkProgram(program, currentPath)
+        val result = checkProgram(program, currentPath, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
@@ -1734,6 +1826,15 @@ class TypeChecker(
     }
 
     companion object {
+        /** Cached prelude context — computed once per JVM process since stdlib doesn't change. */
+        @Volatile
+        private var cachedPreludeContext: ModuleImportContext? = null
+
+        /** Clears prelude cache. Used when stdlib files change. */
+        fun clearPreludeCache() {
+            cachedPreludeContext = null
+        }
+
         /**
          * Create initial context with native functions.
          *
@@ -1796,10 +1897,9 @@ class TypeChecker(
          */
         @JvmStatic
         fun clearCache() {
-            // Clear the ModuleResolver's cache
             ModuleResolver.clearCache()
-            // Clear the TypeCheckCache (constraint, monomorphization, ability impl caches)
             TypeCheckCache.clearAll()
+            // NOTE: prelude cache is NOT cleared — it's self-contained and expensive to recompute
         }
 
         /**

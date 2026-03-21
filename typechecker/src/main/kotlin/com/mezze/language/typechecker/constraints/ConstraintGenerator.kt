@@ -568,6 +568,105 @@ class ConstraintGenerator(
                     // ContextBuilder registers the implementation in Phase 1
                     // Here in Phase 2, we type-check the implementation bodies
                     validateAbilityImplementation(item, currentContext)
+
+                    // For inherent impls, generate constraints for each operation body
+                    if (item.isInherent) {
+                        val targetTypeName = item.targetTypes.firstOrNull()?.let { ann ->
+                            when (ann) {
+                                is IdentifierTypeAnnotation -> ann.name
+                                is TypeApplicationAnnotation -> ann.constructor
+                                else -> null
+                            }
+                        }
+
+                        for (op in item.operations) {
+                            // Each operation gets a FRESH target type to prevent type variable leakage
+                            val targetType = if (item.targetTypes.isNotEmpty()) {
+                                convertTypeAnnotation(item.targetTypes.first())
+                            } else {
+                                MezzeType.VarType(TypeVar.fresh())
+                            }
+
+                            if (op.implementation !is LambdaExpression) continue
+                            val lambda = op.implementation as LambdaExpression
+
+                            val methodInfo = if (targetTypeName != null) {
+                                currentContext.findAnonymousMethod(targetTypeName, op.name)
+                            } else null
+
+                            val paramNames = when (val params = lambda.parameters) {
+                                is UntypedParameters -> params.names
+                                is TypedParameters -> params.recordType.entries.map { it.name }
+                            }
+
+                            val paramTypes = if (op.paramType != null) {
+                                val expectedParam = convertTypeAnnotation(op.paramType!!)
+                                if (expectedParam is MezzeType.RecordType) {
+                                    paramNames.associateWith { name ->
+                                        expectedParam.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
+                                    }
+                                } else {
+                                    paramNames.associateWith { expectedParam }
+                                }
+                            } else {
+                                when (val params = lambda.parameters) {
+                                    is TypedParameters -> params.recordType.entries.associate { entry ->
+                                        entry.name to convertTypeAnnotation(entry.type)
+                                    }
+                                    else -> paramNames.associateWith { MezzeType.VarType(TypeVar.fresh()) }
+                                }
+                            }
+
+                            var bodyContext = currentContext
+                            bodyContext = bodyContext.extendMono(Keywords.IT, targetType)
+                            for ((name, type) in paramTypes) {
+                                bodyContext = bodyContext.extendMono(name, type)
+                            }
+
+                            val constraintContext = ConstraintContext(
+                                bodyContext,
+                                expectedType = null,
+                                performerToEffect = performerToEffect,
+                                performerAddedEffects = performerAddedEffects,
+                                abilityNames = abilityNames,
+                                effectNames = effectNames,
+                                effectDeclarations = effectDeclarations,
+                                abilityDeclarations = abilityDeclarations,
+                                typeDeclarations = typeDeclarations
+                            )
+
+                            val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+                            val constraints = bodyResult.constraints.toMutableList()
+
+                            val registeredMethodType = methodInfo?.methodType
+                            if (registeredMethodType is MezzeType.FunctionType) {
+                                constraints.add(Constraint.Equality(
+                                    left = registeredMethodType.returnType,
+                                    right = bodyResult.type,
+                                    context = "Inherent impl return type for ${op.name}"
+                                ))
+                                val paramRecordType = MezzeType.RecordType(fields = paramTypes, rowVar = null)
+                                constraints.add(Constraint.Equality(
+                                    left = registeredMethodType.paramType,
+                                    right = paramRecordType,
+                                    context = "Inherent impl param type for ${op.name}"
+                                ))
+                            }
+
+                            val opKey = "_inherent_${item.contentHash}_${op.name}"
+                            results[opKey] = ConstraintResult(
+                                type = bodyResult.type,
+                                constraints = constraints,
+                                effects = bodyResult.effects,
+                                effectInstances = bodyResult.effectInstances,
+                                abilityConstraints = bodyResult.abilityConstraints,
+                                associatedTypeConstraints = bodyResult.associatedTypeConstraints,
+                                undefinedVariables = emptyList(),
+                                usedVariables = bodyResult.usedVariables
+                            )
+                        }
+                    }
                 }
                 is TopLevelExpression -> {
                     // Top-level expressions (for REPL)
@@ -1113,7 +1212,7 @@ class ConstraintGenerator(
             )
 
         // Build substitution map: 'a -> Int, etc. (type parameters from target types)
-        val typeParamSubstitution = abilityDeclaration.typeParams.zip(impl.targetTypes).associate { (param, targetType) ->
+        val typeParamSubstitution = abilityDeclaration.typeParams.zip(impl.allTypeArgs).associate { (param, targetType) ->
             param to convertTypeAnnotation(targetType)
         }
 
@@ -1153,16 +1252,16 @@ class ConstraintGenerator(
                     bodyContext = bodyContext.extendMono(name, type)
                 }
 
-                // Inject `it` as implicit receiver — typed as the target type corresponding to receiverTypeParam
-                if (impl.targetTypes.isNotEmpty()) {
+                // Inject `it` as implicit receiver
+                val allImplTypes = impl.allTypeArgs
+                if (allImplTypes.isNotEmpty()) {
                     val receiverIndex = if (abilityDeclaration.receiverTypeParam != null) {
                         abilityDeclaration.typeParams.indexOf(abilityDeclaration.receiverTypeParam)
                     } else {
-                        // Fallback: receiver is the last type param (convention)
                         abilityDeclaration.typeParams.size - 1
                     }
-                    val safeIndex = receiverIndex.coerceIn(0, impl.targetTypes.size - 1)
-                    val receiverType = convertTypeAnnotation(impl.targetTypes[safeIndex])
+                    val safeIndex = receiverIndex.coerceIn(0, allImplTypes.size - 1)
+                    val receiverType = convertTypeAnnotation(allImplTypes[safeIndex])
                     bodyContext = bodyContext.extendMono(Keywords.IT, receiverType)
                 }
 

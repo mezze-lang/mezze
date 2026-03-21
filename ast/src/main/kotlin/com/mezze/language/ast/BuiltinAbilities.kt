@@ -30,7 +30,9 @@ object BuiltinAbilities {
     const val NUM_MUL = "NumMul"
     const val NUM_DIV = "NumDiv"
     const val NUM_MOD = "NumMod"
-    const val NUM_NEG = "NumNeg"
+    // NumNeg removed — neg is a method of NumSub, not a separate ability
+    @Deprecated("Use NUM_SUB — neg is a method of NumSub")
+    const val NUM_NEG = "NumSub"
 
     // Logical abilities
     const val LOGICAL_AND = "LogicalAnd"
@@ -194,12 +196,17 @@ object BuiltinTypes {
     const val LIST = "List"
     const val MAP = "Map"
     const val SET = "Set"
+    const val SEQ = "Seq"
+    const val SORTED_MAP = "SortedMap"
+    const val SORTED_SET = "SortedSet"
+    const val DEQUE = "Deque"
+    const val NON_EMPTY_LIST = "NonEmptyList"
 
     /**
-     * Built-in type constructor names
+     * Built-in type constructor names (non-primitive built-in types)
      */
-    val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET)
-    val primitiveTypeNames = setOf("Int", "Float", "Str", "Bool", "Nat", "Frac", "Ordering")
+    val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST)
+    val primitiveTypeNames = PrimitiveTypes.allNames
     val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
 
     // ========================================================================

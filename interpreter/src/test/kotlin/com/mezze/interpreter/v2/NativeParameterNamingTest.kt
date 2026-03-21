@@ -84,10 +84,10 @@ class NativeParameterNamingTest {
 
     @Test
     fun `test string operations use consistent naming`() {
-        // Tests string::concat with 'l' and 'r' parameters
+        // Tests str::concat with 'l' and 'r' parameters
         val result = eval("""
-            use std::string
-            string::concat { l = "Hello", r = " World" }
+            use std::str
+            str::concat { l = "Hello", r = " World" }
         """.trimIndent())
         assertEquals("Hello World", result)
     }
@@ -165,10 +165,10 @@ class NativeParameterNamingTest {
 
     @Test
     fun `test string length operation`() {
-        // Tests string::length with 's' parameter
+        // Tests str::length with 's' parameter
         val result = eval("""
-            use std::string
-            string::length { s = "hello" }
+            use std::str
+            str::length { s = "hello" }
         """.trimIndent())
         assertEquals(5L, result)
     }

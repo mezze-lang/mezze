@@ -1,0 +1,37 @@
+# std/abilities/convert.mz - Conversion abilities
+#
+# The receiver (it) is always the SOURCE of the conversion.
+#   - Into: infallible conversion (source.into {} -> target)
+#   - TryInto: fallible conversion (source.try_into {} -> Result target err)
+#
+# Example:
+#   impl Into Str for Int where {
+#       into = {it} -> int::to_str {n = it}
+#   }
+#   let s: Str = 42.into {}
+#
+#   impl TryInto Int |ConversionError {msg: Str}| for Str where {
+#       try_into = {it} ->
+#           match __native_int_from_string {s = it} is
+#               Some {val} -> Ok {val = val}
+#               None -> Err {error = ConversionError {msg = "invalid integer"}}
+#   }
+#   let n = "42".try_into {}
+
+# =============================================================================
+# INFALLIBLE CONVERSION
+# =============================================================================
+
+# Convert self ('a) into target type 'b
+ability Into 'b for 'a where {
+    into: {it: 'a} -> 'b
+}
+
+# =============================================================================
+# FALLIBLE CONVERSION
+# =============================================================================
+
+# Convert self ('a) into target type 'b, possibly failing with error 'err
+ability TryInto 'b 'err for 'a where {
+    try_into: {it: 'a} -> Result 'b 'err
+}

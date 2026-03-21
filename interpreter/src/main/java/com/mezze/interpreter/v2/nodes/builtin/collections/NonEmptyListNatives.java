@@ -360,6 +360,53 @@ public final class NonEmptyListNatives {
         return list.getElements().clone();
     }
 
+    // ==================== Equality & Comparison ====================
+
+    @TruffleBoundary
+    public static boolean equals(MezzeNonEmptyList list1, MezzeNonEmptyList list2) {
+        if (list1.size() != list2.size()) return false;
+        for (int i = 0; i < list1.size(); i++) {
+            if (!deepEquals(list1.get(i), list2.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Lexicographic comparison returning -1, 0, or 1.
+     */
+    @TruffleBoundary
+    public static long compare(MezzeNonEmptyList list1, MezzeNonEmptyList list2) {
+        int minLen = Math.min(list1.size(), list2.size());
+        for (int i = 0; i < minLen; i++) {
+            int cmp = compareElements(list1.get(i), list2.get(i));
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+        }
+        return Integer.compare(list1.size(), list2.size());
+    }
+
+    private static int compareElements(Object a, Object b) {
+        if (a instanceof Long && b instanceof Long) {
+            return Long.compare((Long) a, (Long) b);
+        }
+        if (a instanceof Double && b instanceof Double) {
+            return Double.compare((Double) a, (Double) b);
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String) a).compareTo((String) b);
+        }
+        if (a instanceof Long && b instanceof Double) {
+            return Double.compare(((Long) a).doubleValue(), (Double) b);
+        }
+        if (a instanceof Double && b instanceof Long) {
+            return Double.compare((Double) a, ((Long) b).doubleValue());
+        }
+        return 0;
+    }
+
     // ==================== Helper Methods ====================
 
     private static Object[] prepareArgs(MezzeFunction fn, Object arg) {

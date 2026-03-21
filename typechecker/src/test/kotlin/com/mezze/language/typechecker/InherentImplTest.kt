@@ -26,6 +26,7 @@ class InherentImplTest {
     fun setup() {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
         parser = MezzeParser()
         typeChecker = TypeChecker()
     }

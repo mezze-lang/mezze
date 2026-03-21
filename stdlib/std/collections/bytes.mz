@@ -1,3 +1,17 @@
+use std::abilities::compare::{Eq, Ord}
+
+impl Eq for Bytes where {
+    eq: {r: Bytes} -> Bool = {r} -> __native_bytes_equals {b1 = it, b2 = r},
+    neq: {r: Bytes} -> Bool = {r} -> if __native_bytes_equals {b1 = it, b2 = r} then False else True
+}
+
+impl Ord for Bytes where {
+    lt: {r: Bytes} -> Bool = {r} -> __native_bytes_compare {b1 = it, b2 = r} == (0 - 1),
+    le: {r: Bytes} -> Bool = {r} -> __native_bytes_compare {b1 = it, b2 = r} != 1,
+    gt: {r: Bytes} -> Bool = {r} -> __native_bytes_compare {b1 = it, b2 = r} == 1,
+    ge: {r: Bytes} -> Bool = {r} -> __native_bytes_compare {b1 = it, b2 = r} != (0 - 1)
+}
+
 # std/collections/bytes.mezze - Binary data operations
 #
 # Bytes is a built-in type for efficient binary data handling.
@@ -123,3 +137,21 @@ pub let to_hex = { b } ->
 # Convert to a base64-encoded string
 pub let to_base64 = { b } ->
     __native_bytes_to_base64 { b = b }
+
+impl Bytes where {
+    length = {} -> length {b = it},
+    is_empty = {} -> is_empty {b = it},
+    get = {i} -> get {b = it, i = i},
+    slice = {start, end} -> slice {b = it, start = start, end = end},
+    take = {n} -> take {b = it, n = n},
+    drop = {n} -> drop {b = it, n = n},
+    concat = {b2} -> concat {b1 = it, b2 = b2},
+    contains = {pattern} -> contains {b = it, pattern = pattern},
+    reverse = {} -> reverse {b = it},
+    map = {f} -> map {b = it, f = f},
+    fold = {init, f} -> fold {b = it, init = init, f = f},
+    to_str = {} -> to_str {b = it},
+    to_seq = {} -> to_seq {b = it},
+    to_hex = {} -> to_hex {b = it},
+    to_base64 = {} -> to_base64 {b = it}
+}

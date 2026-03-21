@@ -1348,14 +1348,15 @@ class ExpressionConstraintGenerator {
         constraints.addAll(receiverResult.constraints)
         constraints.addAll(argumentResult.constraints)
 
-        // If there's exactly one matching inherent method, use it directly.
-        // If multiple, use the receiver type to disambiguate via unification.
+        // Disambiguate by receiver type name when multiple types share a method name.
+        val receiverTypeName = getReceiverTypeName(receiverType)
         val methodInfo = if (inherentMethods.size == 1) {
             inherentMethods.first()
+        } else if (receiverTypeName != null) {
+            inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
+                ?: inherentMethods.firstOrNull()
         } else {
-            // Multiple types have this method — let unification pick the right one.
-            // We add equality constraints for each candidate; the solver will resolve.
-            inherentMethods.firstOrNull()  // TODO: proper disambiguation with multiple candidates
+            inherentMethods.firstOrNull()
         }
 
         if (methodInfo != null) {
@@ -1408,6 +1409,28 @@ class ExpressionConstraintGenerator {
      *
      * Effect operations are similar to ability methods, but they wrap the result in SuspendedType with the effect.
      */
+
+    /** Extract type name from receiver type for inherent method disambiguation. */
+    private fun getReceiverTypeName(type: MezzeType): String? = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.BytesType -> "Bytes"
+        is MezzeType.OrderingType -> "Ordering"
+        is MezzeType.SeqType -> "Seq"
+        is MezzeType.ListType -> "List"
+        is MezzeType.SetType -> "Set"
+        is MezzeType.MapType -> "Map"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.RecordType -> type.typeName
+        is MezzeType.VariantType -> type.typeName
+        else -> null
+    }
+
     private fun tryGenerateEffectOperationCall(
         expr: MemberAccess,
         effectName: String,

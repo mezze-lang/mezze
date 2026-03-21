@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.ast.PrimitiveTypes
 
 /**
  * Ability resolver - checks that ability constraints are satisfied.
@@ -434,8 +435,15 @@ class AbilityResolver(
     }
 
     private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
+        // Bool variant — delegate to Bool ability check
+        val isBool = type.constructors.size == 2 &&
+            type.constructors.containsKey("True") && type.constructors.containsKey("False") &&
+            type.constructors["True"] == null && type.constructors["False"] == null
+        if (isBool) {
+            return checkBooleanAbility(abilityName, typeArgs)
+        }
+
         // Check if this is a newtype by looking up the type declaration
-        // A newtype is identified by its TypeDeclaration having a NewtypeDefinition, not by constructor count
         val typeName = type.typeName
         val typeDecl = if (typeName != null) typeDeclarations[typeName] else null
         val isNewtype = typeDecl?.definition is NewtypeDefinition
@@ -783,11 +791,14 @@ class AbilityResolver(
                 listOf(type) + additionalTypeArgs
             }
 
+            // For generic impls, track type variable bindings during matching
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+
             // Case 1: Simple matching with computed allTypes
-            if (associatedBindings.isEmpty()) {
+            val structuralMatch = if (associatedBindings.isEmpty()) {
                 annotations.size == allTypes.size &&
                 allTypes.zip(annotations).all { (actualType, annotation) ->
-                    typeMatchesAnnotation(actualType, annotation)
+                    typeMatchesAnnotation(actualType, annotation, impl.typeVars, typeVarBindings)
                 }
             }
             // Case 2: Ability with associated types (e.g., Container 'c having 'item)
@@ -795,7 +806,29 @@ class AbilityResolver(
                 // For abilities with associated types, only match the primary type params.
                 // Associated types are determined by the impl itself, not by unification.
                 // The additionalTypeArgs may contain unresolved VarTypes for associated types.
-                annotations.size == 1 && typeMatchesAnnotation(type, annotations.first())
+                annotations.size == 1 && typeMatchesAnnotation(type, annotations.first(), impl.typeVars, typeVarBindings)
+            }
+
+            if (!structuralMatch) return@find false
+
+            // If this is a generic impl, check method-level constraints with resolved bindings
+            if (typeVarBindings.isNotEmpty() && impl.operationConstraints.isNotEmpty()) {
+                impl.operationConstraints.all { constraint ->
+                    val resolvedTypeArgs = constraint.typeArgs.map { typeArg ->
+                        when (typeArg) {
+                            is IdentifierTypeAnnotation -> {
+                                val bound = typeVarBindings[typeArg.name]
+                                if (bound != null) bound
+                                else resolveTypeAnnotation(typeArg)
+                            }
+                            else -> resolveTypeAnnotation(typeArg)
+                        }
+                    }
+                    val result = checkAbilityImpl(resolvedTypeArgs.first(), constraint.abilityName, resolvedTypeArgs.drop(1))
+                    result is AbilityCheckResult.Satisfied
+                }
+            } else {
+                true
             }
         }
 
@@ -924,10 +957,39 @@ class AbilityResolver(
      *
      * This enables structural matching for ability implementations.
      */
-    private fun typeMatchesAnnotation(type: MezzeType, annotation: TypeAnnotation): Boolean {
+    /**
+     * Convert a simple TypeAnnotation to MezzeType (for constraint checking on generic impls).
+     */
+    private fun resolveTypeAnnotation(annotation: TypeAnnotation): MezzeType {
+        if (annotation is IdentifierTypeAnnotation) {
+            PrimitiveTypes.fromName(annotation.name)?.let { return it }
+            return MezzeType.TypeApplication(annotation.name, emptyList())
+        }
+        if (annotation is SeqTypeAnnotation) {
+            return MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
+        }
+        return MezzeType.TypeApplication(annotation.toString(), emptyList())
+    }
+
+    private fun typeMatchesAnnotation(
+        type: MezzeType,
+        annotation: TypeAnnotation,
+        typeVars: Set<String> = emptySet(),
+        typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
+    ): Boolean {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
+                // Check if this is a type variable from a generic impl
+                if (annotation.name in typeVars) {
+                    val existing = typeVarBindings[annotation.name]
+                    if (existing != null) {
+                        existing == type
+                    } else {
+                        typeVarBindings[annotation.name] = type
+                        true
+                    }
+                }
+                else when (annotation.name) {
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "Str" -> type is MezzeType.StringType
@@ -958,7 +1020,7 @@ class AbilityResolver(
                     type is MezzeType.TypeApplication && type.constructor == annotation.constructor -> {
                         type.args.size == annotation.args.size &&
                         type.args.zip(annotation.args).all { (argType, argAnnotation) ->
-                            typeMatchesAnnotation(argType, argAnnotation)
+                            typeMatchesAnnotation(argType, argAnnotation, typeVars, typeVarBindings)
                         }
                     }
                     type is MezzeType.VariantType && type.typeName == null -> {
@@ -972,7 +1034,7 @@ class AbilityResolver(
                             val inferredArgs = inferTypeArgsFromVariant(type, typeDecl, definition)
                             if (inferredArgs != null && inferredArgs.size == annotation.args.size) {
                                 inferredArgs.zip(annotation.args).all { (inferredType, argAnnotation) ->
-                                    typeMatchesAnnotation(inferredType, argAnnotation)
+                                    typeMatchesAnnotation(inferredType, argAnnotation, typeVars, typeVarBindings)
                                 }
                             } else {
                                 false
@@ -982,10 +1044,10 @@ class AbilityResolver(
                         }
                     }
                     type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
+                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     type is MezzeType.ListType && annotation.constructor == "List" -> {
-                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0])
+                        annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     else -> false
                 }
@@ -995,7 +1057,7 @@ class AbilityResolver(
                 if (type.fields.size != annotation.entries.size) return false
                 annotation.entries.all { entry ->
                     val fieldType = type.fields[entry.name] ?: return false
-                    typeMatchesAnnotation(fieldType, entry.type)
+                    typeMatchesAnnotation(fieldType, entry.type, typeVars, typeVarBindings)
                 }
             }
             is VariantTypeAnnotation -> {
@@ -1008,13 +1070,13 @@ class AbilityResolver(
                     } else if (concretePayload == null) {
                         false
                     } else {
-                        typeMatchesAnnotation(concretePayload, dataType)
+                        typeMatchesAnnotation(concretePayload, dataType, typeVars, typeVarBindings)
                     }
                 }
             }
             is SeqTypeAnnotation -> {
                 // Handle [T] syntax for seq types
-                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType)
+                type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType, typeVars, typeVarBindings)
             }
             else -> false
         }

@@ -60,7 +60,8 @@ class ContextBuilder {
         importedImpls: Map<String, com.mezze.language.ast.ImplDeclaration> = emptyMap(),
         importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
         importedTypes: Map<String, TypeDeclaration> = emptyMap(),
-        importedEffects: Map<String, EffectDeclaration> = emptyMap()
+        importedEffects: Map<String, EffectDeclaration> = emptyMap(),
+        currentModulePath: String? = null
     ): BuildResult {
         // VALIDATION PHASE 1: Check for duplicate declarations BEFORE building context
         // This catches errors early and provides clear error messages
@@ -182,8 +183,13 @@ class ContextBuilder {
         // An impl must be in the same module as either the ability or one of the target types
         // CRITICAL: Use only types actually declared in source, NOT injected built-ins (Bool, Option, Result).
         // Built-in types are not "owned" by user modules, so users cannot impl for them.
+        // EXCEPTION: stdlib home modules (e.g., std::int for Int) can impl for their built-in types.
         val localAbilityNames = abilityDecls.keys
-        val localTypeNames = program.items.filterIsInstance<TypeDeclaration>().map { it.name }.toSet()
+        val declaredTypeNames = program.items.filterIsInstance<TypeDeclaration>().map { it.name }.toSet()
+        val homeTypeNames = if (currentModulePath != null) {
+            BuiltinTypeRegistry.getLocalTypesForModule(currentModulePath)
+        } else emptySet()
+        val localTypeNames = declaredTypeNames + homeTypeNames
         val importedAbilityNames = importedAbilities.keys
         val importedTypeNames = importedTypes.keys
 
@@ -721,14 +727,34 @@ class ContextBuilder {
             return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey)
         }
 
+        // Extract type variables from generic impl header (e.g., 'a from `impl Eq 'a for ['a]`)
+        // Only actual type variables (starting with ') are tracked — concrete types (like Str, Float)
+        // in abilityTypeArgs are not type variables.
+        val typeVars = implDecl.abilityTypeArgs
+            .filterIsInstance<IdentifierTypeAnnotation>()
+            .filter { it.name.startsWith("'") }
+            .map { it.name }
+            .toSet()
+
+        // Use allTypeArgs which combines concrete abilityTypeArgs (before 'for') with targetTypes (after 'for').
+        // For `impl Into Str for Int`: allTypeArgs=[Str, Int]
+        // For `impl Eq 'a for ['a]`: allTypeArgs=[['a]] (type var 'a excluded as it's a quantifier)
+        val allTargetAnnotations = implDecl.allTypeArgs
+        val allTargetNames = allTargetAnnotations.map { getTypeName(it) }
+
+        // Collect method-level constraints from all operations
+        val operationConstraints = implDecl.operations.flatMap { it.abilityConstraints }
+
         // Create impl info
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName!!,  // safe: not inherent
-            targetTypes = targetTypeNames,
-            targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
+            targetTypes = allTargetNames,
+            targetTypeAnnotations = allTargetAnnotations,  // Store original annotations for structural matching
             associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings like 'item = Int
             sourceModule = null,  // TODO: Track source module if needed
-            contentHash = implKey  // Same as the key
+            contentHash = implKey,  // Same as the key
+            typeVars = typeVars,
+            operationConstraints = operationConstraints
         )
 
         // Store in context by content hash
@@ -754,8 +780,34 @@ class ContextBuilder {
             val paramType = if (opParamType != null) {
                 convertTypeAnnotation(opParamType)
             } else {
-                // Default: empty record (no args besides receiver)
-                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                // Infer param type from the lambda's parameters
+                val lambda = op.implementation as? LambdaExpression
+                if (lambda != null) {
+                    when (val params = lambda.parameters) {
+                        is TypedParameters -> {
+                            MezzeType.RecordType(
+                                fields = params.recordType.entries.associate { entry ->
+                                    entry.name to convertTypeAnnotation(entry.type)
+                                },
+                                rowVar = null
+                            )
+                        }
+                        is UntypedParameters -> {
+                            if (params.names.isEmpty()) {
+                                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                            } else {
+                                // Untyped params — use fresh type vars
+                                MezzeType.RecordType(
+                                    fields = params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
+                                    rowVar = null
+                                )
+                            }
+                        }
+                        else -> MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                    }
+                } else {
+                    MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                }
             }
 
             val opReturnType = op.returnType
@@ -797,6 +849,79 @@ class ContextBuilder {
     }
 
     /**
+     * Register an imported inherent impl's methods in the context.
+     * This bypasses validation (since the impl was already validated in its home module)
+     * and only registers the InherentMethodInfo + AbilityImplInfo entries.
+     *
+     * Uses inferred types from the already-typechecked impl (since annotations are often null
+     * for impl operations written as `name = {args} -> body`).
+     */
+    fun registerImportedInherentImpl(
+        ctx: TypingContext,
+        implDecl: ImplAbilityDeclaration,
+        implKey: String
+    ): TypingContext {
+        var result = ctx
+        val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
+        val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
+
+        for (op in implDecl.operations) {
+            // Use the inferred type from the already-typechecked implementation.
+            // The implementation is a lambda whose inferredType is FunctionType(paramType, returnType).
+            val methodType = op.implementation.inferredType as? MezzeType.FunctionType
+                ?: run {
+                    // Fallback: build from annotations or lambda params
+                    val paramType = op.paramType?.let { convertTypeAnnotation(it) }
+                        ?: run {
+                            val lambda = op.implementation as? LambdaExpression
+                            if (lambda != null) {
+                                when (val params = lambda.parameters) {
+                                    is TypedParameters -> MezzeType.RecordType(
+                                        fields = params.recordType.entries.associate { entry ->
+                                            entry.name to convertTypeAnnotation(entry.type)
+                                        },
+                                        rowVar = null
+                                    )
+                                    is UntypedParameters -> MezzeType.RecordType(
+                                        fields = if (params.names.isEmpty()) emptyMap()
+                                                 else params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
+                                        rowVar = null
+                                    )
+                                    else -> MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                                }
+                            } else {
+                                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                            }
+                        }
+                    val returnType = op.returnType?.let { convertTypeAnnotation(it) }
+                        ?: MezzeType.VarType(TypeVar.fresh())
+                    MezzeType.FunctionType(paramType = paramType, returnType = returnType)
+                }
+
+            val methodInfo = TypingContext.InherentMethodInfo(
+                targetTypeName = targetTypeName,
+                methodName = op.name,
+                methodType = methodType,
+                implContentHash = implKey
+            )
+            result = result.extendWithAnonymousMethod(methodInfo)
+        }
+
+        // Also register as a regular impl so the interpreter can find it by content hash
+        val implInfo = TypingContext.AbilityImplInfo(
+            abilityName = null,
+            targetTypes = targetTypeNames,
+            targetTypeAnnotations = implDecl.targetTypes,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
+            sourceModule = null,
+            contentHash = implKey
+        )
+        result = result.extendWithImpl(implKey, implInfo)
+
+        return result
+    }
+
+    /**
      * Extract type name from type annotation for impl keys.
      *
      * Examples:
@@ -811,12 +936,21 @@ class ContextBuilder {
                 annotation.name.removePrefix("'")
             }
             is TypeApplicationAnnotation -> {
-                // Option Int → "Option_Int"
-                val argNames = annotation.args.map { getTypeName(it) }
-                if (argNames.isEmpty()) {
+                // For inherent impls with type vars (e.g., `impl Option 'a where { ... }`),
+                // use just the constructor name so methods register under "Option".
+                // For concrete type applications (e.g., ability impl for `Option Int`), include args.
+                val allArgsAreTypeVars = annotation.args.all { arg ->
+                    arg is IdentifierTypeAnnotation && (arg.name.startsWith("'") || arg.name.first().isLowerCase())
+                }
+                if (allArgsAreTypeVars) {
                     annotation.constructor
                 } else {
-                    "${annotation.constructor}_${argNames.joinToString("_")}"
+                    val argNames = annotation.args.map { getTypeName(it) }
+                    if (argNames.isEmpty()) {
+                        annotation.constructor
+                    } else {
+                        "${annotation.constructor}_${argNames.joinToString("_")}"
+                    }
                 }
             }
             is FunctionTypeAnnotation -> {
@@ -1099,6 +1233,24 @@ class ContextBuilder {
                 name = "Result",
                 typeParams = listOf("a", "e"),
                 definition = resultDef
+            )
+        }
+
+        // Register Ordering type if not already defined
+        // Ordering is a simple variant | LT | EQ | GT | (like Rust's std::cmp::Ordering)
+        if (!typeDecls.containsKey("Ordering")) {
+            val orderingDef = VariantDefinition(
+                listOf(
+                    VariantConstructorDef("LT", null),
+                    VariantConstructorDef("EQ", null),
+                    VariantConstructorDef("GT", null)
+                ),
+                false  // closed variant
+            )
+            typeDecls["Ordering"] = TypeDeclaration(
+                name = "Ordering",
+                typeParams = emptyList(),
+                definition = orderingDef
             )
         }
 

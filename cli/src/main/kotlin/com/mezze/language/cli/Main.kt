@@ -1024,7 +1024,7 @@ private fun handleExecCommand(args: List<String>) {
     val typeCheckStart = System.nanoTime()
     val typeChecker = TypeChecker()
     val typeCheckResult = try {
-        typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot)
+        typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot, enablePrelude = true)
     } catch (e: TypeCheckError) {
         // Format error with source location and code snippet
         val formattedError = SourceContext.formatError(
@@ -1311,7 +1311,7 @@ private fun handleCompileCommand(args: List<String>) {
         // Type-check with main validation: main must be {} -> {} <*>
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
-        val typeCheckResult = typeChecker.checkProgramForExecution(ast, inputFile.toPath().parent ?: inputFile.toPath())
+        val typeCheckResult = typeChecker.checkProgramForExecution(ast, inputFile.toPath().parent ?: inputFile.toPath(), enablePrelude = true)
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
 
         // Handle type-check failure

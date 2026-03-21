@@ -563,11 +563,11 @@ class FormatterTest {
     fun `format use statements grouped without blank lines`() {
         val input = """
             use std::int::Int
-            use std::string::String
+            use std::str::String
             let x = 42
         """.trimIndent()
         val output = formatter.format(input)
-        assertEquals("use std::int::Int\nuse std::string::String\n\nlet x = 42\n", output)
+        assertEquals("use std::int::Int\nuse std::str::String\n\nlet x = 42\n", output)
     }
 
     @Test

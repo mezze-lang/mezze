@@ -909,6 +909,16 @@ object ListTypes {
             )
         }
 
+        // __native_list_compare: {xs: List 'a, ys: List 'a} -> Int
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            context["__native_list_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType, "ys" to listType)),
+                MezzeType.IntType
+            )
+        }
+
         // __native_list_index_of: {xs: List 'a, x: 'a} -> Option Int
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))

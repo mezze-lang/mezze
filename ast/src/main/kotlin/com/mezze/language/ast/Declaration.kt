@@ -384,6 +384,7 @@ sealed class ImplTarget {
 data class ImplAbilityDeclaration(
     val target: ImplTarget,
     val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
+    val abilityTypeArgs: List<TypeAnnotation> = emptyList(), // Type args on the ability: impl Eq 'a for ['a] — the 'a
     val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
     val operations: List<ImplAbilityOperation>,
@@ -399,6 +400,23 @@ data class ImplAbilityDeclaration(
 
     /** Whether this is an inherent impl (no ability) */
     val isInherent: Boolean get() = target is ImplTarget.Inherent
+
+    /**
+     * All type arguments combined: concrete abilityTypeArgs (before 'for') + targetTypes (after 'for').
+     * Maps positionally to the ability's type params (extra params first, self last).
+     *
+     * For `impl Into Str for Int`: abilityTypeArgs=[Str], targetTypes=[Int] → allTypeArgs=[Str, Int]
+     * For `impl Into for Str Int`: abilityTypeArgs=[], targetTypes=[Str, Int] → allTypeArgs=[Str, Int]
+     * For `impl Eq 'a for ['a]`: abilityTypeArgs=['a](var), targetTypes=[['a]] → allTypeArgs=[['a]]
+     *
+     * Type variable abilityTypeArgs are quantifiers (not type arguments), so they are excluded.
+     */
+    val allTypeArgs: List<TypeAnnotation> get() {
+        val concreteArgs = abilityTypeArgs.filter {
+            it !is IdentifierTypeAnnotation || !it.name.startsWith("'")
+        }
+        return concreteArgs + targetTypes
+    }
 }
 
 @Serializable
@@ -406,7 +424,8 @@ data class ImplAbilityOperation(
     val name: String,
     val paramType: TypeAnnotation?,  // Optional - can be inferred from ability declaration
     val returnType: TypeAnnotation?, // Optional - can be inferred from ability declaration
-    val implementation: Expression
+    val implementation: Expression,
+    val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Method-level ability constraints
 )
 
 // ============================================================================

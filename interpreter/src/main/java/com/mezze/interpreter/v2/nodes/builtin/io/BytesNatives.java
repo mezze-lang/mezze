@@ -107,6 +107,28 @@ public final class BytesNatives {
         return MezzeVariant.some((long) (bytes.get(idx) & 0xFF));
     }
 
+    // ==================== Equality & Comparison ====================
+
+    @TruffleBoundary
+    public static boolean equals(MezzeBytes b1, MezzeBytes b2) {
+        return java.util.Arrays.equals(b1.getData(), b2.getData());
+    }
+
+    /**
+     * Lexicographic unsigned byte comparison returning -1, 0, or 1.
+     */
+    @TruffleBoundary
+    public static long compare(MezzeBytes b1, MezzeBytes b2) {
+        int minLen = Math.min(b1.length(), b2.length());
+        for (int i = 0; i < minLen; i++) {
+            int cmp = Integer.compare(b1.get(i) & 0xFF, b2.get(i) & 0xFF);
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+        }
+        return Integer.compare(b1.length(), b2.length());
+    }
+
     // ==================== Slice Operations ====================
 
     @TruffleBoundary

@@ -1,3 +1,21 @@
+use std::abilities::compare::{Eq, Ord}
+use std::abilities::convert::{Into, TryInto}
+
+impl Eq for Char where { eq = {r} -> __native_char_eq {a = it, b = r}, neq = {r} -> if __native_char_eq {a = it, b = r} then False else True }
+impl Ord for Char where { lt = {r} -> __native_char_compare_int {a = it, b = r} == (0 - 1), le = {r} -> __native_char_compare_int {a = it, b = r} != 1, gt = {r} -> __native_char_compare_int {a = it, b = r} == 1, ge = {r} -> __native_char_compare_int {a = it, b = r} != (0 - 1) }
+impl Into Int for Char where { into = {} -> __native_char_to_int {c = it} }
+impl Into Str for Char where { into = {} -> __native_char_to_str {c = it} }
+impl TryInto Char |ConversionError {msg: Str}| for Int where {
+    try_into = {} -> match __native_char_from_int {code = it} is
+        Some {val} -> Ok {val = val}
+        None -> Err {error = ConversionError {msg = "invalid char code point"}}
+}
+impl TryInto Char |ConversionError {msg: Str}| for Str where {
+    try_into = {} -> match __native_char_from_string {s = it} is
+        Some {val} -> Ok {val = val}
+        None -> Err {error = ConversionError {msg = "string must be exactly one character"}}
+}
+
 # std/char.mezze - Character type operations
 #
 # Char represents a single Unicode character (UTF-16 code unit).
@@ -78,3 +96,15 @@ pub let compare = { a, b } ->
 # Example: digit_to_int { c = 'A', radix = 16 } -> Some { val = 10 }
 pub let digit_to_int = { c, radix } ->
     __native_char_digit_to_int { c = c, radix = radix }
+
+impl Char where {
+    to_int = {} -> __native_char_to_int {c = it},
+    to_str = {} -> __native_char_to_str {c = it},
+    to_upper = {} -> __native_char_to_upper {c = it},
+    to_lower = {} -> __native_char_to_lower {c = it},
+    is_letter = {} -> __native_char_is_letter {c = it},
+    is_digit = {} -> __native_char_is_digit {c = it},
+    is_whitespace = {} -> __native_char_is_whitespace {c = it},
+    is_upper = {} -> __native_char_is_upper {c = it},
+    is_lower = {} -> __native_char_is_lower {c = it}
+}

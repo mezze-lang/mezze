@@ -115,9 +115,9 @@ class ResultIntegrationTest {
     void mapErrTransformsError() {
         Object result = MezzeTestHelper.run("""
             use std::result
-            use std::string
+            use std::str
             let res: (Result Int Str) = Err { error = "error" }
-            let mapped = result::map_err { result = res, f = { error } -> string::to_upper { s = error } }
+            let mapped = result::map_err { result = res, f = { error } -> str::to_upper { s = error } }
             match mapped is
                 Ok { val } -> "ok"
                 Err { error } -> error
@@ -312,11 +312,11 @@ class ResultIntegrationTest {
     void foldExecutesOnErrForErr() {
         Object result = MezzeTestHelper.run("""
             use std::result
-            use std::string
+            use std::str
             let res: (Result Int Str) = Err { error = "failed" }
             result::fold {
                 result = res,
-                on_err = { error } -> string::length { s = error },
+                on_err = { error } -> str::length { s = error },
                 on_ok = { val } -> val
             }
             """);

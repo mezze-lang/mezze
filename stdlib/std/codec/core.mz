@@ -29,11 +29,11 @@
 #   # Get AST for inspection/manipulation
 #   let ast: Result Json EncodeError = user.encode_repr { fmt = json::utf8, config = default_config }
 
-use std::string
+use std::str
 use std::int
 use std::collections::seq
 use std::collections::bytes
-use std::convert::{TryFrom, TryTo}
+use std::abilities::convert::{Into, TryInto}
 
 # =============================================================================
 # ERROR TYPES
@@ -308,7 +308,7 @@ pub let format_path = {path: [Str]} ->
     if seq::is_empty {xs = path} then
         "<root>"
     else
-        string::join {strings = path, separator = "."}
+        str::join {strings = path, separator = "."}
 
 # Create an encode error
 pub let encode_error = {path: [Str], message: Str} ->
@@ -337,9 +337,9 @@ pub let decode_error = {path: [Str], message: Str, expected: Str, found: Option 
 
 # Bytes -> Str (UTF-8)
 # Defined here to avoid circular dependency with std/convert.mz
-impl TryFrom for Str DecodeError Bytes where {
-    try_from = {val} ->
-        match bytes::to_str {b = val} is
+impl TryInto Str DecodeError for Bytes where {
+    try_into = {} ->
+        match bytes::to_str {b = it} is
             Ok {val = s} -> Ok {val = s}
             Err {error = e} -> Err {error = {path = [], message = e, expected = "valid UTF-8", found = None}}
 }

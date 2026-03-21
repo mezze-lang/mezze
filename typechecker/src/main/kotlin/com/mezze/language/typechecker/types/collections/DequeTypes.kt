@@ -291,6 +291,19 @@ object DequeTypes {
             )
         }
 
+        // __native_deque_compare: {d1: Deque 'a, d2: Deque 'a} -> Int
+        run {
+            val elemType = MezzeType.VarType(TypeVar("a"))
+            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            context["__native_deque_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "d1" to dequeType,
+                    "d2" to dequeType
+                )),
+                MezzeType.IntType
+            )
+        }
+
         // ========================================
         // Predicate Operations
         // ========================================

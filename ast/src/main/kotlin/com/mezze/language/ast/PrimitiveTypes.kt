@@ -28,7 +28,8 @@ object PrimitiveTypes {
         "Char" to MezzeType.CharType,
         "Bytes" to MezzeType.BytesType,
         "ByteBuffer" to MezzeType.ByteBufferType,
-        "Ordering" to MezzeType.OrderingType,
+        // Ordering is NOT a primitive — it's a variant type | LT | EQ | GT |
+        // Kept in MezzeType as OrderingType for backward compat in when-branches
     )
 
     /**

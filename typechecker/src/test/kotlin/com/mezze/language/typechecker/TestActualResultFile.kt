@@ -30,7 +30,11 @@ class TestActualResultFile {
             val program = parser.parse(source)
             println("Parsed successfully, ${program.items.size} items")
 
-            val typed = typeChecker.typeCheck(program).program
+            val result = typeChecker.checkProgram(program, resultFile.toPath().parent, "std::result")
+            val typed = when (result) {
+                is TypeChecker.TypeCheckResult.Success -> result.program
+                is TypeChecker.TypeCheckResult.Failure -> throw RuntimeException(result.errors.joinToString("\n") { e -> e.message })
+            }
             assertNotNull(typed)
             println("SUCCESS: Typechecked successfully")
         } catch (e: Exception) {

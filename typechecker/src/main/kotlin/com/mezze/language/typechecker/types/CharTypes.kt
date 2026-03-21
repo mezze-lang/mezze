@@ -117,6 +117,12 @@ object CharTypes {
             MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
             MezzeType.OrderingType
         )
+
+        // __native_char_compare_int: {a: Char, b: Char} -> Int
+        context["__native_char_compare_int"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
+            MezzeType.IntType
+        )
     }
 
     private fun registerDigitTypes(context: MutableMap<String, MezzeType>) {

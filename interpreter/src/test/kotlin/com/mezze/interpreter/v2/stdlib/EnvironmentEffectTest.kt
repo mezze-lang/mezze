@@ -25,11 +25,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment current_dir returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let dir = Environment.current_dir {}
-                string::length { s = dir } > 0
+                str::length { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -38,11 +38,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment os_name returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let name = Environment.os_name {}
-                string::length { s = name } > 0
+                str::length { s = name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -63,11 +63,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment arch returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let arch = Environment.arch {}
-                string::length { s = arch } > 0
+                str::length { s = arch } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -76,11 +76,11 @@ class EnvironmentEffectTest {
     fun `test SystemEnvironment os_version returns non-empty string`() {
         val result = eval("""
             use std::effects::environment::{Environment, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let version = Environment.os_version {}
-                string::length { s = version } > 0
+                str::length { s = version } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -141,11 +141,11 @@ class EnvironmentEffectTest {
     fun `test current_dir convenience function`() {
         val result = eval("""
             use std::effects::environment::{current_dir, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let dir = current_dir {}
-                string::length { s = dir } > 0
+                str::length { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -154,11 +154,11 @@ class EnvironmentEffectTest {
     fun `test os_info convenience function`() {
         val result = eval("""
             use std::effects::environment::{os_info, SystemEnvironment}
-            use std::string
+            use std::str
 
             perform SystemEnvironment in do
                 let info = os_info {}
-                string::length { s = info.name } > 0
+                str::length { s = info.name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }

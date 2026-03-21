@@ -1,3 +1,10 @@
+use std::abilities::compare::{Eq, Ord}
+
+impl Eq 'k 'v for Map 'k 'v where {
+    eq: {r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> __native_map_equals {m1 = it, m2 = r},
+    neq: {r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> if __native_map_equals {m1 = it, m2 = r} then False else True
+}
+
 # std/collections/map.mezze - Map operations using HashMap
 
 # Map 'k 'v is a built-in type implemented using HashMap internally
@@ -251,3 +258,25 @@ pub let flat_map: { m: Map 'k 'v, f: { k: 'k, v: 'v } -> Map 'k2 'v2 <...> } -> 
 # Convert Map to SortedMap (keys must be comparable)
 # Example: to_sorted_map { m = map } -> sorted map with keys in order
 pub let to_sorted_map: { m: Map 'k 'v } -> SortedMap 'k 'v = {m} -> __native_map_to_sorted_map {m = m}
+
+impl Map 'k 'v where {
+    get = {k} -> get {m = it, k = k},
+    insert = {k, v} -> insert {m = it, k = k, v = v},
+    remove = {k} -> remove {m = it, k = k},
+    contains_key = {k} -> contains_key {m = it, k = k},
+    size = {} -> size {m = it},
+    is_empty = {} -> is_empty {m = it},
+    keys = {} -> keys {m = it},
+    values = {} -> values {m = it},
+    map_values = {f} -> map_values {m = it, f = f},
+    filter = {p} -> filter {m = it, p = p},
+    fold = {init, f} -> fold {m = it, init = init, f = f},
+    merge = {m2} -> merge {m1 = it, m2 = m2},
+    get_or_default = {k, def} -> get_or_default {m = it, k = k, def = def},
+    any = {p} -> any {m = it, p = p},
+    all = {p} -> all {m = it, p = p},
+    find = {p} -> find {m = it, p = p},
+    count = {p} -> count {m = it, p = p},
+    to_seq = {} -> to_seq {m = it},
+    to_list = {} -> to_list {m = it}
+}

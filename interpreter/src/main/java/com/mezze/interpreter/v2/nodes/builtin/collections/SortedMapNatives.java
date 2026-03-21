@@ -95,6 +95,30 @@ public final class SortedMapNatives {
         return a.equals(b);
     }
 
+    /**
+     * Lexicographic comparison of two sorted maps (by key order, then value order).
+     * Returns -1, 0, or 1.
+     */
+    @TruffleBoundary
+    public static long compareMaps(MezzeSortedMap map1, MezzeSortedMap map2) {
+        Object[] keys1 = map1.getKeysInternal();
+        Object[] keys2 = map2.getKeysInternal();
+        Object[] vals1 = map1.getValuesInternal();
+        Object[] vals2 = map2.getValuesInternal();
+        int minLen = Math.min(keys1.length, keys2.length);
+        for (int i = 0; i < minLen; i++) {
+            int cmp = compare(keys1[i], keys2[i]);
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+            cmp = compare(vals1[i], vals2[i]);
+            if (cmp != 0) {
+                return cmp < 0 ? -1L : 1L;
+            }
+        }
+        return Integer.compare(keys1.length, keys2.length);
+    }
+
     @TruffleBoundary
     public static MezzeVariant minEntry(MezzeSortedMap map) {
         if (map.isEmpty()) {

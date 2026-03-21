@@ -169,6 +169,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /**
      * Compile a typed program to a CallTarget.
      */
+    /** Prelude module paths — loaded for every user program to provide ability impls. */
+    private static final List<String> PRELUDE_MODULES = List.of(
+        "std::int", "std::float", "std::nat", "std::frac",
+        "std::bool", "std::str", "std::char",
+        "std::option", "std::result",
+        "std::collections::seq", "std::collections::list",
+        "std::collections::map", "std::collections::set",
+        "std::collections::deque", "std::collections::sorted_map",
+        "std::collections::sorted_set", "std::collections::nonemptylist",
+        "std::collections::bytes"
+    );
+
     private CallTarget compileProgram(Program program, Path projectRoot) {
         // Extract imported modules from the program
         List<String> importedModules = extractImportedModules(program);
@@ -359,10 +371,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
 
             try {
-                // Get typed module from TypeChecker cache
+                // Get typed module from TypeChecker cache, or load on demand
                 Program typedModule = TypeChecker.Companion.getTypedModule(modulePath);
                 if (typedModule == null) {
-                    throw new RuntimeException("Module not found in typed cache: " + modulePath);
+                    // Module not in cache — load and typecheck on demand
+                    typedModule = loadAndTypeCheckModule(modulePath);
+                    if (typedModule == null) {
+                        throw new RuntimeException("Module not found: " + modulePath);
+                    }
                 }
 
                 // Extract and load dependencies first
@@ -401,6 +417,31 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
             } catch (Exception e) {
                 throw new RuntimeException("Failed to load module: " + modulePath + " - " + e.getMessage(), e);
+            }
+        }
+
+        /**
+         * Load and typecheck a module on demand when not in cache.
+         * Uses the import resolution machinery to parse, typecheck, and cache the module.
+         */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        private Program loadAndTypeCheckModule(String modulePath) {
+            try {
+                // Create a synthetic program that imports just this module
+                var segments = java.util.Arrays.asList(modulePath.split("::"));
+                var usePath = new ModulePath(segments);
+                var useDecl = new UseDeclaration(usePath, null, null);
+                var syntheticProgram = new Program(List.of(useDecl), Collections.emptyList());
+
+                // Type-check the synthetic program — this loads and typechecks the module
+                var typeChecker = new TypeChecker();
+                var result = typeChecker.typeCheck(syntheticProgram,
+                    projectRoot != null ? projectRoot : Paths.get("."));
+
+                // Now the module should be in the cache
+                return TypeChecker.Companion.getTypedModule(modulePath);
+            } catch (Exception e) {
+                return null;
             }
         }
 

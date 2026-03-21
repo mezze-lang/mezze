@@ -125,11 +125,18 @@ object AbilityValidator {
             )
 
         // Rule 1: Check type parameter count matches
-        if (impl.targetTypes.size != abilityDeclaration.typeParams.size) {
+        // Concrete abilityTypeArgs (before 'for') + targetTypes (after 'for') must match ability's type params.
+        // For `impl Into Str for Int`: abilityTypeArgs=[Str](concrete), targetTypes=[Int] → total=2
+        // For `impl Into for Str Int`: abilityTypeArgs=[], targetTypes=[Str, Int] → total=2
+        // For `impl Eq 'a for ['a]`: abilityTypeArgs=['a](variable, not counted), targetTypes=[['a]] → total=1
+        val concreteAbilityTypeArgCount = impl.abilityTypeArgs
+            .count { it !is IdentifierTypeAnnotation || !it.name.startsWith("'") }
+        val totalTypeParams = concreteAbilityTypeArgCount + impl.targetTypes.size
+        if (totalTypeParams != abilityDeclaration.typeParams.size) {
             throw TypeCheckError(
                 "Type parameter count mismatch in ability implementation for '${abilityName}': " +
                 "ability expects ${abilityDeclaration.typeParams.size} type parameters, " +
-                "but implementation provides ${impl.targetTypes.size}",
+                "but implementation provides ${totalTypeParams}",
                 impl.sourceLocation
             )
         }
@@ -228,7 +235,7 @@ object AbilityValidator {
     ) {
         // Build type parameter substitution map
         // e.g., for impl Show for Int: 'a -> Int
-        val substitution = abilityDeclaration.typeParams.zip(impl.targetTypes).toMap()
+        val substitution = abilityDeclaration.typeParams.zip(impl.allTypeArgs).toMap()
 
         for (implOp in impl.operations) {
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
@@ -246,7 +253,15 @@ object AbilityValidator {
             val sourceLocation = implOp.implementation.sourceLocation
 
             // Check for type variables in concrete implementations
-            if (implOp.paramType != null && hasTypeVariables(actualParamType)) {
+            // For generic impls (e.g., impl Eq 'a for ['a]), type variables from
+            // the impl header are allowed in operation signatures.
+            val allowedTypeVars = impl.abilityTypeArgs
+                .filterIsInstance<IdentifierTypeAnnotation>()
+                .filter { it.name.startsWith("'") }
+                .map { it.name }
+                .toSet()
+
+            if (implOp.paramType != null && hasTypeVariables(actualParamType, allowedTypeVars)) {
                 throw TypeCheckError(
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' parameter type contains type variables. " +
@@ -254,7 +269,7 @@ object AbilityValidator {
                     sourceLocation
                 )
             }
-            if (implOp.returnType != null && hasTypeVariables(actualReturnType)) {
+            if (implOp.returnType != null && hasTypeVariables(actualReturnType, allowedTypeVars)) {
                 throw TypeCheckError(
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' return type contains type variables. " +
@@ -352,26 +367,27 @@ object AbilityValidator {
     /**
      * Check if a type annotation contains type variables
      */
-    private fun hasTypeVariables(annotation: TypeAnnotation): Boolean {
+    private fun hasTypeVariables(annotation: TypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                annotation.name.startsWith("'") || annotation.name.first().isLowerCase()
+                val isTypeVar = annotation.name.startsWith("'") || annotation.name.first().isLowerCase()
+                isTypeVar && annotation.name !in allowedVars
             }
             is FunctionTypeAnnotation -> {
-                hasTypeVariables(annotation.paramType) || hasTypeVariables(annotation.returnType)
+                hasTypeVariables(annotation.paramType, allowedVars) || hasTypeVariables(annotation.returnType, allowedVars)
             }
             is RecordTypeAnnotation -> {
-                annotation.entries.any { hasTypeVariables(it.type) }
+                annotation.entries.any { hasTypeVariables(it.type, allowedVars) }
             }
             is VariantTypeAnnotation -> {
-                annotation.constructors.any { it.dataType?.let { hasTypeVariables(it) } == true }
+                annotation.constructors.any { it.dataType?.let { hasTypeVariables(it, allowedVars) } == true }
             }
             is TypeApplicationAnnotation -> {
-                annotation.args.any { hasTypeVariables(it) }
+                annotation.args.any { hasTypeVariables(it, allowedVars) }
             }
-            is SeqTypeAnnotation -> hasTypeVariables(annotation.elementType)
+            is SeqTypeAnnotation -> hasTypeVariables(annotation.elementType, allowedVars)
             is EffectRowAnnotation -> false
-            is QualifiedTypeAnnotation -> annotation.args.any { hasTypeVariables(it) }
+            is QualifiedTypeAnnotation -> annotation.args.any { hasTypeVariables(it, allowedVars) }
         }
     }
 
@@ -400,6 +416,15 @@ object AbilityValidator {
             }
             a is SeqTypeAnnotation && b is SeqTypeAnnotation -> {
                 typeAnnotationsMatch(a.elementType, b.elementType)
+            }
+            a is VariantTypeAnnotation && b is VariantTypeAnnotation -> {
+                a.constructors.size == b.constructors.size &&
+                a.constructors.zip(b.constructors).all { (aCtor, bCtor) ->
+                    aCtor.name == bCtor.name &&
+                    ((aCtor.dataType == null && bCtor.dataType == null) ||
+                     (aCtor.dataType != null && bCtor.dataType != null &&
+                      typeAnnotationsMatch(aCtor.dataType!!, bCtor.dataType!!)))
+                }
             }
             a is QualifiedTypeAnnotation && b is QualifiedTypeAnnotation -> {
                 a.modulePath == b.modulePath &&
@@ -495,7 +520,10 @@ object AbilityValidator {
         }
 
         // Ability is imported - check if any target type is local
-        val targetTypeNames = impl.targetTypes.map { getTypeNameFromAnnotation(it) }
+        // Include both concrete abilityTypeArgs (before 'for') and targetTypes (after 'for')
+        val concreteAbilityTypeArgs = impl.abilityTypeArgs
+            .filter { it !is IdentifierTypeAnnotation || !it.name.startsWith("'") }
+        val targetTypeNames = (concreteAbilityTypeArgs + impl.targetTypes).map { getTypeNameFromAnnotation(it) }
 
         // Check if any target type is defined locally
         val hasLocalTargetType = targetTypeNames.any { typeName ->
@@ -718,7 +746,7 @@ object AbilityValidator {
             if (PrimitiveTypes.isPrimitiveName(typeName)) continue
 
             // Built-in compound types always exist
-            if (typeName in setOf("Option", "Result", "List", "Map", "Set", "Seq", "Promise")) continue
+            if (typeName in BuiltinTypes.coreTypeNames) continue
 
             // User-defined type must be declared
             if (!typeDeclarations.containsKey(typeName)) {

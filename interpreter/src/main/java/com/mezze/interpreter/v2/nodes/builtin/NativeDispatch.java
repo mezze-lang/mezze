@@ -237,6 +237,18 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.intSign(getLong(r, "n")));
         HANDLERS.put("__native_int_neg", (r, c) ->
             PrimitiveNatives.intNegate(getLong(r, "n")));
+        HANDLERS.put("__native_int_eq", (r, c) ->
+            PrimitiveNatives.intEq(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_neq", (r, c) ->
+            PrimitiveNatives.intNeq(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_lt", (r, c) ->
+            PrimitiveNatives.intLt(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_le", (r, c) ->
+            PrimitiveNatives.intLte(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_gt", (r, c) ->
+            PrimitiveNatives.intGt(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_ge", (r, c) ->
+            PrimitiveNatives.intGte(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_int_from_string", (r, c) ->
             intFromString(getString(r, "s")));
         HANDLERS.put("__native_int_from_nat", (r, c) ->
@@ -249,6 +261,14 @@ public final class NativeDispatch extends MezzeNode {
         });
         HANDLERS.put("__native_int_pow", (r, c) ->
             intPow(getLong(r, "base"), getLong(r, "exp")));
+        HANDLERS.put("__native_int_gcd", (r, c) ->
+            intGcd(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_lcm", (r, c) ->
+            intLcm(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_int_is_even", (r, c) ->
+            getLong(r, "n") % 2 == 0);
+        HANDLERS.put("__native_int_is_odd", (r, c) ->
+            getLong(r, "n") % 2 != 0);
     }
 
     @TruffleBoundary
@@ -272,6 +292,22 @@ public final class NativeDispatch extends MezzeNode {
             exp >>= 1;
         }
         return result;
+    }
+
+    private static long intGcd(long a, long b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        while (b != 0) {
+            long t = b;
+            b = a % b;
+            a = t;
+        }
+        return a;
+    }
+
+    private static long intLcm(long a, long b) {
+        if (a == 0 || b == 0) return 0;
+        return Math.abs(a / intGcd(a, b) * b);
     }
 
     // ==================== Float Basic Operations ====================
@@ -332,6 +368,30 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatAtan(getDouble(r, "n")));
         HANDLERS.put("__native_float_atan2", (r, c) ->
             PrimitiveNatives.floatAtan2(getDouble(r, "y"), getDouble(r, "x")));
+        // Float arithmetic
+        HANDLERS.put("__native_float_add", (r, c) ->
+            PrimitiveNatives.floatAdd(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_subtract", (r, c) ->
+            PrimitiveNatives.floatSubtract(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_multiply", (r, c) ->
+            PrimitiveNatives.floatMultiply(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_divide", (r, c) ->
+            PrimitiveNatives.floatDivide(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_neg", (r, c) ->
+            PrimitiveNatives.floatNegate(getDouble(r, "n")));
+        // Float comparisons
+        HANDLERS.put("__native_float_eq", (r, c) ->
+            PrimitiveNatives.floatEq(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_neq", (r, c) ->
+            PrimitiveNatives.floatNeq(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_lt", (r, c) ->
+            PrimitiveNatives.floatLt(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_le", (r, c) ->
+            PrimitiveNatives.floatLte(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_gt", (r, c) ->
+            PrimitiveNatives.floatGt(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_ge", (r, c) ->
+            PrimitiveNatives.floatGte(getDouble(r, "l"), getDouble(r, "r")));
     }
 
     @TruffleBoundary
@@ -386,6 +446,19 @@ public final class NativeDispatch extends MezzeNode {
             getString(r, "s").stripLeading());
         HANDLERS.put("__native_string_trim_end", (r, c) ->
             getString(r, "s").stripTrailing());
+        // String comparisons
+        HANDLERS.put("__native_string_eq", (r, c) ->
+            PrimitiveNatives.strEq(getString(r, "l"), getString(r, "r")));
+        HANDLERS.put("__native_string_neq", (r, c) ->
+            PrimitiveNatives.strNeq(getString(r, "l"), getString(r, "r")));
+        HANDLERS.put("__native_string_lt", (r, c) ->
+            PrimitiveNatives.strLt(getString(r, "l"), getString(r, "r")));
+        HANDLERS.put("__native_string_le", (r, c) ->
+            PrimitiveNatives.strLte(getString(r, "l"), getString(r, "r")));
+        HANDLERS.put("__native_string_gt", (r, c) ->
+            PrimitiveNatives.strGt(getString(r, "l"), getString(r, "r")));
+        HANDLERS.put("__native_string_ge", (r, c) ->
+            PrimitiveNatives.strGte(getString(r, "l"), getString(r, "r")));
     }
 
     @TruffleBoundary
@@ -440,6 +513,11 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.boolNot(getBool(r, "b")));
         HANDLERS.put("__native_bool_xor", (r, c) ->
             PrimitiveNatives.boolXor(getBool(r, "l"), getBool(r, "r")));
+        // Bool comparisons
+        HANDLERS.put("__native_bool_eq", (r, c) ->
+            PrimitiveNatives.boolEq(getBool(r, "l"), getBool(r, "r")));
+        HANDLERS.put("__native_bool_neq", (r, c) ->
+            PrimitiveNatives.boolNeq(getBool(r, "l"), getBool(r, "r")));
     }
 
     // ==================== Seq (new, MezzeSeq-backed) ====================
@@ -1130,6 +1208,8 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
         HANDLERS.put("__native_sorted_set_equals", (r, c) ->
             SortedSetNatives.equals(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+        HANDLERS.put("__native_sorted_set_compare", (r, c) ->
+            SortedSetNatives.compare(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
         HANDLERS.put("__native_sorted_set_to_list", (r, c) ->
             SortedSetNatives.toList(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_to_set", (r, c) ->
@@ -1356,6 +1436,8 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.entries(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_equals", (r, c) ->
             SortedMapNatives.equals(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
+        HANDLERS.put("__native_sorted_map_compare", (r, c) ->
+            SortedMapNatives.compareMaps(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
         HANDLERS.put("__native_sorted_map_min_entry", (r, c) ->
             SortedMapNatives.minEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->
@@ -1478,6 +1560,8 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.concat(getDeque(r, "d1"), getDeque(r, "d2")));
         HANDLERS.put("__native_deque_equals", (r, c) ->
             DequeNatives.equals(getDeque(r, "d1"), getDeque(r, "d2")));
+        HANDLERS.put("__native_deque_compare", (r, c) ->
+            DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2")));
         HANDLERS.put("__native_deque_to_list", (r, c) ->
             DequeNatives.toList(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_seq", (r, c) ->
@@ -1667,6 +1751,10 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.all(getNonEmptyList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_nel_sort_by", (r, c) ->
             NonEmptyListNatives.sortBy(getNonEmptyList(r, "xs"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_nel_equals", (r, c) ->
+            NonEmptyListNatives.equals(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys")));
+        HANDLERS.put("__native_nel_compare", (r, c) ->
+            NonEmptyListNatives.compare(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys")));
     }
 
     // ==================== Nat ====================
@@ -1692,6 +1780,28 @@ public final class NativeDispatch extends MezzeNode {
             NatNatives.max(getLong(r, "l"), getLong(r, "r")));
         HANDLERS.put("__native_nat_clamp", (r, c) ->
             NatNatives.clamp(getLong(r, "n"), getLong(r, "min"), getLong(r, "max")));
+        // Nat arithmetic
+        HANDLERS.put("__native_nat_add", (r, c) ->
+            PrimitiveNatives.natAdd(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_multiply", (r, c) ->
+            PrimitiveNatives.natMultiply(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_divide", (r, c) ->
+            PrimitiveNatives.natDivide(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_modulo", (r, c) ->
+            PrimitiveNatives.natModulo(getLong(r, "l"), getLong(r, "r")));
+        // Nat comparisons
+        HANDLERS.put("__native_nat_eq", (r, c) ->
+            PrimitiveNatives.natEq(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_neq", (r, c) ->
+            PrimitiveNatives.natNeq(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_lt", (r, c) ->
+            PrimitiveNatives.natLt(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_le", (r, c) ->
+            PrimitiveNatives.natLte(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_gt", (r, c) ->
+            PrimitiveNatives.natGt(getLong(r, "l"), getLong(r, "r")));
+        HANDLERS.put("__native_nat_ge", (r, c) ->
+            PrimitiveNatives.natGte(getLong(r, "l"), getLong(r, "r")));
     }
 
     // ==================== Char ====================
@@ -1727,6 +1837,8 @@ public final class NativeDispatch extends MezzeNode {
             CharNatives.eq(getString(r, "a"), getString(r, "b")));
         HANDLERS.put("__native_char_compare", (r, c) ->
             CharNatives.compare(getString(r, "a"), getString(r, "b")));
+        HANDLERS.put("__native_char_compare_int", (r, c) ->
+            CharNatives.compareInt(getString(r, "a"), getString(r, "b")));
     }
 
     // ==================== Frac ====================
@@ -1824,6 +1936,10 @@ public final class NativeDispatch extends MezzeNode {
             BytesNatives.map(getBytes(r, "b"), getFunction(r, "f"), c));
         HANDLERS.put("__native_bytes_fold", (r, c) ->
             BytesNatives.fold(getBytes(r, "b"), getField(r, "init"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_bytes_equals", (r, c) ->
+            BytesNatives.equals(getBytes(r, "b1"), getBytes(r, "b2")));
+        HANDLERS.put("__native_bytes_compare", (r, c) ->
+            BytesNatives.compare(getBytes(r, "b1"), getBytes(r, "b2")));
     }
 
     // ==================== Time ====================

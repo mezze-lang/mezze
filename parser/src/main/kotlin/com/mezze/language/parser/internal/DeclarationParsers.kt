@@ -1420,8 +1420,6 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                 parseImplAbilityBody(implToken, abilityRef, streamAfterFor)
                             }
                             is ParseResult.Failure -> {
-                                // Could be anonymous impl: impl Type where { ... }
-                                // Or could be the old syntax (impl Show for Int where) — give a helpful error
                                 val nextToken = stream2.current()
                                 if (nextToken?.type == TokenType.WHERE) {
                                     // Anonymous impl: impl Type where { ... }
@@ -1437,8 +1435,58 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                         is ParseResult.Failure -> whereToken
                                     }
                                 } else {
-                                    // Not 'for' and not 'where' — fail so effect impl parser can try
-                                    forToken
+                                    // Could be ability impl with type args:
+                                    //   impl Eq 'a for ['a] where { ... }                           (type variable)
+                                    //   impl Into Str for Int where { ... }                          (concrete type)
+                                    //   impl TryInto Int |ConversionError {msg: Str}| for Str where  (variant type)
+                                    //   impl TryInto Int {msg: Str} for Str where                    (record type)
+                                    // Any type annotation is allowed between the ability name and 'for'.
+                                    var argStream = stream2
+                                    val abilityTypeArgs = mutableListOf<TypeAnnotation>()
+                                    while (true) {
+                                        // Stop if we see 'for' — that ends the type args
+                                        val nextTok = argStream.current()
+                                        if (nextTok?.type == TokenType.FOR) break
+
+                                        // Try parsing any type annotation (identifier, type var, variant, record, seq, type application)
+                                        val typeResult = implTargetTypeAnnotation(argStream)
+                                        when (typeResult) {
+                                            is ParseResult.Success -> {
+                                                abilityTypeArgs.add(typeResult.value)
+                                                argStream = skipNewlines(typeResult.remaining)
+                                            }
+                                            is ParseResult.Failure -> break
+                                        }
+                                    }
+                                    if (abilityTypeArgs.isNotEmpty()) {
+                                        val forToken2 = tok(TokenType.FOR)(argStream)
+                                        when (forToken2) {
+                                            is ParseResult.Success -> {
+                                                // Generic ability impl with type args
+                                                val abilityRef = firstRef
+                                                val streamAfterFor = skipNewlines(forToken2.remaining)
+                                                parseImplAbilityBody(implToken, abilityRef, streamAfterFor, abilityTypeArgs)
+                                            }
+                                            is ParseResult.Failure -> {
+                                                // No 'for' — check for 'where' (parameterized anonymous impl)
+                                                // e.g., impl Option 'a where { ... }
+                                                val whereToken2 = tok(TokenType.WHERE)(argStream)
+                                                when (whereToken2) {
+                                                    is ParseResult.Success -> {
+                                                        val targetType = TypeApplicationAnnotation(
+                                                            firstRef.localName,
+                                                            abilityTypeArgs
+                                                        )
+                                                        parseImplAbilityOperationsBlock(implToken, null, listOf(targetType), emptyMap(), whereToken2)
+                                                    }
+                                                    is ParseResult.Failure -> forToken2
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Not 'for', not 'where', no type args — fail so effect impl parser can try
+                                        forToken
+                                    }
                                 }
                             }
                         }
@@ -1457,14 +1505,19 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
     private fun MezzeParser.parseImplAbilityBody(
         implToken: ParseResult.Success<Token>,
         abilityRef: QualifiedRef,
-        streamAfterFor: TokenStream
+        streamAfterFor: TokenStream,
+        abilityTypeArgs: List<TypeAnnotation> = emptyList()
     ): ParseResult<ProgramItem> {
-        // Parse target types (one or more)
+        // Parse target types (one or more).
+        // A capitalized type name followed by type variables ('a, 'b) or structural types
+        // ([T], {fields}) is parsed as a type application (e.g., Option 'a → TypeApplicationAnnotation).
+        // A capitalized type name followed by another capitalized type name means separate target types
+        // (e.g., String Int for multi-parameter abilities).
         val targetTypes = mutableListOf<TypeAnnotation>()
         var currentStream = streamAfterFor
 
-        // Parse first type
-        val firstType = simpleTypeArgument(currentStream)
+        // Parse first type — may be a type application with type variable args
+        val firstType = implTargetTypeAnnotation(currentStream)
         return when (firstType) {
             is ParseResult.Success -> {
                 targetTypes.add(firstType.value)
@@ -1476,7 +1529,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                     if (nextToken?.type == TokenType.WHERE || nextToken?.type == TokenType.HAVING) {
                         break
                     }
-                    val nextType = simpleTypeArgument(currentStream)
+                    val nextType = implTargetTypeAnnotation(currentStream)
                     when (nextType) {
                         is ParseResult.Success -> {
                             targetTypes.add(nextType.value)
@@ -1500,7 +1553,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
 
                 when (whereToken) {
                     is ParseResult.Success -> {
-                        parseImplAbilityOperationsBlock(implToken, abilityRef, targetTypes, associatedTypeBindings, whereToken)
+                        parseImplAbilityOperationsBlock(implToken, abilityRef, targetTypes, associatedTypeBindings, whereToken, abilityTypeArgs)
                     }
                     is ParseResult.Failure -> whereToken
                 }
@@ -1517,7 +1570,8 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
         abilityRef: QualifiedRef?,
         targetTypes: List<TypeAnnotation>,
         associatedTypeBindings: Map<String, TypeAnnotation>,
-        whereToken: ParseResult.Success<Token>
+        whereToken: ParseResult.Success<Token>,
+        abilityTypeArgs: List<TypeAnnotation> = emptyList()
     ): ParseResult<ProgramItem> {
         val stream4 = skipNewlines(whereToken.remaining)
         val lbrace = tok(TokenType.LBRACE)(stream4)
@@ -1586,6 +1640,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                             ImplAbilityDeclaration(
                                 target = implTarget,
                                 targetTypes = targetTypes,
+                                abilityTypeArgs = abilityTypeArgs,
                                 forallVars = emptyList(),
                                 associatedTypeBindings = associatedTypeBindings,
                                 operations = operations,
@@ -1599,6 +1654,63 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                 }
             }
             is ParseResult.Failure -> lbrace
+        }
+    }
+
+/**
+ * Parse a type annotation for impl target types.
+ * Like typeApplicationAnnotation, but only consumes type variable args ('a, 'b)
+ * and structural types ([T], {fields}) after a capitalized constructor.
+ * Capitalized identifiers (String, Int) are NOT consumed as args — they are
+ * separate target types for multi-parameter abilities.
+ */
+internal val MezzeParser.implTargetTypeAnnotation: Parser<TypeAnnotation>
+    get() = { stream ->
+        val first = simpleTypeArgument(stream)
+        when (first) {
+            is ParseResult.Success -> {
+                val firstAnnotation = first.value
+                // Only try to collect type variable args for capitalized type constructors
+                if (firstAnnotation is IdentifierTypeAnnotation && firstAnnotation.name[0].isUpperCase()) {
+                    val args = mutableListOf<TypeAnnotation>()
+                    var currentStream = first.remaining
+                    while (true) {
+                        val nextTok = currentStream.current()
+                        // Only consume type variables ('a), seq types ([T]), and record types ({fields})
+                        // Do NOT consume capitalized identifiers — those are separate target types
+                        if (nextTok != null && nextTok.type == TokenType.IDENTIFIER && nextTok.text.startsWith("'")) {
+                            val argResult = simpleTypeArgument(currentStream)
+                            when (argResult) {
+                                is ParseResult.Success -> {
+                                    args.add(argResult.value)
+                                    currentStream = argResult.remaining
+                                }
+                                is ParseResult.Failure -> break
+                            }
+                        } else if (nextTok != null && nextTok.type == TokenType.LBRACKET) {
+                            // Seq type like ['a]
+                            val argResult = seqTypeAnnotation(currentStream)
+                            when (argResult) {
+                                is ParseResult.Success -> {
+                                    args.add(argResult.value)
+                                    currentStream = argResult.remaining
+                                }
+                                is ParseResult.Failure -> break
+                            }
+                        } else {
+                            break
+                        }
+                    }
+                    if (args.isNotEmpty()) {
+                        ParseResult.Success(TypeApplicationAnnotation(firstAnnotation.name, args), currentStream)
+                    } else {
+                        first // No args, return as simple identifier
+                    }
+                } else {
+                    first // Not a capitalized identifier — return as-is (seq type, record, etc.)
+                }
+            }
+            is ParseResult.Failure -> first
         }
     }
 
@@ -1635,7 +1747,8 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation
                                                         name.value.text,
                                                         funcType.paramType,
                                                         funcType.returnType,
-                                                        impl.value
+                                                        impl.value,
+                                                        funcType.abilityConstraints
                                                     ),
                                                     impl.remaining
                                                 )

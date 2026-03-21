@@ -1,6 +1,25 @@
 # std/result.mezze - Result type utility functions
 # Note: Result type (Ok/Err) is built-in to the language
 
+use std::abilities::compare::{Eq}
+
+impl Eq 'a 'e for Result 'a 'e where {
+    eq = {r} -> match it is
+        Ok {val = l} -> match r is
+            Ok {val = r_val} -> l == r_val
+            Err {error = _} -> False
+        Err {error = l_err} -> match r is
+            Ok {val = _} -> False
+            Err {error = r_err} -> l_err == r_err,
+    neq = {r} -> match it is
+        Ok {val = l} -> match r is
+            Ok {val = r_val} -> l != r_val
+            Err {error = _} -> True
+        Err {error = l_err} -> match r is
+            Ok {val = _} -> True
+            Err {error = r_err} -> l_err != r_err
+}
+
 # Map a function over the success value
 pub let map: { result: Result 'a 'e, f: {val: 'a} -> 'b <...> } -> Result 'b 'e <...> = { result, f } ->
     match result is
@@ -110,3 +129,17 @@ pub let zip: { a: Result 'a 'e, b: Result 'b 'e } -> Result {fst: 'a, snd: 'b} '
             Ok { val = bv } -> Ok { val = { fst = av, snd = bv } }
             Err { error } -> Err { error = error }
         Err { error } -> Err { error = error }
+
+impl Result 'a 'e where {
+    map = {f} -> map {result = it, f = f},
+    map_err = {f} -> map_err {result = it, f = f},
+    flat_map = {f} -> flat_map {result = it, f = f},
+    get_or_else = {def} -> get_or_else {result = it, def = def},
+    is_ok = {} -> is_ok {result = it},
+    is_err = {} -> is_err {result = it},
+    or_else = {f} -> or_else {result = it, f = f},
+    to_option = {} -> to_option {result = it},
+    fold = {on_err, on_ok} -> fold {result = it, on_err = on_err, on_ok = on_ok},
+    flatten = {} -> flatten {result = it},
+    to_list = {} -> to_list {result = it}
+}

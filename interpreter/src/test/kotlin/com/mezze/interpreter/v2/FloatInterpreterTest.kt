@@ -201,9 +201,9 @@ class FloatInterpreterTest {
     fun `to_str converts float to string`() {
         val code = """
             use std::float
-            use std::string
+            use std::str
             let s = float::to_str { n = 3.14 }
-            string::starts_with { s = s, prefix = "3.14" }
+            str::starts_with { s = s, prefix = "3.14" }
         """
         val result = eval(code)
         assertEquals(true, result)

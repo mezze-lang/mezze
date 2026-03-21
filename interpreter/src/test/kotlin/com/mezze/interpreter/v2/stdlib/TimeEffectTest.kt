@@ -587,11 +587,11 @@ class TimeEffectTest {
         val result = eval("""
             use std::effects::time::{MockTime, format_iso8601}
 
-            use std::string
+            use std::str
 
             perform MockTime { fixed_time = 1640995200000 } in do
                 let formatted = format_iso8601 { timestamp = 1640995200000 }
-                string::contains { s = formatted, substring = "2022-01-01" }
+                str::contains { s = formatted, substring = "2022-01-01" }
         """)
         assertEquals(true, result)
     }
@@ -601,11 +601,11 @@ class TimeEffectTest {
         val result = eval("""
             use std::effects::time::{MockTime, format_time_only}
 
-            use std::string
+            use std::str
 
             perform MockTime { fixed_time = 1640995200000 } in do
                 let formatted = format_time_only { timestamp = 1640995200000 }
-                string::length { s = formatted } > 0
+                str::length { s = formatted } > 0
         """)
         assertEquals(true, result)
     }

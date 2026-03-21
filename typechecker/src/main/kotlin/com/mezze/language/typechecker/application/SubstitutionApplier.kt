@@ -99,6 +99,14 @@ class SubstitutionApplier(
     // we replace calls with the concrete impl body wrapped in a let-binding for `it`.
     private val processedImplBodies = mutableMapOf<String, ImplAbilityDeclaration>()
 
+    /**
+     * Pre-populate processedImplBodies with imported impl bodies.
+     * This enables inlining of imported ability/inherent method calls.
+     */
+    fun registerImportedImplBodies(bodies: Map<String, ImplAbilityDeclaration>) {
+        processedImplBodies.putAll(bodies)
+    }
+
     // Mutable version of abilityImpls that includes generated codec impls
     // This allows nested Encode/Decode calls to find impls generated in the same pass
     private val mutableAbilityImpls = abilityImpls.toMutableMap()
@@ -132,13 +140,13 @@ class SubstitutionApplier(
         // Also add to mutableAbilityImpls so nested calls can find it
         // Use content hash as the key (same key format as TypingContext)
         val abilityName = impl.abilityName ?: return impl  // inherent impls: nothing to substitute
-        val targetTypes = impl.targetTypes.map { com.mezze.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
+        val targetTypes = impl.allTypeArgs.map { com.mezze.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
         val contentHashKey = hash.toFullHexString()
 
         mutableAbilityImpls[contentHashKey] = com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo(
             abilityName = abilityName,
             targetTypes = targetTypes,
-            targetTypeAnnotations = impl.targetTypes,  // Store original annotations for structural matching
+            targetTypeAnnotations = impl.allTypeArgs,  // Store original annotations for structural matching
             associatedTypeBindings = impl.associatedTypeBindings,  // Store associated type bindings
             sourceModule = null,
             contentHash = contentHashKey
@@ -196,6 +204,15 @@ class SubstitutionApplier(
      * Returns a new Program with all types resolved.
      */
     fun applyToProgram(program: Program): Program {
+        // Pre-populate identifierContext with resolved types from constraint results.
+        // This ensures that inherent impl bodies (which may reference module-level functions
+        // declared later in the file) can resolve identifier types correctly.
+        for ((key, result) in constraintResults) {
+            if (key.startsWith("_inherent_") || key.startsWith("_toplevel")) continue
+            val resolvedType = substitution.apply(result.type)
+            identifierContext[BindingKey.unqualified(key)] = resolvedType
+        }
+
         // Process items sequentially, updating identifierContext after each let binding
         // This allows later bindings to reference earlier bindings' types (including SuspendedType)
         val updatedItems = mutableListOf<ProgramItem>()
@@ -551,15 +568,19 @@ class SubstitutionApplier(
         // This allows method calls like `it.inner {}` inside impl bodies to resolve correctly.
         val originalContext = identifierContext.toMap()
         val abilityDecl = implDecl.abilityName?.let { abilityDeclarations[it] }
-        if (abilityDecl != null && implDecl.targetTypes.isNotEmpty()) {
+        if (abilityDecl != null && implDecl.allTypeArgs.isNotEmpty()) {
             val receiverIndex = if (abilityDecl.receiverTypeParam != null) {
                 abilityDecl.typeParams.indexOf(abilityDecl.receiverTypeParam)
             } else {
                 abilityDecl.typeParams.size - 1
             }
-            val safeIndex = receiverIndex.coerceIn(0, implDecl.targetTypes.size - 1)
-            val receiverAnnotation = implDecl.targetTypes[safeIndex]
+            val safeIndex = receiverIndex.coerceIn(0, implDecl.allTypeArgs.size - 1)
+            val receiverAnnotation = implDecl.allTypeArgs[safeIndex]
             val receiverType = convertTypeAnnotation(receiverAnnotation)
+            identifierContext[BindingKey.unqualified(Keywords.IT)] = receiverType
+        } else if (implDecl.isInherent && implDecl.targetTypes.isNotEmpty()) {
+            // For inherent impls (impl Type where { ... }), inject `it` as the target type
+            val receiverType = convertTypeAnnotation(implDecl.targetTypes.first())
             identifierContext[BindingKey.unqualified(Keywords.IT)] = receiverType
         }
 
@@ -575,8 +596,7 @@ class SubstitutionApplier(
         // Create a RecordType from the impl operations (old typechecker pattern)
         // This matches OldTypeChecker.kt:1744-1766
         val implRecordType = MezzeType.RecordType(
-            fields = implDecl.operations.associate { op ->
-                // Use the operation's type annotation if available
+            fields = updatedOperations.associate { op ->
                 val paramType = op.paramType
                 val returnType = op.returnType
                 val functionType = if (paramType != null && returnType != null) {
@@ -585,8 +605,8 @@ class SubstitutionApplier(
                         returnType = convertTypeAnnotation(returnType)
                     )
                 } else {
-                    // If no type annotation, use fresh type variable
-                    MezzeType.VarType(TypeVar.fresh())
+                    // Use the updated implementation's inferred type if available
+                    op.implementation.inferredType ?: MezzeType.VarType(TypeVar.fresh())
                 }
                 op.name to functionType
             }
@@ -1337,8 +1357,20 @@ class SubstitutionApplier(
                         }
 
                         if (itValue != null) {
+                            // Compute return type, unwrapping SuspendedType
+                            val rawReturnType = updatedType ?: run {
+                                val opType = operation.implementation.inferredType?.let { substitution.apply(it) }
+                                when (opType) {
+                                    is MezzeType.FunctionType -> opType.returnType
+                                    else -> null
+                                }
+                            }
+                            val effectiveReturnType = when (rawReturnType) {
+                                is MezzeType.SuspendedType -> rawReturnType.valueType
+                                else -> rawReturnType
+                            }
                             return inlineAbilityMethodCall(
-                                expr, operation, itValue, updatedArguments, updatedType
+                                expr, operation, itValue, updatedArguments, effectiveReturnType
                             )
                         }
                     }
@@ -1696,7 +1728,12 @@ class SubstitutionApplier(
     private fun resolveMethodCallByReceiverType(memberAccess: MemberAccess, callReturnType: MezzeType? = null): Map<String, ResolvedAbility> {
         val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
         val methodName = memberAccess.member
-        val receiverType = memberAccess.receiver.inferredType?.let { substitution.apply(it) } ?: return resolvedAbilities
+        val rawReceiverType = memberAccess.receiver.inferredType?.let { substitution.apply(it) } ?: return resolvedAbilities
+        // Unwrap SuspendedType to get the underlying value type for method resolution
+        val receiverType = when (rawReceiverType) {
+            is MezzeType.SuspendedType -> rawReceiverType.valueType
+            else -> rawReceiverType
+        }
 
         // If the receiver is a record type that already has this field, it's a plain field access + call,
         // not an ability method call. This correctly handles dictionaries from Ability.for { it = x }
@@ -1722,7 +1759,10 @@ class SubstitutionApplier(
             }
         }
 
-        if (abilityName == null) return resolvedAbilities
+        if (abilityName == null) {
+            // No ability defines this method — check inherent impls (impl Type where { method = ... })
+            return resolveInherentMethodCall(methodName, receiverType)
+        }
 
         // Always try user-defined impls first — this handles cases like `impl NumAdd for Money`
         // where the user provides a custom impl for a built-in ability on their newtype.
@@ -1831,6 +1871,47 @@ class SubstitutionApplier(
                     isBuiltin = false,
                     implementationHash = implHash
                 )
+            }
+        }
+
+        return resolvedAbilities
+    }
+
+    /**
+     * Resolve an inherent method call (impl Type where { method = ... }).
+     * Finds the inherent impl whose target type matches the receiver.
+     */
+    private fun resolveInherentMethodCall(methodName: String, receiverType: MezzeType): Map<String, ResolvedAbility> {
+        val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
+
+        val inherentImplHashes = mutableAbilityImplsByName[null] ?: return resolvedAbilities
+
+        for (hash in inherentImplHashes) {
+            val implInfo = mutableAbilityImpls[hash] ?: continue
+
+            // Check method name first if impl body is available
+            val implBody = processedImplBodies[hash]
+            if (implBody != null && implBody.operations.none { it.name == methodName }) {
+                continue
+            }
+
+            // Check if target type matches the receiver
+            val annotations = implInfo.targetTypeAnnotations
+            val matches = if (annotations != null && annotations.isNotEmpty()) {
+                typeMatchesAnnotation(receiverType, annotations.first())
+            } else {
+                val receiverTypeName = getTypeNameForAbility(receiverType)
+                implInfo.targetTypes.any { it == receiverTypeName }
+            }
+
+            if (matches) {
+                resolvedAbilities[hash] = ResolvedAbility(
+                    abilityName = "inherent",
+                    typeArgs = listOf(receiverType),
+                    isBuiltin = false,
+                    implementationHash = hash
+                )
+                break
             }
         }
 
@@ -2064,7 +2145,7 @@ class SubstitutionApplier(
                         } else {
                             // Type constructor match
                             when (type) {
-                                is MezzeType.TypeApplication -> type.constructor == annotation.name && type.args.isEmpty()
+                                is MezzeType.TypeApplication -> type.constructor == annotation.name
                                 is MezzeType.RecordType -> type.typeName == annotation.name
                                 is MezzeType.VariantType -> type.typeName == annotation.name
                                 else -> false
@@ -2080,6 +2161,15 @@ class SubstitutionApplier(
                         type.args.size == annotation.args.size &&
                         type.args.zip(annotation.args).all { (argType, argAnnotation) ->
                             typeMatchesAnnotation(argType, argAnnotation)
+                        }
+                    }
+                    is MezzeType.VariantType -> {
+                        // Match variant types against known type constructors
+                        val constructors = type.constructors.keys
+                        when (annotation.constructor) {
+                            "Option" -> constructors == setOf("Some", "None")
+                            "Result" -> constructors == setOf("Ok", "Err")
+                            else -> type.typeName == annotation.constructor
                         }
                     }
                     is MezzeType.SeqType -> {

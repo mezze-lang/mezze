@@ -149,6 +149,12 @@ object BytesTypes {
             MezzeType.BoolType
         )
 
+        // __native_bytes_compare: {b1: Bytes, b2: Bytes} -> Int
+        context["__native_bytes_compare"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("b1" to MezzeType.BytesType, "b2" to MezzeType.BytesType)),
+            MezzeType.IntType
+        )
+
         // __native_bytes_to_str: {b: Bytes} -> Result String String
         context["__native_bytes_to_str"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType)),

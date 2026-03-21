@@ -198,6 +198,18 @@ object SortedSetTypes {
             )
         }
 
+        // __native_sorted_set_compare: {s1: SortedSet 'a, s2: SortedSet 'a} -> Int
+        run {
+            val elementType = MezzeType.VarType(TypeVar("a"))
+            context["__native_sorted_set_compare"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf(
+                    "s1" to MezzeType.SortedSetType(elementType),
+                    "s2" to MezzeType.SortedSetType(elementType)
+                )),
+                MezzeType.IntType
+            )
+        }
+
         // ==================== Higher-Order Functions ====================
 
         // __native_sorted_set_filter: {s: SortedSet 'a, p: {val: 'a} -> Bool} -> SortedSet 'a
