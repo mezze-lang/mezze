@@ -11,3 +11,14 @@ dependencies {
 kotlin {
     jvmToolchain(24)
 }
+
+// Include .mz stdlib files as resources so they're available on the classpath
+// for runtime parsing (e.g., BuiltInAbilities loading ability declarations)
+sourceSets {
+    main {
+        resources {
+            srcDir(".")
+            include("std/**/*.mz")
+        }
+    }
+}

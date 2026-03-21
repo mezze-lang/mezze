@@ -1,20 +1,12 @@
 package com.mezze.language.typechecker.abilities
 
-import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.TypeVar
+import com.mezze.language.ast.*
 
 /**
  * Built-in ability registry for TypeChecker.
  *
- * Abilities are type classes that define operations on types.
- * For example, NumAdd defines the `add` operation for numeric types.
- *
- * Built-in abilities are automatically available without imports:
- * - NumAdd, NumSub, NumMul, NumDiv, NumMod, NumNeg (arithmetic)
- * - Eq (equality comparison)
- * - Ord (ordering comparison)
- * - Inspect (to_dbg_str conversion)
- * - LogicalAnd, LogicalOr, LogicalNot (boolean operations)
+ * Ability method signatures are loaded from stdlib .mz files (not hardcoded).
+ * Only Inspect is compiler-provided (universally available for all types).
  *
  * Operators are desugared to method-call syntax (receiver is implicit `it`):
  * - x + y  →  x.add {r = y}   (NumAdd ability)
@@ -22,159 +14,108 @@ import com.mezze.language.ast.TypeVar
  * - x < y  →  x.lt {r = y}    (Ord ability)
  */
 object BuiltInAbilities {
-    /**
-     * Bool type - use the singleton BoolType for consistency with inferred types.
-     * Note: Bool is technically a variant with True/False constructors in the language,
-     * but internally we use BoolType for efficient comparison and consistency.
-     */
     private val boolType = MezzeType.BoolType
-    /**
-     * Map of ability names to their methods.
-     * Each method is a function that takes a type variable and returns the method's function type.
-     */
-    private val abilities = mapOf(
-        // Arithmetic: receiver is `it`, second operand is `r`
-        "NumAdd" to mapOf(
-            "add" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = typeVar
-                )
-            }
-        ),
-        "NumSub" to mapOf(
-            "sub" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = typeVar
-                )
-            },
-            "neg" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
-                    returnType = typeVar
-                )
-            }
-        ),
-        "NumMul" to mapOf(
-            "mul" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = typeVar
-                )
-            }
-        ),
-        "NumDiv" to mapOf(
-            "div" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = typeVar
-                )
-            }
-        ),
-        "NumMod" to mapOf(
-            "mod" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = typeVar
-                )
-            }
-        ),
-        // Equality: receiver is `it`, second operand is `r`
-        "Eq" to mapOf(
-            "eq" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            },
-            "neq" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            }
-        ),
-        // Ordering: receiver is `it`, second operand is `r`
-        "Ord" to mapOf(
-            "lt" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            },
-            "le" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            },
-            "gt" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            },
-            "ge" to { typeVar: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to typeVar), rowVar = null),
-                    returnType = boolType
-                )
-            }
-        ),
-        // Inspect: receiver is `it`, no explicit params
-        "Inspect" to mapOf(
-            "to_dbg_str" to { _: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
-                    returnType = MezzeType.StringType
-                )
-            }
-        ),
-        // Logical: receiver is `it` (Bool), second operand is `r`
-        "LogicalAnd" to mapOf(
-            "and" to { _: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to boolType), rowVar = null),
-                    returnType = boolType
-                )
-            }
-        ),
-        "LogicalOr" to mapOf(
-            "or" to { _: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = mapOf("r" to boolType), rowVar = null),
-                    returnType = boolType
-                )
-            }
-        ),
-        // LogicalNot: receiver is `it` (Bool), no explicit params
-        "LogicalNot" to mapOf(
-            "not" to { _: MezzeType.VarType ->
-                MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
-                    returnType = boolType
-                )
-            }
-        )
-    )
 
     /**
-     * All built-in ability names.
+     * Map of ability names to their methods, loaded from stdlib .mz files.
+     * Each method is a function that takes a type variable and returns the method's function type.
      */
-    private val allBuiltInAbilityNames = setOf(
-        "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg",
-        "Eq", "Ord", "Inspect",
-        "LogicalAnd", "LogicalOr", "LogicalNot"
-    )
+    private val abilities: Map<String, Map<String, (MezzeType.VarType) -> MezzeType>> by lazy {
+        buildAbilitiesFromMzFiles()
+    }
+
+    /**
+     * All built-in ability names (includes NumNeg for backward compat).
+     */
+    private val allBuiltInAbilityNames: Set<String> by lazy {
+        // NumNeg is referenced by some code but it's actually a method of NumSub.
+        // Keep it in the names set for isBuiltInAbility() checks.
+        abilities.keys + "NumNeg"
+    }
+
+    /**
+     * Parse ability declarations from stdlib .mz files and build method type generators.
+     */
+    private fun buildAbilitiesFromMzFiles(): Map<String, Map<String, (MezzeType.VarType) -> MezzeType>> {
+        val parser = com.mezze.language.parser.MezzeParser()
+        val abilityFiles = listOf(
+            "std/abilities/numeric.mz",
+            "std/abilities/compare.mz",
+            "std/abilities/logic.mz",
+            "std/abilities/inspect.mz",
+            "std/abilities/convert.mz",
+        )
+
+        val result = mutableMapOf<String, Map<String, (MezzeType.VarType) -> MezzeType>>()
+
+        for (file in abilityFiles) {
+            try {
+                val source = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(file) ?: continue
+                val program = parser.parse(source)
+                for (decl in program.items.filterIsInstance<AbilityDeclaration>()) {
+                    val methods = mutableMapOf<String, (MezzeType.VarType) -> MezzeType>()
+                    for (op in decl.operations) {
+                        methods[op.name] = { typeVar: MezzeType.VarType ->
+                            val paramType = convertAnnotationToType(op.paramType, typeVar)
+                            val returnType = convertAnnotationToType(op.returnType, typeVar)
+                            MezzeType.FunctionType(paramType = paramType, returnType = returnType)
+                        }
+                    }
+                    result[decl.name] = methods
+                }
+            } catch (e: Exception) {
+                System.err.println("[BuiltInAbilities] Failed to parse $file: ${e.message}")
+            }
+        }
+
+        // Ensure Inspect is always present (compiler-provided)
+        if ("Inspect" !in result) {
+            result["Inspect"] = mapOf(
+                "to_dbg_str" to { _: MezzeType.VarType ->
+                    MezzeType.FunctionType(
+                        paramType = MezzeType.RecordType(fields = emptyMap(), rowVar = null),
+                        returnType = MezzeType.StringType
+                    )
+                }
+            )
+        }
+
+        return result
+    }
+
+    /**
+     * Convert a TypeAnnotation to a MezzeType, replacing type variables with the shared typeVar.
+     */
+    private fun convertAnnotationToType(annotation: TypeAnnotation, typeVar: MezzeType.VarType): MezzeType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                PrimitiveTypes.fromName(annotation.name)
+                    ?: if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                        typeVar
+                    } else {
+                        MezzeType.TypeApplication(annotation.name, emptyList())
+                    }
+            }
+            is RecordTypeAnnotation -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertAnnotationToType(entry.type, typeVar)
+                    },
+                    rowVar = null
+                )
+            }
+            is FunctionTypeAnnotation -> {
+                MezzeType.FunctionType(
+                    paramType = convertAnnotationToType(annotation.paramType, typeVar),
+                    returnType = convertAnnotationToType(annotation.returnType, typeVar)
+                )
+            }
+            else -> typeVar
+        }
+    }
 
     /**
      * Get the type of an ability method.
-     *
-     * @param abilityName The ability name (e.g., "NumAdd")
-     * @param methodName The method name (e.g., "add")
-     * @param typeVar The type variable for polymorphic abilities
-     * @return The method's function type, or null if not found
      */
     fun getAbilityMethodType(
         abilityName: String,
@@ -193,10 +134,6 @@ object BuiltInAbilities {
 
     /**
      * Check if a variant type is the Bool variant: | True, False |
-     *
-     * Bool is represented as a closed variant with exactly two constructors (True and False),
-     * both with no payloads. This function allows other parts of the typechecker to recognize
-     * Bool variants without duplicating the check logic.
      */
     fun isBoolVariant(type: MezzeType): Boolean {
         return type is MezzeType.VariantType &&

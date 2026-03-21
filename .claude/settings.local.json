@@ -230,7 +230,8 @@
       "Bash(JAVA_HOME=/nix/store/6hm751dv189cvxwgrgbs04hizy06mhgl-graalvm-oracle-24 PATH=/nix/store/6hm751dv189cvxwgrgbs04hizy06mhgl-graalvm-oracle-24/bin:$PATH java -version 2>&1)",
       "Bash(nix-prefetch-url:*)",
       "Bash(tar:*)",
-      "Bash(devenv shell:*)"
+      "Bash(devenv shell:*)",
+      "Bash(JAVA_HOME=/nix/store/6hm751dv189cvxwgrgbs04hizy06mhgl-graalvm-oracle-24 java -cp \"typechecker/build/libs/*:ast/build/libs/*:parser/build/libs/*:stdlib/build/libs/*\" kotlin.MainKt 2>&1 | head -3; echo \"---\"; ls stdlib/build/libs/ 2>/dev/null)"
     ],
     "deny": [],
     "ask": []
