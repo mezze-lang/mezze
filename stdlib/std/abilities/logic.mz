@@ -7,13 +7,13 @@
 #   !x      ->  x.not {}
 
 ability LogicalAnd for 'a where {
-    and: {r: 'a} -> 'a
+    and: {it: 'a, r: 'a} -> 'a
 }
 
 ability LogicalOr for 'a where {
-    or: {r: 'a} -> 'a
+    or: {it: 'a, r: 'a} -> 'a
 }
 
 ability LogicalNot for 'a where {
-    not: {} -> 'a
+    not: {it: 'a} -> 'a
 }

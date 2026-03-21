@@ -83,7 +83,7 @@ class AbilityEffectNameCollisionTest {
     fun `test user-defined ability cannot be used as value`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let x = Show
@@ -186,7 +186,7 @@ class AbilityEffectNameCollisionTest {
     fun `test variant constructor cannot conflict with user-defined ability`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             type MyType = | Show, Other |
@@ -259,11 +259,11 @@ class AbilityEffectNameCollisionTest {
     fun `test user-defined ability method call still works`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show: {} -> Str = {} -> "int"
+                show: {it: 'a} -> Str = {} -> "int"
             }
 
             let my_show = 42.show {}
@@ -278,13 +278,13 @@ class AbilityEffectNameCollisionTest {
         // Users should be able to define their own ability with the same name as a built-in
         val code = """
             ability Eq for 'a where {
-                eq: {r: 'a} -> Bool,
+                eq: {it: 'a, r: 'a} -> Bool,
                 neq: {r: 'a} -> Bool
             }
 
             impl Eq for Bool where {
-                eq: {r: Bool} -> Bool = {r} -> if it then r else if r then False else True,
-                neq: {r: Bool} -> Bool = {r} -> if it then if r then False else True else r
+                eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else if r then False else True,
+                neq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then if r then False else True else r
             }
 
             let test = True.eq {r = False}

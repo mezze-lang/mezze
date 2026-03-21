@@ -30,11 +30,11 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
@@ -67,19 +67,19 @@ class ComprehensiveAbilitiesAndEffectsTest {
         // Note: Using MyEq/MyOrd to avoid conflict with built-in Eq ability
         val source = """
             ability MyEq for 'a where {
-              equals : {right: 'a} -> Bool
+              equals : {it: 'a, right: 'a} -> Bool
             }
 
             ability MyOrd for 'a where {
-              compare : {right: 'a} with MyEq 'a -> Int
+              compare : {it: 'a, right: 'a} with MyEq 'a -> Int
             }
 
             impl MyEq for Int where {
-              equals = {right} -> it == right
+              equals = {it, right} -> it == right
             }
 
             impl MyOrd for Int where {
-              compare = {right} ->
+              compare = {it, right} ->
                 if it.equals {right = right} then 0 else 1
             }
         """.trimIndent()
@@ -103,11 +103,11 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
@@ -126,11 +126,11 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
@@ -160,11 +160,11 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Convert 'b for 'a where {
-              convert : {} -> 'b
+              convert : {it: 'a} -> 'b
             }
 
             impl Convert for Str Int where {
-              convert = {} -> int::to_str {n = it}
+              convert = {it} -> int::to_str {n = it}
             }
 
             let result = 42.convert {}
@@ -315,15 +315,15 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Bool where {
-              show = {} -> if it then "True" else "False"
+              show = {it} -> if it then "True" else "False"
             }
 
             let showValue: {val: 'a} -> Str with Show 'a = {val} ->
@@ -345,7 +345,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             effect Log where {
@@ -353,7 +353,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             impl Log for ConsoleLogger where {

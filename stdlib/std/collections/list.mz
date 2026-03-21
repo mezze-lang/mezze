@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for List 'a where {
-    eq: {r: List 'a} with Eq 'a -> Bool = {r} -> __native_list_equals {xs = it, ys = r},
-    neq: {r: List 'a} with Eq 'a -> Bool = {r} -> if __native_list_equals {xs = it, ys = r} then False else True
+    eq: {it: List 'a, r: List 'a} with Eq 'a -> Bool = {it, r} -> __native_list_equals {xs = it, ys = r},
+    neq: {it: List 'a, r: List 'a} with Eq 'a -> Bool = {it, r} -> if __native_list_equals {xs = it, ys = r} then False else True
 }
 
 impl Ord 'a for List 'a where {
-    lt: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} == (0 - 1),
-    le: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} != 1,
-    gt: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} == 1,
-    ge: {r: List 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_list_compare {xs = it, ys = r} != (0 - 1)
+    lt: {it: List 'a, r: List 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_list_compare {xs = it, ys = r} == (0 - 1),
+    le: {it: List 'a, r: List 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_list_compare {xs = it, ys = r} != 1,
+    gt: {it: List 'a, r: List 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_list_compare {xs = it, ys = r} == 1,
+    ge: {it: List 'a, r: List 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_list_compare {xs = it, ys = r} != (0 - 1)
 }
 
 # std/collections/list.mezze - Immutable linked list operations
@@ -514,37 +514,37 @@ pub let binary_search_by: { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> In
     __native_list_binary_search_by { xs = xs, target = target, cmp = cmp }
 
 impl List 'a where {
-    is_empty = {} -> is_empty {xs = it},
-    head = {} -> head {xs = it},
-    tail = {} -> tail {xs = it},
-    length = {} -> length {xs = it},
-    push = {x} -> push {x = x, xs = it},
-    append = {ys} -> append {xs = it, ys = ys},
-    get = {index} -> get {xs = it, index = index},
-    take = {n} -> take {xs = it, n = n},
-    drop = {n} -> drop {xs = it, n = n},
-    map = {f} -> map {xs = it, f = f},
-    filter = {p} -> filter {xs = it, p = p},
-    fold_left = {init, f} -> fold_left {xs = it, init = init, f = f},
-    reduce = {f} -> reduce {xs = it, f = f},
-    flat_map = {f} -> flat_map {xs = it, f = f},
-    any = {p} -> any {xs = it, p = p},
-    all = {p} -> all {xs = it, p = p},
-    contains = {x} -> contains {xs = it, x = x},
-    reverse = {} -> reverse {xs = it},
-    sort = {} -> sort {xs = it},
-    sort_by = {cmp} -> sort_by {xs = it, cmp = cmp},
-    find = {p} -> find {xs = it, p = p},
-    last = {} -> last {xs = it},
-    zip = {ys} -> zip {xs = it, ys = ys},
-    for_each = {f} -> for_each {xs = it, f = f},
-    partition = {p} -> partition {xs = it, p = p},
-    unique = {} -> unique {xs = it},
-    flatten = {xss} -> flatten {xss = it},
-    enumerate = {} -> enumerate {xs = it},
-    min = {} -> min {xs = it},
-    max = {} -> max {xs = it},
-    sum = {} -> sum {xs = it},
-    to_seq = {} -> to_seq {xs = it},
-    to_set = {} -> to_set {xs = it}
+    is_empty = {it} -> is_empty {xs = it},
+    head = {it} -> head {xs = it},
+    tail = {it} -> tail {xs = it},
+    length = {it} -> length {xs = it},
+    push = {it, x} -> push {x = x, xs = it},
+    append = {it, ys} -> append {xs = it, ys = ys},
+    get = {it, index} -> get {xs = it, index = index},
+    take = {it, n} -> take {xs = it, n = n},
+    drop = {it, n} -> drop {xs = it, n = n},
+    map = {it, f} -> map {xs = it, f = f},
+    filter = {it, p} -> filter {xs = it, p = p},
+    fold_left = {it, init, f} -> fold_left {xs = it, init = init, f = f},
+    reduce = {it, f} -> reduce {xs = it, f = f},
+    flat_map = {it, f} -> flat_map {xs = it, f = f},
+    any = {it, p} -> any {xs = it, p = p},
+    all = {it, p} -> all {xs = it, p = p},
+    contains = {it, x} -> contains {xs = it, x = x},
+    reverse = {it} -> reverse {xs = it},
+    sort = {it} -> sort {xs = it},
+    sort_by = {it, cmp} -> sort_by {xs = it, cmp = cmp},
+    find = {it, p} -> find {xs = it, p = p},
+    last = {it} -> last {xs = it},
+    zip = {it, ys} -> zip {xs = it, ys = ys},
+    for_each = {it, f} -> for_each {xs = it, f = f},
+    partition = {it, p} -> partition {xs = it, p = p},
+    unique = {it} -> unique {xs = it},
+    flatten = {it} -> flatten {xss = it},
+    enumerate = {it} -> enumerate {xs = it},
+    min = {it} -> min {xs = it},
+    max = {it} -> max {xs = it},
+    sum = {it} -> sum {xs = it},
+    to_seq = {it} -> to_seq {xs = it},
+    to_set = {it} -> to_set {xs = it}
 }

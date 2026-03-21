@@ -28,7 +28,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             42.show {}
@@ -48,7 +48,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl MyConvert for Str Int where {
-              convert = {} -> int::to_str {n = it}
+              convert = {it} -> int::to_str {n = it}
             }
 
             123.convert {}
@@ -68,11 +68,11 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Str where {
-              show = {} -> it
+              show = {it} -> it
             }
 
             let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
@@ -95,11 +95,11 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> "INT:$(int::to_str {n = it})"
+              show = {it} -> "INT:$(int::to_str {n = it})"
             }
 
             impl Show for Str where {
-              show = {} -> "STR:$(it)"
+              show = {it} -> "STR:$(it)"
             }
 
             let displayInt = 42.show {}
@@ -309,7 +309,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             let methods = Show.for { it = 42 }
@@ -331,7 +331,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Displayable for Int where {
-              show = {} -> int::to_str {n = it},
+              show = {it} -> int::to_str {n = it},
               display = { verbose } -> if verbose then "Int($(int::to_str {n = it}))" else int::to_str {n = it}
             }
 
@@ -355,7 +355,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             Show.for { it = 7 }.show {}

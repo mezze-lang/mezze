@@ -60,7 +60,7 @@ class AbilityInterpreterTest {
             }
 
             impl Encoder for Str where {
-              encode : {} -> Str = {} -> it
+              encode : {it: Str} -> Str = {it} -> it
             }
 
             1
@@ -78,8 +78,8 @@ class AbilityInterpreterTest {
             }
 
             impl Show for Str where {
-              show : {} -> Str = {} -> it,
-              debug : {} -> Str = {} -> "\"$(it)\""
+              show : {it: Str} -> Str = {it} -> it,
+              debug : {it: Str} -> Str = {it} -> "\"$(it)\""
             }
 
             1
@@ -97,7 +97,7 @@ class AbilityInterpreterTest {
             }
 
             impl Serializer for Int where {
-              serialize : {} -> Str = {} -> int::to_str {n = it}
+              serialize : {it: Int} -> Str = {it} -> int::to_str {n = it}
             }
 
             1
@@ -115,7 +115,7 @@ class AbilityInterpreterTest {
             }
 
             impl Encoder for Int where {
-              encode : {} -> Str = {} -> int::to_str {n = it}
+              encode : {it: Int} -> Str = {it} -> int::to_str {n = it}
             }
 
             42

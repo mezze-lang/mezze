@@ -704,8 +704,8 @@ class AbilityAssociatedTypesTest {
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
-                getKey = {} -> it.k,
-                getValue = {} -> it.v,
+                getKey = {it} -> it.k,
+                getValue = {it} -> it.v,
             }
 
             let container: {k: Int, v: Str} = {k = 42, v = "hello"}
@@ -737,7 +737,7 @@ class AbilityAssociatedTypesTest {
             }
 
             impl Container for [Int] having 'item = Int where {
-                toArray = {} -> it,
+                toArray = {it} -> it,
             }
 
             let arr: [Int] = [1, 2, 3]
@@ -764,7 +764,7 @@ class AbilityAssociatedTypesTest {
             }
 
             impl Container for [Int] having 'item = Int where {
-                nested = {} -> Some { val = it },
+                nested = {it} -> Some { val = it },
             }
 
             let arr: [Int] = [1, 2, 3]

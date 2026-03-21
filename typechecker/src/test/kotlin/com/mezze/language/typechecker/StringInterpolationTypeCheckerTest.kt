@@ -93,11 +93,11 @@ class StringInterpolationTypeCheckerTest {
     fun `test Show ability used in interpolation`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             let display = {x: Int} -> "Value: $(x.show {})"
@@ -109,11 +109,11 @@ class StringInterpolationTypeCheckerTest {
     fun `test polymorphic function with Show constraint using interpolation`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             let display: {val: 'a} -> Str with Show 'a = {val} ->
@@ -130,15 +130,15 @@ class StringInterpolationTypeCheckerTest {
     fun `test nested ability calls in interpolation`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Str where {
-                show = {} -> "\"$(it)\""
+                show = {it} -> "\"$(it)\""
             }
 
             let showBoth: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->
@@ -152,11 +152,11 @@ class StringInterpolationTypeCheckerTest {
     fun `test ability constraint propagation through interpolation`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             let wrap: {val: 'a} -> Str with Show 'a = {val} ->
@@ -583,11 +583,11 @@ class StringInterpolationTypeCheckerTest {
     fun `test complex scenario with abilities effects and pattern matching`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             type Result = | Ok { value: Int }, Err { message: Str } |
@@ -617,15 +617,15 @@ class StringInterpolationTypeCheckerTest {
     fun `test multiple ability constraints with interpolation in lambda chain`() {
         assertTypeChecks("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Str where {
-                show = {} -> "\"$(it)\""
+                show = {it} -> "\"$(it)\""
             }
 
             let showPair: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->

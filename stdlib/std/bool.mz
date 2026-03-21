@@ -2,11 +2,11 @@ use std::abilities::compare::{Eq}
 use std::abilities::logic::{LogicalAnd, LogicalOr, LogicalNot}
 use std::abilities::convert::{Into}
 
-impl Eq for Bool where { eq = {r} -> __native_bool_eq {l = it, r = r}, neq = {r} -> __native_bool_neq {l = it, r = r} }
-impl LogicalAnd for Bool where { and = {r} -> __native_bool_and {l = it, r = r} }
-impl LogicalOr for Bool where { or = {r} -> __native_bool_or {l = it, r = r} }
-impl LogicalNot for Bool where { not = {} -> __native_bool_not {b = it} }
-impl Into Str for Bool where { into = {} -> if it then "True" else "False" }
+impl Eq for Bool where { eq = {it, r} -> __native_bool_eq {l = it, r = r}, neq = {it, r} -> __native_bool_neq {l = it, r = r} }
+impl LogicalAnd for Bool where { and = {it, r} -> __native_bool_and {l = it, r = r} }
+impl LogicalOr for Bool where { or = {it, r} -> __native_bool_or {l = it, r = r} }
+impl LogicalNot for Bool where { not = {it} -> __native_bool_not {b = it} }
+impl Into Str for Bool where { into = {it} -> if it then "True" else "False" }
 
 # Bool utility functions
 # This module provides utility functions for working with bools
@@ -57,9 +57,9 @@ pub let iff = { l: Bool, r: Bool } ->
 #     not { b = any { xs = xs } }
 
 impl Bool where {
-    to_str = {} -> __native_bool_to_str {b = it},
-    to_int = {} -> if it then 1 else 0,
-    xor = {r} -> __native_bool_xor {l = it, r = r},
-    iff = {r} -> __native_bool_or {l = __native_bool_and {l = it, r = r}, r = __native_bool_and {l = __native_bool_not {b = it}, r = __native_bool_not {b = r}}},
-    implies = {r} -> if it then r else True
+    to_str = {it} -> __native_bool_to_str {b = it},
+    to_int = {it} -> if it then 1 else 0,
+    xor = {it, r} -> __native_bool_xor {l = it, r = r},
+    iff = {it, r} -> __native_bool_or {l = __native_bool_and {l = it, r = r}, r = __native_bool_and {l = __native_bool_not {b = it}, r = __native_bool_not {b = r}}},
+    implies = {it, r} -> if it then r else True
 }

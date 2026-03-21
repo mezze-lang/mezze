@@ -41,12 +41,12 @@ class AbilityOrphanRulesTest {
     fun `impl in same module as ability is valid`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             # Impl is in same module as ability - OK
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let result = 42.show {}
@@ -64,7 +64,7 @@ class AbilityOrphanRulesTest {
         // Built-in types (Int, Str, Bool) have no module, so impl must be with ability
         val source = """
             ability Printable for 'a where {
-                print: {} -> Str
+                print: {it: 'a} -> Str
             }
 
             impl Printable for Int where {
@@ -72,7 +72,7 @@ class AbilityOrphanRulesTest {
             }
 
             impl Printable for Str where {
-                print = {} -> it
+                print = {it} -> it
             }
 
             impl Printable for Bool where {
@@ -99,7 +99,7 @@ class AbilityOrphanRulesTest {
     fun `impl in same module as type is valid`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             # Define a custom variant type
@@ -107,7 +107,7 @@ class AbilityOrphanRulesTest {
 
             # Impl is in same module as Person type - OK
             impl Show for Person where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         Person { name, age } -> name
             }
@@ -126,13 +126,13 @@ class AbilityOrphanRulesTest {
     fun `impl for variant type in same module is valid`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             type Color = | Red, Green, Blue |
 
             impl Show for Color where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         Red -> "red"
                         Green -> "green"
@@ -195,7 +195,7 @@ class AbilityOrphanRulesTest {
         val abilityMod = tempDir.resolve("ability_mod.mz")
         Files.writeString(abilityMod, """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
         """.trimIndent())
 
@@ -211,7 +211,7 @@ class AbilityOrphanRulesTest {
 
             # This is an orphan impl - neither Show nor Person is defined here
             impl Show for Person where {
-                show = {} -> it.name
+                show = {it} -> it.name
             }
         """.trimIndent())
 
@@ -236,7 +236,7 @@ class AbilityOrphanRulesTest {
         val abilityMod = tempDir.resolve("my_ability.mz")
         Files.writeString(abilityMod, """
             ability Printable for 'a where {
-                print: {} -> Str
+                print: {it: 'a} -> Str
             }
         """.trimIndent())
 
@@ -271,15 +271,15 @@ class AbilityOrphanRulesTest {
     fun `duplicate impl in same file should fail`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "first"
+                show = {it} -> "first"
             }
 
             impl Show for Int where {
-                show = {} -> "second"
+                show = {it} -> "second"
             }
         """.trimIndent()
 
@@ -305,11 +305,11 @@ class AbilityOrphanRulesTest {
         val mod1 = tempDir.resolve("mod1.mz")
         Files.writeString(mod1, """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "from mod1"
+                show = {it} -> "from mod1"
             }
         """.trimIndent())
 
@@ -320,7 +320,7 @@ class AbilityOrphanRulesTest {
             # This would be a duplicate if orphan rules didn't catch it first
             # But even if orphan rules pass, duplicate check should fail
             impl Show for Int where {
-                show = {} -> "from mod2"
+                show = {it} -> "from mod2"
             }
         """.trimIndent())
 
@@ -338,19 +338,19 @@ class AbilityOrphanRulesTest {
     fun `different abilities for same type is valid`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             ability Debug for 'a where {
-                debug: {} -> Str
+                debug: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "show"
+                show = {it} -> "show"
             }
 
             impl Debug for Int where {
-                debug = {} -> "debug"
+                debug = {it} -> "debug"
             }
 
             let x = 42.show {}
@@ -367,19 +367,19 @@ class AbilityOrphanRulesTest {
     fun `same ability for different types is valid`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             impl Show for Str where {
-                show = {} -> it
+                show = {it} -> it
             }
 
             impl Show for Bool where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         True -> "true"
                         False -> "false"
@@ -407,12 +407,12 @@ class AbilityOrphanRulesTest {
         val abilityMod = tempDir.resolve("showable.mz")
         Files.writeString(abilityMod, """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             # Impl in same module as ability (valid)
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
         """.trimIndent())
 
@@ -444,7 +444,7 @@ class AbilityOrphanRulesTest {
 
             # Impl in same module as type (valid)
             impl Show for Person where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         Person {name} -> name
             }
@@ -453,7 +453,7 @@ class AbilityOrphanRulesTest {
         val showableMod = tempDir.resolve("showable.mz")
         Files.writeString(showableMod, """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
         """.trimIndent())
 
@@ -481,7 +481,7 @@ class AbilityOrphanRulesTest {
     fun `pub keyword on ability should fail with helpful message`() {
         val source = """
             pub ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
         """.trimIndent()
 
@@ -519,11 +519,11 @@ class AbilityOrphanRulesTest {
     fun `ability without pub keyword should work`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let x = 42.show {}

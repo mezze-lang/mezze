@@ -388,7 +388,7 @@ class ImportResolutionTest {
             // When the ability is declared in the same file, resolveImplDeclarations converts it
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {

@@ -290,7 +290,7 @@ class EffectPropagationTest {
             }
 
             impl Math for Int where {
-              compute : {r: Int} -> Int = {r} -> it + r
+              compute : {it: Int, r: Int} -> Int = {it, r} -> it + r
             }
 
             # This function should have no effects since Math is an ability, not an effect

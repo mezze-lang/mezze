@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for SortedSet 'a where {
-    eq: {r: SortedSet 'a} with Eq 'a -> Bool = {r} -> __native_sorted_set_equals {s1 = it, s2 = r},
-    neq: {r: SortedSet 'a} with Eq 'a -> Bool = {r} -> if __native_sorted_set_equals {s1 = it, s2 = r} then False else True
+    eq: {it: SortedSet 'a, r: SortedSet 'a} with Eq 'a -> Bool = {it, r} -> __native_sorted_set_equals {s1 = it, s2 = r},
+    neq: {it: SortedSet 'a, r: SortedSet 'a} with Eq 'a -> Bool = {it, r} -> if __native_sorted_set_equals {s1 = it, s2 = r} then False else True
 }
 
 impl Ord 'a for SortedSet 'a where {
-    lt: {r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_sorted_set_compare {s1 = it, s2 = r} == (0 - 1),
-    le: {r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_sorted_set_compare {s1 = it, s2 = r} != 1,
-    gt: {r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_sorted_set_compare {s1 = it, s2 = r} == 1,
-    ge: {r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_sorted_set_compare {s1 = it, s2 = r} != (0 - 1)
+    lt: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} == (0 - 1),
+    le: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} != 1,
+    gt: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} == 1,
+    ge: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} != (0 - 1)
 }
 
 # std/collections/sorted_set.mezze - Immutable sorted set operations
@@ -233,23 +233,23 @@ pub let for_each: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> {} <...> = 
     __native_sorted_set_for_each { s = s, f = f }
 
 impl SortedSet 'a where {
-    add = {x} -> add {s = it, x = x},
-    remove = {x} -> remove {s = it, x = x},
-    contains = {x} -> contains {s = it, x = x},
-    size = {} -> size {s = it},
-    is_empty = {} -> is_empty {s = it},
-    union = {s2} -> union {s1 = it, s2 = s2},
-    intersect = {s2} -> intersect {s1 = it, s2 = s2},
-    difference = {s2} -> difference {s1 = it, s2 = s2},
-    min = {} -> min {s = it},
-    max = {} -> max {s = it},
-    filter = {p} -> filter {s = it, p = p},
-    map = {f} -> map {s = it, f = f},
-    fold = {init, f} -> fold {s = it, init = init, f = f},
-    any = {p} -> any {s = it, p = p},
-    all = {p} -> all {s = it, p = p},
-    find = {p} -> find {s = it, p = p},
-    to_list = {} -> to_list {s = it},
-    to_set = {} -> to_set {s = it},
-    to_seq = {} -> to_seq {s = it}
+    add = {it, x} -> add {s = it, x = x},
+    remove = {it, x} -> remove {s = it, x = x},
+    contains = {it, x} -> contains {s = it, x = x},
+    size = {it} -> size {s = it},
+    is_empty = {it} -> is_empty {s = it},
+    union = {it, s2} -> union {s1 = it, s2 = s2},
+    intersect = {it, s2} -> intersect {s1 = it, s2 = s2},
+    difference = {it, s2} -> difference {s1 = it, s2 = s2},
+    min = {it} -> min {s = it},
+    max = {it} -> max {s = it},
+    filter = {it, p} -> filter {s = it, p = p},
+    map = {it, f} -> map {s = it, f = f},
+    fold = {it, init, f} -> fold {s = it, init = init, f = f},
+    any = {it, p} -> any {s = it, p = p},
+    all = {it, p} -> all {s = it, p = p},
+    find = {it, p} -> find {s = it, p = p},
+    to_list = {it} -> to_list {s = it},
+    to_set = {it} -> to_set {s = it},
+    to_seq = {it} -> to_seq {s = it}
 }

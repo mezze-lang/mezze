@@ -2,23 +2,23 @@ use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumMod}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
 
-impl NumAdd for Int where { add = {r} -> __native_int_add {l = it, r = r} }
-impl NumSub for Int where { sub = {r} -> __native_int_subtract {l = it, r = r}, neg = {} -> __native_int_neg {n = it} }
-impl NumMul for Int where { mul = {r} -> __native_int_multiply {l = it, r = r} }
-impl NumDiv for Int where { div = {r} -> __native_int_divide {l = it, r = r} }
-impl NumMod for Int where { mod = {r} -> __native_int_modulo {l = it, r = r} }
-impl Eq for Int where { eq = {r} -> __native_int_eq {l = it, r = r}, neq = {r} -> __native_int_neq {l = it, r = r} }
-impl Ord for Int where { lt = {r} -> __native_int_lt {l = it, r = r}, le = {r} -> __native_int_le {l = it, r = r}, gt = {r} -> __native_int_gt {l = it, r = r}, ge = {r} -> __native_int_ge {l = it, r = r} }
-impl Into Str for Int where { into = {} -> __native_int_to_str {n = it} }
-impl Into Float for Int where { into = {} -> __native_int_to_float {n = it} }
-impl Into Frac for Int where { into = {} -> __native_int_to_frac {n = it} }
+impl NumAdd for Int where { add = {it, r} -> __native_int_add {l = it, r = r} }
+impl NumSub for Int where { sub = {it, r} -> __native_int_subtract {l = it, r = r}, neg = {it} -> __native_int_neg {n = it} }
+impl NumMul for Int where { mul = {it, r} -> __native_int_multiply {l = it, r = r} }
+impl NumDiv for Int where { div = {it, r} -> __native_int_divide {l = it, r = r} }
+impl NumMod for Int where { mod = {it, r} -> __native_int_modulo {l = it, r = r} }
+impl Eq for Int where { eq = {it, r} -> __native_int_eq {l = it, r = r}, neq = {it, r} -> __native_int_neq {l = it, r = r} }
+impl Ord for Int where { lt = {it, r} -> __native_int_lt {l = it, r = r}, le = {it, r} -> __native_int_le {l = it, r = r}, gt = {it, r} -> __native_int_gt {l = it, r = r}, ge = {it, r} -> __native_int_ge {l = it, r = r} }
+impl Into Str for Int where { into = {it} -> __native_int_to_str {n = it} }
+impl Into Float for Int where { into = {it} -> __native_int_to_float {n = it} }
+impl Into Frac for Int where { into = {it} -> __native_int_to_frac {n = it} }
 impl TryInto Nat |ConversionError {msg: Str}| for Int where {
-    try_into = {} -> match __native_int_to_nat {n = it} is
+    try_into = {it} -> match __native_int_to_nat {n = it} is
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "negative integer cannot convert to Nat"}}
 }
 impl TryInto Int |ConversionError {msg: Str}| for Str where {
-    try_into = {} -> match __native_int_from_string {s = it} is
+    try_into = {it} -> match __native_int_from_string {s = it} is
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "invalid integer"}}
 }
@@ -100,17 +100,17 @@ pub let to_nat = { n: Int } ->
     __native_int_to_nat { n = n }
 
 impl Int where {
-    to_float = {} -> __native_int_to_float {n = it},
-    to_str = {} -> __native_int_to_str {n = it},
-    abs = {} -> __native_int_abs {n = it},
-    sign = {} -> __native_int_sign {n = it},
-    is_even = {} -> __native_int_is_even {n = it},
-    is_odd = {} -> __native_int_is_odd {n = it},
-    clamp = {min, max} -> __native_int_clamp {n = it, min = min, max = max},
-    pow = {exp} -> __native_int_pow {base = it, exp = exp},
-    min = {r} -> __native_int_min {l = it, r = r},
-    max = {r} -> __native_int_max {l = it, r = r},
-    to_nat = {} -> __native_int_to_nat {n = it},
-    gcd = {r} -> __native_int_gcd {l = it, r = r},
-    lcm = {r} -> __native_int_lcm {l = it, r = r}
+    to_float = {it} -> __native_int_to_float {n = it},
+    to_str = {it} -> __native_int_to_str {n = it},
+    abs = {it} -> __native_int_abs {n = it},
+    sign = {it} -> __native_int_sign {n = it},
+    is_even = {it} -> __native_int_is_even {n = it},
+    is_odd = {it} -> __native_int_is_odd {n = it},
+    clamp = {it, min, max} -> __native_int_clamp {n = it, min = min, max = max},
+    pow = {it, exp} -> __native_int_pow {base = it, exp = exp},
+    min = {it, r} -> __native_int_min {l = it, r = r},
+    max = {it, r} -> __native_int_max {l = it, r = r},
+    to_nat = {it} -> __native_int_to_nat {n = it},
+    gcd = {it, r} -> __native_int_gcd {l = it, r = r},
+    lcm = {it, r} -> __native_int_lcm {l = it, r = r}
 }

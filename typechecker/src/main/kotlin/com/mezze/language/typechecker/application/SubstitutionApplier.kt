@@ -564,25 +564,9 @@ class SubstitutionApplier(
      * Creates a RecordType from the impl's operations, matching old typechecker behavior.
      */
     private fun applyToImplAbilityDeclaration(implDecl: ImplAbilityDeclaration): ImplAbilityDeclaration {
-        // Inject `it` into identifierContext for impl body processing.
-        // This allows method calls like `it.inner {}` inside impl bodies to resolve correctly.
+        // `it` is now explicit in ALL impl bodies (both ability and inherent).
+        // No implicit injection needed.
         val originalContext = identifierContext.toMap()
-        val abilityDecl = implDecl.abilityName?.let { abilityDeclarations[it] }
-        if (abilityDecl != null && implDecl.allTypeArgs.isNotEmpty()) {
-            val receiverIndex = if (abilityDecl.receiverTypeParam != null) {
-                abilityDecl.typeParams.indexOf(abilityDecl.receiverTypeParam)
-            } else {
-                abilityDecl.typeParams.size - 1
-            }
-            val safeIndex = receiverIndex.coerceIn(0, implDecl.allTypeArgs.size - 1)
-            val receiverAnnotation = implDecl.allTypeArgs[safeIndex]
-            val receiverType = convertTypeAnnotation(receiverAnnotation)
-            identifierContext[BindingKey.unqualified(Keywords.IT)] = receiverType
-        } else if (implDecl.isInherent && implDecl.targetTypes.isNotEmpty()) {
-            // For inherent impls (impl Type where { ... }), inject `it` as the target type
-            val receiverType = convertTypeAnnotation(implDecl.targetTypes.first())
-            identifierContext[BindingKey.unqualified(Keywords.IT)] = receiverType
-        }
 
         val updatedOperations = implDecl.operations.map { op ->
             val updatedImpl = applyToExpression(op.implementation)
@@ -1411,24 +1395,36 @@ class SubstitutionApplier(
     ): Expression {
         val opBody = operation.implementation
 
-        // Produce: (do { let it = receiver; opBody })(arguments)
-        // This binds `it` in scope, then the opBody lambda can reference it
-        val letIt = LetStatement(
-            pattern = VariablePattern(Keywords.IT),
-            expression = itValue
-        )
-        val wrappedBody = DoExpression(
-            statements = listOf(letIt),
-            result = opBody,
-            inferredType = opBody.inferredType,
-            sourceLocation = expr.sourceLocation
-        )
+        // `it` is now an explicit param in impl bodies.
+        // Inject `it = receiver` into the call-site arguments record.
+        val argsWithIt = when (arguments) {
+            is RecordLiteral -> {
+                // Add it = receiver to the record literal
+                val itEntry = RecordFieldEntry(
+                    name = Keywords.IT,
+                    value = itValue
+                )
+                arguments.copy(entries = listOf(itEntry) + arguments.entries)
+            }
+            else -> {
+                // Fallback: wrap in a do-expression that binds it (legacy path)
+                val letIt = LetStatement(
+                    pattern = VariablePattern(Keywords.IT),
+                    expression = itValue
+                )
+                DoExpression(
+                    statements = listOf(letIt),
+                    result = arguments,
+                    inferredType = arguments.inferredType,
+                    sourceLocation = expr.sourceLocation
+                )
+            }
+        }
 
-        // The result is a plain function call: wrappedBody(arguments)
-        // No resolvedAbilities needed — the interpreter sees a direct lambda call
+        // The result is: opBody({it = receiver, ...args})
         return expr.copy(
-            function = wrappedBody,
-            arguments = arguments,
+            function = opBody,
+            arguments = argsWithIt,
             inferredType = returnType,
             resolvedAbilities = emptyMap(),
             isTailCall = false,

@@ -338,7 +338,7 @@ pub let decode_error = {path: [Str], message: Str, expected: Str, found: Option 
 # Bytes -> Str (UTF-8)
 # Defined here to avoid circular dependency with std/convert.mz
 impl TryInto Str DecodeError for Bytes where {
-    try_into = {} ->
+    try_into = {it} ->
         match bytes::to_str {b = it} is
             Ok {val = s} -> Ok {val = s}
             Err {error = e} -> Err {error = {path = [], message = e, expected = "valid UTF-8", found = None}}

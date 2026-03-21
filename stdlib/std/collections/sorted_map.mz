@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'k 'v for SortedMap 'k 'v where {
-    eq: {r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> __native_sorted_map_equals {m1 = it, m2 = r},
-    neq: {r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> if __native_sorted_map_equals {m1 = it, m2 = r} then False else True
+    eq: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_equals {m1 = it, m2 = r},
+    neq: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> if __native_sorted_map_equals {m1 = it, m2 = r} then False else True
 }
 
 impl Ord 'k 'v for SortedMap 'k 'v where {
-    lt: {r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {r} -> __native_sorted_map_compare {m1 = it, m2 = r} == (0 - 1),
-    le: {r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {r} -> __native_sorted_map_compare {m1 = it, m2 = r} != 1,
-    gt: {r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {r} -> __native_sorted_map_compare {m1 = it, m2 = r} == 1,
-    ge: {r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {r} -> __native_sorted_map_compare {m1 = it, m2 = r} != (0 - 1)
+    lt: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} == (0 - 1),
+    le: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} != 1,
+    gt: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} == 1,
+    ge: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} != (0 - 1)
 }
 
 # std/collections/sorted_map.mezze - Immutable sorted map operations
@@ -190,19 +190,19 @@ pub let from_list: { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
     __native_sorted_map_from_list { xs = xs }
 
 impl SortedMap 'k 'v where {
-    get = {k} -> get {m = it, k = k},
-    insert = {k, v} -> insert {m = it, k = k, v = v},
-    remove = {k} -> remove {m = it, k = k},
-    contains_key = {k} -> contains_key {m = it, k = k},
-    size = {} -> size {m = it},
-    is_empty = {} -> is_empty {m = it},
-    keys = {} -> keys {m = it},
-    values = {} -> values {m = it},
-    min_key = {} -> min_key {m = it},
-    max_key = {} -> max_key {m = it},
-    filter = {p} -> filter {m = it, p = p},
-    fold = {init, f} -> fold {m = it, init = init, f = f},
-    map_values = {f} -> map_values {m = it, f = f},
-    to_map = {} -> to_map {m = it},
-    to_list = {} -> to_list {m = it}
+    get = {it, k} -> get {m = it, k = k},
+    insert = {it, k, v} -> insert {m = it, k = k, v = v},
+    remove = {it, k} -> remove {m = it, k = k},
+    contains_key = {it, k} -> contains_key {m = it, k = k},
+    size = {it} -> size {m = it},
+    is_empty = {it} -> is_empty {m = it},
+    keys = {it} -> keys {m = it},
+    values = {it} -> values {m = it},
+    min_key = {it} -> min_key {m = it},
+    max_key = {it} -> max_key {m = it},
+    filter = {it, p} -> filter {m = it, p = p},
+    fold = {it, init, f} -> fold {m = it, init = init, f = f},
+    map_values = {it, f} -> map_values {m = it, f = f},
+    to_map = {it} -> to_map {m = it},
+    to_list = {it} -> to_list {m = it}
 }

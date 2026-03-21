@@ -1,8 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'k 'v for Map 'k 'v where {
-    eq: {r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> __native_map_equals {m1 = it, m2 = r},
-    neq: {r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {r} -> if __native_map_equals {m1 = it, m2 = r} then False else True
+    eq: {it: Map 'k 'v, r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_map_equals {m1 = it, m2 = r},
+    neq: {it: Map 'k 'v, r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> if __native_map_equals {m1 = it, m2 = r} then False else True
 }
 
 # std/collections/map.mezze - Map operations using HashMap
@@ -260,23 +260,23 @@ pub let flat_map: { m: Map 'k 'v, f: { k: 'k, v: 'v } -> Map 'k2 'v2 <...> } -> 
 pub let to_sorted_map: { m: Map 'k 'v } -> SortedMap 'k 'v = {m} -> __native_map_to_sorted_map {m = m}
 
 impl Map 'k 'v where {
-    get = {k} -> get {m = it, k = k},
-    insert = {k, v} -> insert {m = it, k = k, v = v},
-    remove = {k} -> remove {m = it, k = k},
-    contains_key = {k} -> contains_key {m = it, k = k},
-    size = {} -> size {m = it},
-    is_empty = {} -> is_empty {m = it},
-    keys = {} -> keys {m = it},
-    values = {} -> values {m = it},
-    map_values = {f} -> map_values {m = it, f = f},
-    filter = {p} -> filter {m = it, p = p},
-    fold = {init, f} -> fold {m = it, init = init, f = f},
-    merge = {m2} -> merge {m1 = it, m2 = m2},
-    get_or_default = {k, def} -> get_or_default {m = it, k = k, def = def},
-    any = {p} -> any {m = it, p = p},
-    all = {p} -> all {m = it, p = p},
-    find = {p} -> find {m = it, p = p},
-    count = {p} -> count {m = it, p = p},
-    to_seq = {} -> to_seq {m = it},
-    to_list = {} -> to_list {m = it}
+    get = {it, k} -> get {m = it, k = k},
+    insert = {it, k, v} -> insert {m = it, k = k, v = v},
+    remove = {it, k} -> remove {m = it, k = k},
+    contains_key = {it, k} -> contains_key {m = it, k = k},
+    size = {it} -> size {m = it},
+    is_empty = {it} -> is_empty {m = it},
+    keys = {it} -> keys {m = it},
+    values = {it} -> values {m = it},
+    map_values = {it, f} -> map_values {m = it, f = f},
+    filter = {it, p} -> filter {m = it, p = p},
+    fold = {it, init, f} -> fold {m = it, init = init, f = f},
+    merge = {it, m2} -> merge {m1 = it, m2 = m2},
+    get_or_default = {it, k, def} -> get_or_default {m = it, k = k, def = def},
+    any = {it, p} -> any {m = it, p = p},
+    all = {it, p} -> all {m = it, p = p},
+    find = {it, p} -> find {m = it, p = p},
+    count = {it, p} -> count {m = it, p = p},
+    to_seq = {it} -> to_seq {m = it},
+    to_list = {it} -> to_list {m = it}
 }

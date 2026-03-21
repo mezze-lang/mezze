@@ -374,7 +374,7 @@ class ImportedPerformerTest {
     fun `custom ability and impl in same file should work`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -399,7 +399,7 @@ class ImportedPerformerTest {
     fun `ability with multiple impls for different types should work`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -407,7 +407,7 @@ class ImportedPerformerTest {
             }
 
             impl Show for Str where {
-                show = {} -> it
+                show = {it} -> it
             }
 
             impl Show for Bool where {
@@ -501,7 +501,7 @@ class ImportedPerformerTest {
         // User wrote "show" instead of "42.show"
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {

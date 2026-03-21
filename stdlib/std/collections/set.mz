@@ -1,8 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for Set 'a where {
-    eq: {r: Set 'a} with Eq 'a -> Bool = {r} -> __native_set_equals {s1 = it, s2 = r},
-    neq: {r: Set 'a} with Eq 'a -> Bool = {r} -> if __native_set_equals {s1 = it, s2 = r} then False else True
+    eq: {it: Set 'a, r: Set 'a} with Eq 'a -> Bool = {it, r} -> __native_set_equals {s1 = it, s2 = r},
+    neq: {it: Set 'a, r: Set 'a} with Eq 'a -> Bool = {it, r} -> if __native_set_equals {s1 = it, s2 = r} then False else True
 }
 
 # std/collections/set.mezze - Set operations using HashSet
@@ -197,24 +197,24 @@ pub let to_sorted_set: { s: Set 'a } -> SortedSet 'a = {s} -> __native_set_to_so
 pub let from_sorted_set: { s: SortedSet 'a } -> Set 'a = {s} -> __native_set_from_sorted_set {s = s}
 
 impl Set 'a where {
-    insert = {x} -> insert {s = it, x = x},
-    remove = {x} -> remove {s = it, x = x},
-    contains = {x} -> contains {s = it, x = x},
-    size = {} -> size {s = it},
-    is_empty = {} -> is_empty {s = it},
-    union = {s2} -> union {s1 = it, s2 = s2},
-    intersection = {s2} -> intersection {s1 = it, s2 = s2},
-    difference = {s2} -> difference {s1 = it, s2 = s2},
-    is_subset = {s2} -> is_subset {s1 = it, s2 = s2},
-    filter = {p} -> filter {s = it, p = p},
-    map = {f} -> map {s = it, f = f},
-    fold = {init, f} -> fold {s = it, init = init, f = f},
-    any = {p} -> any {s = it, p = p},
-    all = {p} -> all {s = it, p = p},
-    find = {p} -> find {s = it, p = p},
-    count = {p} -> count {s = it, p = p},
-    min = {} -> min {s = it},
-    max = {} -> max {s = it},
-    to_seq = {} -> to_seq {s = it},
-    to_list = {} -> to_list {s = it}
+    insert = {it, x} -> insert {s = it, x = x},
+    remove = {it, x} -> remove {s = it, x = x},
+    contains = {it, x} -> contains {s = it, x = x},
+    size = {it} -> size {s = it},
+    is_empty = {it} -> is_empty {s = it},
+    union = {it, s2} -> union {s1 = it, s2 = s2},
+    intersection = {it, s2} -> intersection {s1 = it, s2 = s2},
+    difference = {it, s2} -> difference {s1 = it, s2 = s2},
+    is_subset = {it, s2} -> is_subset {s1 = it, s2 = s2},
+    filter = {it, p} -> filter {s = it, p = p},
+    map = {it, f} -> map {s = it, f = f},
+    fold = {it, init, f} -> fold {s = it, init = init, f = f},
+    any = {it, p} -> any {s = it, p = p},
+    all = {it, p} -> all {s = it, p = p},
+    find = {it, p} -> find {s = it, p = p},
+    count = {it, p} -> count {s = it, p = p},
+    min = {it} -> min {s = it},
+    max = {it} -> max {s = it},
+    to_seq = {it} -> to_seq {s = it},
+    to_list = {it} -> to_list {s = it}
 }

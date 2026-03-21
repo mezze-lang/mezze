@@ -187,7 +187,7 @@ class ContentAddressableHashingE2ETest {
             }
 
             impl Doubler for Int where {
-                double = {} -> it + it
+                double = {it} -> it + it
             }
 
             21.double {}
@@ -221,7 +221,7 @@ class ContentAddressableHashingE2ETest {
             }
 
             impl Triple for Int where {
-                triple = {} -> it + it + it
+                triple = {it} -> it + it + it
             }
 
             10.triple {}
@@ -344,7 +344,7 @@ class ContentAddressableHashingE2ETest {
             }
 
             impl Square for Int where {
-                square = {} -> it * it
+                square = {it} -> it * it
             }
 
             let compute = {n: Int} -> n.square {}
@@ -488,11 +488,11 @@ class ContentAddressableHashingE2ETest {
             }
 
             impl Inner for Int where {
-                inner = {} -> it
+                inner = {it} -> it
             }
 
             impl Outer for Int where {
-                outer = {} -> it.inner {} + 10
+                outer = {it} -> it.inner {} + 10
             }
 
             5.outer {}
@@ -557,7 +557,7 @@ class ContentAddressableHashingE2ETest {
             }
 
             impl Negate for Int where {
-                negate = {} -> 0 - it
+                negate = {it} -> 0 - it
             }
 
             42.negate {}

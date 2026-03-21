@@ -22,11 +22,11 @@ class AbilityMethodCallTest {
     fun `test simple ability method call with Bool implementation`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             let test = True.show {}
@@ -49,11 +49,11 @@ class AbilityMethodCallTest {
             use std::int
 
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             let test = 42.show {}
@@ -73,7 +73,7 @@ class AbilityMethodCallTest {
     fun `test ability method call with polymorphic parameter succeeds without implementation`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = {x} -> x.show {}
@@ -97,11 +97,11 @@ class AbilityMethodCallTest {
     fun `test polymorphic function using ability method should have constraint`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             let showResult = {x} -> x.show {}
@@ -128,15 +128,15 @@ class AbilityMethodCallTest {
             use std::int
 
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             let test1 = True.show {}
@@ -159,7 +159,7 @@ class AbilityMethodCallTest {
     fun `test ability cannot be used as value - should fail`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = Show
@@ -179,7 +179,7 @@ class AbilityMethodCallTest {
     fun `test ability method access is now blocked`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = Show.show
@@ -204,11 +204,11 @@ class AbilityMethodCallTest {
             use std::int
 
             ability Convert 'b for 'a where {
-                convert: {} -> 'b
+                convert: {it: 'a} -> 'b
             }
 
             impl Convert for Str Int where {
-                convert = {} -> int::to_str {n = it}
+                convert = {it} -> int::to_str {n = it}
             }
 
             let test = 42.convert {}
@@ -228,15 +228,15 @@ class AbilityMethodCallTest {
     fun `test nested ability method calls`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             impl Show for Str where {
-                show = {} -> "\"$(it)\""
+                show = {it} -> "\"$(it)\""
             }
 
             let test = (True.show {}).show {}
@@ -256,11 +256,11 @@ class AbilityMethodCallTest {
     fun `test ability method in record field`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             let test = {result = True.show {}}
@@ -283,11 +283,11 @@ class AbilityMethodCallTest {
     fun `test ability method with record argument`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             let test = True.show {}
@@ -309,19 +309,19 @@ class AbilityMethodCallTest {
             use std::bool
 
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             ability MyEq for 'a where {
-                eq: {r: 'a} -> Bool
+                eq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             impl MyEq for Bool where {
-                eq: {r: Bool} -> Bool = {r} -> if it then r else bool::not {b = r}
+                eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else bool::not {b = r}
             }
 
             let showIfEqual = {x, y} ->
@@ -351,11 +351,11 @@ class AbilityMethodCallTest {
     fun `test ability method call with String implementation`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Str where {
-                show = {} -> "\"$(it)\""
+                show = {it} -> "\"$(it)\""
             }
 
             let test = "hello".show {}
@@ -400,7 +400,7 @@ class AbilityMethodCallTest {
     fun `test typo in ability method name is blocked as direct access`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = Show.shwo
@@ -421,11 +421,11 @@ class AbilityMethodCallTest {
     fun `test method call with wrong argument fields gives error`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let x = 42.show { wrong_field = "oops" }
@@ -441,11 +441,11 @@ class AbilityMethodCallTest {
     fun `test method call on type without matching impl gives error`() {
         val source = """
             ability Printable for 'a where {
-                print: {} -> Str
+                print: {it: 'a} -> Str
             }
 
             impl Printable for Int where {
-                print = {} -> "int"
+                print = {it} -> "int"
             }
 
             let x = "hello".print {}
@@ -467,7 +467,7 @@ class AbilityMethodCallTest {
     fun `test direct ability access error suggests both alternatives`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let x = Show.show

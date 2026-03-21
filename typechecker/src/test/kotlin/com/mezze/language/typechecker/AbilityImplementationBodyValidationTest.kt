@@ -32,11 +32,11 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Show for 'a where {
-              show: {} -> Str
+              show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> int::to_str {n = it}
+              show = {it} -> int::to_str {n = it}
             }
 
             let display = {value} -> value.show {}
@@ -60,7 +60,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Display for Int where {
-              display = {} -> {text = int::to_str {n = it}}
+              display = {it} -> {text = int::to_str {n = it}}
             }
 
             let render = {value} -> value.display {}
@@ -82,7 +82,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Identity for Int where {
-              identity = {} -> it
+              identity = {it} -> it
             }
 
             let id = {x} -> x.identity {}
@@ -104,7 +104,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Double for Int where {
-              double = {} -> it + it
+              double = {it} -> it + it
             }
 
             let d = {x} -> x.double {}
@@ -126,7 +126,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Sign for Int where {
-              sign = {} -> if it > 0 then "positive" else "non-positive"
+              sign = {it} -> if it > 0 then "positive" else "non-positive"
             }
 
             let getSign = {x} -> x.sign {}
@@ -172,7 +172,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Combine for Int where {
-              combine = {right} -> it + right
+              combine = {it, right} -> it + right
             }
 
             let add = {x, y} -> x.combine {right = y}
@@ -219,11 +219,11 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong primitive type should fail`() {
         val source = """
             ability Show for 'a where {
-              show: {} -> Str
+              show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> it
+              show = {it} -> it
             }
 
             let display = {value} -> value.show {}
@@ -246,7 +246,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Process for Int where {
-              process = {} -> if it > 0 then "positive" else 0
+              process = {it} -> if it > 0 then "positive" else 0
             }
 
             let p = {x} -> x.process {}
@@ -296,7 +296,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Display for Int where {
-              display = {} -> {message = int::to_str {n = it}}
+              display = {it} -> {message = int::to_str {n = it}}
             }
 
             let render = {value} -> value.display {}
@@ -319,7 +319,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Display for Int where {
-              display = {} -> {text = it}
+              display = {it} -> {text = it}
             }
 
             let render = {value} -> value.display {}
@@ -366,7 +366,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Process for Int where {
-              process = {} -> undefinedFunction {x = it}
+              process = {it} -> undefinedFunction {x = it}
             }
 
             let p = {x} -> x.process {}
@@ -389,7 +389,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl StringLength for Str where {
-              length = {} -> it + it
+              length = {it} -> it + it
             }
 
             let len = {s} -> s.length {}
@@ -408,11 +408,11 @@ class AbilityImplementationBodyValidationTest {
     fun `test multi-parameter ability body returning wrong type should fail`() {
         val source = """
             ability Eq for 'a where {
-              eq: {r: 'a} -> Bool
+              eq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Eq for Int where {
-              eq = {r} -> it + r
+              eq = {it, r} -> it + r
             }
 
             let areEqual = {x, y} -> x.eq {r = y}
@@ -435,7 +435,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl GetValue for Int where {
-              getValue = {} -> {x} -> x + it
+              getValue = {it} -> {x} -> x + it
             }
 
             let g = {v} -> v.getValue {}
@@ -485,11 +485,11 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Identity for Bool where {
-              identity = {} -> it
+              identity = {it} -> it
             }
 
             impl Identity for Str where {
-              identity = {} -> it
+              identity = {it} -> it
             }
 
             let idBool = {x} -> x.identity {}
@@ -514,7 +514,7 @@ class AbilityImplementationBodyValidationTest {
             }
 
             impl Format for Int where {
-              format = {} -> int::to_str {n = it + 1}
+              format = {it} -> int::to_str {n = it + 1}
             }
 
             let f = {x} -> x.format {}

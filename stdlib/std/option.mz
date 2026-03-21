@@ -4,14 +4,14 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for Option 'a where {
-    eq = {r} -> match it is
+    eq = {it, r} -> match it is
         Some {val = l} -> match r is
             Some {val = r_val} -> l == r_val
             None -> False
         None -> match r is
             Some {val = _} -> False
             None -> True,
-    neq = {r} -> match it is
+    neq = {it, r} -> match it is
         Some {val = l} -> match r is
             Some {val = r_val} -> l != r_val
             None -> True
@@ -21,24 +21,24 @@ impl Eq 'a for Option 'a where {
 }
 
 impl Ord 'a for Option 'a where {
-    lt = {r} -> match it is
+    lt = {it, r} -> match it is
         None -> match r is
             Some {val = _} -> True
             None -> False
         Some {val = l} -> match r is
             None -> False
             Some {val = r_val} -> l < r_val,
-    le = {r} -> match it is
+    le = {it, r} -> match it is
         None -> True
         Some {val = l} -> match r is
             None -> False
             Some {val = r_val} -> l <= r_val,
-    gt = {r} -> match it is
+    gt = {it, r} -> match it is
         None -> False
         Some {val = l} -> match r is
             None -> True
             Some {val = r_val} -> l > r_val,
-    ge = {r} -> match it is
+    ge = {it, r} -> match it is
         Some {val = l} -> match r is
             Some {val = r_val} -> l >= r_val
             None -> True
@@ -164,15 +164,15 @@ pub let zip_with: { a: Option 'a, b: Option 'b, f: {x: 'a, y: 'b} -> 'c <...> } 
         None -> None
 
 impl Option 'a where {
-    map = {f} -> map {opt = it, f = f},
-    flat_map = {f} -> flat_map {opt = it, f = f},
-    get_or_else = {def} -> get_or_else {opt = it, def = def},
-    is_some = {} -> is_some {opt = it},
-    is_none = {} -> is_none {opt = it},
-    filter = {p} -> filter {opt = it, p = p},
-    or_else = {opt2} -> or_else {opt1 = it, opt2 = opt2},
-    fold = {on_none, on_some} -> fold {opt = it, on_none = on_none, on_some = on_some},
-    flatten = {} -> flatten {opt = it},
-    to_result = {error} -> to_result {opt = it, error = error},
-    to_list = {} -> to_list {opt = it}
+    map = {it, f} -> map {opt = it, f = f},
+    flat_map = {it, f} -> flat_map {opt = it, f = f},
+    get_or_else = {it, def} -> get_or_else {opt = it, def = def},
+    is_some = {it} -> is_some {opt = it},
+    is_none = {it} -> is_none {opt = it},
+    filter = {it, p} -> filter {opt = it, p = p},
+    or_else = {it, opt2} -> or_else {opt1 = it, opt2 = opt2},
+    fold = {it, on_none, on_some} -> fold {opt = it, on_none = on_none, on_some = on_some},
+    flatten = {it} -> flatten {opt = it},
+    to_result = {it, error} -> to_result {opt = it, error = error},
+    to_list = {it} -> to_list {opt = it}
 }

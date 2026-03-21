@@ -40,7 +40,7 @@ class MethodCallSyntaxTest {
     fun `simple method call on user-defined ability`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -165,7 +165,7 @@ class MethodCallSyntaxTest {
     fun `Show_dot_for chained with method call`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -193,7 +193,7 @@ class MethodCallSyntaxTest {
     fun `method call on boolean value`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
@@ -220,7 +220,7 @@ class MethodCallSyntaxTest {
     fun `method call on variable`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -252,7 +252,7 @@ class MethodCallSyntaxTest {
     fun `method call on type without impl fails`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             # No impl for Float!
@@ -276,7 +276,7 @@ class MethodCallSyntaxTest {
     fun `it is available in impl method body`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -306,7 +306,7 @@ class MethodCallSyntaxTest {
             }
 
             impl Double for Int where {
-                double = {} -> it + it
+                double = {it} -> it + it
             }
 
             let result = 21.double {}
@@ -330,7 +330,7 @@ class MethodCallSyntaxTest {
     fun `Show_dot_for returns record of methods`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -372,7 +372,7 @@ class MethodCallSyntaxTest {
     fun `Ability_dot_for with multi-method ability returns all methods`() {
         val source = """
             ability Showable for 'a where {
-                show: {} -> Str,
+                show: {it: 'a} -> Str,
                 display: { verbose: Bool } -> Str
             }
 

@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for ['a] where {
-    eq: {r: ['a]} with Eq 'a -> Bool = {r} -> __native_seq_equals {l = it, r = r},
-    neq: {r: ['a]} with Eq 'a -> Bool = {r} -> if __native_seq_equals {l = it, r = r} then False else True
+    eq: {it: ['a], r: ['a]} with Eq 'a -> Bool = {it, r} -> __native_seq_equals {l = it, r = r},
+    neq: {it: ['a], r: ['a]} with Eq 'a -> Bool = {it, r} -> if __native_seq_equals {l = it, r = r} then False else True
 }
 
 impl Ord 'a for ['a] where {
-    lt: {r: ['a]} with Ord 'a, Eq 'a -> Bool = {r} -> __native_seq_compare {xs = it, ys = r} == (0 - 1),
-    le: {r: ['a]} with Ord 'a, Eq 'a -> Bool = {r} -> __native_seq_compare {xs = it, ys = r} != 1,
-    gt: {r: ['a]} with Ord 'a, Eq 'a -> Bool = {r} -> __native_seq_compare {xs = it, ys = r} == 1,
-    ge: {r: ['a]} with Ord 'a, Eq 'a -> Bool = {r} -> __native_seq_compare {xs = it, ys = r} != (0 - 1)
+    lt: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} == (0 - 1),
+    le: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} != 1,
+    gt: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} == 1,
+    ge: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} != (0 - 1)
 }
 
 # std/collections/seq.mezze - Seq (Sequence) operations
@@ -639,45 +639,45 @@ pub let min_float = {xs} -> __native_seq_min_float {xs = xs}
 pub let max_float = {xs} -> __native_seq_max_float {xs = xs}
 
 impl Seq 'a where {
-    length = {} -> length {xs = it},
-    is_empty = {} -> is_empty {xs = it},
-    get = {i} -> get {xs = it, i = i},
-    set = {i, x} -> set {xs = it, i = i, x = x},
-    add = {x} -> add {xs = it, x = x},
-    push = {x} -> push {xs = it, x = x},
-    push_front = {x} -> push_front {xs = it, x = x},
-    concat = {ys} -> concat {xs = it, ys = ys},
-    head = {} -> head {xs = it},
-    first = {} -> first {xs = it},
-    last = {} -> last {xs = it},
-    tail = {} -> tail {xs = it},
-    take = {n} -> take {xs = it, n = n},
-    drop = {n} -> drop {xs = it, n = n},
-    slice = {start, end} -> slice {xs = it, start = start, end = end},
-    contains = {x} -> contains {xs = it, x = x},
-    find = {p} -> find {xs = it, p = p},
-    map = {f} -> map {xs = it, f = f},
-    filter = {p} -> filter {xs = it, p = p},
-    flat_map = {f} -> flat_map {xs = it, f = f},
-    fold = {init, f} -> fold {xs = it, init = init, f = f},
-    reduce = {f} -> reduce {xs = it, f = f},
-    any = {p} -> any {xs = it, p = p},
-    all = {p} -> all {xs = it, p = p},
-    none = {p} -> none {xs = it, p = p},
-    count = {p} -> count {xs = it, p = p},
-    reverse = {} -> reverse {xs = it},
-    sort = {} -> sort {xs = it},
-    sort_by = {cmp} -> sort_by {xs = it, cmp = cmp},
-    unique = {} -> unique {xs = it},
-    flatten = {xss} -> flatten {xss = it},
-    zip = {ys} -> zip {xs = it, ys = ys},
-    enumerate = {} -> enumerate {xs = it},
-    for_each = {f} -> for_each {xs = it, f = f},
-    join = {sep} -> join {xs = it, sep = sep},
-    partition = {p} -> partition {xs = it, p = p},
-    min = {} -> min {xs = it},
-    max = {} -> max {xs = it},
-    sum = {} -> sum {xs = it},
-    to_list = {} -> to_list {xs = it},
-    to_set = {} -> to_set {xs = it}
+    length = {it} -> length {xs = it},
+    is_empty = {it} -> is_empty {xs = it},
+    get = {it, i} -> get {xs = it, i = i},
+    set = {it, i, x} -> set {xs = it, i = i, x = x},
+    add = {it, x} -> add {xs = it, x = x},
+    push = {it, x} -> push {xs = it, x = x},
+    push_front = {it, x} -> push_front {xs = it, x = x},
+    concat = {it, ys} -> concat {xs = it, ys = ys},
+    head = {it} -> head {xs = it},
+    first = {it} -> first {xs = it},
+    last = {it} -> last {xs = it},
+    tail = {it} -> tail {xs = it},
+    take = {it, n} -> take {xs = it, n = n},
+    drop = {it, n} -> drop {xs = it, n = n},
+    slice = {it, start, end} -> slice {xs = it, start = start, end = end},
+    contains = {it, x} -> contains {xs = it, x = x},
+    find = {it, p} -> find {xs = it, p = p},
+    map = {it, f} -> map {xs = it, f = f},
+    filter = {it, p} -> filter {xs = it, p = p},
+    flat_map = {it, f} -> flat_map {xs = it, f = f},
+    fold = {it, init, f} -> fold {xs = it, init = init, f = f},
+    reduce = {it, f} -> reduce {xs = it, f = f},
+    any = {it, p} -> any {xs = it, p = p},
+    all = {it, p} -> all {xs = it, p = p},
+    none = {it, p} -> none {xs = it, p = p},
+    count = {it, p} -> count {xs = it, p = p},
+    reverse = {it} -> reverse {xs = it},
+    sort = {it} -> sort {xs = it},
+    sort_by = {it, cmp} -> sort_by {xs = it, cmp = cmp},
+    unique = {it} -> unique {xs = it},
+    flatten = {it} -> flatten {xss = it},
+    zip = {it, ys} -> zip {xs = it, ys = ys},
+    enumerate = {it} -> enumerate {xs = it},
+    for_each = {it, f} -> for_each {xs = it, f = f},
+    join = {it, sep} -> join {xs = it, sep = sep},
+    partition = {it, p} -> partition {xs = it, p = p},
+    min = {it} -> min {xs = it},
+    max = {it} -> max {xs = it},
+    sum = {it} -> sum {xs = it},
+    to_list = {it} -> to_list {xs = it},
+    to_set = {it} -> to_set {xs = it}
 }

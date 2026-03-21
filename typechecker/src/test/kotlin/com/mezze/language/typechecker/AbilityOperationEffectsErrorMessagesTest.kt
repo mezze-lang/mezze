@@ -289,12 +289,12 @@ class AbilityOperationEffectsErrorMessagesTest {
             }
 
             ability Show for 'a where {
-                show: {} -> Str  # Pure - no effects
+                show: {it: 'a} -> Str  # Pure - no effects
             }
 
             impl Show for Int where {
                 # WRONG: declares <Log> but ability is pure
-                show: {} -> Str <Log> = {} -> "number"
+                show: {it: 'a} -> Str <Log> = {} -> "number"
             }
         """.trimIndent()
 

@@ -212,7 +212,7 @@ class DoExpressionConstraintTest {
         // should fail when no impl Show for Bool exists
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do
@@ -235,7 +235,7 @@ class DoExpressionConstraintTest {
         // Using explicit field value {val = diff} where diff is polymorphic
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do
@@ -259,7 +259,7 @@ class DoExpressionConstraintTest {
         // When the type is truly polymorphic, it should add a constraint and succeed
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let polyShow = {val} -> do
@@ -357,7 +357,7 @@ class DoExpressionConstraintTest {
         // are correctly propagated to the enclosing lambda
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let noiseAdd = {x, y} -> do

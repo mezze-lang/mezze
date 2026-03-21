@@ -23,7 +23,7 @@ class AbilityImplementationVerificationTest {
     fun `test ability call with concrete type but no implementation should fail`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let add = {x, y} -> ((x + y) > (x - y)).show {}
@@ -46,11 +46,11 @@ class AbilityImplementationVerificationTest {
     fun `test ability call with concrete type and valid implementation should succeed`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Bool where {
-                show = {} -> if it then "True" else "False"
+                show = {it} -> if it then "True" else "False"
             }
 
             let add = {x, y} -> ((x + y) > (x - y)).show {}
@@ -70,7 +70,7 @@ class AbilityImplementationVerificationTest {
     fun `test ability call with polymorphic type should succeed`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let showResult = {x} -> x.show {}
@@ -89,7 +89,7 @@ class AbilityImplementationVerificationTest {
     fun `test ability call with Int without implementation should fail`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = 42.show {}
@@ -112,7 +112,7 @@ class AbilityImplementationVerificationTest {
     fun `test ability call with String without implementation should fail`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let test = "hello".show {}
@@ -135,11 +135,11 @@ class AbilityImplementationVerificationTest {
     fun `test nested ability calls with missing implementation`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Str where {
-                show = {} -> "\"$(it)\""
+                show = {it} -> "\"$(it)\""
             }
 
             let test = True.show {}.show {}

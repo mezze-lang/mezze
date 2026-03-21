@@ -127,7 +127,7 @@ class AbilityConstraintAnnotationsTest {
             }
 
             ability Show for 'a where {
-                show: {} -> Str,
+                show: {it: 'a} -> Str,
             }
 
             impl Show for Int where {
@@ -157,8 +157,8 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
-                getKey = {} -> it.k,
-                getValue = {} -> it.v,
+                getKey = {it} -> it.k,
+                getValue = {it} -> it.v,
             }
 
             let getBoth: {c: 'c} -> {key: 'key, value: 'value} with BiContainer 'c = {c} ->
@@ -178,8 +178,8 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
-                getKey = {} -> it.k,
-                getValue = {} -> it.v,
+                getKey = {it} -> it.k,
+                getValue = {it} -> it.v,
             }
 
             let getWithKnownKey: {c: 'c} -> Int with BiContainer 'c having 'key = Int = {c} ->
@@ -198,7 +198,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test simple ability without associated types works without having`() {
         val code = """
             ability Eq for 'a where {
-                eq: {r: 'a} -> Bool,
+                eq: {it: 'a, r: 'a} -> Bool,
             }
 
             impl Eq for Int where {
@@ -227,11 +227,11 @@ class AbilityConstraintAnnotationsTest {
     fun `test chained ability constraints without having clauses`() {
         val code = """
             ability Eq for 'a where {
-                eq: {r: 'a} -> Bool,
+                eq: {it: 'a, r: 'a} -> Bool,
             }
 
             ability Show for 'a where {
-                show: {} -> Str,
+                show: {it: 'a} -> Str,
             }
 
             impl Eq for Int where {
@@ -291,7 +291,7 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl Container for {items: [Str]} having 'item = Str where {
-                getAll = {} -> it.items,
+                getAll = {it} -> it.items,
             }
 
             let getAllItems: {c: 'c} -> ['item] with Container 'c = {c} ->
@@ -416,8 +416,8 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
-                getKey = {} -> it.k,
-                getValue = {} -> it.v,
+                getKey = {it} -> it.k,
+                getValue = {it} -> it.v,
             }
 
             let getWrongKey: {c: 'c} -> Str with BiContainer 'c having 'key = Int, 'value = Str = {c} ->

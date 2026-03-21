@@ -82,7 +82,7 @@ class InherentImplTest {
     fun `inherent impl is distinct from ability impl in AST`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             type Foo = {val: Int}
@@ -224,7 +224,7 @@ class InherentImplTest {
             type Pair = {first: Int, second: Int}
 
             impl Pair where {
-                sum: {} -> Int = {} -> it.first + it.second
+                sum: {it: Pair} -> Int = {it} -> it.first + it.second
             }
 
             let p = Pair {first = 3, second = 7}
@@ -254,7 +254,7 @@ class InherentImplTest {
             type Animal = {name: Str}
 
             impl Describe for Animal where {
-                describe = {} -> it.name
+                describe = {it} -> it.name
             }
 
             impl Animal where {
@@ -429,7 +429,7 @@ class InherentImplTest {
             type T = {v: Int}
 
             impl T where {
-                get_v: {} -> Int = {} -> it.v
+                get_v: {it: T} -> Int = {it} -> it.v
             }
         """.trimIndent()
 
@@ -452,7 +452,7 @@ class InherentImplTest {
             type T = {v: Int}
 
             impl T where {
-                to_str = {} -> __native_int_to_str {n = it.v}
+                to_str = {it} -> __native_int_to_str {n = it.v}
             }
         """.trimIndent()
 
@@ -489,7 +489,7 @@ class InherentImplTest {
         // Users cannot extend built-in types — only stdlib can
         val source = """
             impl Int where {
-                double: {} -> Int = {} -> it + it
+                double: {it: Int} -> Int = {it} -> it + it
             }
         """.trimIndent()
 
@@ -692,7 +692,7 @@ class InherentImplTest {
             type MyRecord = {x: Int, y: Int}
 
             impl Hashable for MyRecord where {
-                hash = {} -> it.x + it.y
+                hash = {it} -> it.x + it.y
             }
         """.trimIndent()
 
@@ -874,7 +874,7 @@ class InherentImplTest {
     fun `duplicate ability impl for same type is rejected`() {
         val source = """
             ability Showable for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             type Thing = {v: Int}

@@ -10,22 +10,22 @@
 #   -x     ->  x.neg {}
 
 ability NumAdd for 'a where {
-    add: {r: 'a} -> 'a
+    add: {it: 'a, r: 'a} -> 'a
 }
 
 ability NumSub for 'a where {
-    sub: {r: 'a} -> 'a,
-    neg: {} -> 'a
+    sub: {it: 'a, r: 'a} -> 'a,
+    neg: {it: 'a} -> 'a
 }
 
 ability NumMul for 'a where {
-    mul: {r: 'a} -> 'a
+    mul: {it: 'a, r: 'a} -> 'a
 }
 
 ability NumDiv for 'a where {
-    div: {r: 'a} -> 'a
+    div: {it: 'a, r: 'a} -> 'a
 }
 
 ability NumMod for 'a where {
-    mod: {r: 'a} -> 'a
+    mod: {it: 'a, r: 'a} -> 'a
 }

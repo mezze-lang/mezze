@@ -158,7 +158,7 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate ability declaration should fail`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             ability Show for 'a where {
@@ -177,7 +177,7 @@ class DuplicateDeclarationExtendedTest {
     fun `test different ability names should pass`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             ability Display for 'a where {
@@ -197,11 +197,11 @@ class DuplicateDeclarationExtendedTest {
             use std::int
 
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Int where {
@@ -222,15 +222,15 @@ class DuplicateDeclarationExtendedTest {
             use std::int
 
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> int::to_str {n = it}
+                show = {it} -> int::to_str {n = it}
             }
 
             impl Show for Str where {
-                show = {} -> it
+                show = {it} -> it
             }
 
             42.show {}
@@ -244,7 +244,7 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate ability implementation for generic type should fail`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for (List Int) where {
@@ -267,7 +267,7 @@ class DuplicateDeclarationExtendedTest {
     fun `test ability implementation for different generic types should pass`() {
         val code = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for (List Int) where {
@@ -322,7 +322,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             impl Convert for Str Int where {
-                convert = {} -> int::to_str {n = it}
+                convert = {it} -> int::to_str {n = it}
             }
 
             "hello".convert {}

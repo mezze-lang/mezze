@@ -55,7 +55,7 @@ class AbilityEffectComprehensiveTest {
         fun `simple ability declaration with one type parameter`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 let x = 1
@@ -70,7 +70,7 @@ class AbilityEffectComprehensiveTest {
         fun `ability declaration with multiple type parameters`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 let x = 1
@@ -85,8 +85,8 @@ class AbilityEffectComprehensiveTest {
         fun `ability declaration with multiple operations`() {
             val source = """
                 ability Eq for 'a where {
-                    eq: { right: 'a } -> Bool,
-                    neq: { right: 'a } -> Bool
+                    eq: { it: 'a, right: 'a } -> Bool,
+                    neq: { it: 'a, right: 'a } -> Bool
                 }
 
                 let x = 1
@@ -101,8 +101,8 @@ class AbilityEffectComprehensiveTest {
         fun `ability declaration with complex return types`() {
             val source = """
                 ability Container for 'a where {
-                    first: {} -> Option Int,
-                    size: {} -> Int
+                    first: {it: 'a} -> Option Int,
+                    size: {it: 'a} -> Int
                 }
 
                 let x = 1
@@ -117,7 +117,7 @@ class AbilityEffectComprehensiveTest {
         fun `ability with record parameter type`() {
             val source = """
                 ability Serializable for 'a where {
-                    serialize: { format: Str } -> Str,
+                    serialize: { it: 'a, format: Str } -> Str,
                     deserialize: { data: Str, format: Str } -> 'a
                 }
 
@@ -217,11 +217,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for built-in type Int`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 let result = 42.show {}
@@ -236,11 +236,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for built-in type String`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 let result = "hello".show {}
@@ -255,11 +255,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for built-in type Bool`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Bool where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             True -> "true"
                             False -> "false"
@@ -277,11 +277,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for built-in type Float`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Float where {
-                    show = {} -> "float"
+                    show = {it} -> "float"
                 }
 
                 let result = 3.14.show {}
@@ -296,13 +296,13 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for custom variant type`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type Color = | Red, Green, Blue |
 
                 impl Show for Color where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Red -> "red"
                             Green -> "green"
@@ -322,13 +322,13 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for custom variant type with payloads`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type Person = | Person { name: Str, age: Int } |
 
                 impl Show for Person where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Person { name, age } -> name
                 }
@@ -346,13 +346,13 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability for record type alias`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type Point = { x: Int, y: Int }
 
                 impl Show for Point where {
-                    show = {} -> "point"
+                    show = {it} -> "point"
                 }
 
                 let p: Point = { x = 1, y = 2 }
@@ -368,11 +368,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl multi-param ability`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 impl Convert for Str Int where {
-                    convert = {} -> "converted"
+                    convert = {it} -> "converted"
                 }
 
                 let result = 42.convert {}
@@ -387,13 +387,13 @@ class AbilityEffectComprehensiveTest {
         fun `impl ability with multiple operations`() {
             val source = """
                 ability Describable for 'a where {
-                    describe: {} -> Str,
-                    shortDesc: {} -> Str
+                    describe: {it: 'a} -> Str,
+                    shortDesc: {it: 'a} -> Str
                 }
 
                 impl Describable for Int where {
-                    describe = {} -> "integer value",
-                    shortDesc = {} -> "int"
+                    describe = {it} -> "integer value",
+                    shortDesc = {it} -> "int"
                 }
 
                 let a = 42.describe {}
@@ -409,19 +409,19 @@ class AbilityEffectComprehensiveTest {
         fun `multiple impls for same ability different types`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 impl Show for Bool where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             True -> "true"
                             False -> "false"
@@ -441,19 +441,19 @@ class AbilityEffectComprehensiveTest {
         fun `different abilities for same type`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 ability Debug for 'a where {
-                    debug: {} -> Str
+                    debug: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "show"
+                    show = {it} -> "show"
                 }
 
                 impl Debug for Int where {
-                    debug = {} -> "debug"
+                    debug = {it} -> "debug"
                 }
 
                 let a = 42.show {}
@@ -611,11 +611,11 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("showable.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
             """.trimIndent())
 
@@ -673,11 +673,11 @@ class AbilityEffectComprehensiveTest {
                 use types::{Person}
 
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Person where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Person { name, age } -> name
                 }
@@ -728,11 +728,11 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("showable.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
             """.trimIndent())
 
@@ -761,11 +761,11 @@ class AbilityEffectComprehensiveTest {
         fun `ability impl is auto-resolved for Int`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 # Auto-resolve impl Show for Int
@@ -781,15 +781,15 @@ class AbilityEffectComprehensiveTest {
         fun `ability impl is auto-resolved based on argument type`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 # Should resolve to Show Int
@@ -808,13 +808,13 @@ class AbilityEffectComprehensiveTest {
         fun `ability impl is auto-resolved for custom type`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type Color = | Red, Green, Blue |
 
                 impl Show for Color where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Red -> "red"
                             Green -> "green"
@@ -836,11 +836,11 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("showable.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
             """.trimIndent())
 
@@ -862,15 +862,15 @@ class AbilityEffectComprehensiveTest {
         fun `multi-param ability impl auto-resolution`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 impl Convert for Str Int where {
-                    convert = {} -> "converted"
+                    convert = {it} -> "converted"
                 }
 
                 impl Convert for Int Str where {
-                    convert = {} -> 0
+                    convert = {it} -> 0
                 }
 
                 # Should resolve based on argument and expected return type
@@ -895,11 +895,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl in same module as ability is valid`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 let result = 42.show {}
@@ -914,13 +914,13 @@ class AbilityEffectComprehensiveTest {
         fun `impl in same module as type is valid`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type Person = | Person { name: Str } |
 
                 impl Show for Person where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Person { name } -> name
                 }
@@ -940,7 +940,7 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("my_ability.mz")
             Files.writeString(abilityMod, """
                 ability Printable for 'a where {
-                    print: {} -> Str
+                    print: {it: 'a} -> Str
                 }
             """.trimIndent())
 
@@ -951,7 +951,7 @@ class AbilityEffectComprehensiveTest {
 
                 # Orphan: Printable is imported, Int is built-in
                 impl Printable for Int where {
-                    print = {} -> "int"
+                    print = {it} -> "int"
                 }
             """.trimIndent())
 
@@ -973,7 +973,7 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("ability_mod.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
             """.trimIndent())
 
@@ -991,7 +991,7 @@ class AbilityEffectComprehensiveTest {
 
                 # Orphan: both Show and Person are imported
                 impl Show for Person where {
-                    show = {} -> it.name
+                    show = {it} -> it.name
                 }
             """.trimIndent())
 
@@ -1013,7 +1013,7 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("showable.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
             """.trimIndent())
 
@@ -1026,7 +1026,7 @@ class AbilityEffectComprehensiveTest {
                 type MyInt = | MyInt { val: Int } |
 
                 impl Show for MyInt where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             MyInt { val } -> "myint"
                 }
@@ -1055,11 +1055,11 @@ class AbilityEffectComprehensiveTest {
 
                 # Local ability - impl is valid
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Person where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             Person { name } -> name
                 }
@@ -1077,7 +1077,7 @@ class AbilityEffectComprehensiveTest {
         fun `multi-param ability - impl valid if any target type is local`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 type Celsius = | Celsius { degrees: Float } |
@@ -1085,7 +1085,7 @@ class AbilityEffectComprehensiveTest {
 
                 # Valid: both types are local
                 impl Convert for Fahrenheit Celsius where {
-                    convert = {} ->
+                    convert = {it} ->
                         match it is
                             Celsius { degrees } -> Fahrenheit { degrees = degrees * 1.8 + 32.0 }
                 }
@@ -1111,11 +1111,11 @@ class AbilityEffectComprehensiveTest {
         fun `duplicate ability declaration should fail`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
             """.trimIndent()
 
@@ -1161,15 +1161,15 @@ class AbilityEffectComprehensiveTest {
         fun `duplicate ability impl for same type should fail`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "first"
+                    show = {it} -> "first"
                 }
 
                 impl Show for Int where {
-                    show = {} -> "second"
+                    show = {it} -> "second"
                 }
             """.trimIndent()
 
@@ -1219,15 +1219,15 @@ class AbilityEffectComprehensiveTest {
         fun `duplicate multi-param ability impl should fail`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 impl Convert for Str Int where {
-                    convert = {} -> "first"
+                    convert = {it} -> "first"
                 }
 
                 impl Convert for Str Int where {
-                    convert = {} -> "second"
+                    convert = {it} -> "second"
                 }
             """.trimIndent()
 
@@ -1248,19 +1248,19 @@ class AbilityEffectComprehensiveTest {
         fun `different abilities for same type is valid - not duplicate`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 ability Debug for 'a where {
-                    debug: {} -> Str
+                    debug: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "show"
+                    show = {it} -> "show"
                 }
 
                 impl Debug for Int where {
-                    debug = {} -> "debug"
+                    debug = {it} -> "debug"
                 }
 
                 let a = 42.show {}
@@ -1276,15 +1276,15 @@ class AbilityEffectComprehensiveTest {
         fun `same ability for different types is valid - not duplicate`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 let a = 42.show {}
@@ -1331,11 +1331,11 @@ class AbilityEffectComprehensiveTest {
         fun `ability without pub keyword works`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 let result = 42.show {}
@@ -1369,7 +1369,7 @@ class AbilityEffectComprehensiveTest {
         fun `pub keyword on ability should fail with helpful message`() {
             val source = """
                 pub ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
             """.trimIndent()
 
@@ -1409,11 +1409,11 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("showable.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
             """.trimIndent())
 
@@ -1469,12 +1469,12 @@ class AbilityEffectComprehensiveTest {
         fun `impl missing required operation should fail`() {
             val source = """
                 ability Eq for 'a where {
-                    eq: { right: 'a } -> Bool,
-                    neq: { right: 'a } -> Bool
+                    eq: { it: 'a, right: 'a } -> Bool,
+                    neq: { it: 'a, right: 'a } -> Bool
                 }
 
                 impl Eq for Int where {
-                    eq = { right } -> True
+                    eq = { it, right } -> True
                     # Missing neq operation
                 }
             """.trimIndent()
@@ -1495,11 +1495,11 @@ class AbilityEffectComprehensiveTest {
         fun `impl with extra operation should fail`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int",
+                    show = {it} -> "int",
                     extra = {} -> "extra"
                 }
             """.trimIndent()
@@ -1768,12 +1768,12 @@ class AbilityEffectComprehensiveTest {
         fun `ability impl type parameter count mismatch should fail`() {
             val source = """
                 ability Convert 'b for 'a where {
-                    convert: {} -> 'b
+                    convert: {it: 'a} -> 'b
                 }
 
                 # Wrong: only one type parameter, ability expects two
                 impl Convert for Int where {
-                    convert = {} -> "test"
+                    convert = {it} -> "test"
                 }
             """.trimIndent()
 
@@ -1794,7 +1794,7 @@ class AbilityEffectComprehensiveTest {
         fun `using ability method without impl should fail`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type MyType = | MyType |
@@ -1831,15 +1831,15 @@ class AbilityEffectComprehensiveTest {
         fun `chained ability method calls`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 let a = 42.show {}
@@ -1856,15 +1856,15 @@ class AbilityEffectComprehensiveTest {
             // Test that ability methods work in function composition
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Show for Str where {
-                    show = {} -> it
+                    show = {it} -> it
                 }
 
                 # Use ability in a simple function
@@ -1884,13 +1884,13 @@ class AbilityEffectComprehensiveTest {
             // Test ability impl for a locally-defined variant type
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 type MyOption = | MySome { val: Int }, MyNone |
 
                 impl Show for MyOption where {
-                    show = {} ->
+                    show = {it} ->
                         match it is
                             MySome { val } -> "some"
                             MyNone -> "none"
@@ -1911,7 +1911,7 @@ class AbilityEffectComprehensiveTest {
         fun `effect and ability in same module`() {
             val source = """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 effect Log where {
@@ -1919,7 +1919,7 @@ class AbilityEffectComprehensiveTest {
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Log for Console where {
@@ -1940,19 +1940,19 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("abilities.mz")
             Files.writeString(abilityMod, """
                 ability Show for 'a where {
-                    show: {} -> Str
+                    show: {it: 'a} -> Str
                 }
 
                 ability Debug for 'a where {
-                    debug: {} -> Str
+                    debug: {it: 'a} -> Str
                 }
 
                 impl Show for Int where {
-                    show = {} -> "int"
+                    show = {it} -> "int"
                 }
 
                 impl Debug for Int where {
-                    debug = {} -> "debug_int"
+                    debug = {it} -> "debug_int"
                 }
             """.trimIndent())
 
@@ -1989,15 +1989,15 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("formatting.mz")
             Files.writeString(abilityMod, """
                 ability Format for 'a where {
-                    format: {} -> Str
+                    format: {it: 'a} -> Str
                 }
 
                 impl Format for Int where {
-                    format = {} -> "int"
+                    format = {it} -> "int"
                 }
 
                 impl Format for Str where {
-                    format = {} -> it
+                    format = {it} -> it
                 }
             """.trimIndent())
 

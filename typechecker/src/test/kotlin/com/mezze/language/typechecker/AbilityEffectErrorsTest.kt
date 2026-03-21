@@ -317,7 +317,7 @@ class AbilityEffectErrorsTest {
     fun `test user-defined ability method access is blocked`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let f = Show.show
@@ -337,7 +337,7 @@ class AbilityEffectErrorsTest {
     fun `test user-defined ability with wrong method should error`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             let f = Show.nonexistent

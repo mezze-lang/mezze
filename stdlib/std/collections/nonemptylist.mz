@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for NonEmptyList 'a where {
-    eq: {r: NonEmptyList 'a} with Eq 'a -> Bool = {r} -> __native_nel_equals {xs = it, ys = r},
-    neq: {r: NonEmptyList 'a} with Eq 'a -> Bool = {r} -> if __native_nel_equals {xs = it, ys = r} then False else True
+    eq: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Eq 'a -> Bool = {it, r} -> __native_nel_equals {xs = it, ys = r},
+    neq: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Eq 'a -> Bool = {it, r} -> if __native_nel_equals {xs = it, ys = r} then False else True
 }
 
 impl Ord 'a for NonEmptyList 'a where {
-    lt: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} == (0 - 1),
-    le: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} != 1,
-    gt: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} == 1,
-    ge: {r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_nel_compare {xs = it, ys = r} != (0 - 1)
+    lt: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_nel_compare {xs = it, ys = r} == (0 - 1),
+    le: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_nel_compare {xs = it, ys = r} != 1,
+    gt: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_nel_compare {xs = it, ys = r} == 1,
+    ge: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_nel_compare {xs = it, ys = r} != (0 - 1)
 }
 
 # std/collections/nonemptylist.mezze - Non-empty list operations
@@ -115,20 +115,20 @@ pub let sort_by: { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int } -> NonEmp
     __native_nel_sort_by { xs = xs, cmp = cmp }
 
 impl NonEmptyList 'a where {
-    head = {} -> head {xs = it},
-    tail = {} -> tail {xs = it},
-    length = {} -> length {xs = it},
-    last = {} -> last {xs = it},
-    map = {f} -> map {xs = it, f = f},
-    flat_map = {f} -> flat_map {xs = it, f = f},
-    fold_left = {init, f} -> fold_left {xs = it, init = init, f = f},
-    reduce = {f} -> reduce {xs = it, f = f},
-    any = {p} -> any {xs = it, p = p},
-    all = {p} -> all {xs = it, p = p},
-    contains = {x} -> contains {xs = it, x = x},
-    reverse = {} -> reverse {xs = it},
-    sort = {} -> sort {xs = it},
-    sort_by = {cmp} -> sort_by {xs = it, cmp = cmp},
-    to_list = {} -> to_list {xs = it},
-    to_seq = {} -> to_seq {xs = it}
+    head = {it} -> head {xs = it},
+    tail = {it} -> tail {xs = it},
+    length = {it} -> length {xs = it},
+    last = {it} -> last {xs = it},
+    map = {it, f} -> map {xs = it, f = f},
+    flat_map = {it, f} -> flat_map {xs = it, f = f},
+    fold_left = {it, init, f} -> fold_left {xs = it, init = init, f = f},
+    reduce = {it, f} -> reduce {xs = it, f = f},
+    any = {it, p} -> any {xs = it, p = p},
+    all = {it, p} -> all {xs = it, p = p},
+    contains = {it, x} -> contains {xs = it, x = x},
+    reverse = {it} -> reverse {xs = it},
+    sort = {it} -> sort {xs = it},
+    sort_by = {it, cmp} -> sort_by {xs = it, cmp = cmp},
+    to_list = {it} -> to_list {xs = it},
+    to_seq = {it} -> to_seq {xs = it}
 }

@@ -45,7 +45,7 @@ public class UserDefinedAbilityTest {
     void testAbilityWithMultipleOperations() {
         assertDoesNotThrow(() -> MezzeTestHelper.run("""
             ability Show for 'a where {
-                show: {} -> Str,
+                show: {it: 'a} -> Str,
                 debug: {} -> Str
             }
 
@@ -81,7 +81,7 @@ public class UserDefinedAbilityTest {
             }
 
             impl Encoder for Str where {
-                encode = {} -> it
+                encode = {it} -> it
             }
 
             "hello".encode {}
@@ -132,12 +132,12 @@ public class UserDefinedAbilityTest {
     void testImplWithMultipleOperations() {
         Object result = MezzeTestHelper.run("""
             ability Show for 'a where {
-                show: {} -> Str,
+                show: {it: 'a} -> Str,
                 debug: {} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "shown",
+                show = {it} -> "shown",
                 debug = {} -> "debugged"
             }
 
@@ -282,7 +282,7 @@ public class UserDefinedAbilityTest {
             }
 
             impl Serializer for Int where {
-                serialize = {} -> int::to_str {n = it}
+                serialize = {it} -> int::to_str {n = it}
             }
 
             123.serialize {}

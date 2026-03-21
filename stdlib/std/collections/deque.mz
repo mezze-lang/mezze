@@ -1,15 +1,15 @@
 use std::abilities::compare::{Eq, Ord}
 
 impl Eq 'a for Deque 'a where {
-    eq: {r: Deque 'a} with Eq 'a -> Bool = {r} -> __native_deque_equals {d1 = it, d2 = r},
-    neq: {r: Deque 'a} with Eq 'a -> Bool = {r} -> if __native_deque_equals {d1 = it, d2 = r} then False else True
+    eq: {it: Deque 'a, r: Deque 'a} with Eq 'a -> Bool = {it, r} -> __native_deque_equals {d1 = it, d2 = r},
+    neq: {it: Deque 'a, r: Deque 'a} with Eq 'a -> Bool = {it, r} -> if __native_deque_equals {d1 = it, d2 = r} then False else True
 }
 
 impl Ord 'a for Deque 'a where {
-    lt: {r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_deque_compare {d1 = it, d2 = r} == (0 - 1),
-    le: {r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_deque_compare {d1 = it, d2 = r} != 1,
-    gt: {r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_deque_compare {d1 = it, d2 = r} == 1,
-    ge: {r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {r} -> __native_deque_compare {d1 = it, d2 = r} != (0 - 1)
+    lt: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} == (0 - 1),
+    le: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} != 1,
+    gt: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} == 1,
+    ge: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} != (0 - 1)
 }
 
 # std/collections/deque.mezze - Double-ended queue operations
@@ -312,23 +312,23 @@ pub let product_float: { d: Deque Float } -> Float = { d } ->
     __native_deque_product_float { d = d }
 
 impl Deque 'a where {
-    push_front = {x} -> push_front {d = it, x = x},
-    push_back = {x} -> push_back {d = it, x = x},
-    pop_front = {} -> pop_front {d = it},
-    pop_back = {} -> pop_back {d = it},
-    peek_front = {} -> peek_front {d = it},
-    peek_back = {} -> peek_back {d = it},
-    is_empty = {} -> is_empty {d = it},
-    length = {} -> length {d = it},
-    map = {f} -> map {d = it, f = f},
-    filter = {p} -> filter {d = it, p = p},
-    fold = {init, f} -> fold {d = it, init = init, f = f},
-    reverse = {} -> reverse {d = it},
-    concat = {d2} -> concat {d1 = it, d2 = d2},
-    take = {n} -> take {d = it, n = n},
-    drop = {n} -> drop {d = it, n = n},
-    sort = {} -> sort {d = it},
-    unique = {} -> unique {d = it},
-    to_list = {} -> to_list {d = it},
-    to_seq = {} -> to_seq {d = it}
+    push_front = {it, x} -> push_front {d = it, x = x},
+    push_back = {it, x} -> push_back {d = it, x = x},
+    pop_front = {it} -> pop_front {d = it},
+    pop_back = {it} -> pop_back {d = it},
+    peek_front = {it} -> peek_front {d = it},
+    peek_back = {it} -> peek_back {d = it},
+    is_empty = {it} -> is_empty {d = it},
+    length = {it} -> length {d = it},
+    map = {it, f} -> map {d = it, f = f},
+    filter = {it, p} -> filter {d = it, p = p},
+    fold = {it, init, f} -> fold {d = it, init = init, f = f},
+    reverse = {it} -> reverse {d = it},
+    concat = {it, d2} -> concat {d1 = it, d2 = d2},
+    take = {it, n} -> take {d = it, n = n},
+    drop = {it, n} -> drop {d = it, n = n},
+    sort = {it} -> sort {d = it},
+    unique = {it} -> unique {d = it},
+    to_list = {it} -> to_list {d = it},
+    to_seq = {it} -> to_seq {d = it}
 }

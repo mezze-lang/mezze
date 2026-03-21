@@ -705,8 +705,8 @@ class ExpressionConstraintGenerator {
             // Check if user has defined their own ability with this name (shadowing built-in)
             val userDefinedAbility = context.abilityDeclarations[receiverName]
 
-            // Block direct Ability.method access for built-in abilities.
-            // Use value.method { args } or Ability.for { it = value }.method instead.
+            // Direct Ability.method access — return the FULL method type (with `it` param).
+            // Example: Eq.eq returns {it: 'a, r: 'a} -> Bool
             if (userDefinedAbility == null && BuiltInAbilities.isBuiltInAbility(receiverName)) {
                 val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
                 val methodType = BuiltInAbilities.getAbilityMethodType(
@@ -716,11 +716,22 @@ class ExpressionConstraintGenerator {
                 )
 
                 if (methodType != null) {
-                    throw TypeCheckError(
-                        message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
-                            "Use 'value.${expr.member} { args }' or '${receiverName}.for { it = value }.${expr.member}' instead.",
-                        expression = expr,
-                        errorType = ErrorType.MISSING_FIELD
+                    // Return the full method type for direct calls: Ability.method {it = x, r = y}
+                    return ConstraintResult(
+                        type = methodType,
+                        constraints = emptyList(),
+                        effects = emptySet(),
+                        effectInstances = emptySet(),
+                        abilityConstraints = listOf(Constraint.AbilityRequired(
+                            typeVar = freshTypeVar.variable,
+                            abilityName = receiverName,
+                            typeArgs = emptyList(),
+                            context = "Direct ability call: ${receiverName}.${expr.member}",
+                            sourceLocation = expr.sourceLocation
+                        )),
+                        associatedTypeConstraints = emptyList(),
+                        undefinedVariables = emptyList(),
+                        usedVariables = emptySet()
                     )
                 } else {
                     // Method not found on built-in ability - throw error with suggestion
@@ -1011,9 +1022,16 @@ class ExpressionConstraintGenerator {
      * - `and: {l: Bool, r: Bool} -> Bool` → `{r: Bool} -> Bool`
      */
     private fun stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
-        // In the new ability design, method signatures already don't include the receiver.
-        // The receiver is implicit `it`, bound via `for`. No stripping needed.
-        return methodType
+        // Strip `it` from the method's param record for method-call syntax.
+        // The receiver is passed separately via the member access (x.method {args}).
+        if (methodType !is MezzeType.FunctionType) return methodType
+        val params = (methodType.paramType as? MezzeType.RecordType)?.fields ?: return methodType
+        val strippedParams = params.filterKeys { it != "it" }
+        return MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(fields = strippedParams, rowVar = null),
+            returnType = methodType.returnType,
+            effects = methodType.effects
+        )
     }
 
     /**
@@ -1110,20 +1128,24 @@ class ExpressionConstraintGenerator {
         }
 
         if (builtInMatches.size == 1 && filteredMatchingAbilities.isEmpty()) {
-            // Built-in ability — use when no user-defined ability matches the call-site argument fields.
+            // Built-in ability — method type from .mz files includes `it` param.
+            // Strip `it` for method-call syntax (receiver is handled separately).
             val abilityName = builtInMatches.first()
             val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
-            val methodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, freshTypeVar)!!
+            val fullMethodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, freshTypeVar)!!
 
-            // For monomorphic abilities (LogicalAnd/Or/Not), the receiver must be Bool.
-            // For polymorphic abilities, use a fresh type var.
-            receiverConstraintType = when (abilityName) {
-                "LogicalAnd", "LogicalOr", "LogicalNot" -> MezzeType.BoolType
-                else -> freshTypeVar
-            }
+            if (fullMethodType !is MezzeType.FunctionType) return null
 
-            if (methodType !is MezzeType.FunctionType) return null
-            strippedMethodType = methodType
+            // Strip `it` from param record — call-site only has the other params
+            val fullParams = (fullMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
+            val strippedParams = fullParams.filterKeys { it != "it" }
+            strippedMethodType = MezzeType.FunctionType(
+                paramType = MezzeType.RecordType(fields = strippedParams, rowVar = null),
+                returnType = fullMethodType.returnType,
+                effects = fullMethodType.effects
+            )
+
+            receiverConstraintType = freshTypeVar
 
             abilityConstraints.add(Constraint.AbilityRequired(
                 typeVar = freshTypeVar.variable,
@@ -1369,10 +1391,15 @@ class ExpressionConstraintGenerator {
             // from the receiver expression's constraint generation.
 
             if (freshMethodType is MezzeType.FunctionType) {
-                // Constrain arguments
+                // Strip `it` from param type — method syntax passes receiver separately
+                val fullParams = (freshMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
+                val strippedParams = fullParams.filterKeys { it != "it" }
+                val strippedParamType = MezzeType.RecordType(fields = strippedParams, rowVar = null)
+
+                // Constrain arguments (without it)
                 constraints.add(Constraint.Equality(
                     left = argumentResult.type,
-                    right = freshMethodType.paramType,
+                    right = strippedParamType,
                     context = "Inherent method call arguments for $methodName",
                     sourceLocation = expr.sourceLocation
                 ))

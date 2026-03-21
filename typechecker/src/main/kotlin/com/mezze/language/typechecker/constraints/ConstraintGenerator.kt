@@ -618,7 +618,7 @@ class ConstraintGenerator(
                             }
 
                             var bodyContext = currentContext
-                            bodyContext = bodyContext.extendMono(Keywords.IT, targetType)
+                            // `it` is now explicit in inherent impl bodies — no implicit injection
                             for ((name, type) in paramTypes) {
                                 bodyContext = bodyContext.extendMono(name, type)
                             }
@@ -1252,18 +1252,8 @@ class ConstraintGenerator(
                     bodyContext = bodyContext.extendMono(name, type)
                 }
 
-                // Inject `it` as implicit receiver
-                val allImplTypes = impl.allTypeArgs
-                if (allImplTypes.isNotEmpty()) {
-                    val receiverIndex = if (abilityDeclaration.receiverTypeParam != null) {
-                        abilityDeclaration.typeParams.indexOf(abilityDeclaration.receiverTypeParam)
-                    } else {
-                        abilityDeclaration.typeParams.size - 1
-                    }
-                    val safeIndex = receiverIndex.coerceIn(0, allImplTypes.size - 1)
-                    val receiverType = convertTypeAnnotation(allImplTypes[safeIndex])
-                    bodyContext = bodyContext.extendMono(Keywords.IT, receiverType)
-                }
+                // `it` is now an explicit param in ability impl bodies ({it, r} -> ...).
+                // No implicit injection needed — the lambda param handles it.
 
                 val constraintContext = ConstraintContext(
                     bodyContext,

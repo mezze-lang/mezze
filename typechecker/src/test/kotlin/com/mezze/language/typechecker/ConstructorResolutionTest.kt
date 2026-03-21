@@ -197,7 +197,7 @@ class ConstructorResolutionTest {
         // VariantConstruction in the AST. Instead, verify the AbilityDeclaration is preserved.
         val typedProgram = typeCheckAndGetProgram("""
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
         """.trimIndent())
 

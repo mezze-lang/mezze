@@ -2,16 +2,16 @@ use std::abilities::numeric::{NumAdd, NumMul, NumDiv, NumMod}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
 
-impl NumAdd for Nat where { add = {r} -> __native_nat_add {l = it, r = r} }
-impl NumMul for Nat where { mul = {r} -> __native_nat_multiply {l = it, r = r} }
-impl NumDiv for Nat where { div = {r} -> __native_nat_divide {l = it, r = r} }
-impl NumMod for Nat where { mod = {r} -> __native_nat_modulo {l = it, r = r} }
-impl Eq for Nat where { eq = {r} -> __native_nat_eq {l = it, r = r}, neq = {r} -> __native_nat_neq {l = it, r = r} }
-impl Ord for Nat where { lt = {r} -> __native_nat_lt {l = it, r = r}, le = {r} -> __native_nat_le {l = it, r = r}, gt = {r} -> __native_nat_gt {l = it, r = r}, ge = {r} -> __native_nat_ge {l = it, r = r} }
-impl Into Int for Nat where { into = {} -> __native_nat_to_int {n = it} }
-impl Into Str for Nat where { into = {} -> __native_nat_to_str {n = it} }
+impl NumAdd for Nat where { add = {it, r} -> __native_nat_add {l = it, r = r} }
+impl NumMul for Nat where { mul = {it, r} -> __native_nat_multiply {l = it, r = r} }
+impl NumDiv for Nat where { div = {it, r} -> __native_nat_divide {l = it, r = r} }
+impl NumMod for Nat where { mod = {it, r} -> __native_nat_modulo {l = it, r = r} }
+impl Eq for Nat where { eq = {it, r} -> __native_nat_eq {l = it, r = r}, neq = {it, r} -> __native_nat_neq {l = it, r = r} }
+impl Ord for Nat where { lt = {it, r} -> __native_nat_lt {l = it, r = r}, le = {it, r} -> __native_nat_le {l = it, r = r}, gt = {it, r} -> __native_nat_gt {l = it, r = r}, ge = {it, r} -> __native_nat_ge {l = it, r = r} }
+impl Into Int for Nat where { into = {it} -> __native_nat_to_int {n = it} }
+impl Into Str for Nat where { into = {it} -> __native_nat_to_str {n = it} }
 impl TryInto Nat |ConversionError {msg: Str}| for Str where {
-    try_into = {} -> match __native_nat_from_string {s = it} is
+    try_into = {it} -> match __native_nat_from_string {s = it} is
         Some {val} -> Ok {val = val}
         None -> Err {error = ConversionError {msg = "invalid nat"}}
 }
@@ -66,13 +66,13 @@ pub let clamp = { n: Nat, min: Nat, max: Nat } ->
     __native_nat_clamp { n = n, min = min, max = max }
 
 impl Nat where {
-    to_int = {} -> __native_nat_to_int {n = it},
-    to_str = {} -> __native_nat_to_str {n = it},
-    clamp = {min, max} -> __native_nat_clamp {n = it, min = min, max = max},
-    min = {r} -> __native_nat_min {l = it, r = r},
-    max = {r} -> __native_nat_max {l = it, r = r},
-    is_zero = {} -> it == 0n,
-    is_even = {} -> __native_nat_to_int {n = it} % 2 == 0,
-    is_odd = {} -> __native_nat_to_int {n = it} % 2 != 0,
-    subtract_to_int = {r} -> __native_nat_subtract_to_int {l = it, r = r}
+    to_int = {it} -> __native_nat_to_int {n = it},
+    to_str = {it} -> __native_nat_to_str {n = it},
+    clamp = {it, min, max} -> __native_nat_clamp {n = it, min = min, max = max},
+    min = {it, r} -> __native_nat_min {l = it, r = r},
+    max = {it, r} -> __native_nat_max {l = it, r = r},
+    is_zero = {it} -> it == 0n,
+    is_even = {it} -> __native_nat_to_int {n = it} % 2 == 0,
+    is_odd = {it} -> __native_nat_to_int {n = it} % 2 != 0,
+    subtract_to_int = {it, r} -> __native_nat_subtract_to_int {l = it, r = r}
 }

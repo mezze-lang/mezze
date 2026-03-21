@@ -7,5 +7,5 @@
 #   "value is $(x)"  ->  uses x.to_dbg_str {}
 
 ability Inspect for 'a where {
-    to_dbg_str: {} -> Str
+    to_dbg_str: {it: 'a} -> Str
 }

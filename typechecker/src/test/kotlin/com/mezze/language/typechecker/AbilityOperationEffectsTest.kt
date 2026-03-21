@@ -37,7 +37,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with no effects (pure)`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -57,7 +57,7 @@ class AbilityOperationEffectsTest {
     fun `test ability operation with explicit empty effects`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str <>
+                show: {it: 'a} -> Str <>
             }
 
             impl Show for Int where {
@@ -325,7 +325,7 @@ class AbilityOperationEffectsTest {
     fun `test calling pure ability operation has no effect`() {
         val source = """
             ability Show for 'a where {
-                show: {} -> Str
+                show: {it: 'a} -> Str
             }
 
             impl Show for Int where {

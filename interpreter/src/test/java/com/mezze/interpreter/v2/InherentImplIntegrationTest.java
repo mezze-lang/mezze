@@ -18,7 +18,7 @@ public class InherentImplIntegrationTest {
             type Counter = {value: Int}
 
             impl Counter where {
-                get_value: {} -> Int = {} -> it.value
+                get_value: {it: Counter} -> Int = {it} -> it.value
             }
 
             let c: Counter = {value = 42}
@@ -67,8 +67,8 @@ public class InherentImplIntegrationTest {
             type Pair = {first: Int, second: Int}
 
             impl Pair where {
-                sum: {} -> Int = {} -> it.first + it.second,
-                product: {} -> Int = {} -> it.first * it.second
+                sum: {it: Pair} -> Int = {it} -> it.first + it.second,
+                product: {it: Pair} -> Int = {it} -> it.first * it.second
             }
 
             let p: Pair = {first = 3, second = 7}
@@ -88,11 +88,11 @@ public class InherentImplIntegrationTest {
             type Item = {name: Str, count: Int}
 
             impl Describable for Item where {
-                describe = {} -> it.name
+                describe = {it} -> it.name
             }
 
             impl Item where {
-                total: {} -> Int = {} -> it.count * 2
+                total: {it: Widget} -> Int = {it} -> it.count * 2
             }
 
             let item: Item = {name = "widget", count = 5}
@@ -107,7 +107,7 @@ public class InherentImplIntegrationTest {
             type Box = {width: Int, height: Int}
 
             impl Box where {
-                area: {} -> Int = {} -> it.width * it.height,
+                area: {it: Rect} -> Int = {it} -> it.width * it.height,
                 scale: {factor: Int} -> Box = {factor} -> {width = it.width * factor, height = it.height * factor}
             }
 
@@ -126,8 +126,8 @@ public class InherentImplIntegrationTest {
             type Num = {val: Int}
 
             impl Num where {
-                double: {} -> Num = {} -> {val = it.val * 2},
-                get: {} -> Int = {} -> it.val
+                double: {it: Num} -> Num = {it} -> {val = it.val * 2},
+                get: {it: Num} -> Int = {it} -> it.val
             }
 
             let n: Num = {val = 5}

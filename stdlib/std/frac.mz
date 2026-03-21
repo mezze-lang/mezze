@@ -2,14 +2,14 @@ use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into}
 
-impl NumAdd for Frac where { add = {r} -> __native_frac_add {l = it, r = r} }
-impl NumSub for Frac where { sub = {r} -> __native_frac_subtract {l = it, r = r}, neg = {} -> __native_negate_frac {n = it} }
-impl NumMul for Frac where { mul = {r} -> __native_frac_multiply {l = it, r = r} }
-impl NumDiv for Frac where { div = {r} -> __native_frac_divide {l = it, r = r} }
-impl Eq for Frac where { eq = {r} -> __native_frac_equals {l = it, r = r}, neq = {r} -> if __native_frac_equals {l = it, r = r} then False else True }
-impl Ord for Frac where { lt = {r} -> __native_frac_less_than {l = it, r = r}, le = {r} -> if __native_frac_greater_than {l = it, r = r} then False else True, gt = {r} -> __native_frac_greater_than {l = it, r = r}, ge = {r} -> if __native_frac_less_than {l = it, r = r} then False else True }
-impl Into Float for Frac where { into = {} -> __native_frac_to_float {n = it} }
-impl Into Str for Frac where { into = {} -> __native_frac_to_str {n = it} }
+impl NumAdd for Frac where { add = {it, r} -> __native_frac_add {l = it, r = r} }
+impl NumSub for Frac where { sub = {it, r} -> __native_frac_subtract {l = it, r = r}, neg = {it} -> __native_negate_frac {n = it} }
+impl NumMul for Frac where { mul = {it, r} -> __native_frac_multiply {l = it, r = r} }
+impl NumDiv for Frac where { div = {it, r} -> __native_frac_divide {l = it, r = r} }
+impl Eq for Frac where { eq = {it, r} -> __native_frac_equals {l = it, r = r}, neq = {it, r} -> if __native_frac_equals {l = it, r = r} then False else True }
+impl Ord for Frac where { lt = {it, r} -> __native_frac_less_than {l = it, r = r}, le = {it, r} -> if __native_frac_greater_than {l = it, r = r} then False else True, gt = {it, r} -> __native_frac_greater_than {l = it, r = r}, ge = {it, r} -> if __native_frac_less_than {l = it, r = r} then False else True }
+impl Into Float for Frac where { into = {it} -> __native_frac_to_float {n = it} }
+impl Into Str for Frac where { into = {it} -> __native_frac_to_str {n = it} }
 
 # std/types/frac.mezze - Fraction type operations
 
@@ -81,13 +81,13 @@ pub let abs = { n } -> __native_abs_frac { n = n }
 pub let negate = { n } -> __native_negate_frac { n = n }
 
 impl Frac where {
-    to_float = {} -> __native_frac_to_float {n = it},
-    to_str = {} -> __native_frac_to_str {n = it},
-    abs = {} -> __native_abs_frac {n = it},
-    numerator = {} -> __native_frac_numerator {n = it},
-    denominator = {} -> __native_frac_denominator {n = it},
-    is_zero = {} -> __native_frac_is_zero {n = it},
-    is_positive = {} -> __native_frac_is_positive {n = it},
-    is_negative = {} -> __native_frac_is_negative {n = it},
-    reciprocal = {} -> __native_frac_reciprocal {n = it}
+    to_float = {it} -> __native_frac_to_float {n = it},
+    to_str = {it} -> __native_frac_to_str {n = it},
+    abs = {it} -> __native_abs_frac {n = it},
+    numerator = {it} -> __native_frac_numerator {n = it},
+    denominator = {it} -> __native_frac_denominator {n = it},
+    is_zero = {it} -> __native_frac_is_zero {n = it},
+    is_positive = {it} -> __native_frac_is_positive {n = it},
+    is_negative = {it} -> __native_frac_is_negative {n = it},
+    reciprocal = {it} -> __native_frac_reciprocal {n = it}
 }
