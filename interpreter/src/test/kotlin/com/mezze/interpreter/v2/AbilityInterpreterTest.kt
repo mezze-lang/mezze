@@ -39,7 +39,7 @@ class AbilityInterpreterTest {
             }
 
             impl Encoder for Int where {
-              encode : {it: 'a} -> Str = {it} -> "number"
+              encode : {it: Int} -> Str = {it} -> "number"
             }
 
             1
@@ -56,7 +56,7 @@ class AbilityInterpreterTest {
             }
 
             impl Encoder for Int where {
-              encode : {it: 'a} -> Str = {it} -> "number"
+              encode : {it: Int} -> Str = {it} -> "number"
             }
 
             impl Encoder for Str where {
@@ -93,7 +93,7 @@ class AbilityInterpreterTest {
             use std::int
 
             ability Serializer for 'a where {
-              serialize : {} -> Str
+              serialize : {it: 'a} -> Str
             }
 
             impl Serializer for Int where {

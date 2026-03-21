@@ -313,7 +313,7 @@ class AbilityMethodCallTest {
             }
 
             ability MyEq for 'a where {
-                eq: {it: 'a, r: 'a} -> Bool
+                my_eq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Show for Bool where {
@@ -321,11 +321,11 @@ class AbilityMethodCallTest {
             }
 
             impl MyEq for Bool where {
-                eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else bool::not {b = r}
+                my_eq: {it: Bool, r: Bool} -> Bool = {it, r} -> if it then r else bool::not {b = r}
             }
 
             let showIfEqual = {x, y} ->
-                if x.eq {r = y} then x.show {} else "not equal"
+                if x.my_eq {r = y} then x.show {} else "not equal"
 
             showIfEqual
         """.trimIndent()

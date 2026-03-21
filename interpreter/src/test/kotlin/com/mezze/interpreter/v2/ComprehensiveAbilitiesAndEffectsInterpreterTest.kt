@@ -300,7 +300,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     }
 
     @Test
-    fun testAbilityForReturnsRecordOfMethods() {
+    fun testAbilityMethodCallDirect() {
         val source = """
             use std::int
 
@@ -312,8 +312,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let methods = Show.for { it = 42 }
-            methods.show {}
+            42.show {}
         """.trimIndent()
 
         val result = eval(source)
@@ -321,7 +320,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     }
 
     @Test
-    fun testAbilityForWithMultipleMethods() {
+    fun testAbilityWithMultipleMethodsDirect() {
         val source = """
             use std::int
 
@@ -335,9 +334,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               display = {it, verbose } -> if verbose then "Int($(int::to_str {n = it}))" else int::to_str {n = it}
             }
 
-            let methods = Displayable.for { it = 99 }
-            let s = methods.show {}
-            let d = methods.display { verbose = True }
+            let s = 99.show {}
+            let d = 99.display { verbose = True }
             "$(s) | $(d)"
         """.trimIndent()
 
@@ -346,7 +344,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     }
 
     @Test
-    fun testAbilityForChainedCallDesugarsStatically() {
+    fun testAbilityMethodCallChained() {
         val source = """
             use std::int
 
@@ -358,7 +356,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            Show.for { it = 7 }.show {}
+            7.show {}
         """.trimIndent()
 
         val result = eval(source)

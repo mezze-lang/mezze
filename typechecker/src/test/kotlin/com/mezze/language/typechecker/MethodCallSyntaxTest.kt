@@ -44,7 +44,7 @@ class MethodCallSyntaxTest {
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let x = 42
@@ -65,11 +65,11 @@ class MethodCallSyntaxTest {
     fun `method call with additional arguments`() {
         val source = """
             ability Format for 'a where {
-                format: { style: Str } -> Str
+                format: {it: 'a, style: Str } -> Str
             }
 
             impl Format for Int where {
-                format = { style } -> style
+                format = {it, style } -> style
             }
 
             let x = 42
@@ -90,11 +90,11 @@ class MethodCallSyntaxTest {
     fun `method call on string literal`() {
         val source = """
             ability Length for 'a where {
-                length: {} -> Int
+                length: {it: 'a} -> Int
             }
 
             impl Length for Str where {
-                length = {} -> 0
+                length = {it} -> 0
             }
 
             let result = "hello".length {}
@@ -122,11 +122,11 @@ class MethodCallSyntaxTest {
             type Button = { onClick: {} -> {} }
 
             ability Handler for 'a where {
-                onClick: {} -> Str
+                onClick: {it: 'a} -> Str
             }
 
             impl Handler for Button where {
-                onClick = {} -> "clicked"
+                onClick = {it} -> "clicked"
             }
         """.trimIndent()
 
@@ -162,17 +162,17 @@ class MethodCallSyntaxTest {
     // ========================================================================
 
     @Test
-    fun `Show_dot_for chained with method call`() {
+    fun `method call directly on literal`() {
         val source = """
             ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
-            let result = Show.for { it = 42 }.show {}
+            let result = 42.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -197,7 +197,7 @@ class MethodCallSyntaxTest {
             }
 
             impl Show for Bool where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         True -> "true"
                         False -> "false"
@@ -224,7 +224,7 @@ class MethodCallSyntaxTest {
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let f = { x } ->
@@ -280,7 +280,7 @@ class MethodCallSyntaxTest {
             }
 
             impl Show for Int where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         _ -> "works"
             }
@@ -302,7 +302,7 @@ class MethodCallSyntaxTest {
     fun `it has the correct type in impl method body`() {
         val source = """
             ability Double for 'a where {
-                double: {} -> 'a
+                double: {it: 'a} -> 'a
             }
 
             impl Double for Int where {
@@ -327,18 +327,17 @@ class MethodCallSyntaxTest {
     // ========================================================================
 
     @Test
-    fun `Show_dot_for returns record of methods`() {
+    fun `method call on user-defined Show with Int`() {
         val source = """
             ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
-            let methods = Show.for { it = 42 }
-            let result = methods.show {}
+            let result = 42.show {}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -352,10 +351,9 @@ class MethodCallSyntaxTest {
     }
 
     @Test
-    fun `Ability_dot_for works with built-in Eq`() {
+    fun `method call with built-in Eq`() {
         val source = """
-            let methods = Eq.for { it = 42 }
-            let result = methods.eq { r = 10 }
+            let result = 42.eq { r = 10 }
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -369,21 +367,20 @@ class MethodCallSyntaxTest {
     }
 
     @Test
-    fun `Ability_dot_for with multi-method ability returns all methods`() {
+    fun `multi-method ability with method call syntax`() {
         val source = """
             ability Showable for 'a where {
                 show: {it: 'a} -> Str,
-                display: { verbose: Bool } -> Str
+                display: {it: 'a, verbose: Bool } -> Str
             }
 
             impl Showable for Int where {
-                show = {} -> "int",
-                display = { verbose } -> "int"
+                show = {it} -> "int",
+                display = {it, verbose } -> "int"
             }
 
-            let methods = Showable.for { it = 42 }
-            let r1 = methods.show {}
-            let r2 = methods.display { verbose = True }
+            let r1 = 42.show {}
+            let r2 = 42.display { verbose = True }
         """.trimIndent()
 
         val program = parser.parse(source)

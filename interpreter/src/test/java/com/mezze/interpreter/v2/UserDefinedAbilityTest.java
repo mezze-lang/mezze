@@ -278,7 +278,7 @@ public class UserDefinedAbilityTest {
             use std::int
 
             ability Serializer for 'a where {
-                serialize: {} -> Str
+                serialize: {it: 'a} -> Str
             }
 
             impl Serializer for Int where {
@@ -315,11 +315,11 @@ public class UserDefinedAbilityTest {
             type Maybe 'a = | Nothing, Just {val: 'a} |
 
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for (Maybe Int) where {
-                encode = {} ->
+                encode = {it} ->
                     match it is
                         Nothing -> "nothing"
                         Just {val = x} -> "just"
@@ -409,7 +409,7 @@ public class UserDefinedAbilityTest {
             }
 
             ability Comparer for 'a where {
-                compare: {r: 'a} -> Bool
+                compare: {it: 'a, r: 'a} -> Bool
             }
 
             impl Encoder for Int where {
@@ -417,7 +417,7 @@ public class UserDefinedAbilityTest {
             }
 
             impl Comparer for Int where {
-                compare = {r} -> it == r
+                compare = {it, r} -> it == r
             }
 
             let encode_if_equal: {x: 'a, y: 'a} -> Str with Encoder 'a, Comparer 'a =

@@ -260,15 +260,15 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint inference propagates through function calls`() {
         val code = """
             ability Container for 'c having 'item where {
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Container for [Int] having 'item = Int where {
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
 
             let addItem: {c: 'c, item: 'item} -> 'c with Container 'c = {c, item} ->
-                c.add {element = item}
+                c.append {element = item}
 
             let arr: [Int] = [1, 2, 3]
             let result = addItem {c = arr, item = 42}

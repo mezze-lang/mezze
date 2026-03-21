@@ -262,16 +262,16 @@ class AbilityAssociatedTypesTest {
         val source = """
             ability Collection for 'c having 'item where {
                 empty: {} -> 'c,
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Collection for [Int] having 'item = Int where {
                 empty = {} -> [],
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
 
             let intColl: [Int] = [1, 2]
-            let withInt = intColl.add {element = 42}
+            let withInt = intColl.append {element = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -676,15 +676,15 @@ class AbilityAssociatedTypesTest {
     fun `test associated type resolves to concrete type in method parameter`() {
         val source = """
             ability Container for 'c having 'item where {
-                add: {it: 'c, element: 'item} -> 'c,
+                append: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Container for [Int] having 'item = Int where {
-                add = {it, element} -> it,
+                append = {it, element} -> it,
             }
 
             let arr: [Int] = [1, 2, 3]
-            let result = arr.add {element = 42}
+            let result = arr.append {element = 42}
         """.trimIndent()
 
         val program = parser.parse(source)

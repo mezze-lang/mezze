@@ -203,7 +203,7 @@ class AbilityEffectNameCollisionTest {
     fun `test type name cannot conflict with user-defined ability`() {
         val code = """
             ability Display for 'a where {
-                display: {} -> Str
+                display: {it: 'a} -> Str
             }
 
             type Display = { text: Str }
@@ -263,7 +263,7 @@ class AbilityEffectNameCollisionTest {
             }
 
             impl Show for Int where {
-                show: {it: 'a} -> Str = {it} -> "int"
+                show: {it: Int} -> Str = {it} -> "int"
             }
 
             let my_show = 42.show {}
@@ -279,7 +279,7 @@ class AbilityEffectNameCollisionTest {
         val code = """
             ability Eq for 'a where {
                 eq: {it: 'a, r: 'a} -> Bool,
-                neq: {r: 'a} -> Bool
+                neq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Eq for Bool where {
