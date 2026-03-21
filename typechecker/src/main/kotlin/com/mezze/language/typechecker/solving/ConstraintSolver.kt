@@ -1468,12 +1468,15 @@ class ConstraintSolver(
      * Also checks for built-in ability implementations.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>): Boolean {
-        // Built-in ability auto-derivation for core abilities (Eq, Ord, NumAdd, etc.)
-        // This runs for abilities recognized by BuiltinAbilities regardless of whether
-        // they're also declared in .mz files. This ensures that primitive types always
-        // satisfy core ability constraints, even when the explicit .mz impl isn't in scope.
-        if (typeArgs.size == 1 && BuiltinAbilities.isBuiltin(abilityName)) {
-            if (isBuiltInAbilityImplementation(abilityName, typeArgs.first())) {
+        // Derivation + fallback for abilities that can't come from context alone:
+        // - Inspect: universally available for ALL types
+        // - VarType pass-through: polymorphic types are constrained at call site
+        // - Eq/Ord derivation for composite types (records, variants, lists)
+        // - Bool variant matching for logical operators
+        // - Primitive type impls as fallback (needed when stdlib modules don't have
+        //   cross-type impls in scope, e.g. std::str using == on Int)
+        if (typeArgs.size == 1) {
+            if (canDeriveAbility(abilityName, typeArgs.first())) {
                 return true
             }
         }
@@ -2075,21 +2078,18 @@ class ConstraintSolver(
     }
 
     /**
-     * Check if this is a built-in ability with built-in implementation.
-     *
-     * Built-in abilities have implicit implementations for certain types:
-     * - NumAdd, NumMul, NumDiv, NumMod: Int, Float, Nat, Frac
-     * - NumSub, NumNeg: Int, Float, Frac (NOT Nat - subtraction can go negative)
-     * - Eq: Int, Float, String, Bool, Nat, Frac, Ordering
-     * - Ord: Int, Float, String, Nat, Frac
-     * - Inspect: All primitive types
+     * Check if an ability can be derived or is intrinsically available for a type.
+     * Handles:
+     * - Inspect: universally available for ALL types
+     * - VarType pass-through: polymorphic types are constrained at call site
+     * - Eq/Ord derivation for composite types (records, variants, lists, seqs)
+     * - Bool variant matching for logical operators
+     * - Primitive type fallback: needed when .mz impl isn't in scope (e.g. stdlib
+     *   modules that use == on Int without importing std::int)
      */
-    private fun isBuiltInAbilityImplementation(abilityName: String, type: MezzeType): Boolean {
-        // Unwrap SuspendedType to check the inner value type
+    private fun canDeriveAbility(abilityName: String, type: MezzeType): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
-        // Expand TypeApplication to VariantType if possible
-        // This allows deriving Eq/Ord for named variant types like Option, Result, etc.
         if (unwrappedType is MezzeType.TypeApplication) {
             val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
             if (expanded != null) {
@@ -2098,21 +2098,21 @@ class ConstraintSolver(
         }
 
         return when (abilityName) {
-            // Numeric abilities that work with Nat
+            "Inspect" -> true
+
             "NumAdd", "NumMul", "NumDiv", "NumMod" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType
             }
-            // NumSub (includes neg) doesn't work with Nat (result can be negative)
+
             "NumSub" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.FracType
             }
 
-            // Equality - implemented for most primitive types and derivable for records/variants/lists
             "Eq" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
@@ -2123,49 +2123,33 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.OrderingType ||
                 unwrappedType is MezzeType.BytesType ||
                 unwrappedType is MezzeType.ByteBufferType ||
-                // Type variables are assumed to have Eq - they're constrained at the call site
                 unwrappedType is MezzeType.VarType ||
                 isBoolVariant(unwrappedType) ||
-                // Derive Eq for records if all fields have Eq
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
-                // Derive Eq for variants if all constructor payloads have Eq (or no payload)
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Eq", it) }) ||
-                // Derive Eq for lists if element type has Eq
-                (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType)) ||
-                // Derive Eq for arrays if element type has Eq
-                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
             }
 
-            // Ordering - implemented for comparable types and derivable for records/variants/lists
             "Ord" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.StringType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType ||
-                // Type variables are assumed to have Ord - they're constrained at the call site
                 unwrappedType is MezzeType.VarType ||
-                // Derive Ord for records if all fields have Ord
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Ord", it) }) ||
-                // Derive Ord for variants if all constructor payloads have Ord (or no payload)
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Ord", it) }) ||
-                // Derive Ord for lists if element type has Ord
-                (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType)) ||
-                // Derive Ord for arrays if element type has Ord
-                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Ord", unwrappedType.elementType)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType))
             }
 
-            // Inspect - built-in ability for displaying values
-            "Inspect" -> true  // All types can be inspected
-
-            // Logical operators - Bool (including partial Bool variants from unification)
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType ||
                 isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }
 
-            // NumZero/NumOne - numeric types only
             "NumZero", "NumOne" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
@@ -2173,7 +2157,6 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.FracType
             }
 
-            // Default - types with sensible default values
             "Default" -> {
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
@@ -2190,8 +2173,13 @@ class ConstraintSolver(
     }
 
     /**
-     * Check if a type is the Bool variant type.
+     * Check if a type has an ability via derivation OR via an explicit impl in context.
+     * Used for recursive Eq/Ord derivation on composite types.
      */
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType): Boolean {
+        return canDeriveAbility(abilityName, type) || checkAbilityImplementation(abilityName, listOf(type))
+    }
+
     /**
      * Generate a user-friendly error message for ability constraint failures.
      * Provides specific messages for common cases like arithmetic with function types.

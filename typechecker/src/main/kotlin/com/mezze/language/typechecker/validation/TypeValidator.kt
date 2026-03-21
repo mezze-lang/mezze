@@ -393,11 +393,17 @@ class TypeValidator(
                 continue
             }
 
-            // Check if this is a built-in ability with built-in implementation
             val abilityName = constraint.abilityName
 
-            if (isBuiltInAbilityImplementation(abilityName, concreteType)) {
-                // Built-in ability for built-in type (e.g., Eq for Int)
+            // Built-in abilities are validated by the ConstraintSolver (Phase 3).
+            // No need to re-validate here — if we reached Phase 5, they passed.
+            if (BuiltinAbilities.isBuiltin(abilityName)) {
+                continue
+            }
+
+            // Derivation: Inspect universality, VarType pass-through,
+            // Eq/Ord composite derivation, Bool logical operators.
+            if (canDeriveAbility(abilityName, concreteType)) {
                 continue
             }
 
@@ -736,14 +742,16 @@ class TypeValidator(
     }
 
     /**
-     * Check if this is a built-in ability with built-in implementation.
+     * Check if an ability can be derived without an explicit impl in context.
+     * Only handles things that CAN'T come from .mz files:
+     * - Inspect: universally available for ALL types
+     * - VarType pass-through: polymorphic types are constrained at call site
+     * - Eq/Ord derivation for composite types (records, variants, lists, seqs)
+     * - Bool variant matching for logical operators
      */
-    private fun isBuiltInAbilityImplementation(abilityName: String, type: MezzeType): Boolean {
-        // Unwrap SuspendedType to check the inner value type
+    private fun canDeriveAbility(abilityName: String, type: MezzeType): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
-        // Expand TypeApplication to VariantType if possible
-        // This allows deriving Eq/Ord for named variant types like Option, Result, etc.
         if (unwrappedType is MezzeType.TypeApplication) {
             val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
             if (expanded != null) {
@@ -751,71 +759,51 @@ class TypeValidator(
             }
         }
 
-        // Built-in abilities have implicit implementations for certain types
         return when (abilityName) {
-            // Numeric abilities - implemented for Int, Float, Nat, Frac
-            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod" -> {
-                unwrappedType is MezzeType.IntType ||
-                unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.NatType ||
-                unwrappedType is MezzeType.FracType
-            }
-
-            // Equality - implemented for most primitive types and derivable for records/variants/lists
-            "Eq" -> {
-                unwrappedType is MezzeType.IntType ||
-                unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.StringType ||
-                unwrappedType is MezzeType.BoolType ||
-                unwrappedType is MezzeType.NatType ||
-                unwrappedType is MezzeType.FracType ||
-                unwrappedType is MezzeType.OrderingType ||
-                unwrappedType is MezzeType.BytesType ||
-                unwrappedType is MezzeType.ByteBufferType ||
-                // Type variables are assumed to have Eq - they're constrained at the call site
-                unwrappedType is MezzeType.VarType ||
-                isBoolVariant(unwrappedType) ||
-                // Derive Eq for records if all fields have Eq
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
-                // Derive Eq for variants if all constructor payloads have Eq (or no payload)
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Eq", it) }) ||
-                // Derive Eq for lists if element type has Eq
-                (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType)) ||
-                // Derive Eq for seqs if element type has Eq
-                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
-            }
-
-            // Ordering - implemented for comparable types and derivable for records/variants/lists
-            "Ord" -> {
-                unwrappedType is MezzeType.IntType ||
-                unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.StringType ||
-                unwrappedType is MezzeType.NatType ||
-                unwrappedType is MezzeType.FracType ||
-                // Type variables are assumed to have Ord - they're constrained at the call site
-                unwrappedType is MezzeType.VarType ||
-                // Derive Ord for records if all fields have Ord
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Ord", it) }) ||
-                // Derive Ord for variants if all constructor payloads have Ord (or no payload)
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Ord", it) }) ||
-                // Derive Ord for lists if element type has Ord
-                (unwrappedType is MezzeType.ListType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType)) ||
-                // Derive Ord for seqs if element type has Ord
-                (unwrappedType is MezzeType.SeqType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
-            }
-
-            // Inspect - built-in ability for displaying values (to_str)
-            // CRITICAL: Inspect is universally available for ALL types (per OldTypeChecker line 2806-2807)
-            // This includes newtypes, records, variants, functions, etc.
-            // Note: "Show" is NOT a built-in ability - it's commonly used as a user-defined ability name
             "Inspect" -> true
 
-            // Logical operations - only for Bool
+            "Eq" -> {
+                unwrappedType is MezzeType.VarType ||
+                isBoolVariant(unwrappedType) ||
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
+            }
+
+            "Ord" -> {
+                unwrappedType is MezzeType.VarType ||
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Ord", unwrappedType.elementType)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType))
+            }
+
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType)
             }
 
             else -> false
+        }
+    }
+
+    /**
+     * Check if a type has an ability via derivation OR via an explicit impl in context.
+     */
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType): Boolean {
+        return canDeriveAbility(abilityName, type) || hasImplInContext(abilityName, type)
+    }
+
+    /**
+     * Check if an ability impl for this type exists in the typing context.
+     */
+    private fun hasImplInContext(abilityName: String, type: MezzeType): Boolean {
+        val impls = context.getAbilityImpls(abilityName)
+        return impls.any { implInfo ->
+            val annotations = implInfo.targetTypeAnnotations ?: return@any false
+            if (annotations.size != 1) return@any false
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+            typeMatchesAnnotation(type, annotations[0], implInfo.typeVars, typeVarBindings)
         }
     }
 

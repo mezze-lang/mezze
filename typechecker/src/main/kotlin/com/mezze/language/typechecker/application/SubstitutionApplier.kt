@@ -1575,8 +1575,19 @@ class SubstitutionApplier(
             }
         }
 
-        if (impl != null) {
-            // Found explicit implementation
+        if (impl != null && BuiltinAbilities.isBuiltin(abilityName) &&
+            BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
+            // Built-in ability with a context impl (from prelude) — use native fast path.
+            // The .mz impl is authoritative for type checking, but the interpreter
+            // uses optimized native dispatch for built-in abilities on primitive types.
+            val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(primaryType)}"
+            resolvedAbilities[builtinKey] = ResolvedAbility(
+                abilityName = abilityName,
+                typeArgs = listOf(primaryType),
+                isBuiltin = true
+            )
+        } else if (impl != null) {
+            // Found explicit implementation (user-defined or non-builtin)
             // Reconstruct the full type args from the impl's target types
             val implTypeArgs = impl.targetTypes.map { typeName ->
                 // Use centralized registry for primitive types
@@ -1773,7 +1784,16 @@ class SubstitutionApplier(
                 impl = mutableAbilityImpls[implHashes.first()]
             }
         }
-        if (impl != null) {
+        if (impl != null && BuiltinAbilities.isBuiltin(abilityName) &&
+            BuiltinAbilities.typeHasAutomaticImplementation(receiverType, abilityName)) {
+            // Built-in ability with a context impl — use native fast path
+            val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(receiverType)}"
+            resolvedAbilities[builtinKey] = ResolvedAbility(
+                abilityName = abilityName,
+                typeArgs = listOf(receiverType),
+                isBuiltin = true
+            )
+        } else if (impl != null) {
             val contentHash = impl.contentHash
                 ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
             resolvedAbilities[contentHash] = ResolvedAbility(
@@ -1935,7 +1955,16 @@ class SubstitutionApplier(
             // Try to find an explicit implementation
             val impl = findAbilityImplementation(abilityName, typeArgs)
 
-            if (impl != null) {
+            if (impl != null && BuiltinAbilities.isBuiltin(abilityName) && typeArgs.size == 1 &&
+                BuiltinAbilities.typeHasAutomaticImplementation(typeArgs[0], abilityName)) {
+                // Built-in ability with a context impl — use native fast path
+                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(typeArgs[0])}"
+                resolvedAbilities[builtinKey] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,
+                    isBuiltin = true
+                )
+            } else if (impl != null) {
                 // Found explicit implementation - use content hash as key
                 val contentHash = impl.contentHash
                     ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
@@ -2021,7 +2050,16 @@ class SubstitutionApplier(
             // Try to find an explicit implementation
             val impl = findAbilityImplementation(abilityName, typeArgs)
 
-            if (impl != null) {
+            if (impl != null && BuiltinAbilities.isBuiltin(abilityName) && typeArgs.size == 1 &&
+                BuiltinAbilities.typeHasAutomaticImplementation(typeArgs[0], abilityName)) {
+                // Built-in ability with a context impl — use native fast path
+                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(typeArgs[0])}"
+                resolvedAbilities[builtinKey] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,
+                    isBuiltin = true
+                )
+            } else if (impl != null) {
                 // Found explicit implementation - use content hash as key
                 val contentHash = impl.contentHash
                     ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")

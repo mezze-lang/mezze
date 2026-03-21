@@ -195,9 +195,7 @@ class TypeChecker(
         var loadedModules: Map<String, TypedModule> = emptyMap()
         // Prelude auto-import: loads inherent impls from all stdlib modules so
         // method syntax works without explicit `use` (e.g., [1,2,3].map {f = ...}).
-        // Only inherent impls are imported — named ability impls (Eq, NumAdd) are handled
-        // by the existing hardcoded isBuiltInAbilityImplementation() system.
-        val shouldInjectPrelude = enablePrelude && (currentModulePath == null || !currentModulePath.startsWith("std::"))
+        val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
         val enhancedContext = if (hasImports(program) || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             // CRITICAL FIX: Pass the ModuleResolver to ModuleTypeChecker so it can update
@@ -226,9 +224,6 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        // Reset TypeVar counter after prelude loading so user program
-                        // gets deterministic type variable names/IDs
-                        TypeVar.resetCounter()
                         mergeImportContext(parentContext, importContext!!)
                     } else {
                         mergeImportContext(parentContext, importContext!!)
@@ -1231,7 +1226,7 @@ class TypeChecker(
                     importedAbilities = emptyMap(),
                     importedEffects = emptyMap(),
                     importedImpls = emptyMap(),
-                    importedAbilityImpls = ctx.importedAbilityImpls.filter { (_, impl) -> impl.isInherent }
+                    importedAbilityImpls = ctx.importedAbilityImpls
                 )
             }
             is ImportResolutionResult.Failure -> ModuleImportContext.empty()
