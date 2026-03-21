@@ -30,7 +30,7 @@ class AbilityValidationTest {
 
             ability Eq for 'a where {
               eq: {it: 'a, r: 'a} -> Bool,
-              neq: {r: 'a} -> Bool
+              neq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Eq for Str where {
@@ -80,11 +80,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Convert 'to for 'from where {
-              convert: {} -> 'to
+              convert: {it: 'from} -> 'to
             }
 
             impl Convert for Int Str where {
-              convert: {} -> Int = {} ->
+              convert: {it: Str} -> Int = {it} ->
                 match int::from_string {s = it} is
                   Some {val} -> val
                   None -> 0
@@ -107,7 +107,7 @@ class AbilityValidationTest {
             use std::int
 
             ability Display for 'a where {
-              display: {} -> {text: Str}
+              display: {it: 'a} -> {text: Str}
             }
 
             impl Display for Int where {
@@ -137,9 +137,9 @@ class AbilityValidationTest {
 
             # Method-level constraints instead of ability-level
             ability Ord for 'a where {
-              compare: {r: 'a} with Eq 'a -> Int,
-              lt: {r: 'a} with Eq 'a -> Bool,
-              gt: {r: 'a} with Eq 'a -> Bool
+              compare: {it: 'a, r: 'a} with Eq 'a -> Int,
+              lt: {it: 'a, r: 'a} with Eq 'a -> Bool,
+              gt: {it: 'a, r: 'a} with Eq 'a -> Bool
             }
 
             impl Eq for Str where {
@@ -167,18 +167,18 @@ class AbilityValidationTest {
     fun `test ability with associated types for generic containers`() {
         val source = """
             ability Container for 'c having 'item where {
-              show: {it: 'a} -> Str,
-              get: {index: Int} -> 'item
+              show: {it: 'c} -> Str,
+              get: {it: 'c, index: Int} -> 'item
             }
 
             impl Container for [Int] having 'item = Int where {
-              show = {} -> "array of integers",
-              get = {index} -> 42
+              show = {it} -> "array of integers",
+              get = {it, index} -> 42
             }
 
             impl Container for [Str] having 'item = Str where {
-              show = {} -> "array of strings",
-              get = {index} -> "hello"
+              show = {it} -> "array of strings",
+              get = {it, index} -> "hello"
             }
 
             let intArray = [1, 2, 3]
@@ -198,7 +198,7 @@ class AbilityValidationTest {
         val source = """
             ability Eq for 'a where {
               eq: {it: 'a, r: 'a} -> Bool,
-              neq: {r: 'a} -> Bool
+              neq: {it: 'a, r: 'a} -> Bool
             }
 
             impl Eq for Str where {
@@ -322,7 +322,7 @@ class AbilityValidationTest {
             use std::int
 
             ability Display for 'a where {
-              display: {} -> {text: Str}
+              display: {it: 'a} -> {text: Str}
             }
 
             impl Display for Int where {
@@ -345,7 +345,7 @@ class AbilityValidationTest {
     fun `test type parameter count mismatch should fail`() {
         val source = """
             ability Convert 'to for 'from where {
-              convert: {} -> 'to
+              convert: {it: 'from} -> 'to
             }
 
             impl Convert for Str where {
@@ -370,7 +370,7 @@ class AbilityValidationTest {
             use std::int
 
             ability Process for 'a where {
-              process: {} -> Str
+              process: {it: 'a} -> Str
             }
 
             impl Process for Int where {
@@ -399,7 +399,7 @@ class AbilityValidationTest {
             }
 
             impl Show for Int where {
-              show = {} -> "number"
+              show = {it} -> "number"
             }
 
             let display: {val: 'a} -> Str with Show 'a = {val} ->
@@ -429,7 +429,7 @@ class AbilityValidationTest {
             }
 
             impl Show for Float where {
-              show = {} -> "float"
+              show = {it} -> "float"
             }
 
             let display: {val: 'a} -> Str with Show 'a = {val} ->
@@ -569,11 +569,11 @@ class AbilityValidationTest {
             use std::int
 
             ability Convert 'to for 'from where {
-              convert: {} -> 'to
+              convert: {it: 'from} -> 'to
             }
 
             impl Convert for Int Str where {
-              convert = {} -> 0
+              convert = {it} -> 0
             }
 
             let transform: {val: Float} -> Int with Convert Int Float = {val} ->
@@ -656,11 +656,11 @@ class AbilityValidationTest {
         // "impl Convert for Int Str" with types in the right order
         val source = """
             ability Convert 'to for 'from where {
-              convert: {} -> 'to
+              convert: {it: 'from} -> 'to
             }
 
             impl Convert for Int Str where {
-              convert = {} -> 0
+              convert = {it} -> 0
             }
 
             # Multi-parameter constraint: Convert 'b 'a with 'to='b, 'from='a

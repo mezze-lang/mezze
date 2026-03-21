@@ -68,7 +68,7 @@ class AbilityOrphanRulesTest {
             }
 
             impl Printable for Int where {
-                print = {} -> "int"
+                print = {it} -> "int"
             }
 
             impl Printable for Str where {
@@ -76,7 +76,7 @@ class AbilityOrphanRulesTest {
             }
 
             impl Printable for Bool where {
-                print = {} ->
+                print = {it} ->
                     match it is
                         True -> "true"
                         False -> "false"
@@ -158,7 +158,7 @@ class AbilityOrphanRulesTest {
     fun `multi-param ability impl in module of any target type is valid`() {
         val source = """
             ability Convert 'b for 'a where {
-                convert: {} -> 'b
+                convert: {it: 'a} -> 'b
             }
 
             type Celsius = | Celsius { degrees: Float } |
@@ -166,7 +166,7 @@ class AbilityOrphanRulesTest {
 
             # Impl in same module as both Celsius and Fahrenheit - OK
             impl Convert for Fahrenheit Celsius where {
-                convert = {} ->
+                convert = {it} ->
                     match it is
                         Celsius { degrees } -> Fahrenheit { degrees = degrees * 1.8 + 32.0 }
             }
@@ -246,7 +246,7 @@ class AbilityOrphanRulesTest {
 
             # Orphan: Printable is from my_ability, Int is built-in
             impl Printable for Int where {
-                print = {} -> "int"
+                print = {it} -> "int"
             }
         """.trimIndent())
 

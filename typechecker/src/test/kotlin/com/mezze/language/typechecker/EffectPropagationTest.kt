@@ -286,7 +286,7 @@ class EffectPropagationTest {
             }
 
             ability Math for 'a where {
-              compute : {r: 'a} -> 'a
+              compute : {it: 'a, r: 'a} -> 'a
             }
 
             impl Math for Int where {

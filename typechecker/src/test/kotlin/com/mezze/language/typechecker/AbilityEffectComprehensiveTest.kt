@@ -697,7 +697,7 @@ class AbilityEffectComprehensiveTest {
             val abilityMod = tempDir.resolve("serializer.mz")
             Files.writeString(abilityMod, """
                 ability Serializable for 'a where {
-                    serialize: {} -> Str
+                    serialize: {it: 'a} -> Str
                 }
             """.trimIndent())
 
@@ -709,7 +709,7 @@ class AbilityEffectComprehensiveTest {
                 type MyData = | MyData { val: Str } |
 
                 impl serializer::Serializable for MyData where {
-                    serialize = {} ->
+                    serialize = {it} ->
                         match it is
                             MyData { val } -> val
                 }

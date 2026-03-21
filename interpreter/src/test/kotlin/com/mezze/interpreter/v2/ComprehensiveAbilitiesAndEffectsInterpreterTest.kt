@@ -24,7 +24,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -44,7 +44,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability MyConvert 'b for 'a where {
-              convert : {} -> 'b
+              convert : {it: 'a} -> 'b
             }
 
             impl MyConvert for Str Int where {
@@ -64,7 +64,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -91,7 +91,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -192,7 +192,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testComplexAbilityAndEffectInteractionExecution() {
         val source = """
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             effect Log where {
@@ -200,7 +200,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show for Int where {
-              show = {} -> "123"
+              show = {it} -> "123"
             }
 
             impl Log for MockLogger where {
@@ -221,15 +221,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testAbilityChainExecution() {
         val source = """
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
-              show = {} -> "5"
+              show = {it} -> "5"
             }
 
             impl Show for Bool where {
-              show = {} -> "True"
+              show = {it} -> "True"
             }
 
             do
@@ -305,7 +305,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -326,13 +326,13 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Displayable for 'a where {
-              show : {} -> Str,
-              display : { verbose: Bool } -> Str
+              show : {it: 'a} -> Str,
+              display : {it: 'a, verbose: Bool } -> Str
             }
 
             impl Displayable for Int where {
               show = {it} -> int::to_str {n = it},
-              display = { verbose } -> if verbose then "Int($(int::to_str {n = it}))" else int::to_str {n = it}
+              display = {it, verbose } -> if verbose then "Int($(int::to_str {n = it}))" else int::to_str {n = it}
             }
 
             let methods = Displayable.for { it = 99 }
@@ -351,7 +351,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             use std::int
 
             ability Show for 'a where {
-              show : {} -> Str
+              show : {it: 'a} -> Str
             }
 
             impl Show for Int where {

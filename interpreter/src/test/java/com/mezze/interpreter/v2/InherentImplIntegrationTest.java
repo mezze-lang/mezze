@@ -33,7 +33,7 @@ public class InherentImplIntegrationTest {
             type Point = {x: Int, y: Int}
 
             impl Point where {
-                translate: {dx: Int, dy: Int} -> Point = {dx, dy} -> {x = it.x + dx, y = it.y + dy}
+                translate: {it: Point, dx: Int, dy: Int} -> Point = {it, dx, dy} -> {x = it.x + dx, y = it.y + dy}
             }
 
             let p: Point = {x = 1, y = 2}
@@ -49,7 +49,7 @@ public class InherentImplIntegrationTest {
             type Color = | Red, Green, Blue |
 
             impl Color where {
-                is_red: {} -> Bool = {} ->
+                is_red: {it: Color} -> Bool = {it} ->
                     match it is
                         Red -> True
                         _ -> False
@@ -82,7 +82,7 @@ public class InherentImplIntegrationTest {
     void testInherentImplCoexistsWithAbilityImpl() {
         Object result = MezzeTestHelper.run("""
             ability Describable for 'a where {
-                describe: {} -> Str
+                describe: {it: 'a} -> Str
             }
 
             type Item = {name: Str, count: Int}
@@ -92,7 +92,7 @@ public class InherentImplIntegrationTest {
             }
 
             impl Item where {
-                total: {it: Widget} -> Int = {it} -> it.count * 2
+                total: {it: Item} -> Int = {it} -> it.count * 2
             }
 
             let item: Item = {name = "widget", count = 5}
@@ -107,8 +107,8 @@ public class InherentImplIntegrationTest {
             type Box = {width: Int, height: Int}
 
             impl Box where {
-                area: {it: Rect} -> Int = {it} -> it.width * it.height,
-                scale: {factor: Int} -> Box = {factor} -> {width = it.width * factor, height = it.height * factor}
+                area: {it: Box} -> Int = {it} -> it.width * it.height,
+                scale: {it: Box, factor: Int} -> Box = {it, factor} -> {width = it.width * factor, height = it.height * factor}
             }
 
             let b: Box = {width = 3, height = 4}

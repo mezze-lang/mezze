@@ -22,7 +22,7 @@ class AbilityInterpreterTest {
     fun testSimpleAbilityDeclaration() {
         val code = """
             ability Encoder for 'a where {
-              encode : {} -> Str
+              encode : {it: 'a} -> Str
             }
 
             1
@@ -35,11 +35,11 @@ class AbilityInterpreterTest {
     fun testImplAbilityDeclaration() {
         val code = """
             ability Encoder for 'a where {
-              encode : {} -> Str
+              encode : {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
-              encode : {} -> Str = {} -> "number"
+              encode : {it: 'a} -> Str = {it} -> "number"
             }
 
             1
@@ -52,11 +52,11 @@ class AbilityInterpreterTest {
     fun testMultipleAbilityImplementations() {
         val code = """
             ability Encoder for 'a where {
-              encode : {} -> Str
+              encode : {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
-              encode : {} -> Str = {} -> "number"
+              encode : {it: 'a} -> Str = {it} -> "number"
             }
 
             impl Encoder for Str where {
@@ -73,8 +73,8 @@ class AbilityInterpreterTest {
     fun testAbilityWithMultipleOperations() {
         val code = """
             ability Show for 'a where {
-              show : {} -> Str,
-              debug : {} -> Str
+              show : {it: 'a} -> Str,
+              debug : {it: 'a} -> Str
             }
 
             impl Show for Str where {
@@ -111,7 +111,7 @@ class AbilityInterpreterTest {
             use std::int
 
             ability Encoder for 'a where {
-              encode : {} -> Str
+              encode : {it: 'a} -> Str
             }
 
             impl Encoder for Int where {

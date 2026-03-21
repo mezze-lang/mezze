@@ -378,7 +378,7 @@ class ImportedPerformerTest {
             }
 
             impl Show for Int where {
-                show = {} -> "an integer"
+                show = {it} -> "an integer"
             }
 
             let result = 42.show {}
@@ -403,7 +403,7 @@ class ImportedPerformerTest {
             }
 
             impl Show for Int where {
-                show = {} -> "an integer"
+                show = {it} -> "an integer"
             }
 
             impl Show for Str where {
@@ -411,7 +411,7 @@ class ImportedPerformerTest {
             }
 
             impl Show for Bool where {
-                show = {} ->
+                show = {it} ->
                     match it is
                         True -> "true"
                         False -> "false"
@@ -446,13 +446,13 @@ class ImportedPerformerTest {
     fun `ability with multiple methods should work`() {
         val source = """
             ability Serializable for 'a where {
-                serialize: {} -> Str,
-                deserialize: { str: Str } -> 'a
+                serialize: {it: 'a} -> Str,
+                deserialize: {it: 'a, str: Str } -> 'a
             }
 
             impl Serializable for Int where {
-                serialize = {} -> "int",
-                deserialize = { str } -> 0
+                serialize = {it} -> "int",
+                deserialize = {it, str } -> 0
             }
 
             let serialized = 42.serialize {}
@@ -505,7 +505,7 @@ class ImportedPerformerTest {
             }
 
             impl Show for Int where {
-                show = {} -> "int"
+                show = {it} -> "int"
             }
 
             let result = show {}

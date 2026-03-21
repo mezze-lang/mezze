@@ -56,7 +56,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Display for 'a where {
-              display: {} -> {text: Str}
+              display: {it: 'a} -> {text: Str}
             }
 
             impl Display for Int where {
@@ -78,7 +78,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with polymorphic operation should pass`() {
         val source = """
             ability Identity for 'a where {
-              identity: {} -> 'a
+              identity: {it: 'a} -> 'a
             }
 
             impl Identity for Int where {
@@ -100,7 +100,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with numeric operations should pass`() {
         val source = """
             ability Double for 'a where {
-              double: {} -> 'a
+              double: {it: 'a} -> 'a
             }
 
             impl Double for Int where {
@@ -122,7 +122,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with conditional should pass`() {
         val source = """
             ability Sign for 'a where {
-              sign: {} -> Str
+              sign: {it: 'a} -> Str
             }
 
             impl Sign for Int where {
@@ -144,11 +144,11 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with pattern matching should pass`() {
         val source = """
             ability DefaultValue for 'a where {
-              default: {opt: Option 'a} -> 'a
+              default: {it: 'a, opt: Option 'a} -> 'a
             }
 
             impl DefaultValue for Int where {
-              default = {opt} -> match opt is
+              default = {it, opt} -> match opt is
                 Some {val} -> val
                 None -> 0
             }
@@ -168,7 +168,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with multiple parameters should pass`() {
         val source = """
             ability Combine for 'a where {
-              combine: {right: 'a} -> 'a
+              combine: {it: 'a, right: 'a} -> 'a
             }
 
             impl Combine for Int where {
@@ -192,11 +192,11 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Parse for 'a where {
-              parse: {str: Str} -> Int
+              parse: {it: 'a, str: Str} -> Int
             }
 
             impl Parse for Str where {
-              parse = {str} ->
+              parse = {it, str} ->
                 match int::from_string {s = str} is
                   Some {val} -> val
                   None -> 0
@@ -242,7 +242,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong type in conditional should fail`() {
         val source = """
             ability Process for 'a where {
-              process: {} -> Str
+              process: {it: 'a} -> Str
             }
 
             impl Process for Int where {
@@ -265,11 +265,11 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning wrong type in pattern match should fail`() {
         val source = """
             ability Extract for 'a where {
-              extract: {opt: Option 'a} -> Str
+              extract: {it: 'a, opt: Option 'a} -> Str
             }
 
             impl Extract for Int where {
-              extract = {opt} -> match opt is
+              extract = {it, opt} -> match opt is
                 Some {val} -> val
                 None -> "none"
             }
@@ -292,7 +292,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Display for 'a where {
-              display: {} -> {text: Str}
+              display: {it: 'a} -> {text: Str}
             }
 
             impl Display for Int where {
@@ -315,7 +315,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body with wrong record field type should fail`() {
         val source = """
             ability Display for 'a where {
-              display: {} -> {text: Str}
+              display: {it: 'a} -> {text: Str}
             }
 
             impl Display for Int where {
@@ -338,11 +338,11 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body not using all parameters should fail`() {
         val source = """
             ability Combine for 'a where {
-              combine: {right: 'a} -> 'a
+              combine: {it: 'a, right: 'a} -> 'a
             }
 
             impl Combine for Int where {
-              combine = {right} -> it
+              combine = {it, right} -> it
             }
 
             let add = {x, y} -> x.combine {right = y}
@@ -362,7 +362,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body with undefined function should fail`() {
         val source = """
             ability Process for 'a where {
-              process: {} -> Str
+              process: {it: 'a} -> Str
             }
 
             impl Process for Int where {
@@ -385,7 +385,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body with wrong numeric operation should fail`() {
         val source = """
             ability StringLength for 'a where {
-              length: {} -> Int
+              length: {it: 'a} -> Int
             }
 
             impl StringLength for Str where {
@@ -431,7 +431,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability body returning function when value expected should fail`() {
         val source = """
             ability GetValue for 'a where {
-              getValue: {} -> Int
+              getValue: {it: 'a} -> Int
             }
 
             impl GetValue for Int where {
@@ -456,11 +456,11 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Transform for 'a where {
-              transform: {} -> Str
+              transform: {it: 'a} -> Str
             }
 
             impl Transform for Int where {
-              transform = {} -> int::to_str {n = "not an int"}
+              transform = {it} -> int::to_str {n = "not an int"}
             }
 
             let t = {x} -> x.transform {}
@@ -481,7 +481,7 @@ class AbilityImplementationBodyValidationTest {
     fun `test ability with identity implementation should pass`() {
         val source = """
             ability Identity for 'a where {
-              identity: {} -> 'a
+              identity: {it: 'a} -> 'a
             }
 
             impl Identity for Bool where {
@@ -510,7 +510,7 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Format for 'a where {
-              format: {} -> Str
+              format: {it: 'a} -> Str
             }
 
             impl Format for Int where {
@@ -534,11 +534,11 @@ class AbilityImplementationBodyValidationTest {
             use std::int
 
             ability Calculate for 'a where {
-              calculate: {y: 'a} -> Str
+              calculate: {it: 'a, y: 'a} -> Str
             }
 
             impl Calculate for Int where {
-              calculate = {y} -> int::to_str {n = (it + y) * 2}
+              calculate = {it, y} -> int::to_str {n = (it + y) * 2}
             }
 
             let calc = {a, b} -> a.calculate {y = b}

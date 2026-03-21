@@ -263,7 +263,7 @@ class AbilityEffectNameCollisionTest {
             }
 
             impl Show for Int where {
-                show: {it: 'a} -> Str = {} -> "int"
+                show: {it: 'a} -> Str = {it} -> "int"
             }
 
             let my_show = 42.show {}

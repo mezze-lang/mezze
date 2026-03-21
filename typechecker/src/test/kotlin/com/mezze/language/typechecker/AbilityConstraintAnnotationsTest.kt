@@ -44,13 +44,13 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint with having clause specifies associated type`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
-                size: {} -> Int,
+                get: {it: 'c, index: Int} -> (Option 'item),
+                size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
-                size = {} -> 0,
+                get = {it, index} -> Some { val = 0 },
+                size = {it} -> 0,
             }
 
             let getFirst: {c: 'c} -> (Option Int) with Container 'c having 'item = Int = {c} ->
@@ -71,13 +71,13 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint without having clause infers associated type`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
-                size: {} -> Int,
+                get: {it: 'c, index: Int} -> (Option 'item),
+                size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
-                size = {} -> 0,
+                get = {it, index} -> Some { val = 0 },
+                size = {it} -> 0,
             }
 
             let getFirst: {c: 'c} -> (Option 'item) with Container 'c = {c} ->
@@ -95,13 +95,13 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint without having clause works with concrete usage`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> (Option 'item),
-                size: {} -> Int,
+                get: {it: 'c, index: Int} -> (Option 'item),
+                size: {it: 'c} -> Int,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> Some { val = 0 },
-                size = {} -> 0,
+                get = {it, index} -> Some { val = 0 },
+                size = {it} -> 0,
             }
 
             let arr: [Int] = [1, 2, 3]
@@ -123,7 +123,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test multiple ability constraints one with having one without`() {
         val code = """
             ability Container for 'c having 'item where {
-                size: {} -> Int,
+                size: {it: 'c} -> Int,
             }
 
             ability Show for 'a where {
@@ -131,11 +131,11 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl Show for Int where {
-                show = {} -> "int",
+                show = {it} -> "int",
             }
 
             impl Container for [Int] having 'item = Int where {
-                size = {} -> 0,
+                size = {it} -> 0,
             }
 
             let showAndSize: {c: 'c, v: 'v} -> Int with Container 'c having 'item = Int, Show 'v = {c, v} ->
@@ -152,8 +152,8 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint without having clause multiple associated types`() {
         val code = """
             ability BiContainer for 'c having 'key, 'value where {
-                getKey: {} -> 'key,
-                getValue: {} -> 'value,
+                getKey: {it: 'c} -> 'key,
+                getValue: {it: 'c} -> 'value,
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
@@ -173,8 +173,8 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint with partial having clause specifies one associated type`() {
         val code = """
             ability BiContainer for 'c having 'key, 'value where {
-                getKey: {} -> 'key,
-                getValue: {} -> 'value,
+                getKey: {it: 'c} -> 'key,
+                getValue: {it: 'c} -> 'value,
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
@@ -202,7 +202,7 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl Eq for Int where {
-                eq = {r} -> True,
+                eq = {it, r} -> True,
             }
 
             let areEqual: {a: 'a, b: 'a} -> Bool with Eq 'a = {a, b} ->
@@ -235,11 +235,11 @@ class AbilityConstraintAnnotationsTest {
             }
 
             impl Eq for Int where {
-                eq = {r} -> True,
+                eq = {it, r} -> True,
             }
 
             impl Show for Int where {
-                show = {} -> "int",
+                show = {it} -> "int",
             }
 
             let checkAndShow: {a: 'a, b: 'a} -> Str with Eq 'a, Show 'a = {a, b} ->
@@ -260,11 +260,11 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint inference propagates through function calls`() {
         val code = """
             ability Container for 'c having 'item where {
-                add: {element: 'item} -> 'c,
+                add: {it: 'c, element: 'item} -> 'c,
             }
 
             impl Container for [Int] having 'item = Int where {
-                add = {element} -> it,
+                add = {it, element} -> it,
             }
 
             let addItem: {c: 'c, item: 'item} -> 'c with Container 'c = {c, item} ->
@@ -287,7 +287,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test ability constraint with complex associated type without having`() {
         val code = """
             ability Container for 'c having 'item where {
-                getAll: {} -> ['item],
+                getAll: {it: 'c} -> ['item],
             }
 
             impl Container for {items: [Str]} having 'item = Str where {
@@ -383,11 +383,11 @@ class AbilityConstraintAnnotationsTest {
     fun `test error message for complex ability associated type mismatch`() {
         val code = """
             ability Container for 'c having 'item where {
-                get: {index: Int} -> 'item,
+                get: {it: 'c, index: Int} -> 'item,
             }
 
             impl Container for [Int] having 'item = Int where {
-                get = {index} -> 0,
+                get = {it, index} -> 0,
             }
 
             let getFirst: {c: 'c} -> Str with Container 'c having 'item = Int = {c} ->
@@ -411,8 +411,8 @@ class AbilityConstraintAnnotationsTest {
     fun `test error message for multiple ability associated type mismatches`() {
         val code = """
             ability BiContainer for 'c having 'key, 'value where {
-                getKey: {} -> 'key,
-                getValue: {} -> 'value,
+                getKey: {it: 'c} -> 'key,
+                getValue: {it: 'c} -> 'value,
             }
 
             impl BiContainer for {k: Int, v: Str} having 'key = Int, 'value = Str where {
