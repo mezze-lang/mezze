@@ -264,6 +264,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         // Construct final string: param with constraints -> return effects
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
+    is MezzeType.OrderingType -> "Ordering"
     is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
     else -> throw IllegalArgumentException("Unexpected type in prettyPrintTypeWithMapping: $type")
 }
