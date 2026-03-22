@@ -1989,6 +1989,31 @@ internal val MezzeParser.postfixExpression: Parser<Expression>
                         is ParseResult.Failure -> break  // Not a member access
                     }
                 }
+                TokenType.NEWLINE -> {
+                    // Look past newlines for continuation with DOT (method chaining)
+                    var ahead = currentStream
+                    while (ahead.current()?.type == TokenType.NEWLINE) {
+                        ahead = ahead.advance()
+                    }
+                    if (ahead.current()?.type == TokenType.DOT) {
+                        // Continue parsing: the DOT on the next line continues this expression
+                        val dotStream = ahead.advance()
+                        val member = memberIdentifierParser(dotStream)
+                        result = when (member) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                MemberAccess(
+                                    result.value,
+                                    member.value.text,
+                                    sourceLocation = result.value.sourceLocation
+                                ),
+                                member.remaining
+                            )
+                            is ParseResult.Failure -> break
+                        }
+                    } else {
+                        break  // Newline not followed by DOT — end of expression
+                    }
+                }
                 TokenType.LPAREN -> {
                     // BUG FIX: Reject () syntax for function calls
                     // Mezze uses {} for function calls, not ()
