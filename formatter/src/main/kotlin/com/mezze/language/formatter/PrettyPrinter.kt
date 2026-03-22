@@ -942,6 +942,14 @@ class PrettyPrinter {
             return
         }
 
+        // Check for chained method calls: x.foo {..}.bar {..}.baz {..}
+        // These are nested FunctionCall(MemberAccess(FunctionCall(MemberAccess(...), ..), ..), ..)
+        val chainSegments = tryExtractMethodChain(expr)
+        if (chainSegments != null && chainSegments.second.size >= 2) {
+            printMethodChain(chainSegments)
+            return
+        }
+
         // Regular function call
         val needsParens = expr.function is LambdaExpression || expr.function is IfExpression
         if (needsParens) append("(")
@@ -949,6 +957,91 @@ class PrettyPrinter {
         if (needsParens) append(")")
         append(" ")
         printExpression(expr.arguments)
+    }
+
+    /**
+     * A segment in a method chain: .method { args }
+     */
+    private data class MethodChainSegment(
+        val methodName: String,
+        val arguments: Expression
+    )
+
+    /**
+     * Try to extract a method chain from a function call.
+     * Returns the root expression + list of (method, args) segments, or null if not a chain.
+     *
+     * Example: [1,2,3].filter {p = ...}.map {f = ...}
+     * Returns: Pair([1,2,3], [("filter", {p=...}), ("map", {f=...})])
+     */
+    private fun tryExtractMethodChain(expr: FunctionCall): Pair<Expression, List<MethodChainSegment>>? {
+        // Must be receiver.method { args } pattern
+        val func = expr.function
+        if (func !is MemberAccess) return null
+
+        // Don't extract binary/unary operators as chains
+        if (func.member in methodToOperator || func.member in methodToUnaryOperator) return null
+
+        val segments = mutableListOf<MethodChainSegment>()
+        segments.add(MethodChainSegment(func.member, expr.arguments))
+
+        var current = func.receiver
+        while (current is FunctionCall && current.function is MemberAccess) {
+            val memberAccess = current.function as MemberAccess
+            // Stop if we hit an operator
+            if (memberAccess.member in methodToOperator || memberAccess.member in methodToUnaryOperator) break
+            segments.add(0, MethodChainSegment(memberAccess.member, current.arguments))
+            current = memberAccess.receiver
+        }
+
+        // Need at least 2 chained calls to format as a chain
+        if (segments.size < 2) return null
+
+        return Pair(current, segments)
+    }
+
+    /**
+     * Print a method chain with one method call per line when it exceeds line length.
+     *
+     *     [1, 2, 3, 4, 5]
+     *       .filter { p = { x } -> x > 2 }
+     *       .map { f = { x } -> x * 10 }
+     *       .fold { init = 0, f = { acc, x } -> acc + x }
+     */
+    private fun printMethodChain(chain: Pair<Expression, List<MethodChainSegment>>) {
+        val (root, segments) = chain
+
+        // Estimate total length on one line
+        var estimatedLength = estimateExpressionLength(root)
+        for (seg in segments) {
+            estimatedLength += 1 + seg.methodName.length + 1 + estimateExpressionLength(seg.arguments) // .method args
+        }
+
+        val useMultiLine = estimatedLength > config.MAX_LINE_LENGTH ||
+                           segments.any { isComplexExpression(it.arguments) } ||
+                           segments.size > 3
+
+        if (useMultiLine) {
+            printExpression(root)
+            newLine()
+            indent {
+                for ((i, seg) in segments.withIndex()) {
+                    printIndent()
+                    append(".${seg.methodName} ")
+                    printExpression(seg.arguments)
+                    if (i < segments.size - 1) {
+                        newLine()
+                    }
+                }
+            }
+        } else {
+            // Single line: x.foo { a }.bar { b }
+            printExpression(root)
+            for (seg in segments) {
+                append(".${seg.methodName} ")
+                printExpression(seg.arguments)
+            }
+        }
     }
 
     /**
