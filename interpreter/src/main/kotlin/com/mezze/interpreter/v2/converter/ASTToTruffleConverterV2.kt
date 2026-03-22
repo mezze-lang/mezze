@@ -613,13 +613,17 @@ class ASTToTruffleConverterV2(
         return when (val pattern = letBinding.pattern) {
             is VariablePattern -> {
                 val kind = inferKind(letBinding.expression)
+                val contentHash = letBinding.contentHash
                 val slot = getOrCreateSlotWithKind(pattern.name, kind)
 
-                // OPTIMIZATION: Populate content hash to slot mapping for O(1) lookup
-                // This enables convertIdentifier() to skip string key construction
-                val contentHash = letBinding.contentHash
+                // When a content hash is available, create an additional hash-keyed slot
+                // so cross-module references resolve to the correct definition even when
+                // multiple modules export the same name (e.g., 8 modules all export `to_str`).
+                // The name slot is always written for local references.
+                // The hash slot is written via WriteLocalWithContextNode's global registration.
                 if (contentHash != null) {
-                    contentHashToSlot[contentHash] = slot
+                    val hs = getOrCreateSlotWithKind(contentHash, kind)
+                    contentHashToSlot[contentHash] = hs
                 }
 
                 // Pass content hash to lambda conversion for CallTarget caching
@@ -635,8 +639,10 @@ class ASTToTruffleConverterV2(
                 // Use WriteLocalWithContextNode for:
                 // 1. Function bindings to support recursion (function references itself)
                 // 2. ALL top-level bindings so nested functions can access them via fallback lookup
-                // When a nested function references a top-level variable, the frame slot may be
-                // empty, but the fallback lookup will find it in the global context.
+                // WriteLocalWithContextNode writes to the name slot AND registers in global
+                // context by both name and content hash. The hash-keyed slot in contentHashToSlot
+                // is looked up by ReadLocalWithFallbackNode, which falls back to global context
+                // lookup when the frame slot is empty — finding the value via content hash.
                 if (letBinding.expression is LambdaExpression || isTopLevel) {
                     WriteLocalWithContextNode.create(valueNode, slot, kind, pattern.name, contentHash)
                 } else {
@@ -751,6 +757,10 @@ class ASTToTruffleConverterV2(
                 // Direct hash-based slot lookup - O(1), no string construction
                 return ReadLocalWithFallbackNode.create(hashSlot, contentHash, contentHash)
             }
+            // Hash not in local slot map (e.g., inside a lambda sub-converter).
+            // Use a dummy slot (-1) so ReadLocalWithFallbackNode goes straight to
+            // global context lookup by content hash.
+            return ReadLocalWithFallbackNode.create(-1, contentHash, contentHash)
         }
 
         val lookupKey = identifier.toBindingKey().toKeyString()
