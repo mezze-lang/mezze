@@ -108,6 +108,9 @@ class ASTToTruffleConverterV2(
     // Maps ability name -> list of operation names (populated from AbilityDeclaration items)
     private val abilityOperationNames = mutableMapOf<String, List<String>>()
 
+    // Newtype constructor names — these are erased at runtime
+    private val newtypeConstructors = mutableSetOf<String>()
+
     /**
      * Tracks scoped effect info for impls by content hash.
      * Maps contentHash -> ScopedImplInfo
@@ -185,7 +188,13 @@ class ASTToTruffleConverterV2(
         return when (item) {
             is LetBinding -> convertLetBinding(item)
             is TopLevelExpression -> convertExpression(item.expression)
-            is TypeDeclaration -> UnitLiteralNode()
+            is TypeDeclaration -> {
+                // Track newtype constructors for runtime erasure
+                if (item.definition is NewtypeDefinition) {
+                    newtypeConstructors.add((item.definition as NewtypeDefinition).constructor)
+                }
+                UnitLiteralNode()
+            }
             is EffectDeclaration -> UnitLiteralNode()
             is ImplDeclaration -> convertImplDeclaration(item)
             is AbilityDeclaration -> {
@@ -365,6 +374,7 @@ class ASTToTruffleConverterV2(
                 parentVariableSlots = implParamSlots.toMap(),
                 parentScopedEffectInfo = this.scopedEffectInfo.toMap()
             )
+            opConverter.newtypeConstructors.addAll(this.newtypeConstructors)
 
             // IMPORTANT: Closure vars FIRST (slots 0..closureCount-1), then params (closureCount..)
             // This matches MezzeFunctionRootNode's argument binding order
@@ -416,6 +426,7 @@ class ASTToTruffleConverterV2(
                         parentVariableSlots = implParamSlots.toMap(),
                         parentScopedEffectInfo = this.scopedEffectInfo.toMap()
                     )
+                    initConverter.newtypeConstructors.addAll(this.newtypeConstructors)
 
                     // First, create slots for closure vars (they come first in the frame)
                     closureVars.forEach { varName ->
@@ -454,6 +465,7 @@ class ASTToTruffleConverterV2(
                         parentVariableSlots = implParamSlots.toMap(),
                         parentScopedEffectInfo = this.scopedEffectInfo.toMap()
                     )
+                    finalConverter.newtypeConstructors.addAll(this.newtypeConstructors)
 
                     // First, create slots for closure vars (they come first in the frame)
                     closureVars.forEach { varName ->
@@ -890,6 +902,44 @@ class ASTToTruffleConverterV2(
                         } else {
                             branches.add(MatchBranchNode.literalPattern(false, bodyNode))
                         }
+                    } else if (pattern.constructor in newtypeConstructors) {
+                        // Newtype pattern: erased at runtime.
+                        // The scrutinee IS the inner value (record for record newtypes,
+                        // primitive for primitive newtypes wrapped in {val: T}).
+                        // Bind scrutinee to a temp slot, then extract fields from it.
+                        val scrutineeSlot = getOrCreateSlot("__newtype_scrutinee_${pattern.constructor}__")
+                        val recordPattern = pattern.recordPattern
+                        var bodyNode = convertExpression(case.expression)
+
+                        if (recordPattern != null) {
+                            val bindingNodes = mutableListOf<MezzeNode>()
+                            for (entry in recordPattern.entries) {
+                                val bindName = when (val fp = entry.pattern) {
+                                    is VariablePattern -> fp.name
+                                    else -> entry.name
+                                }
+                                val slot = getOrCreateSlot(bindName)
+                                // Extract field from the scrutinee (which is a record)
+                                bindingNodes.add(WriteLocalNode.createObject(
+                                    RecordFieldAccessNode.createByName(
+                                        ReadLocalNode.createObject(scrutineeSlot),
+                                        entry.name
+                                    ),
+                                    slot
+                                ))
+                            }
+                            if (bindingNodes.isNotEmpty()) {
+                                bodyNode = BlockNode(bindingNodes.toTypedArray() + arrayOf(bodyNode))
+                            }
+                        }
+
+                        // Use wildcard with binding — writes scrutinee to scrutineeSlot
+                        if (hasGuardsOrIfLet) {
+                            branches.add(MatchBranchNode.wildcardWithGuard(scrutineeSlot, bodyNode, guardNode, ifLetNodes))
+                        } else {
+                            branches.add(MatchBranchNode.wildcard(scrutineeSlot, bodyNode))
+                        }
+                        wildcardIndex = index
                     } else {
                         val tag = getTagForConstructor(pattern.constructor)
                         // Collect both field names and slots for proper record extraction
@@ -1927,6 +1977,8 @@ class ASTToTruffleConverterV2(
         )
         // Inherit ability operation name mappings so method-call syntax resolves inside lambdas
         functionConverter.abilityOperationNames.putAll(this.abilityOperationNames)
+        // Inherit newtype constructor names for runtime erasure
+        functionConverter.newtypeConstructors.addAll(this.newtypeConstructors)
 
         // Extract ability constraints from the lambda's inferred type
         // These are populated by the typechecker for polymorphic functions
@@ -2252,9 +2304,12 @@ class ASTToTruffleConverterV2(
             return BoolLiteralNode(false)
         }
 
-        // TODO: Newtype construction should be erased at runtime.
-        // Currently still creates MezzeVariant because pattern matching
-        // also needs to be updated simultaneously. See task #34.
+        // Newtype construction is erased at runtime — just evaluate the payload
+        if (variantConstr.resolution is ConstructorResolution.NewtypeConstructor ||
+            variantConstr.constructor in newtypeConstructors) {
+            return variantConstr.value?.let { convertExpression(it) }
+                ?: UnitLiteralNode()
+        }
 
         val tag = getTagForConstructor(variantConstr.constructor)
         val payloadNode = variantConstr.value?.let { convertExpression(it) }
