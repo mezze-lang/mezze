@@ -1249,38 +1249,6 @@ class SubstitutionApplier(
             }
         }
 
-        // STATIC DESUGARING: Ability.for { it = value }.method { args }
-        // When the function is MemberAccess(forCall, method) and forCall is a .for call,
-        // rewrite to value.method { args } — avoiding runtime dictionary materialization.
-        if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
-            val outerReceiver = (updatedFunction as MemberAccess).receiver
-            val outerMethod = (updatedFunction as MemberAccess).member
-            if (outerReceiver is FunctionCall &&
-                outerReceiver.function is MemberAccess &&
-                (outerReceiver.function as MemberAccess).member == Keywords.FOR &&
-                outerReceiver.resolvedAbilities.isNotEmpty()
-            ) {
-                // Extract the `it` value from the .for call's arguments
-                val forArgs = outerReceiver.arguments
-                val itValue = if (forArgs is RecordLiteral) {
-                    forArgs.entries.filterIsInstance<RecordFieldEntry>()
-                        .find { it.name == Keywords.IT }?.value ?: forArgs
-                } else {
-                    forArgs
-                }
-                // Rewrite: value.method { args } with the .for call's resolvedAbilities
-                val rewrittenFunction = MemberAccess(
-                    receiver = itValue,
-                    member = outerMethod,
-                    sourceLocation = updatedFunction.sourceLocation,
-                    inferredType = updatedFunction.inferredType
-                )
-                resolvedAbilities = outerReceiver.resolvedAbilities
-                // Fall through to inlining below (don't return early)
-                return inlineOrEmit(expr, rewrittenFunction, updatedArguments, updatedType, resolvedAbilities)
-            }
-        }
-
         return inlineOrEmit(expr, updatedFunction, updatedArguments, updatedType, resolvedAbilities)
     }
 
@@ -1289,8 +1257,6 @@ class SubstitutionApplier(
      * If inlining is possible (we have the impl body in processedImplBodies), produces:
      *   DoExpression(let it = receiver, opBody(args))
      * Otherwise falls back to emitting the FunctionCall with resolvedAbilities for the interpreter.
-     *
-     * For Ability.for { it = value } calls, produces a RecordLiteral of closures.
      */
     private fun inlineOrEmit(
         expr: FunctionCall,
@@ -1309,11 +1275,6 @@ class SubstitutionApplier(
             if (resolved != null) {
                 val implDecl = processedImplBodies[resolved.implementationHash]
                 if (implDecl != null) {
-                    // Handle Ability.for { it = value } — produce a record of closures
-                    if (methodName == Keywords.FOR) {
-                        return inlineAbilityFor(expr, implDecl, updatedArguments, updatedType)
-                    }
-
                     // Handle value.method { args } — inline the operation body
                     val operation = implDecl.operations.find { it.name == methodName }
                     if (operation != null) {
@@ -1432,51 +1393,6 @@ class SubstitutionApplier(
             resolvedAbilities = emptyMap(),
             isTailCall = false,
             resolvedFunctionContentHash = null
-        )
-    }
-
-    /**
-     * Inline Ability.for { it = value } — produces a RecordLiteral of closures.
-     * Each ability operation becomes a field in the record, with `it` captured.
-     *
-     * Show.for { it = 42 } → { show = (do { let it = 42; show_impl_body }) }
-     */
-    private fun inlineAbilityFor(
-        expr: FunctionCall,
-        implDecl: ImplAbilityDeclaration,
-        arguments: Expression,
-        returnType: MezzeType?
-    ): Expression {
-        // Extract the `it` value from the { it = value } argument
-        val itValue = if (arguments is RecordLiteral) {
-            arguments.entries.filterIsInstance<RecordFieldEntry>()
-                .find { it.name == Keywords.IT }?.value ?: arguments
-        } else {
-            arguments
-        }
-
-        // Build a record literal with each operation as a field
-        val entries = implDecl.operations.map { op ->
-            val opBody = op.implementation
-            // Wrap each operation body so `it` is bound
-            val letIt = LetStatement(
-                pattern = VariablePattern(Keywords.IT),
-                expression = itValue
-            )
-            val wrappedBody = DoExpression(
-                statements = listOf(letIt),
-                result = opBody,
-                inferredType = opBody.inferredType,
-                sourceLocation = expr.sourceLocation
-            )
-            RecordFieldEntry(name = op.name, value = wrappedBody)
-        }
-
-        // Return a RecordLiteral directly — the FunctionCall is eliminated entirely
-        return RecordLiteral(
-            entries = entries,
-            inferredType = returnType,
-            sourceLocation = expr.sourceLocation
         )
     }
 
@@ -1745,8 +1661,8 @@ class SubstitutionApplier(
         }
 
         // If the receiver is a record type that already has this field, it's a plain field access + call,
-        // not an ability method call. This correctly handles dictionaries from Ability.for { it = x }
-        // and any record that happens to have a field matching an ability method name.
+        // not an ability method call. This correctly handles any record that happens to have a field
+        // matching an ability method name.
         if (receiverType is MezzeType.RecordType && methodName in receiverType.fields) {
             return resolvedAbilities
         }

@@ -42,7 +42,6 @@ import com.mezze.interpreter.v2.nodes.builtin.BuiltinUnaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.v2.nodes.inline.*
 import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as OptimizedAbilityCallNode
-import com.mezze.interpreter.v2.nodes.ability.AbilityForNode
 import com.mezze.interpreter.v2.nodes.ability.DirectDictionaryCallNode
 import com.mezze.interpreter.v2.nodes.function.RuntimeAbilityCallNode
 import com.mezze.interpreter.v2.nodes.function.DictionaryPassingInvokeNode
@@ -1483,33 +1482,6 @@ class ASTToTruffleConverterV2(
 
                 val implementationHash = resolvedAbility.implementationHash
                     ?: throw RuntimeException("Content hash required for ability call: ${resolvedAbility.abilityName}")
-
-                // Handle Ability.for { it = value } — returns a record of all bound methods
-                if (operationName == Keywords.FOR) {
-                    val abilityName = resolvedAbility.abilityName
-                    val opNames = abilityOperationNames[abilityName]
-                        ?: throw RuntimeException("Unknown ability operations for: $abilityName")
-
-                    // Extract the `it` value from the { it = value } argument
-                    val itValueNode = if (funcCall.arguments is RecordLiteral) {
-                        val itEntry = (funcCall.arguments as RecordLiteral).entries
-                            .filterIsInstance<RecordFieldEntry>()
-                            .find { it.name == Keywords.IT }
-                        if (itEntry != null) {
-                            convertExpression(itEntry.value!!)
-                        } else {
-                            convertExpression(funcCall.arguments)
-                        }
-                    } else {
-                        convertExpression(funcCall.arguments)
-                    }
-
-                    return AbilityForNode.create(
-                        itValueNode,
-                        implementationHash,
-                        opNames.toTypedArray()
-                    )
-                }
 
                 // Build the args record with `it` injected for the receiver
                 val receiver = memberAccess.receiver

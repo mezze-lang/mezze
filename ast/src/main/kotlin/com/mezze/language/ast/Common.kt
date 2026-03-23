@@ -455,9 +455,6 @@ data class BindingKey(
  * Centralizes keyword strings so they're never hardcoded as magic strings.
  */
 object Keywords {
-    /** The `for` keyword — used in `ability X for 'a` and `Ability.for { it = value }` */
-    const val FOR = "for"
-
     /** The `it` implicit receiver binding in ability impl bodies */
     const val IT = "it"
 

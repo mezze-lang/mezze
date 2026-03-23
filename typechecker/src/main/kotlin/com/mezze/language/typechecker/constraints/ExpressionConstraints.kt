@@ -692,16 +692,6 @@ class ExpressionConstraintGenerator {
         }
 
         if (receiverName != null) {
-            // Special case: Ability.for — returns a function that binds the receiver
-            // Show.for has type: {it: 'a} -> {show: {} -> Str, ...}
-            if (expr.member == Keywords.FOR) {
-                val isAbility = context.abilityDeclarations.containsKey(receiverName) ||
-                    BuiltInAbilities.isBuiltInAbility(receiverName)
-                if (isAbility) {
-                    return generateAbilityFor(expr, receiverName, context)
-                }
-            }
-
             // Check if user has defined their own ability with this name (shadowing built-in)
             val userDefinedAbility = context.abilityDeclarations[receiverName]
 
@@ -751,7 +741,7 @@ class ExpressionConstraintGenerator {
             if (abilityOperationType != null) {
                 throw TypeCheckError(
                     message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
-                        "Use 'value.${expr.member} { args }' or '${receiverName}.for { it = value }.${expr.member}' instead.",
+                        "Use 'value.${expr.member} { args }' or '${receiverName}.${expr.member} { it = value, ... }' instead.",
                     expression = expr,
                     errorType = ErrorType.MISSING_FIELD
                 )
@@ -914,106 +904,6 @@ class ExpressionConstraintGenerator {
     }
 
     /**
-     * Generate constraints for `Ability.for` — returns a function that binds the receiver
-     * and returns a record of the ability's methods with receiver stripped.
-     *
-     * Type: `Show.for` has type `{it: 'a} -> {show: {} -> Str, ...}`
-     *   where 'a must have a Show impl.
-     *
-     * The returned record's methods have the receiver parameter removed from their signatures,
-     * since the receiver is bound via `it` in the `.for` call.
-     */
-    private fun generateAbilityFor(
-        expr: MemberAccess,
-        abilityName: String,
-        context: ConstraintContext
-    ): ConstraintResult {
-        val methodFields = mutableMapOf<String, MezzeType>()
-        val receiverTypeVar: MezzeType.VarType
-
-        val abilityDecl = context.abilityDeclarations[abilityName]
-        if (abilityDecl != null) {
-            // User-defined ability — instantiate the operations record with fresh vars
-            val abilityOperationType = context.typingContext.getAbilityOperationType(abilityName)
-            if (abilityOperationType == null || abilityOperationType !is MezzeType.RecordType) {
-                throw TypeCheckError(
-                    message = "Ability '$abilityName' has no methods",
-                    expression = expr,
-                    errorType = ErrorType.MISSING_FIELD
-                )
-            }
-
-            val associatedTypeNames = abilityDecl.associatedTypes
-            val (instantiated, originalToFresh) = instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(
-                abilityOperationType, associatedTypeNames
-            )
-
-            // Find the fresh var for the ability's primary type param
-            val primaryTypeParam = abilityDecl.typeParams.firstOrNull()?.removePrefix("'")
-            val primaryFreshVar = if (primaryTypeParam != null) originalToFresh[primaryTypeParam] else null
-            receiverTypeVar = if (primaryFreshVar != null) {
-                MezzeType.VarType(primaryFreshVar)
-            } else {
-                MezzeType.VarType(TypeVar.fresh())
-            }
-
-            if (instantiated is MezzeType.RecordType) {
-                for ((opName, opType) in instantiated.fields) {
-                    methodFields[opName] = stripReceiverFromMethodType(opType, receiverTypeVar)
-                }
-            }
-        } else if (BuiltInAbilities.isBuiltInAbility(abilityName)) {
-            // Built-in ability — signatures are already receiver-less (no stripping needed)
-            receiverTypeVar = MezzeType.VarType(TypeVar.fresh())
-            val availableMethods = BuiltInAbilities.getAvailableMethods(abilityName)
-            for (methodName in availableMethods) {
-                val methodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, receiverTypeVar)
-                if (methodType != null) {
-                    methodFields[methodName] = methodType
-                }
-            }
-        } else {
-            throw TypeCheckError(
-                message = "Ability '$abilityName' is not defined",
-                expression = expr,
-                errorType = ErrorType.UNDEFINED_VARIABLE
-            )
-        }
-
-        if (methodFields.isEmpty()) {
-            throw TypeCheckError(
-                message = "Ability '$abilityName' has no methods",
-                expression = expr,
-                errorType = ErrorType.MISSING_FIELD
-            )
-        }
-
-        val methodRecordType = MezzeType.RecordType(methodFields)
-
-        // The `.for` function type: {it: 'a} -> {method1: ..., method2: ..., ...}
-        val forParamType = MezzeType.RecordType(mapOf(Keywords.IT to receiverTypeVar))
-        val forFunctionType = MezzeType.FunctionType(
-            paramType = forParamType,
-            returnType = methodRecordType
-        )
-
-        // Add ability constraint: 'a must have this ability
-        val abilityConstraint = Constraint.AbilityRequired(
-            typeVar = receiverTypeVar.variable,
-            abilityName = abilityName,
-            typeArgs = emptyList(),
-            context = "Ability.${Keywords.FOR}: $abilityName",
-            sourceLocation = expr.sourceLocation
-        )
-
-        return ConstraintResult(
-            type = forFunctionType,
-            constraints = emptyList(),
-            abilityConstraints = listOf(abilityConstraint)
-        )
-    }
-
-    /**
      * Strip the receiver parameter from a method's function type.
      *
      * Convention: the first field of an ability method's param record is the receiver.
@@ -1037,8 +927,7 @@ class ExpressionConstraintGenerator {
     /**
      * Try to generate constraints for method call syntax: `value.method { args }`.
      *
-     * Desugars through the `.for` model: `42.show {}` is equivalent to
-     * `Show.for { it = 42 }.show {}`.
+     * Desugars `42.show {}` to `Show.show { it = 42 }`.
      *
      * The method's receiver parameter is stripped (bound via `it`), and the explicit
      * arguments are matched against the remaining parameters.
@@ -2904,15 +2793,9 @@ class ExpressionConstraintGenerator {
                 memberAccess.receiver is VariantConstruction &&
                 context.typingContext.lookup(receiverName ?: "") is TypingContext.LookupResult.NotFound
 
-            // Skip method resolution if the receiver is an Ability.for { ... } call —
-            // the result is a record of methods, so .method is field access, not method dispatch.
-            val isAbilityForCall = memberAccess.receiver is FunctionCall &&
-                (memberAccess.receiver as FunctionCall).function is MemberAccess &&
-                ((memberAccess.receiver as FunctionCall).function as MemberAccess).member == Keywords.FOR
-
             // Only try method resolution if receiver is NOT an ability/effect/performer
-            // and not an unknown uppercase name and not an Ability.for call
-            if (!isAbilityOrEffect && !isUnknownUppercaseName && !isAbilityForCall) {
+            // and not an unknown uppercase name
+            if (!isAbilityOrEffect && !isUnknownUppercaseName) {
                 val methodCallResult = tryGenerateMethodCall(expr, memberAccess, context)
                 if (methodCallResult != null) {
                     return methodCallResult

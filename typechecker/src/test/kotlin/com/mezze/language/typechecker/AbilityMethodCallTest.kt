@@ -478,10 +478,10 @@ class AbilityMethodCallTest {
             typeChecker.typeCheck(program).program
         }
 
-        // Error should suggest both method-call and .for syntax
+        // Error should suggest method-call and direct call syntax
         assertTrue(error.message?.contains("value.show") == true,
             "Error should suggest method-call syntax: ${error.message}")
-        assertTrue(error.message?.contains("Show.for") == true,
-            "Error should suggest .for syntax: ${error.message}")
+        assertTrue(error.message?.contains("Show.show") == true,
+            "Error should suggest direct call syntax: ${error.message}")
     }
 }

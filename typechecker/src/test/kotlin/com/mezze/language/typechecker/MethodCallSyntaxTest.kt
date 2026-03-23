@@ -12,8 +12,8 @@ import org.junit.jupiter.api.assertThrows
  * Tests for method call syntax: `value.method { args }`.
  *
  * Method call syntax allows calling ability methods on values directly:
- *   42.show {}          → equivalent to Show.for { it = 42 }.show {}
- *   x.eq { r = y }     → equivalent to Eq.for { it = x }.eq { r = y }
+ *   42.show {}          → equivalent to Show.show { it = 42 }
+ *   x.eq { r = y }     → equivalent to Eq.eq { it = x, r = y }
  *
  * Resolution order:
  * 1. Field access (record fields)
@@ -323,7 +323,7 @@ class MethodCallSyntaxTest {
     }
 
     // ========================================================================
-    // Ability.for { it = value } SYNTAX
+    // DIRECT ABILITY METHOD CALLS
     // ========================================================================
 
     @Test
