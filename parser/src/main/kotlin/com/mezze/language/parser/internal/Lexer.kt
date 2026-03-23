@@ -23,7 +23,7 @@ data class Token(
 
 enum class TokenType {
     // Keywords
-    LET, TYPE, NEWTYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL, DERIVING,
+    LET, TYPE, NEWTYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
 
     // Literals
     INTEGER, NAT, FLOAT, FRACTION, STRING, BOOLEAN,
@@ -117,7 +117,6 @@ private object InternedTokens {
     const val USE = "use"
     const val HAVING = "having"
     const val FORALL = "forall"
-    const val DERIVING = "deriving"
 
     // Common identifiers
     const val TRUE = "True"
@@ -159,8 +158,7 @@ class Lexer(private val source: String) {
             InternedTokens.IN to TokenType.IN,
             InternedTokens.USE to TokenType.USE,
             InternedTokens.HAVING to TokenType.HAVING,
-            InternedTokens.FORALL to TokenType.FORALL,
-            InternedTokens.DERIVING to TokenType.DERIVING
+            InternedTokens.FORALL to TokenType.FORALL
             // Note: Booleans are True/False (uppercase variant constructors), not keywords
         )
     }

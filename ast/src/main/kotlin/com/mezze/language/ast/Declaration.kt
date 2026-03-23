@@ -210,8 +210,7 @@ data class VariantDefinition(
 @Serializable
 data class NewtypeDefinition(
     val constructor: String,        // Constructor name (e.g., "Email")
-    val wrappedType: TypeAnnotation, // Type being wrapped (e.g., String)
-    val derivedAbilities: List<String> = emptyList() // Abilities to auto-derive (e.g., ["Eq", "Ord"])
+    val wrappedType: TypeAnnotation  // Type being wrapped (e.g., String, { x: Float, y: Float })
 ) : TypeDefinition
 
 @Serializable

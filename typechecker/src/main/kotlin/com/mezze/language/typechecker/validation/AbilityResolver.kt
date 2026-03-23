@@ -236,58 +236,14 @@ class AbilityResolver(
         val wrappedType = type.constructors.values.firstOrNull()
 
         return when (abilityName) {
-            "Inspect" -> {
-                // Inspect is always auto-derived for newtypes (universal debugging)
-                if (wrappedType != null) {
-                    val wrappedCheck = checkAbility(wrappedType, "Inspect")
-                    if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
-                        return AbilityCheckResult.Unsatisfied(
-                            reason = "Newtype '$typeName' Inspect requires wrapped type to have Inspect"
-                        )
-                    }
-                }
-                AbilityCheckResult.Satisfied("Built-in Newtype to_string (auto-derived)")
-            }
-            "Eq", "Ord" -> {
-                // Eq and Ord require explicit deriving
-                val derivedAbilities = definition.derivedAbilities
-
-                if (abilityName in derivedAbilities) {
-                    // Check that wrapped type also has this ability
-                    if (wrappedType != null) {
-                        val wrappedCheck = checkAbility(wrappedType, abilityName)
-                        if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
-                            return AbilityCheckResult.Unsatisfied(
-                                reason = "Newtype '$typeName' cannot derive $abilityName because wrapped type doesn't have $abilityName"
-                            )
-                        }
-                    }
-                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Newtype '$typeName' does not derive $abilityName. Add 'deriving $abilityName' to the newtype declaration.",
-                        suggestions = listOf("newtype $typeName = ... deriving $abilityName")
-                    )
-                }
+            BuiltinAbilities.INSPECT -> {
+                // Inspect is always available for newtypes (universal debugging)
+                AbilityCheckResult.Satisfied("Built-in Newtype Inspect (universal)")
             }
             else -> {
-                // Other abilities require explicit impl or deriving
-                val derivedAbilities = definition.derivedAbilities
-
-                if (abilityName in derivedAbilities) {
-                    // Check that wrapped type also has this ability
-                    if (wrappedType != null) {
-                        val wrappedCheck = checkAbility(wrappedType, abilityName)
-                        if (wrappedCheck is AbilityCheckResult.Unsatisfied) {
-                            return AbilityCheckResult.Unsatisfied(
-                                reason = "Newtype '$typeName' cannot derive $abilityName because wrapped type doesn't have $abilityName"
-                            )
-                        }
-                    }
-                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
-                } else {
-                    checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-                }
+                // All other abilities require explicit impl.
+                // Newtypes do NOT auto-derive — users write `impl Eq for UserId where { ... }`
+                checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
             }
         }
     }
@@ -304,35 +260,13 @@ class AbilityResolver(
         typeArgs: List<MezzeType>,
         definition: NewtypeDefinition
     ): AbilityCheckResult {
-        val typeName = type.constructor
-
         return when (abilityName) {
-            "Inspect" -> {
-                // Inspect is always auto-derived for newtypes (universal debugging)
-                AbilityCheckResult.Satisfied("Built-in Newtype to_string (auto-derived)")
-            }
-            "Eq", "Ord" -> {
-                // Eq and Ord require explicit deriving
-                val derivedAbilities = definition.derivedAbilities
-
-                if (abilityName in derivedAbilities) {
-                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Newtype '$typeName' does not derive $abilityName. Add 'deriving $abilityName' to the newtype declaration.",
-                        suggestions = listOf("newtype $typeName = ... deriving $abilityName")
-                    )
-                }
+            BuiltinAbilities.INSPECT -> {
+                AbilityCheckResult.Satisfied("Built-in Newtype Inspect (universal)")
             }
             else -> {
-                // Other abilities require explicit impl or deriving
-                val derivedAbilities = definition.derivedAbilities
-
-                if (abilityName in derivedAbilities) {
-                    AbilityCheckResult.Satisfied("Derived via 'deriving $abilityName'")
-                } else {
-                    checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-                }
+                // Newtypes require explicit impl for all non-Inspect abilities
+                checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
             }
         }
     }
