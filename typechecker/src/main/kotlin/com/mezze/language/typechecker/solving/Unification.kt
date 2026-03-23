@@ -118,6 +118,16 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         }
     }
 
+    // SPECIAL CASE: NewtypeType with TypeApplication
+    // TypeAnnotation "UserId" becomes TypeApplication("UserId", []) in the constraint generator,
+    // but the actual type is NewtypeType("UserId", ...). Unify them by name.
+    if (type1 is MezzeType.NewtypeType && type2 is MezzeType.TypeApplication && type1.name == type2.constructor) {
+        return UnificationResult.Success(Substitution.empty)
+    }
+    if (type1 is MezzeType.TypeApplication && type2 is MezzeType.NewtypeType && type1.constructor == type2.name) {
+        return UnificationResult.Success(Substitution.empty)
+    }
+
     // SPECIAL CASE: TypeApplication expansion
     // Handle cross-type unification: VariantType with TypeApplication
     when {
@@ -1262,19 +1272,9 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     val variantDef = when (val def = typeDecl.definition) {
         is VariantDefinition -> def
         is NewtypeDefinition -> {
-            // Convert newtype to a variant with a single constructor
-            // If wrappedType is already a record, use it directly:
-            //   newtype Point = Point { x: Int, y: Int }  =>  type Point = | Point { x: Int, y: Int } |
-            // Otherwise, wrap in a record with 'val' field:
-            //   newtype UserId = UserId Int  =>  type UserId = | UserId { val: Int } |
-            val payloadType = if (def.wrappedType is RecordTypeAnnotation) {
-                def.wrappedType
-            } else {
-                RecordTypeAnnotation(
-                    entries = listOf(RecordTypeEntry("val", def.wrappedType))
-                )
-            }
-            VariantDefinition(listOf(VariantConstructorDef(def.constructor, payloadType)))
+            // Newtypes are NOT variants — don't expand them.
+            // They have their own MezzeType.NewtypeType and unification rules.
+            return null
         }
         else -> return null
     }
@@ -1504,13 +1504,8 @@ internal fun expandTypeApplication(
             }
         }
         is NewtypeDefinition -> {
-            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
-            if (expanded != null && expanded.constructors.size == 1) {
-                val (constructorName, payloadType) = expanded.constructors.entries.first()
-                TypeExpansionResult.Newtype(expanded, constructorName, payloadType)
-            } else {
-                TypeExpansionResult.NotFound
-            }
+            // Newtypes are NOT expanded to VariantType — they stay as NewtypeType
+            TypeExpansionResult.NotFound
         }
     }
 }

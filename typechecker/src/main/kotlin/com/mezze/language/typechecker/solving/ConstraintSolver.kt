@@ -2114,9 +2114,16 @@ class ConstraintSolver(
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         if (unwrappedType is MezzeType.TypeApplication) {
-            val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
-            if (expanded != null) {
-                unwrappedType = expanded
+            // Try expanding to variant (type Color = | Red, Green |)
+            val expandedVariant = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
+            if (expandedVariant != null) {
+                unwrappedType = expandedVariant
+            } else {
+                // Try expanding to record (type Point = { x: Int, y: Int })
+                val expandedRecord = expandTypeApplicationToRecord(unwrappedType, typeDeclarations)
+                if (expandedRecord != null) {
+                    unwrappedType = expandedRecord
+                }
             }
         }
 
@@ -2792,10 +2799,20 @@ class ConstraintSolver(
         // This handles non-parametric types like Color (TypeApplication("Color", []))
         // and parametric types like Option Int (TypeApplication("Option", [IntType]))
         if (variantType is MezzeType.TypeApplication) {
-            val expanded = expandTypeApplicationToVariant(variantType, typeDeclarations)
+            // Check if this is a newtype — newtypes have a single constructor
+            // that wraps the inner type. Handle pattern matching directly.
+            val typeDecl = typeDeclarations[variantType.constructor]
+                ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(variantType.constructor)
+            if (typeDecl?.definition is NewtypeDefinition) {
+                val newtypeDef = typeDecl.definition as NewtypeDefinition
+                if (constructorName == newtypeDef.constructor) {
+                    // Valid newtype constructor match — unify payload with wrapped type
+                    return ConstraintResult.Success(currentSubst)
+                }
+            }
 
+            val expanded = expandTypeApplicationToVariant(variantType, typeDeclarations)
             if (expanded != null) {
-                // Recursively solve with the expanded variant type, preserving original constraint
                 return solveHasConstructor(
                     constraint.copy(variantType = expanded),
                     currentSubst,
