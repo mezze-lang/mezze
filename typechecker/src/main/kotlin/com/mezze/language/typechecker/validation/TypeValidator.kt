@@ -247,6 +247,12 @@ class TypeValidator(
         for (constraint in constraints) {
             when (constraint) {
                 is Constraint.AbilityRequired -> {
+                    // Built-in abilities are validated by the ConstraintSolver (Phase 3).
+                    // Skip re-validation here — the ConstraintSolver uses canDeriveAbility
+                    // for Inspect/VarType/composite derivation and context-based lookup
+                    // for primitive types via imported .mz impls.
+                    if (BuiltinAbilities.isBuiltin(constraint.abilityName)) continue
+
                     // Check if ability is satisfied
                     val type = substitution.apply(MezzeType.VarType(constraint.typeVar))
                     // Apply substitution to typeArgs as well for multi-parameter abilities

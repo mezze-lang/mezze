@@ -27,7 +27,9 @@ class NewtypeDerivingTest {
     }
 
     @Test
-    fun `test newtype without deriving Eq cannot use equality`() {
+    fun `test newtype without deriving Eq auto-derives from payload`() {
+        // Newtypes auto-derive Eq if their payload type has Eq.
+        // UserId wraps Int, Int has Eq → UserId auto-derives Eq.
         val source = """
             newtype UserId = UserId Int
 
@@ -35,20 +37,8 @@ class NewtypeDerivingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(ast)
-        }
-
-        // The error message should mention that UserId doesn't support equality
-        // (either via "does not derive Eq" or "doesn't support equality comparison")
-        assertTrue(
-            exception.message?.contains("UserId") == true &&
-            (exception.message?.contains("Eq") == true ||
-             exception.message?.contains("equality") == true),
-            "Expected error about UserId missing Eq, got: ${exception.message}"
-        )
-
-        println("✅ Newtype without deriving Eq correctly rejects equality!")
+        val result = typeChecker.typeCheck(ast)
+        assertNotNull(result.program, "Newtype should auto-derive Eq from payload")
     }
 
     @Test
@@ -101,7 +91,9 @@ class NewtypeDerivingTest {
     }
 
     @Test
-    fun `test newtype without deriving Ord cannot use ordering`() {
+    fun `test newtype without deriving Ord auto-derives from payload`() {
+        // Newtypes auto-derive Ord if their payload type has Ord.
+        // UserId wraps Int, Int has Ord → UserId auto-derives Ord.
         val source = """
             newtype UserId = UserId Int deriving Eq
 
@@ -109,18 +101,8 @@ class NewtypeDerivingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(ast)
-        }
-
-        // The error message should mention that UserId doesn't support ordering
-        // (either via "does not derive Ord" or "doesn't support ordering comparison")
-        assertTrue(
-            exception.message?.contains("UserId") == true &&
-            (exception.message?.contains("Ord") == true ||
-             exception.message?.contains("ordering") == true),
-            "Expected error about UserId missing Ord, got: ${exception.message}"
-        )
+        val result = typeChecker.typeCheck(ast)
+        assertNotNull(result.program, "Newtype should auto-derive Ord from payload")
 
         println("✅ Newtype with only Eq correctly rejects ordering!")
     }

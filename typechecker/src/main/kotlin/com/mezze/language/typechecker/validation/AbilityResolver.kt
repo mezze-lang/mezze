@@ -102,307 +102,38 @@ class AbilityResolver(
         abilityName: String,
         typeArgs: List<MezzeType>
     ): AbilityCheckResult {
+        // NOTE: Built-in abilities (Eq, NumAdd, Ord, etc.) are validated by the
+        // ConstraintSolver in Phase 3 and skipped by TypeValidator in Phase 5.
+        // This resolver only handles user-defined abilities and codec abilities.
+
         return when (type) {
             // Type variables can't be checked yet (deferred to instantiation)
             is MezzeType.VarType -> AbilityCheckResult.Satisfied(
                 implSource = "Type variable (deferred)"
             )
 
-            // Numeric types: Int, Float, Nat, Frac
-            is MezzeType.IntType -> checkIntAbility(abilityName, typeArgs)
-            is MezzeType.FloatType -> checkFloatAbility(abilityName, typeArgs)
-            is MezzeType.NatType -> checkNatAbility(abilityName, typeArgs)
-            is MezzeType.FracType -> checkFracAbility(abilityName, typeArgs)
-
-            // Other primitive types
-            is MezzeType.StringType -> checkStringAbility(abilityName, typeArgs)
-            is MezzeType.BoolType -> checkBooleanAbility(abilityName, typeArgs)
-            is MezzeType.CharType -> checkCharAbility(abilityName, typeArgs)
-            is MezzeType.OrderingType -> checkOrderingAbility(abilityName, typeArgs)
-            is MezzeType.BytesType -> checkBytesAbility(abilityName, typeArgs)
-            is MezzeType.ByteBufferType -> checkByteBufferAbility(abilityName, typeArgs)
-
-            // Collection types
-            is MezzeType.ListType -> checkListAbility(type, abilityName, typeArgs)
-            is MezzeType.SeqType -> checkSeqAbility(type, abilityName, typeArgs)
-            is MezzeType.SetType -> checkSetAbility(type, abilityName, typeArgs)
-            is MezzeType.MapType -> checkMapAbility(type, abilityName, typeArgs)
-            is MezzeType.SortedSetType -> checkSortedSetAbility(type, abilityName, typeArgs)
-            is MezzeType.SortedMapType -> checkSortedMapAbility(type, abilityName, typeArgs)
-
-            // Composite types
-            is MezzeType.RecordType -> checkRecordAbility(type, abilityName, typeArgs)
-            is MezzeType.VariantType -> checkVariantAbility(type, abilityName, typeArgs)
-            is MezzeType.TypeApplication -> checkTypeApplicationAbility(type, abilityName, typeArgs)
+            // Suspended types delegate to their wrapped type
+            is MezzeType.SuspendedType -> checkAbility(type.valueType, abilityName, typeArgs)
 
             // Function types don't have abilities
             is MezzeType.FunctionType -> AbilityCheckResult.Unsatisfied(
                 reason = "Function types do not support abilities"
             )
 
-            // Suspended types delegate to their wrapped type
-            is MezzeType.SuspendedType -> checkAbility(type.valueType, abilityName, typeArgs)
-
             // Effect rows don't have abilities
             is MezzeType.EffectRow -> AbilityCheckResult.Unsatisfied(
                 reason = "Effect rows do not support abilities"
             )
-        }
-    }
 
-    // ========================================
-    // Numeric Types
-    // ========================================
+            // Composite types: check for user-defined ability impls
+            is MezzeType.RecordType -> checkRecordAbility(type, abilityName, typeArgs)
+            is MezzeType.VariantType -> checkVariantAbility(type, abilityName, typeArgs)
+            is MezzeType.TypeApplication -> checkTypeApplicationAbility(type, abilityName, typeArgs)
 
-    private fun checkIntAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod" ->
-                AbilityCheckResult.Satisfied("Built-in Int arithmetic")
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Int equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Int ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Int to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.IntType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkFloatAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "NumAdd", "NumSub", "NumMul", "NumDiv" ->
-                AbilityCheckResult.Satisfied("Built-in Float arithmetic")
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Float equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Float ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Float to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.FloatType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkNatAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "NumAdd", "NumMul", "NumDiv", "NumMod" ->
-                AbilityCheckResult.Satisfied("Built-in Nat arithmetic")
-            // Note: Nat doesn't support NumSub because Nat - Nat can be negative (returns Int, not Nat)
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Nat equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Nat ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Nat to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.NatType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkFracAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "NumAdd", "NumSub", "NumMul", "NumDiv" ->
-                AbilityCheckResult.Satisfied("Built-in Frac arithmetic")
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Frac equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Frac ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Frac to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.FracType, abilityName, typeArgs)
-        }
-    }
-
-    // ========================================
-    // Other Primitive Types
-    // ========================================
-
-    private fun checkStringAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in String equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in String ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in String to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.StringType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkBooleanAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Bool equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Bool ordering (False < True)")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Bool to_string")
-            "LogicalAnd", "LogicalOr", "LogicalNot" ->
-                AbilityCheckResult.Satisfied("Built-in Bool logic")
-            else -> checkUserDefinedAbilityImpl(MezzeType.BoolType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkCharAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Char equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Char ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Char to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.CharType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkOrderingAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Ordering equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Ordering ordering (LT < EQ < GT)")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Ordering to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.OrderingType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkBytesAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> AbilityCheckResult.Satisfied("Built-in Bytes equality")
-            "Ord" -> AbilityCheckResult.Satisfied("Built-in Bytes lexicographic ordering")
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Bytes to_string")
-            else -> checkUserDefinedAbilityImpl(MezzeType.BytesType, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkByteBufferAbility(abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        // ByteBuffer is mutable, so it has very limited abilities
-        return when (abilityName) {
-            // ByteBuffer doesn't have Eq or Inspect implemented
-            else -> checkUserDefinedAbilityImpl(MezzeType.ByteBufferType, abilityName, typeArgs)
-        }
-    }
-
-    // ========================================
-    // Collection Types
-    // ========================================
-
-    private fun checkListAbility(type: MezzeType.ListType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // List has equals if element type has Eq
-                val elementCheck = checkAbility(type.elementType, "Eq")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in List equality (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "List Eq requires element type to have Eq",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Eq")
-                    )
-                }
-            }
-            "Ord" -> {
-                // List has Ord (lexicographic) if element type has Ord
-                val elementCheck = checkAbility(type.elementType, "Ord")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in List lexicographic ordering (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "List Ord requires element type to have Ord",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Ord")
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in List to_str")
+            // All other types: look up user-defined impl in context
             else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
         }
     }
-
-    private fun checkSeqAbility(type: MezzeType.SeqType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // Seq has equals if element type has Eq
-                val elementCheck = checkAbility(type.elementType, "Eq")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Seq equality (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Seq Eq requires element type to have Eq",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Eq")
-                    )
-                }
-            }
-            "Ord" -> {
-                // Seq has Ord (lexicographic) if element type has Ord
-                val elementCheck = checkAbility(type.elementType, "Ord")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Seq lexicographic ordering (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Seq Ord requires element type to have Ord",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Ord")
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Seq to_str")
-            else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkSetAbility(type: MezzeType.SetType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // Set has equals if element type has Eq
-                val elementCheck = checkAbility(type.elementType, "Eq")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Set equality (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Set Eq requires element type to have Eq",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Eq")
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Set to_str")
-            else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkMapAbility(type: MezzeType.MapType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // Map has equals if key and value types have Eq
-                val keyCheck = checkAbility(type.keyType, "Eq")
-                val valueCheck = checkAbility(type.valueType, "Eq")
-                if (keyCheck is AbilityCheckResult.Satisfied && valueCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in Map equality (derived from key and value)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "Map Eq requires both key and value types to have Eq"
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in Map to_str")
-            else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkSortedSetAbility(type: MezzeType.SortedSetType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // SortedSet has equals if element type has Eq
-                val elementCheck = checkAbility(type.elementType, "Eq")
-                if (elementCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in SortedSet equality (derived from element)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "SortedSet Eq requires element type to have Eq",
-                        suggestions = listOf("Ensure ${formatType(type.elementType)} has Eq")
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in SortedSet to_str")
-            else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-        }
-    }
-
-    private fun checkSortedMapAbility(type: MezzeType.SortedMapType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
-                // SortedMap has equals if key and value types have Eq
-                val keyCheck = checkAbility(type.keyType, "Eq")
-                val valueCheck = checkAbility(type.valueType, "Eq")
-                if (keyCheck is AbilityCheckResult.Satisfied && valueCheck is AbilityCheckResult.Satisfied) {
-                    AbilityCheckResult.Satisfied("Built-in SortedMap equality (derived from key and value)")
-                } else {
-                    AbilityCheckResult.Unsatisfied(
-                        reason = "SortedMap Eq requires both key and value types to have Eq"
-                    )
-                }
-            }
-            "Inspect" -> AbilityCheckResult.Satisfied("Built-in SortedMap to_str")
-            else -> checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
-        }
-    }
-
-    // ========================================
-    // Composite Types
-    // ========================================
 
     private fun checkRecordAbility(type: MezzeType.RecordType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
         return when (abilityName) {
@@ -435,12 +166,12 @@ class AbilityResolver(
     }
 
     private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        // Bool variant — delegate to Bool ability check
+        // Bool variant — delegate to user-defined ability impl lookup
         val isBool = type.constructors.size == 2 &&
             type.constructors.containsKey("True") && type.constructors.containsKey("False") &&
             type.constructors["True"] == null && type.constructors["False"] == null
         if (isBool) {
-            return checkBooleanAbility(abilityName, typeArgs)
+            return checkUserDefinedAbilityImpl(MezzeType.BoolType, abilityName, typeArgs)
         }
 
         // Check if this is a newtype by looking up the type declaration
