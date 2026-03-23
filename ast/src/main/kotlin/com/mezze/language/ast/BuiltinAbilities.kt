@@ -42,6 +42,15 @@ object BuiltinAbilities {
     // Inspect ability
     const val INSPECT = "Inspect"
 
+    // Default/Zero/One abilities
+    const val DEFAULT = "Default"
+    const val NUM_ZERO = "NumZero"
+    const val NUM_ONE = "NumOne"
+
+    // Conversion abilities
+    const val INTO = "Into"
+    const val TRY_INTO = "TryInto"
+
     // Serialization abilities (used by codec system)
     const val ENCODE = "Encode"
     const val ENCODE_REPR = "EncodeRepr"
@@ -75,7 +84,7 @@ object BuiltinAbilities {
     const val CONVERT = "Convert"
 
     // All core built-in abilities (operators and basic operations)
-    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT, INSPECT)
+    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT, INSPECT, DEFAULT, NUM_ZERO, NUM_ONE, INTO, TRY_INTO)
 
     /**
      * Check if an ability name is a built-in ability

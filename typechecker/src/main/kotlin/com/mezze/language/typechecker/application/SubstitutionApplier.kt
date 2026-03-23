@@ -1508,7 +1508,6 @@ class SubstitutionApplier(
 
 
         // Check if this is actually an ability (not a regular variable)
-        // Look for implementations of this ability, or check if it's auto-derivable
         val hasImpl = mutableAbilityImpls.values.any { it.abilityName == abilityName }
         val isCodecAbility = abilityName in setOf(
             "Encode", "Decode", "EncodeRepr", "DecodeRepr",
@@ -1520,23 +1519,20 @@ class SubstitutionApplier(
         }
 
         // Get the argument type to determine which implementation to use
-        val argType = arguments.inferredType
-        if (argType !is MezzeType.RecordType) return resolvedAbilities
+        val argType = arguments.inferredType as? MezzeType.RecordType
 
         // For Encode/EncodeRepr/Decode/DecodeRepr abilities, the type we need is in the "val" field specifically
         // For other abilities like Show, use the first field's type
-        val primaryType = if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
-            // Encode/Decode use {val: 'a, config: 'cfg} where 'a is the data type
+        val primaryType = if (argType == null) {
+            null  // No args — will use returnType fallback
+        } else if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
             val valFieldType = argType.fields["val"]
             if (valFieldType != null) {
                 substitution.apply(valFieldType)
             } else {
-                // Fall back to first field if "val" not found
                 argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
             }
         } else {
-            // For other abilities, look for `it` field first (explicit receiver),
-            // then fall back to first field's type
             val itFieldType = argType.fields["it"]
             if (itFieldType != null) {
                 substitution.apply(itFieldType)
