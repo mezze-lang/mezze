@@ -1331,30 +1331,30 @@ class SubstitutionApplier(
                             else -> false
                         }
 
-                        // For method-call syntax (value.method {}), bind `it` to the receiver
-                        // For direct ability name calls (Ability.method {args}), skip inlining
-                        // (these go through the interpreter's built-in dispatch or codec path)
-                        val itValue = if (!receiverIsAbilityName) {
-                            receiver
-                        } else {
-                            null
+                        // Compute return type, unwrapping SuspendedType
+                        val rawReturnType = updatedType ?: run {
+                            val opType = operation.implementation.inferredType?.let { substitution.apply(it) }
+                            when (opType) {
+                                is MezzeType.FunctionType -> opType.returnType
+                                else -> null
+                            }
+                        }
+                        val effectiveReturnType = when (rawReturnType) {
+                            is MezzeType.SuspendedType -> rawReturnType.valueType
+                            else -> rawReturnType
                         }
 
-                        if (itValue != null) {
-                            // Compute return type, unwrapping SuspendedType
-                            val rawReturnType = updatedType ?: run {
-                                val opType = operation.implementation.inferredType?.let { substitution.apply(it) }
-                                when (opType) {
-                                    is MezzeType.FunctionType -> opType.returnType
-                                    else -> null
-                                }
-                            }
-                            val effectiveReturnType = when (rawReturnType) {
-                                is MezzeType.SuspendedType -> rawReturnType.valueType
-                                else -> rawReturnType
-                            }
+                        if (!receiverIsAbilityName) {
+                            // Method-call syntax (value.method {}): bind `it` to receiver
                             return inlineAbilityMethodCall(
-                                expr, operation, itValue, updatedArguments, effectiveReturnType
+                                expr, operation, receiver, updatedArguments, effectiveReturnType
+                            )
+                        } else if (resolved.abilityName !in BuiltinAbilities.CODEC_ABILITIES &&
+                                   resolved.abilityName !in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
+                            // Direct ability call (Ability.method {args}): inline with null itValue
+                            // Skip for codec abilities — they need runtime dispatch
+                            return inlineAbilityMethodCall(
+                                expr, operation, null, updatedArguments, effectiveReturnType
                             )
                         }
                     }
@@ -1389,42 +1389,45 @@ class SubstitutionApplier(
     private fun inlineAbilityMethodCall(
         expr: FunctionCall,
         operation: ImplAbilityOperation,
-        itValue: Expression,
+        itValue: Expression?,
         arguments: Expression,
         returnType: MezzeType?
     ): Expression {
         val opBody = operation.implementation
 
-        // `it` is now an explicit param in impl bodies.
-        // Inject `it = receiver` into the call-site arguments record.
-        val argsWithIt = when (arguments) {
-            is RecordLiteral -> {
-                // Add it = receiver to the record literal
-                val itEntry = RecordFieldEntry(
-                    name = Keywords.IT,
-                    value = itValue
-                )
-                arguments.copy(entries = listOf(itEntry) + arguments.entries)
+        // Build arguments: inject `it = receiver` if we have a receiver (method-call syntax).
+        // For direct calls (Ability.method { args }), args already include `it` if needed,
+        // or the method has no `it` param (e.g., Default.default {}).
+        val finalArgs = if (itValue != null) {
+            when (arguments) {
+                is RecordLiteral -> {
+                    val itEntry = RecordFieldEntry(
+                        name = Keywords.IT,
+                        value = itValue
+                    )
+                    arguments.copy(entries = listOf(itEntry) + arguments.entries)
+                }
+                else -> {
+                    val letIt = LetStatement(
+                        pattern = VariablePattern(Keywords.IT),
+                        expression = itValue
+                    )
+                    DoExpression(
+                        statements = listOf(letIt),
+                        result = arguments,
+                        inferredType = arguments.inferredType,
+                        sourceLocation = expr.sourceLocation
+                    )
+                }
             }
-            else -> {
-                // Fallback: wrap in a do-expression that binds it (legacy path)
-                val letIt = LetStatement(
-                    pattern = VariablePattern(Keywords.IT),
-                    expression = itValue
-                )
-                DoExpression(
-                    statements = listOf(letIt),
-                    result = arguments,
-                    inferredType = arguments.inferredType,
-                    sourceLocation = expr.sourceLocation
-                )
-            }
+        } else {
+            // Direct call: args passed as-is (already contain `it` if the method needs it)
+            arguments
         }
 
-        // The result is: opBody({it = receiver, ...args})
         return expr.copy(
             function = opBody,
-            arguments = argsWithIt,
+            arguments = finalArgs,
             inferredType = returnType,
             resolvedAbilities = emptyMap(),
             isTailCall = false,
@@ -1532,11 +1535,21 @@ class SubstitutionApplier(
                 argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
             }
         } else {
-            // For other abilities, use the first field's type
-            argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
+            // For other abilities, look for `it` field first (explicit receiver),
+            // then fall back to first field's type
+            val itFieldType = argType.fields["it"]
+            if (itFieldType != null) {
+                substitution.apply(itFieldType)
+            } else {
+                argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
+            }
         }
 
-        if (primaryType == null) return resolvedAbilities
+        // If no primary type from arguments (e.g., Default.default {} with empty args),
+        // use the return type from context to determine which impl to use.
+        val effectivePrimaryType = primaryType
+            ?: returnType?.let { substitution.apply(it) }
+            ?: return resolvedAbilities
 
         // For Encode/EncodeRepr/Decode/DecodeRepr, we need to search with both format type AND data type
         // The format type comes from the Format/DecodeFormat impl in scope
@@ -1550,17 +1563,15 @@ class SubstitutionApplier(
 
             if (formatTypeName != null) {
                 val formatType = MezzeType.TypeApplication(formatTypeName, emptyList())
-                // Search with both format type and data type
-                impl = findAbilityImplementation(abilityName, listOf(formatType, primaryType))
+                impl = findAbilityImplementation(abilityName, listOf(formatType, effectivePrimaryType))
             }
         } else {
             // First try exact match (for single-parameter abilities)
-            impl = findAbilityImplementation(abilityName, listOf(primaryType))
+            impl = findAbilityImplementation(abilityName, listOf(effectivePrimaryType))
 
             // If no exact match, try partial match for multi-parameter abilities
-            // e.g., for Convert 'a 'b, find impl where first type matches
             if (impl == null) {
-                impl = findAbilityImplementationByFirstType(abilityName, primaryType)
+                impl = findAbilityImplementationByFirstType(abilityName, effectivePrimaryType)
             }
         }
 
@@ -1576,14 +1587,12 @@ class SubstitutionApplier(
         }
 
         if (impl != null && BuiltinAbilities.isBuiltin(abilityName) &&
-            BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
+            BuiltinAbilities.typeHasAutomaticImplementation(effectivePrimaryType, abilityName)) {
             // Built-in ability with a context impl (from prelude) — use native fast path.
-            // The .mz impl is authoritative for type checking, but the interpreter
-            // uses optimized native dispatch for built-in abilities on primitive types.
-            val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(primaryType)}"
+            val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(effectivePrimaryType)}"
             resolvedAbilities[builtinKey] = ResolvedAbility(
                 abilityName = abilityName,
-                typeArgs = listOf(primaryType),
+                typeArgs = listOf(effectivePrimaryType),
                 isBuiltin = true
             )
         } else if (impl != null) {
@@ -1604,15 +1613,12 @@ class SubstitutionApplier(
                 implementationHash = contentHash
             )
         } else if (BuiltinAbilities.isBuiltin(abilityName)) {
-            // Check for built-in ability with automatic implementation
-            if (BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
-                // For builtins, use a deterministic synthetic key based on ability + type
-                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(primaryType)}"
+            if (BuiltinAbilities.typeHasAutomaticImplementation(effectivePrimaryType, abilityName)) {
+                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(effectivePrimaryType)}"
                 resolvedAbilities[builtinKey] = ResolvedAbility(
                     abilityName = abilityName,
-                    typeArgs = listOf(primaryType),
+                    typeArgs = listOf(effectivePrimaryType),
                     isBuiltin = true
-                    // No implementationHash for builtins - they're handled specially by interpreter
                 )
             }
         } else if (abilityName in BuiltinAbilities.AUTO_DERIVE_CODEC_ABILITIES) {
@@ -1643,9 +1649,9 @@ class SubstitutionApplier(
                     findDecodeTargetFromSubstitution() ?: extractedFromReturnType
                 }
 
-                extractedType ?: primaryType
+                extractedType ?: effectivePrimaryType
             } else {
-                primaryType // For Encode/EncodeRepr, use the argument type
+                effectivePrimaryType // For Encode/EncodeRepr, use the argument type
             }
 
             // For built-in parametric types (Option, Result), keep them as TypeApplication
