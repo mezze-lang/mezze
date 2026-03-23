@@ -2113,7 +2113,17 @@ class ConstraintSolver(
     private fun canDeriveAbility(abilityName: String, type: MezzeType): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
+        // Track if the original type was a newtype — newtypes don't auto-derive Eq/Ord
+        var isNewtype = unwrappedType is MezzeType.NewtypeType
+
         if (unwrappedType is MezzeType.TypeApplication) {
+            // Check if this TypeApplication refers to a newtype declaration
+            val typeDecl = typeDeclarations[unwrappedType.constructor]
+                ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
+            if (typeDecl?.definition is NewtypeDefinition) {
+                isNewtype = true
+            }
+
             // Try expanding to variant (type Color = | Red, Green |)
             val expandedVariant = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
             if (expandedVariant != null) {
@@ -2125,6 +2135,12 @@ class ConstraintSolver(
                     unwrappedType = expandedRecord
                 }
             }
+        }
+
+        // Newtypes NEVER auto-derive Eq/Ord — requires explicit impl.
+        // Only Inspect is universally available.
+        if (isNewtype && abilityName != BuiltinAbilities.INSPECT) {
+            return false
         }
 
         return when (abilityName) {
@@ -2799,18 +2815,6 @@ class ConstraintSolver(
         // This handles non-parametric types like Color (TypeApplication("Color", []))
         // and parametric types like Option Int (TypeApplication("Option", [IntType]))
         if (variantType is MezzeType.TypeApplication) {
-            // Check if this is a newtype — newtypes have a single constructor
-            // that wraps the inner type. Handle pattern matching directly.
-            val typeDecl = typeDeclarations[variantType.constructor]
-                ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(variantType.constructor)
-            if (typeDecl?.definition is NewtypeDefinition) {
-                val newtypeDef = typeDecl.definition as NewtypeDefinition
-                if (constructorName == newtypeDef.constructor) {
-                    // Valid newtype constructor match — unify payload with wrapped type
-                    return ConstraintResult.Success(currentSubst)
-                }
-            }
-
             val expanded = expandTypeApplicationToVariant(variantType, typeDeclarations)
             if (expanded != null) {
                 return solveHasConstructor(

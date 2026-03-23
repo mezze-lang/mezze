@@ -1272,9 +1272,16 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     val variantDef = when (val def = typeDecl.definition) {
         is VariantDefinition -> def
         is NewtypeDefinition -> {
-            // Newtypes are NOT variants — don't expand them.
-            // They have their own MezzeType.NewtypeType and unification rules.
-            return null
+            // Expand newtype to variant for pattern matching and construction.
+            // Ability derivation uses a separate check (isNewtype in canDeriveAbility).
+            val payloadType = if (def.wrappedType is RecordTypeAnnotation) {
+                def.wrappedType
+            } else {
+                RecordTypeAnnotation(
+                    entries = listOf(RecordTypeEntry("val", def.wrappedType))
+                )
+            }
+            VariantDefinition(listOf(VariantConstructorDef(def.constructor, payloadType)))
         }
         else -> return null
     }
@@ -1504,8 +1511,13 @@ internal fun expandTypeApplication(
             }
         }
         is NewtypeDefinition -> {
-            // Newtypes are NOT expanded to VariantType — they stay as NewtypeType
-            TypeExpansionResult.NotFound
+            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
+            if (expanded != null && expanded.constructors.size == 1) {
+                val (constructorName, payloadType) = expanded.constructors.entries.first()
+                TypeExpansionResult.Newtype(expanded, constructorName, payloadType)
+            } else {
+                TypeExpansionResult.NotFound
+            }
         }
     }
 }

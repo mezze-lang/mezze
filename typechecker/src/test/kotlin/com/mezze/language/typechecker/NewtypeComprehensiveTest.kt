@@ -184,8 +184,8 @@ class NewtypeComprehensiveTest {
                 impl Eq for UserId where {
                     eq = {it, r} ->
                         match it is
-                            UserId {value = a} -> match r is
-                                UserId {value = b} -> a == b
+                            UserId {val = a} -> match r is
+                                UserId {val = b} -> a == b
                 }
 
                 let same = {a: UserId, b: UserId} -> a.eq {r = b}

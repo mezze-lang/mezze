@@ -7,11 +7,10 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 
 /**
- * Tests for newtype deriving behavior.
+ * Tests for newtype ability behavior.
  *
- * Newtypes have special rules:
- * - Inspect: Always auto-derived (universal debugging)
- * - Eq, Ord: Only available if explicitly listed in `deriving` clause
+ * Newtypes do NOT auto-derive Eq/Ord — users must write explicit impl blocks.
+ * Only Inspect is universally available.
  */
 class NewtypeDerivingTest {
 
@@ -27,134 +26,64 @@ class NewtypeDerivingTest {
     }
 
     @Test
-    fun `test newtype without deriving Eq auto-derives from payload`() {
-        // Newtypes auto-derive Eq if their payload type has Eq.
-        // UserId wraps Int, Int has Eq → UserId auto-derives Eq.
+    fun `test newtype without Eq cannot use equality`() {
         val source = """
             newtype UserId = UserId Int
-
             let compare = {a: UserId, b: UserId} -> a == b
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Newtype should auto-derive Eq from payload")
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(ast)
+        }
     }
 
     @Test
-    fun `test newtype with deriving Eq can use equality`() {
+    fun `test newtype without Ord cannot use ordering`() {
         val source = """
-            newtype UserId = UserId Int deriving Eq
-
-            let compare = {a: UserId, b: UserId} -> a == b
-        """.trimIndent()
-
-        val ast = parser.parse(source)
-        // Should not throw - returns TypeCheckResult on success
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Newtype with deriving Eq can use equality!")
-    }
-
-    @Test
-    fun `test newtype Inspect always works without deriving`() {
-        val source = """
-            newtype Email = Email String
-
-            let show = {e: Email} -> e.to_dbg_str {}
-        """.trimIndent()
-
-        val ast = parser.parse(source)
-        // Should not throw - Inspect is always auto-derived for newtypes
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Newtype Inspect works without explicit deriving!")
-    }
-
-    @Test
-    fun `test newtype with deriving multiple abilities`() {
-        val source = """
-            newtype Score = Score Int deriving Eq, Ord
-
-            let compare = {a: Score, b: Score} -> a == b
-            let order = {a: Score, b: Score} -> a < b
-        """.trimIndent()
-
-        val ast = parser.parse(source)
-        // Should not throw - both Eq and Ord are derived
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Newtype with deriving multiple abilities works!")
-    }
-
-    @Test
-    fun `test newtype without deriving Ord auto-derives from payload`() {
-        // Newtypes auto-derive Ord if their payload type has Ord.
-        // UserId wraps Int, Int has Ord → UserId auto-derives Ord.
-        val source = """
-            newtype UserId = UserId Int deriving Eq
-
+            newtype UserId = UserId Int
             let order = {a: UserId, b: UserId} -> a < b
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Newtype should auto-derive Ord from payload")
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(ast)
+        }
+    }
 
-        println("✅ Newtype with only Eq correctly rejects ordering!")
+    @Test
+    fun `test newtype Inspect always works`() {
+        val source = """
+            newtype Email = Email String
+            let show = {e: Email} -> e.to_dbg_str {}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val result = typeChecker.typeCheck(ast)
+        assertNotNull(result.program)
     }
 
     @Test
     fun `test regular variant still auto-derives Eq`() {
-        // Regular variants (not newtypes) should still auto-derive Eq
         val source = """
             type Color = | Red, Green, Blue |
-
             let compare = {a: Color, b: Color} -> a == b
         """.trimIndent()
 
         val ast = parser.parse(source)
-        // Should not throw - regular variants auto-derive Eq
         val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Regular variant still auto-derives Eq!")
+        assertNotNull(result.program)
     }
 
     @Test
     fun `test single-constructor variant is not treated as newtype`() {
-        // A single-constructor variant should NOT be treated as a newtype
-        // It should still auto-derive Eq
         val source = """
             type Wrapper = | Wrap Int |
-
             let compare = {a: Wrapper, b: Wrapper} -> a == b
         """.trimIndent()
 
         val ast = parser.parse(source)
-        // Should not throw - single-constructor variants (declared with 'type') still auto-derive Eq
         val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Single-constructor variant is NOT treated as newtype - auto-derives Eq!")
-    }
-
-    @Test
-    fun `test newtype with record wrapped type can derive Eq`() {
-        val source = """
-            newtype Point = Point { x: Int, y: Int } deriving Eq
-
-            let same = {a: Point, b: Point} -> a == b
-        """.trimIndent()
-
-        val ast = parser.parse(source)
-        // Should not throw - Eq is explicitly derived
-        val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program, "Expected successful type check with a program")
-
-        println("✅ Newtype with record wrapped type can derive Eq!")
+        assertNotNull(result.program)
     }
 }
