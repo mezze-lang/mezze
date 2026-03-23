@@ -131,6 +131,25 @@ sealed interface MezzeType {
         )
     }
 
+    // Newtype — compile-time wrapper, erased at runtime.
+    // newtype UserId = UserId Int → NewtypeType("UserId", "UserId", IntType)
+    // newtype Point = Point {x: Float, y: Float} → NewtypeType("Point", "Point", RecordType({x: Float, y: Float}))
+    // At runtime, UserId 42 is just 42. Point {x=1.0, y=2.0} is just {x=1.0, y=2.0}.
+    // Does NOT auto-derive Eq/Ord/Codec — requires explicit impl.
+    // Constructor is private to defining module (opaque type).
+    @Serializable
+    data class NewtypeType(
+        val name: String,            // Type name: "UserId"
+        val constructor: String,     // Constructor name: "UserId"
+        val wrappedType: MezzeType   // Inner type: IntType, RecordType, etc.
+    ) : MezzeType {
+        override fun toString(): String = safeToString(
+            name,
+            truncatedContent = { "wraps ${wrappedType::class.simpleName}" },
+            fullContent = { name }
+        )
+    }
+
     // Built-in core types (always available)
     // Note: Option and Result are now regular variant types, not special AST types
     // They are defined as built-in variants:
@@ -383,6 +402,11 @@ data class TypeScheme(
                     dataType?.let { applySubstitutionToType(it, substitution) }
                 },
                 type.rowVar
+            )
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applySubstitutionToType(type.wrappedType, substitution)
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 type.constructor,

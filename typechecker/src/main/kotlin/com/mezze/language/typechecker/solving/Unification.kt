@@ -400,6 +400,19 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> UnificationResult.Success(Substitution.empty)
 
+        // CASE 14: Newtype unification — same name = same type, unify wrapped types
+        type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
+            if (type1.name == type2.name) {
+                unify(type1.wrappedType, type2.wrappedType, typeDeclarations)
+            } else {
+                UnificationResult.Failure(
+                    message = "Type mismatch: ${type1.name} is not the same type as ${type2.name}",
+                    type1 = type1,
+                    type2 = type2
+                )
+            }
+        }
+
         // OrderingType can unify with VariantType([LT, EQ, GT]) and vice versa
         // This supports pattern matching where the scrutinee is OrderingType but patterns create a VariantType
         type1 is MezzeType.OrderingType && type2 is MezzeType.VariantType -> {

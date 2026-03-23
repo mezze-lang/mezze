@@ -2931,6 +2931,11 @@ class SubstitutionApplier(
                 valueType = closeGeneratedRowVars(type.valueType, bindingName),
                 effects = type.effects
             )
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                closeGeneratedRowVars(type.wrappedType, bindingName)
+            )
             // Types without row variables
             is MezzeType.VarType,
             is MezzeType.IntType,

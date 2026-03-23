@@ -747,6 +747,9 @@ class ImportResolver(
             is MezzeType.EffectRow -> {
                 // Effect rows don't contain type applications
             }
+            is MezzeType.NewtypeType -> {
+                collectTypeApplicationConstructors(type.wrappedType, result)
+            }
             // Simple types that don't contain other types
             is MezzeType.VarType,
             is MezzeType.IntType,

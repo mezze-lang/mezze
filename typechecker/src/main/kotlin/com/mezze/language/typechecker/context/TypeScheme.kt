@@ -233,6 +233,13 @@ private fun applySubstitutionToType(
                 effects = type.effects
             )
         }
+        is MezzeType.NewtypeType -> {
+            MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applySubstitutionToType(type.wrappedType, substitution)
+            )
+        }
         is MezzeType.EffectRow -> {
             // Effect rows don't contain substitutable type variables
             type
@@ -297,6 +304,9 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         }
         is MezzeType.SuspendedType -> {
             collectFreeTypeVars(type.valueType)
+        }
+        is MezzeType.NewtypeType -> {
+            collectFreeTypeVars(type.wrappedType)
         }
         is MezzeType.EffectRow -> {
             // Effect rows don't contain type variables

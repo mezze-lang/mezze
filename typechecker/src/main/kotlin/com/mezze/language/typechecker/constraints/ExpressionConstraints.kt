@@ -1755,6 +1755,11 @@ class ExpressionConstraintGenerator {
                 valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings),
                 effects = type.effects
             )
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                substituteAssociatedTypesInType(type.wrappedType, associatedTypeBindings)
+            )
             // Primitive types and VarType unchanged
             is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
@@ -1896,6 +1901,7 @@ class ExpressionConstraintGenerator {
             is MezzeType.MapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
             is MezzeType.SuspendedType -> getFreeTypeVariables(type.valueType)
             is MezzeType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
+            is MezzeType.NewtypeType -> getFreeTypeVariables(type.wrappedType)
             // Primitive types have no variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
@@ -1966,6 +1972,11 @@ class ExpressionConstraintGenerator {
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) }
+            )
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applyTypeVarSubstitution(type.wrappedType, substitution)
             )
             // Primitive types unchanged
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
@@ -4003,7 +4014,8 @@ class ExpressionConstraintGenerator {
             is MezzeType.CharType,
             is MezzeType.OrderingType,
             is MezzeType.BytesType,
-            is MezzeType.ByteBufferType -> ExtractedEffects(emptySet(), false)
+            is MezzeType.ByteBufferType,
+            is MezzeType.NewtypeType -> ExtractedEffects(emptySet(), false)
         }
     }
 
@@ -4035,7 +4047,8 @@ class ExpressionConstraintGenerator {
             is MezzeType.CharType,
             is MezzeType.OrderingType,
             is MezzeType.BytesType,
-            is MezzeType.ByteBufferType -> false
+            is MezzeType.ByteBufferType,
+            is MezzeType.NewtypeType -> false
         }
     }
 

@@ -272,8 +272,22 @@ class ContextBuilder {
                 // This will be handled separately if needed
             }
             is NewtypeDefinition -> {
-                // Newtypes have a single constructor
-                // This will be handled separately if needed
+                // Newtype constructor: UserId : Int -> NewtypeType("UserId", "UserId", IntType)
+                typeVarCache.clear()
+                val wrappedMezzeType = convertTypeAnnotationInternal(definition.wrappedType)
+                val newtypeResult = MezzeType.NewtypeType(
+                    name = typeDecl.name,
+                    constructor = definition.constructor,
+                    wrappedType = wrappedMezzeType
+                )
+                val constructorType = MezzeType.FunctionType(
+                    paramType = wrappedMezzeType,
+                    returnType = newtypeResult
+                )
+                val typeVars = mutableSetOf<TypeVar>()
+                collectTypeVarsFromType(constructorType, typeVars)
+                val scheme = TypeScheme(typeVars.toList(), emptyList(), constructorType)
+                result = result.extendPoly(definition.constructor, scheme)
             }
         }
 
@@ -291,19 +305,31 @@ class ContextBuilder {
         val resultType = if (typeDecl.typeParams.isEmpty()) {
             // Monomorphic variant: Result
             // Get constructors from the variant definition
-            val constructors = when (val def = typeDecl.definition) {
-                is VariantDefinition -> def.constructors.associate { ctor ->
-                    ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
+            when (val def = typeDecl.definition) {
+                is NewtypeDefinition -> {
+                    // Newtypes get their own MezzeType — not a VariantType
+                    val wrappedMezzeType = convertTypeAnnotationInternal(def.wrappedType)
+                    MezzeType.NewtypeType(
+                        name = typeDecl.name,
+                        constructor = def.constructor,
+                        wrappedType = wrappedMezzeType
+                    )
                 }
-                is RecordDefinition,
-                is NewtypeDefinition -> emptyMap()
+                else -> {
+                    val constructors = when (def) {
+                        is VariantDefinition -> def.constructors.associate { ctor ->
+                            ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
+                        }
+                        is RecordDefinition -> emptyMap()
+                        is NewtypeDefinition -> emptyMap() // unreachable
+                    }
+                    MezzeType.VariantType(
+                        constructors = constructors,
+                        rowVar = null,
+                        typeName = typeDecl.name
+                    )
+                }
             }
-
-            MezzeType.VariantType(
-                constructors = constructors,
-                rowVar = null,
-                typeName = typeDecl.name  // Track the type alias name
-            )
         } else {
             // Polymorphic variant: Result 'a 'b
             // Use cached type variables for type parameters
@@ -1163,6 +1189,7 @@ class ContextBuilder {
                 collectTypeVarsFromType(type.valueType, typeVars)
             }
             is MezzeType.SuspendedType -> collectTypeVarsFromType(type.valueType, typeVars)
+            is MezzeType.NewtypeType -> collectTypeVarsFromType(type.wrappedType, typeVars)
             // Primitive types have no type variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,

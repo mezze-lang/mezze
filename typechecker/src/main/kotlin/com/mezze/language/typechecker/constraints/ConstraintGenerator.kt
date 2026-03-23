@@ -2012,6 +2012,7 @@ class ConstraintGenerator(
                 collectTypeVarsRecursive(type.keyType, result)
                 collectTypeVarsRecursive(type.valueType, result)
             }
+            is MezzeType.NewtypeType -> collectTypeVarsRecursive(type.wrappedType, result)
             // Concrete types have no type variables
             is MezzeType.IntType,
             is MezzeType.FloatType,

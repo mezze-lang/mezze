@@ -2036,6 +2036,7 @@ class ConstraintSolver(
             is MezzeType.OrderingType,
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType -> type
+            is MezzeType.NewtypeType -> type  // Newtypes don't auto-derive codec
         }
     }
 
@@ -2069,6 +2070,7 @@ class ConstraintSolver(
             is MezzeType.OrderingType,
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType -> false
+            is MezzeType.NewtypeType -> false  // Newtypes don't auto-derive codec
         }
     }
 
@@ -2279,6 +2281,7 @@ class ConstraintSolver(
             is MezzeType.MapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
             is MezzeType.SortedMapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
             is MezzeType.SuspendedType -> isConcrete(type.valueType)
+            is MezzeType.NewtypeType -> isConcrete(type.wrappedType)
             // Non-concrete types
             is MezzeType.VarType -> false
             is MezzeType.EffectRow -> false  // Effect rows are not value types
@@ -3518,6 +3521,11 @@ class ConstraintSolver(
                     effects = type.effects
                 )
             }
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                closeRowVarsInType(type.wrappedType, rowVarsToClose)
+            )
             // Primitive types and EffectRow don't contain row vars
             is MezzeType.VarType,
             is MezzeType.IntType,
@@ -3709,6 +3717,7 @@ class ConstraintSolver(
             is MezzeType.SortedSetType -> collectTypeVars(type.elementType)
             is MezzeType.MapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
             is MezzeType.SuspendedType -> collectTypeVars(type.valueType)
+            is MezzeType.NewtypeType -> collectTypeVars(type.wrappedType)
             // Primitives have no type variables
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
             is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
@@ -3772,6 +3781,11 @@ class ConstraintSolver(
             is MezzeType.SuspendedType -> MezzeType.SuspendedType(
                 valueType = applyVarSubstitution(type.valueType, substitution),
                 effects = type.effects
+            )
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applyVarSubstitution(type.wrappedType, substitution)
             )
             // Primitives unchanged
             is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,

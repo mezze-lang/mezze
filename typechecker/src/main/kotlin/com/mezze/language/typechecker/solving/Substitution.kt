@@ -94,6 +94,8 @@ data class Substitution(
             is MezzeType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
             is MezzeType.SuspendedType -> needsSubstitution(type.valueType) || needsSubstitutionInEffectRow(type.effects)
 
+            is MezzeType.NewtypeType -> needsSubstitution(type.wrappedType)
+
             // Effect rows may need substitution if they have effectInstances with TypeVars
             is MezzeType.EffectRow -> needsSubstitutionInEffectRow(type)
 
@@ -214,6 +216,12 @@ data class Substitution(
             is MezzeType.SuspendedType -> MezzeType.SuspendedType(
                 valueType = applyWithVisited(type.valueType, visitedVars),
                 effects = applyToEffectRowWithVisited(type.effects, visitedVars)
+            )
+
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applyWithVisited(type.wrappedType, visitedVars)
             )
 
             is MezzeType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars)
@@ -403,6 +411,8 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
 
         is MezzeType.SuspendedType -> occursCheck(typeVar, type.valueType)
 
+        is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
+
         is MezzeType.EffectRow -> false // Effect rows don't contain type variables
 
         // Concrete types can't contain type variables
@@ -461,6 +471,8 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
 
         is MezzeType.SuspendedType -> collectFreeTypeVars(type.valueType)
+
+        is MezzeType.NewtypeType -> collectFreeTypeVars(type.wrappedType)
 
         is MezzeType.EffectRow -> emptySet()
 

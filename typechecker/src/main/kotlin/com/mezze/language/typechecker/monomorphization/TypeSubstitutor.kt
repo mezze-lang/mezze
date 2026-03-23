@@ -155,6 +155,12 @@ class TypeSubstitutor(
                 effects = MezzeType.EffectRow.simple(type.effects.effects, type.effects.rowVar)
             )
 
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                type.name,
+                type.constructor,
+                applyToType(type.wrappedType)
+            )
+
             // Concrete types stay as-is
             is MezzeType.IntType,
             is MezzeType.FloatType,

@@ -93,6 +93,9 @@ class CodecGenerator {
                 type.args.all { isSerializable(it) }
             }
 
+            // Newtypes - NOT serializable (require explicit codec impl)
+            is MezzeType.NewtypeType -> false
+
             // Type variables - assume serializable (constraint will be added during resolution)
             is MezzeType.VarType -> true
         }

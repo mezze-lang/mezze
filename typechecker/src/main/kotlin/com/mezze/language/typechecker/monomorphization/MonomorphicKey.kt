@@ -358,6 +358,11 @@ sealed class ConcreteType {
             )
 
             is MezzeType.EffectRow -> MzNamed("EffectRow", emptyList())
+
+            is MezzeType.NewtypeType -> MzNamed(
+                name = type.name,
+                typeArgs = listOf(fromMezzeType(type.wrappedType))
+            )
         }
     }
 }

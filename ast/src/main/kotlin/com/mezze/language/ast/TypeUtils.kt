@@ -131,6 +131,7 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
         is MezzeType.SortedSetType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
         is MezzeType.SeqType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
         is MezzeType.SuspendedType -> collectTypeVarsRecursive(type.valueType, collector, sortFields)
+        is MezzeType.NewtypeType -> collectTypeVarsRecursive(type.wrappedType, collector, sortFields)
         // Base types don't contain type variables
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
         is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
@@ -304,6 +305,10 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
         is MezzeType.SuspendedType -> {
             val newValueType = substituteTypeVariables(type.valueType, mapping)
             MezzeType.SuspendedType(newValueType, type.effects)
+        }
+        is MezzeType.NewtypeType -> {
+            val newWrappedType = substituteTypeVariables(type.wrappedType, mapping)
+            MezzeType.NewtypeType(type.name, type.constructor, newWrappedType)
         }
         // Base types and effect rows remain unchanged
         is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
