@@ -437,6 +437,10 @@ sealed class ConstructorResolution {
     @Serializable
     data class HandlerReference(val handlerName: String, val effectName: String? = null) : ConstructorResolution()
 
+    /** Newtype constructor — erased at runtime (UserId, Email, etc.) */
+    @Serializable
+    object NewtypeConstructor : ConstructorResolution()
+
     /** Not yet resolved by typechecker (default) */
     @Serializable
     object Unresolved : ConstructorResolution()

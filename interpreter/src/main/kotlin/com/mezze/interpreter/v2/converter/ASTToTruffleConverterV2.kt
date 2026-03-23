@@ -2245,13 +2245,16 @@ class ASTToTruffleConverterV2(
 
     private fun convertVariantConstruction(variantConstr: VariantConstruction): MezzeNode {
         // Special case: True and False are boolean literals, not variants
-        // In Mezze, Bool is defined as | True, False | but we optimize to native booleans
         if (variantConstr.constructor == "True" && variantConstr.value == null) {
             return BoolLiteralNode(true)
         }
         if (variantConstr.constructor == "False" && variantConstr.value == null) {
             return BoolLiteralNode(false)
         }
+
+        // TODO: Newtype construction should be erased at runtime.
+        // Currently still creates MezzeVariant because pattern matching
+        // also needs to be updated simultaneously. See task #34.
 
         val tag = getTagForConstructor(variantConstr.constructor)
         val payloadNode = variantConstr.value?.let { convertExpression(it) }

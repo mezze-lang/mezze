@@ -189,6 +189,14 @@ class SubstitutionApplier(
             return ConstructorResolution.HandlerReference(name, effectName)
         }
 
+        // Check newtype constructors — they're erased at runtime
+        val newtypeDecl = typeDeclarations.values.find {
+            it.definition is NewtypeDefinition && (it.definition as NewtypeDefinition).constructor == name
+        }
+        if (newtypeDecl != null) {
+            return ConstructorResolution.NewtypeConstructor
+        }
+
         // Check variant constructors using O(1) index lookup
         if (variantConstructorIndex.contains(name)) {
             return ConstructorResolution.VariantConstructor
