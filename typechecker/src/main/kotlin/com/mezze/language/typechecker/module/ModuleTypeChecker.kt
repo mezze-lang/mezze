@@ -179,8 +179,15 @@ class ModuleTypeChecker(
         // we must return the cached result to avoid re-type-checking.
         // Re-type-checking fails because local variables in function bodies
         // (like `delim_handle` in continuation.mz) aren't in scope.
-        getFromGlobalCache(module.modulePath)?.let {
-            return ModuleTypeCheckResult.Success(it)
+        getFromGlobalCache(module.modulePath)?.let { cached ->
+            // Ensure the ModuleResolver also has the typed version with content hashes.
+            // After clearCache(), the resolver re-loads from disk (unhashed), but this
+            // global cache retains the typed module. Sync them so importers see all impls.
+            moduleResolver?.updateModuleExports(
+                cached.modulePath, cached.program,
+                buildTypeContextFromProgram(cached.program)
+            )
+            return ModuleTypeCheckResult.Success(cached)
         }
 
         // Check for circular dependency in type-checking

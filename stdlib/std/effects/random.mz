@@ -4,6 +4,7 @@ use std::math::core
 use std::math::trig
 use std::collections::seq
 use std::int
+use std::float
 
 # Random effect definition
 effect Random where {

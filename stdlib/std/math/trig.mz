@@ -1,6 +1,7 @@
 # std/math/trig.mezze - Trigonometric functions
 
 use std::math::core
+use std::float
 
 # Basic trigonometric functions
 pub let sin = { n: Float } ->

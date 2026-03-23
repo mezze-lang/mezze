@@ -1506,16 +1506,21 @@ class ConstraintSolver(
         // Search for implementation using structural type matching
         val impls = context.getAbilityImpls(abilityName)
 
+        // Unwrap SuspendedType for matching — a suspended Int is still an Int for ability purposes
+        val unwrappedTypeArgs = typeArgs.map { arg ->
+            if (arg is MezzeType.SuspendedType) arg.valueType else arg
+        }
+
         val hasImpl = impls.any { implInfo ->
             // Use structural matching - compare actual types against type annotations
             val annotations = implInfo.targetTypeAnnotations ?: return@any false
 
-            if (annotations.size != typeArgs.size) return@any false
+            if (annotations.size != unwrappedTypeArgs.size) return@any false
 
             // For generic impls, track type variable bindings during matching
             val typeVarBindings = mutableMapOf<String, MezzeType>()
 
-            val matches = typeArgs.zip(annotations).all { (actualType, annotation) ->
+            val matches = unwrappedTypeArgs.zip(annotations).all { (actualType, annotation) ->
                 typeMatchesAnnotation(actualType, annotation, implInfo.typeVars, typeVarBindings)
             }
 
@@ -2114,34 +2119,18 @@ class ConstraintSolver(
         }
 
         return when (abilityName) {
+            // Inspect is universally available — no impl needed
             "Inspect" -> true
 
-            "NumAdd", "NumMul", "NumDiv", "NumMod" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.NatType || unwrappedType is MezzeType.FracType
-            }
-            "NumSub" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.FracType
-            }
-
+            // Eq/Ord: VarType pass-through + derivation for composite types
             "Eq" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.StringType || unwrappedType is MezzeType.BoolType ||
-                unwrappedType is MezzeType.NatType || unwrappedType is MezzeType.FracType ||
-                unwrappedType is MezzeType.OrderingType || unwrappedType is MezzeType.BytesType ||
-                unwrappedType is MezzeType.ByteBufferType ||
                 unwrappedType is MezzeType.VarType || isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it) }) ||
                 (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType)) ||
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
             }
-
             "Ord" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.StringType || unwrappedType is MezzeType.NatType ||
-                unwrappedType is MezzeType.FracType ||
                 unwrappedType is MezzeType.VarType ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
@@ -2149,22 +2138,14 @@ class ConstraintSolver(
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType))
             }
 
+            // Logical operators only work on Bool
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }
 
-            "NumZero", "NumOne" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.NatType || unwrappedType is MezzeType.FracType
-            }
-            "Default" -> {
-                unwrappedType is MezzeType.IntType || unwrappedType is MezzeType.FloatType ||
-                unwrappedType is MezzeType.NatType || unwrappedType is MezzeType.FracType ||
-                unwrappedType is MezzeType.StringType || unwrappedType is MezzeType.BoolType ||
-                unwrappedType is MezzeType.SeqType || unwrappedType is MezzeType.ListType
-            }
-
+            // All other abilities (NumAdd, NumSub, NumZero, Default, Into, etc.)
+            // are resolved via context lookup in checkAbilityImplementation
             else -> false
         }
     }
