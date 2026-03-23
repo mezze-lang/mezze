@@ -68,9 +68,11 @@ data class ProgramIndex(
                 implsByPerformer = implDecls.associateBy { it.performerName },
                 implsByEffect = implDecls.groupBy { it.effect.localName },
                 abilityImplsByAbility = abilityImplDecls.filter { !it.isInherent }.groupBy { it.abilityName!! },
-                abilityImplsByHash = abilityImplDecls.mapNotNull { impl ->
-                    impl.contentHash?.let { hash -> hash to impl }
-                }.toMap(),
+                abilityImplsByHash = abilityImplDecls.associate { impl ->
+                    val hash = impl.contentHash
+                        ?: com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl).toFullHexString()
+                    hash to (if (impl.contentHash != null) impl else impl.copy(contentHash = hash))
+                },
                 letBindings = letBindingDecls
                     .filter { it.isSimpleBinding }
                     .associateBy { it.variableName },

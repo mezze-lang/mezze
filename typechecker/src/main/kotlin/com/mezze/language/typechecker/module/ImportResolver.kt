@@ -478,7 +478,8 @@ class ImportResolver(
                 }
             }
 
-            // Use index for O(1) access to all ability implementations - already keyed by hash
+            // Import all ability implementations — always keyed by content hash.
+            // ProgramIndex.build computes hashes on-demand for unhashed impls.
             abilityImpls.putAll(module.index.abilityImplsByHash)
         }
 
