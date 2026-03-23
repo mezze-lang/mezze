@@ -5,6 +5,7 @@
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into}
 use std::abilities::default::{Default}
+use std::int
 use std::collections::bytes
 
 # =============================================================================

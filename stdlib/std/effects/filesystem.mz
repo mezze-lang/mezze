@@ -2,6 +2,7 @@
 
 use std::str::{split, join}
 use std::collections::seq
+use std::int
 
 # FileSystem error types (exported for pattern matching)
 pub type FileSystemError = | FileNotFound { path: Str }, PermissionDenied { path: Str, operation: Str }, IOError { path: Str, message: Str }, DiskFull { path: Str, bytes_needed: Int }, AlreadyExists { path: Str }, DirectoryNotEmpty { path: Str }, NotADirectory { path: Str }, InvalidPath { path: Str } |

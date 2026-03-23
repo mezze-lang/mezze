@@ -1,4 +1,5 @@
 use std::abilities::compare::{Eq, Ord}
+use std::int
 
 impl Eq 'a for NonEmptyList 'a where {
     eq: {it: NonEmptyList 'a, r: NonEmptyList 'a} with Eq 'a -> Bool = {it, r} -> __native_nel_equals {xs = it, ys = r},

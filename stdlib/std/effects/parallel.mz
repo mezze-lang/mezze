@@ -20,6 +20,7 @@
 #       results
 
 use std::collections::seq
+use std::int
 
 # Parallel effect - data parallel operations
 effect Parallel where {

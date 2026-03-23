@@ -1,5 +1,6 @@
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
+use std::int
 
 impl Eq for Char where { eq = {it, r} -> __native_char_eq {a = it, b = r}, neq = {it, r} -> if __native_char_eq {a = it, b = r} then False else True }
 impl Ord for Char where { lt = {it, r} -> __native_char_compare_int {a = it, b = r} == (0 - 1), le = {it, r} -> __native_char_compare_int {a = it, b = r} != 1, gt = {it, r} -> __native_char_compare_int {a = it, b = r} == 1, ge = {it, r} -> __native_char_compare_int {a = it, b = r} != (0 - 1) }

@@ -2,6 +2,7 @@ use std::abilities::numeric::{NumAdd, NumMul, NumDiv, NumMod, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
 use std::abilities::default::{Default}
+use std::int
 
 impl NumAdd for Nat where { add = {it, r} -> __native_nat_add {l = it, r = r} }
 impl NumMul for Nat where { mul = {it, r} -> __native_nat_multiply {l = it, r = r} }

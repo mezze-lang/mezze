@@ -1,4 +1,5 @@
 use std::abilities::compare::{Eq, Ord}
+use std::int
 
 impl Eq 'a for List 'a where {
     eq: {it: List 'a, r: List 'a} with Eq 'a -> Bool = {it, r} -> __native_list_equals {xs = it, ys = r},

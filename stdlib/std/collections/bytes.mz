@@ -1,4 +1,5 @@
 use std::abilities::compare::{Eq, Ord}
+use std::int
 
 impl Eq for Bytes where {
     eq: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_equals {b1 = it, b2 = r},

@@ -2,6 +2,7 @@
 #
 # STM provides composable, lock-free concurrent programming with transactions.
 use std::collections::list
+use std::int
 # All reads and writes to shared memory happen atomically within transactions.
 #
 # Key features:

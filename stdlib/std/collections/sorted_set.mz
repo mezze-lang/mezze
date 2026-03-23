@@ -1,4 +1,5 @@
 use std::abilities::compare::{Eq, Ord}
+use std::int
 
 impl Eq 'a for SortedSet 'a where {
     eq: {it: SortedSet 'a, r: SortedSet 'a} with Eq 'a -> Bool = {it, r} -> __native_sorted_set_equals {s1 = it, s2 = r},
