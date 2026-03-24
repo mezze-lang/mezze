@@ -437,4 +437,75 @@ class NewtypeImplRuntimeTest {
             assertEquals(true, result);
         }
     }
+
+    // ========================================================================
+    // User-defined newtype with Eq via !
+    // ========================================================================
+
+    @Nested
+    class UserNewtypeEqRuntime {
+
+        @Test
+        void newtypeEqWithNeqViaNot() {
+            Object result = MezzeTestHelper.run("""
+                use std::abilities::compare::{Eq}
+
+                newtype UserId = UserId Int
+
+                impl Eq for UserId where {
+                    eq = {it, r} -> match it is
+                        UserId {val = a} -> match r is
+                            UserId {val = b} -> a == b,
+                    neq = {it, r} -> it.eq {r = r}.not {}
+                }
+
+                let u1 = UserId {value = 42}
+                let u2 = UserId {value = 42}
+                u1 == u2
+                """);
+            assertEquals(true, result);
+        }
+
+        @Test
+        void newtypeNeqViaNot() {
+            Object result = MezzeTestHelper.run("""
+                use std::abilities::compare::{Eq}
+
+                newtype UserId = UserId Int
+
+                impl Eq for UserId where {
+                    eq = {it, r} -> match it is
+                        UserId {val = a} -> match r is
+                            UserId {val = b} -> a == b,
+                    neq = {it, r} -> it.eq {r = r}.not {}
+                }
+
+                let u1 = UserId {value = 42}
+                let u2 = UserId {value = 99}
+                u1 != u2
+                """);
+            assertEquals(true, result);
+        }
+
+        @Test
+        void newtypeNeqViaNot_sameValues() {
+            Object result = MezzeTestHelper.run("""
+                use std::abilities::compare::{Eq}
+
+                newtype UserId = UserId Int
+
+                impl Eq for UserId where {
+                    eq = {it, r} -> match it is
+                        UserId {val = a} -> match r is
+                            UserId {val = b} -> a == b,
+                    neq = {it, r} -> it.eq {r = r}.not {}
+                }
+
+                let u1 = UserId {value = 42}
+                let u2 = UserId {value = 42}
+                u1 != u2
+                """);
+            assertEquals(false, result);
+        }
+    }
 }

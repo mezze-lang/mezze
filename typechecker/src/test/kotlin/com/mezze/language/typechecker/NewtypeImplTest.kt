@@ -329,4 +329,34 @@ class NewtypeImplTest {
             """.trimIndent(), "CancellationToken .cancel/.is_cancelled")
         }
     }
+
+    // ========================================================================
+    // User-defined newtype with Eq via not
+    // ========================================================================
+
+    @Nested
+    inner class UserNewtypeEq {
+
+        @Test
+        fun `newtype Eq with neq via not`() {
+            checkPasses("""
+                use std::abilities::compare::{Eq}
+
+                newtype UserId = UserId Int
+
+                impl Eq for UserId where {
+                    eq = {it, r} -> match it is
+                        UserId {val = a} -> match r is
+                            UserId {val = b} -> a == b,
+                    neq = {it, r} -> it.eq {r = r}.not {}
+                }
+
+                let u1 = UserId {value = 42}
+                let u2 = UserId {value = 42}
+                let u3 = UserId {value = 99}
+                let same = u1 == u2
+                let diff = u1 != u3
+            """.trimIndent(), "UserId Eq with neq via not")
+        }
+    }
 }
