@@ -271,10 +271,6 @@ class TypeChecker(
             currentModulePath = currentModulePath
         )
         val context = buildResult.context
-        if (currentModulePath?.startsWith("std::") == true) {
-            val f = java.io.File("/tmp/trace.txt")
-            f.appendText("[$currentModulePath] afterBuild: Eq=${context.getAbilityImpls("Eq").size} enhanced=${enhancedContext.getAbilityImpls("Eq").size}\n")
-        }
 
         // Build type aliases for pretty printing (include imported types)
         cachedTypeAliases = buildTypeAliases(desugaredProgram, contextBuilder, importContext)
