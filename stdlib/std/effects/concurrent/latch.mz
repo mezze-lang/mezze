@@ -19,6 +19,14 @@ impl Eq for Latch where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+## Inherent impls for Latch — method syntax for common operations
+impl Latch where {
+    count_down: {it: Latch} -> {} = {it} -> count_down {latch = it},
+    await: {it: Latch} -> {} = {it} -> await_latch {latch = it},
+    await_timeout: {it: Latch, ms: Int} -> Bool = {it, ms} -> await_latch_timeout {latch = it, ms = ms},
+    get_count: {it: Latch} -> Int = {it} -> get_count {latch = it}
+}
+
 ## Create a new latch with the given count.
 ## The count must be non-negative.
 pub let latch: {count: Int} -> Latch = {count} -> __native_latch_new {count = count}

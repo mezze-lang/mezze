@@ -28,6 +28,19 @@ impl Eq for CancellationToken where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for CancellationToken — method syntax for common operations
+impl CancellationToken where {
+    cancel: {it: CancellationToken, reason: Str} -> {} = {it, reason} -> cancel {token = it, reason = reason},
+    cancel_default: {it: CancellationToken} -> {} = {it} -> cancel_default {token = it},
+    is_cancelled: {it: CancellationToken} -> Bool = {it} -> is_cancelled {token = it},
+    get_reason: {it: CancellationToken} -> Option Str = {it} -> get_reason {token = it},
+    check_cancelled: {it: CancellationToken} -> {} = {it} -> check_cancelled {token = it},
+    on_cancel: {it: CancellationToken, callback: {} -> {}} -> Str = {it, callback} -> on_cancel {token = it, callback = callback},
+    remove_callback: {it: CancellationToken, id: Str} -> {} = {it, id} -> remove_callback {token = it, id = id},
+    create_child: {it: CancellationToken} -> CancellationToken = {it} -> create_child {token = it},
+    with_cancellation: {it: CancellationToken, f: {} -> 'a} -> Option 'a = {it, f} -> with_cancellation {token = it, f = f}
+}
+
 # =============================================================================
 # Creation
 # =============================================================================

@@ -28,6 +28,18 @@ impl Eq for Semaphore where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for Semaphore — method syntax for common operations
+impl Semaphore where {
+    acquire: {it: Semaphore} -> {} = {it} -> acquire {sem = it},
+    acquire_n: {it: Semaphore, permits: Int} -> {} = {it, permits} -> acquire_n {sem = it, permits = permits},
+    release: {it: Semaphore} -> {} = {it} -> release {sem = it},
+    release_n: {it: Semaphore, permits: Int} -> {} = {it, permits} -> release_n {sem = it, permits = permits},
+    try_acquire: {it: Semaphore} -> Bool = {it} -> try_acquire {sem = it},
+    try_acquire_n: {it: Semaphore, permits: Int} -> Bool = {it, permits} -> try_acquire_n {sem = it, permits = permits},
+    available: {it: Semaphore} -> Int = {it} -> available {sem = it},
+    with_permit: {it: Semaphore, f: {} -> 'a} -> 'a = {it, f} -> with_permit {sem = it, f = f}
+}
+
 # Create a new semaphore with specified number of permits
 #
 # Example:

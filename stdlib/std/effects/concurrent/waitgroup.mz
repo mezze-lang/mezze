@@ -23,6 +23,15 @@ impl Eq for WaitGroup where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+## Inherent impls for WaitGroup — method syntax for common operations
+impl WaitGroup where {
+    add: {it: WaitGroup, delta: Int} -> {} = {it, delta} -> add {wg = it, delta = delta},
+    done: {it: WaitGroup} -> {} = {it} -> done {wg = it},
+    wait: {it: WaitGroup} -> {} = {it} -> wait {wg = it},
+    wait_timeout: {it: WaitGroup, ms: Int} -> Bool = {it, ms} -> wait_timeout {wg = it, ms = ms},
+    get_count: {it: WaitGroup} -> Int = {it} -> get_count_wg {wg = it}
+}
+
 ## Create a new wait group with count 0.
 pub let wait_group: {} -> WaitGroup = {} -> __native_waitgroup_new {}
 

@@ -27,6 +27,15 @@ impl Eq for Mutex where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for Mutex — method syntax for common operations
+impl Mutex where {
+    with_lock: {it: Mutex, f: {} -> 'a} -> 'a = {it, f} -> with_lock {mutex = it, f = f},
+    lock: {it: Mutex} -> {} = {it} -> lock {mutex = it},
+    unlock: {it: Mutex} -> {} = {it} -> unlock {mutex = it},
+    try_lock: {it: Mutex} -> Bool = {it} -> try_lock {mutex = it},
+    is_held_by_current_thread: {it: Mutex} -> Bool = {it} -> is_held_by_current_thread {mutex = it}
+}
+
 # Create a new mutex
 #
 # Example:

@@ -34,6 +34,19 @@ impl Eq 'a for Agent 'a where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for Agent — method syntax for common operations
+impl Agent 'a where {
+    deref: {it: Agent 'a} -> 'a = {it} -> deref_agent {agent = it},
+    send: {it: Agent 'a, f: {current: 'a} -> 'a} -> {} = {it, f} -> send {agent = it, f = f},
+    send_off: {it: Agent 'a, f: {current: 'a} -> 'a} -> {} = {it, f} -> send_off {agent = it, f = f},
+    await: {it: Agent 'a} -> {} = {it} -> await_agent {agent = it},
+    await_timeout: {it: Agent 'a, timeout_ms: Int} -> Bool = {it, timeout_ms} -> await_agent_timeout {agent = it, timeout_ms = timeout_ms},
+    error: {it: Agent 'a} -> Option Str = {it} -> agent_error {agent = it},
+    has_error: {it: Agent 'a} -> Bool = {it} -> has_error {agent = it},
+    restart: {it: Agent 'a, value: 'a} -> {} = {it, value} -> restart_agent {agent = it, value = value},
+    set_error_handler: {it: Agent 'a, handler: {agent: Agent 'a, error: Str} -> {}} -> {} = {it, handler} -> set_error_handler {agent = it, handler = handler}
+}
+
 # Create a new agent with the given initial value
 #
 # Example:

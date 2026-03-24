@@ -25,6 +25,16 @@ impl Eq 'a for Chan 'a where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for Chan — method syntax for common operations
+impl Chan 'a where {
+    send = {it, value} -> Channel.send {ch = it, value = value},
+    recv = {it} -> Channel.recv {ch = it},
+    try_send = {it, value} -> Channel.try_send {ch = it, value = value},
+    try_recv = {it} -> Channel.try_recv {ch = it},
+    close = {it} -> Channel.close {ch = it},
+    is_closed = {it} -> Channel.is_closed {ch = it}
+}
+
 # Channel effect - typed channel communication operations
 effect Channel where {
     # Send a value to a channel (blocks if buffer full)

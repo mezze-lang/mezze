@@ -26,6 +26,19 @@ impl Eq 'a for Atom 'a where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for Atom — method syntax for common operations
+impl Atom 'a where {
+    deref: {it: Atom 'a} -> 'a = {it} -> deref {atom = it},
+    reset: {it: Atom 'a, value: 'a} -> 'a = {it, value} -> reset {atom = it, value = value},
+    swap: {it: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {it, f} -> swap {atom = it, f = f},
+    compare_and_set: {it: Atom 'a, expected: 'a, new: 'a} -> Bool = {it, expected, new} -> compare_and_set {atom = it, expected = expected, new = new},
+    swap_with: {it: Atom 'a, f: {current: 'a, arg: 'b} -> 'a, arg: 'b} -> 'a = {it, f, arg} -> swap_with {atom = it, f = f, arg = arg},
+    get_and_swap: {it: Atom 'a, f: {current: 'a} -> 'a} -> {old: 'a, new: 'a} = {it, f} -> get_and_swap {atom = it, f = f},
+    add_watch: {it: Atom 'a, key: Str, f: {key: Str, old: 'a, new: 'a} -> {}} -> {} = {it, key, f} -> add_watch {atom = it, key = key, f = f},
+    remove_watch: {it: Atom 'a, key: Str} -> {} = {it, key} -> remove_watch {atom = it, key = key},
+    set_validator: {it: Atom 'a, validator: {val: 'a} -> Bool} -> {} = {it, validator} -> set_validator {atom = it, validator = validator}
+}
+
 # Create a new atom with an initial value
 #
 # Example:

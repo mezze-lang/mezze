@@ -41,6 +41,16 @@ impl Eq 'a for TVar 'a where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for TVar — method syntax for common operations
+impl TVar 'a where {
+    read = {it} -> STM.read {var = it},
+    write = {it, val} -> STM.write {var = it, val = val},
+    modify = {it, f} -> STM.modify {var = it, f = f},
+    swap = {it, val} -> STM.swap {var = it, val = val},
+    ensure = {it} -> STM.ensure {var = it},
+    deref = {it} -> deref {var = it}
+}
+
 # Create a new TVar with an initial value
 #
 # Example:
@@ -315,6 +325,17 @@ impl Eq 'a for TMVar 'a where {
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
 }
 
+# Inherent impls for TMVar — method syntax for common operations
+impl TMVar 'a where {
+    take = {it} -> take_tmvar {var = it},
+    put = {it, val} -> put_tmvar {var = it, val = val},
+    read = {it} -> read_tmvar {var = it},
+    try_take = {it} -> try_take_tmvar {var = it},
+    try_put = {it, val} -> try_put_tmvar {var = it, val = val},
+    swap = {it, val} -> swap_tmvar {var = it, val = val},
+    is_empty = {it} -> is_empty_tmvar {var = it}
+}
+
 # Internal helper to unwrap the TMVar to get the underlying TVar
 let unwrap_tmvar: {var: TMVar 'a} -> TVar (Option 'a) =
     {var} -> match var is
@@ -468,6 +489,16 @@ pub newtype TQueue 'a = TQueue (TVar {read: List 'a, write: List 'a})
 impl Eq 'a for TQueue 'a where {
     eq = {it, r} -> __native_ref_eq {l = it, r = r},
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
+
+# Inherent impls for TQueue — method syntax for common operations
+impl TQueue 'a where {
+    write = {it, val} -> write_tqueue {q = it, val = val},
+    read = {it} -> read_tqueue {q = it},
+    try_read = {it} -> try_read_tqueue {q = it},
+    peek = {it} -> peek_tqueue {q = it},
+    is_empty = {it} -> is_empty_tqueue {q = it},
+    length = {it} -> length_tqueue {q = it}
 }
 
 # Internal helper to unwrap TQueue
@@ -629,6 +660,19 @@ pub newtype TBQueue 'a = TBQueue (TVar {read: List 'a, write: List 'a, size: Int
 impl Eq 'a for TBQueue 'a where {
     eq = {it, r} -> __native_ref_eq {l = it, r = r},
     neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
+
+# Inherent impls for TBQueue — method syntax for common operations
+impl TBQueue 'a where {
+    write = {it, val} -> write_tbqueue {q = it, val = val},
+    read = {it} -> read_tbqueue {q = it},
+    try_read = {it} -> try_read_tbqueue {q = it},
+    try_write = {it, val} -> try_write_tbqueue {q = it, val = val},
+    peek = {it} -> peek_tbqueue {q = it},
+    is_empty = {it} -> is_empty_tbqueue {q = it},
+    is_full = {it} -> is_full_tbqueue {q = it},
+    size = {it} -> size_tbqueue {q = it},
+    capacity = {it} -> capacity_tbqueue {q = it}
 }
 
 # Internal helper to unwrap TBQueue
