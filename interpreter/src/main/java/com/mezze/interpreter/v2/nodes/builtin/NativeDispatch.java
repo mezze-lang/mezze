@@ -4209,6 +4209,18 @@ public final class NativeDispatch extends MezzeNode {
             }
             return MezzeSeq.fromArray(mutDeque.toArray());
         });
+
+        // Reference equality for opaque types (newtypes wrapping native objects)
+        HANDLERS.put("__native_ref_eq", (r, c) -> {
+            Object l = getField(r, "l");
+            Object r2 = getField(r, "r");
+            return l == r2;
+        });
+        HANDLERS.put("__native_ref_neq", (r, c) -> {
+            Object l = getField(r, "l");
+            Object r2 = getField(r, "r");
+            return l != r2;
+        });
     }
 
     @TruffleBoundary

@@ -20,6 +20,7 @@
 
 use std::collections::seq
 use std::effects::concurrent::cancellation::{CancellationToken}
+use std::abilities::compare::{Eq}
 
 # Promise type - opaque wrapper around native promise/future
 pub newtype Promise 'a = Promise __NativePromise
@@ -27,6 +28,25 @@ pub newtype Promise 'a = Promise __NativePromise
 # Scope type - opaque wrapper for structured concurrency scopes
 # Used with `scoped` to ensure all spawned children complete before parent
 pub newtype Scope 'a = Scope __NativeScope
+
+# Eq for Promise — reference identity (same promise object)
+impl Eq 'a for Promise 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
+
+# Eq for Scope — reference identity
+impl Eq 'a for Scope 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
+
+# Inherent impls for Promise — method syntax for common operations
+impl Promise 'a where {
+    await: {it: Promise 'a} -> 'a <Async> = {it} -> Async.await {p = it},
+    is_done: {it: Promise 'a} -> Bool <Async> = {it} -> Async.is_done {p = it},
+    cancel: {it: Promise 'a} -> {} <Async> = {it} -> Async.cancel {p = it}
+}
 
 # Error type for async operations
 # - AsyncFailed: Task failed with an exception

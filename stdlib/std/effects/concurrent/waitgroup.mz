@@ -14,7 +14,14 @@
 ##   # Wait for all tasks:
 ##   wait {wg = wg}
 
+use std::abilities::compare::{Eq}
+
 pub newtype WaitGroup = WaitGroup __NativeWaitGroup
+
+impl Eq for WaitGroup where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 ## Create a new wait group with count 0.
 pub let wait_group: {} -> WaitGroup = {} -> __native_waitgroup_new {}

@@ -14,8 +14,16 @@
 #       Channel.send { ch = ch, value = 42 }
 #       let received = Channel.recv { ch = ch }
 
+use std::abilities::compare::{Eq}
+
 # Chan - the channel value type (opaque handle)
 pub newtype Chan 'a = Chan __NativeChannel
+
+# Eq for Chan — reference identity (same channel object)
+impl Eq 'a for Chan 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Channel effect - typed channel communication operations
 effect Channel where {

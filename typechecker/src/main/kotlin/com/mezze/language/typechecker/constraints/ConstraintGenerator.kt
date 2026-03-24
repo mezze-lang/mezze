@@ -1271,8 +1271,10 @@ class ConstraintGenerator(
                 val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
 
                 // Check for undefined variables in the body
-                if (bodyResult.undefinedVariables.isNotEmpty()) {
-                    val undefinedVar = bodyResult.undefinedVariables.first()
+                // Allow __native_* identifiers — they're resolved at runtime by NativeDispatch
+                val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith("__native_") }
+                if (realUndefined.isNotEmpty()) {
+                    val undefinedVar = realUndefined.first()
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: " +
                         "Undefined variable '${undefinedVar.name}'"
