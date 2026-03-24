@@ -240,7 +240,9 @@ class MezzeTextDocumentService(
                 typeCheckResult = TypeCheckResult(
                     program = program,
                     monomorphicInstances = emptyMap(),  // Not available in recovery mode
-                    resolvedImports = buildResolvedImports(recoveryResult.importContext)
+                    resolvedImports = buildResolvedImports(recoveryResult.importContext),
+                    importedAbilities = recoveryResult.importContext?.importedAbilities ?: emptyMap(),
+                    importedEffects = recoveryResult.importContext?.importedEffects ?: emptyMap()
                 )
 
                 // Populate codebase if in project mode and no errors
@@ -486,22 +488,30 @@ class MezzeTextDocumentService(
             return codeBlock("type $word")
         }
 
-        // 4. Look up effect declarations
-        val effectDecl = program.items
-            .filterIsInstance<EffectDeclaration>()
-            .find { it.name == word }
-
-        if (effectDecl != null) {
-            return codeBlock("effect $word")
-        }
-
-        // 5. Look up ability declarations
+        // 4-5. Look up ability and effect declarations (local or imported)
         val abilityDecl = program.items
             .filterIsInstance<AbilityDeclaration>()
             .find { it.name == word }
+            ?: result?.importedAbilities?.get(word)
 
         if (abilityDecl != null) {
-            return codeBlock("ability $word")
+            val fromModule = result?.resolvedImports
+                ?.find { it.localName == word && it.kind == ImportKind.ABILITY }
+                ?.modulePath
+            return formatAbilityHover(abilityDecl, fromModule)
+        }
+
+        // 5b. Look up effect declarations (local or imported)
+        val effectDecl = program.items
+            .filterIsInstance<EffectDeclaration>()
+            .find { it.name == word }
+            ?: result?.importedEffects?.get(word)
+
+        if (effectDecl != null) {
+            val fromModule = result?.resolvedImports
+                ?.find { it.localName == word && it.kind == ImportKind.EFFECT }
+                ?.modulePath
+            return formatEffectHover(effectDecl, fromModule)
         }
 
         // 7. Look up let bindings by name (without type info)
@@ -516,6 +526,72 @@ class MezzeTextDocumentService(
         }
 
         return null
+    }
+
+    /**
+     * Format hover info for an ability declaration, showing all operations.
+     */
+    private fun formatAbilityHover(decl: AbilityDeclaration, fromModule: String?): String {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+
+        val typeParams = decl.typeParams.joinToString(" ") { "'$it" }
+        val forClause = decl.receiverTypeParam?.let { " for '$it" } ?: ""
+        val header = "ability ${decl.name} $typeParams$forClause"
+
+        val ops = decl.operations.joinToString("\n") { op ->
+            "  ${op.name}: ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        }
+
+        val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
+        val moduleInfo = if (!fromModule.isNullOrEmpty()) "\n\n*from* `$fromModule`" else ""
+
+        return codeBlock("$header$body") + moduleInfo
+    }
+
+    /**
+     * Format hover info for an effect declaration, showing all operations.
+     */
+    private fun formatEffectHover(decl: EffectDeclaration, fromModule: String?): String {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+
+        val header = "effect ${decl.name}"
+
+        val ops = decl.operations.joinToString("\n") { op ->
+            "  ${op.name}: ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        }
+
+        val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
+        val moduleInfo = if (!fromModule.isNullOrEmpty()) "\n\n*from* `$fromModule`" else ""
+
+        return codeBlock("$header$body") + moduleInfo
+    }
+
+    /**
+     * Format a TypeAnnotation to a readable string.
+     */
+    private fun formatTypeAnnotation(type: TypeAnnotation): String {
+        return when (type) {
+            is IdentifierTypeAnnotation -> type.name
+            is RecordTypeAnnotation -> {
+                if (type.entries.isEmpty()) "{}"
+                else "{ ${type.entries.joinToString(", ") { "${it.name}: ${formatTypeAnnotation(it.type)}" }} }"
+            }
+            is FunctionTypeAnnotation -> {
+                val constraints = if (type.abilityConstraints.isNotEmpty()) {
+                    " with ${type.abilityConstraints.joinToString(", ") { c ->
+                        c.abilityName + if (c.typeArgs.isNotEmpty()) " ${c.typeArgs.joinToString(" ") { formatTypeAnnotation(it) }}" else ""
+                    }}"
+                } else ""
+                "${formatTypeAnnotation(type.paramType)}$constraints -> ${formatTypeAnnotation(type.returnType)}"
+            }
+            is TypeApplicationAnnotation -> {
+                if (type.args.isEmpty()) type.constructor
+                else "${type.constructor} ${type.args.joinToString(" ") { formatTypeAnnotation(it) }}"
+            }
+            is SeqTypeAnnotation -> "[${formatTypeAnnotation(type.elementType)}]"
+            is VariantTypeAnnotation -> "| ${type.constructors.joinToString(", ") { it.name }} |"
+            else -> type.toString()
+        }
     }
 
     /**
@@ -786,16 +862,21 @@ class MezzeTextDocumentService(
 
             val items = mutableListOf<CompletionItem>()
 
-            // Check if we're inside a match expression (after 'match X is')
-            val matchCompletions = if (state != null) {
-                getMatchPatternCompletions(state, position)
+            // Check if we're after a dot (method completion: x.|)
+            val dotCompletions = if (state != null) {
+                getDotCompletions(state, position)
             } else {
                 emptyList()
             }
 
-            if (matchCompletions.isNotEmpty()) {
-                // If we're completing match patterns, prioritize those
-                items.addAll(matchCompletions)
+            if (dotCompletions.isNotEmpty()) {
+                items.addAll(dotCompletions)
+                Either.forLeft<List<CompletionItem>, CompletionList>(items)
+            }
+            // Check if we're inside a match expression (after 'match X is')
+            else if (state != null && getMatchPatternCompletions(state, position).let { matchCompletions ->
+                if (matchCompletions.isNotEmpty()) { items.addAll(matchCompletions); true } else false
+            }) {
                 Either.forLeft<List<CompletionItem>, CompletionList>(items)
             } else {
                 // Check if we're inside a function call (after '{')
@@ -1044,6 +1125,187 @@ class MezzeTextDocumentService(
             }
             else -> emptyList()
         }
+    }
+
+    /**
+     * Get dot-completions: when user types `x.`, suggest methods available on x's type.
+     * Includes ability methods (eq, neq, lt, add, ...) and inherent methods.
+     */
+    private fun getDotCompletions(state: DocumentState, position: Position): List<CompletionItem> {
+        val lines = state.content.lines()
+        if (position.line >= lines.size) return emptyList()
+
+        val line = lines[position.line]
+        val beforeCursor = line.substring(0, minOf(position.character, line.length))
+
+        // Check if cursor is right after a dot: `identifier.` or `expr.`
+        val dotMatch = Regex("""(\w+)\.\s*$""").find(beforeCursor) ?: return emptyList()
+        val receiverName = dotMatch.groupValues[1]
+
+        val result = state.typeCheckResult ?: return emptyList()
+        val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
+
+        fun formatType(type: MezzeType): String {
+            return prettyPrintTypeWithAliases(type, state.typeAliases, false, typeDeclarations)
+        }
+
+        // Find the receiver's type
+        val receiverType = findReceiverType(receiverName, result, position) ?: return emptyList()
+        // Unwrap SuspendedType
+        val baseType = when (receiverType) {
+            is MezzeType.SuspendedType -> receiverType.valueType
+            else -> receiverType
+        }
+
+        val items = mutableListOf<CompletionItem>()
+        val typeName = getTypeName(baseType)
+
+        // 1. Collect ability methods available for this type
+        val allAbilities = result.program.items.filterIsInstance<AbilityDeclaration>() +
+            (result.importedAbilities.values)
+
+        val allImpls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+
+        for (abilityDecl in allAbilities) {
+            // Check if this type has an impl for this ability (or if it's auto-derived)
+            val hasImpl = allImpls.any { impl ->
+                impl.abilityName == abilityDecl.name && impl.targetTypes.any { target ->
+                    formatTypeAnnotation(target).contains(typeName ?: "")
+                }
+            } || isBuiltinAbilityForType(abilityDecl.name, baseType)
+
+            if (hasImpl) {
+                for (op in abilityDecl.operations) {
+                    // Skip methods that don't have `it` (construction methods like default, zero)
+                    val paramStr = formatTypeAnnotation(op.paramType)
+                    if (!paramStr.contains("it:") && !paramStr.contains("it ")) continue
+
+                    // Build the completion snippet (exclude `it` from args the user types)
+                    val argFields = extractNonItFields(op.paramType)
+                    val snippet = if (argFields.isEmpty()) {
+                        "${op.name} {}"
+                    } else {
+                        val fieldSnippets = argFields.mapIndexed { i, name ->
+                            "$name = \${${i + 1}:}"
+                        }.joinToString(", ")
+                        "${op.name} { $fieldSnippets }"
+                    }
+
+                    items.add(CompletionItem(op.name).apply {
+                        kind = CompletionItemKind.Method
+                        detail = "${abilityDecl.name}.${op.name}"
+                        documentation = Either.forLeft(
+                            "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+                        )
+                        insertText = snippet
+                        insertTextFormat = InsertTextFormat.Snippet
+                    })
+                }
+            }
+        }
+
+        // 2. Collect inherent methods for this type
+        for (impl in allImpls) {
+            if (!impl.isInherent) continue
+            val implTypeName = impl.targetTypes.firstOrNull()?.let { formatTypeAnnotation(it) }
+            if (implTypeName != null && (implTypeName == typeName || implTypeName.startsWith(typeName ?: ""))) {
+                for (op in impl.operations) {
+                    val argFields = extractNonItFieldsFromImpl(op)
+                    val snippet = if (argFields.isEmpty()) {
+                        "${op.name} {}"
+                    } else {
+                        val fieldSnippets = argFields.mapIndexed { i, name ->
+                            "$name = \${${i + 1}:}"
+                        }.joinToString(", ")
+                        "${op.name} { $fieldSnippets }"
+                    }
+
+                    items.add(CompletionItem(op.name).apply {
+                        kind = CompletionItemKind.Method
+                        detail = "inherent method"
+                        insertText = snippet
+                        insertTextFormat = InsertTextFormat.Snippet
+                    })
+                }
+            }
+        }
+
+        // 3. Record field access
+        if (baseType is MezzeType.RecordType) {
+            for ((fieldName, fieldType) in baseType.fields) {
+                items.add(CompletionItem(fieldName).apply {
+                    kind = CompletionItemKind.Field
+                    detail = formatType(fieldType)
+                })
+            }
+        }
+
+        return items
+    }
+
+    /** Get the simple type name for ability matching. */
+    private fun getTypeName(type: MezzeType): String? {
+        return when (type) {
+            is MezzeType.IntType -> "Int"
+            is MezzeType.FloatType -> "Float"
+            is MezzeType.StringType -> "Str"
+            is MezzeType.BoolType -> "Bool"
+            is MezzeType.NatType -> "Nat"
+            is MezzeType.FracType -> "Frac"
+            is MezzeType.CharType -> "Char"
+            is MezzeType.BytesType -> "Bytes"
+            is MezzeType.ListType -> "List"
+            is MezzeType.SeqType -> "Seq"
+            is MezzeType.SetType -> "Set"
+            is MezzeType.SortedSetType -> "SortedSet"
+            is MezzeType.MapType -> "Map"
+            is MezzeType.SortedMapType -> "SortedMap"
+            is MezzeType.TypeApplication -> type.constructor
+            is MezzeType.VariantType -> type.constructors.keys.firstOrNull()
+            else -> null
+        }
+    }
+
+    /** Check if a type has automatic builtin implementation for an ability. */
+    private fun isBuiltinAbilityForType(abilityName: String, type: MezzeType): Boolean {
+        return com.mezze.language.ast.BuiltinAbilities.typeHasAutomaticImplementation(type, abilityName)
+    }
+
+    /** Extract non-`it` field names from an ability operation's param type annotation. */
+    private fun extractNonItFields(paramType: TypeAnnotation): List<String> {
+        if (paramType is RecordTypeAnnotation) {
+            return paramType.entries.filter { it.name != "it" }.map { it.name }
+        }
+        return emptyList()
+    }
+
+    /** Extract non-`it` field names from an impl operation's lambda params. */
+    private fun extractNonItFieldsFromImpl(op: ImplAbilityOperation): List<String> {
+        val lambda = op.implementation
+        if (lambda is LambdaExpression && lambda.parameters is RecordLiteral) {
+            val params = lambda.parameters as RecordLiteral
+            return params.entries.filterIsInstance<RecordFieldEntry>()
+                .map { it.name }
+                .filter { it != "it" }
+        }
+        return emptyList()
+    }
+
+    /** Find the type of a receiver identifier at a given position. */
+    private fun findReceiverType(name: String, result: TypeCheckResult, position: Position): MezzeType? {
+        // Check top-level bindings
+        val binding = result.program.items
+            .filterIsInstance<LetBinding>()
+            .filter { it.isSimpleBinding }
+            .find { it.variableName == name }
+        if (binding?.inferredType != null) return binding.inferredType
+
+        // Check resolved imports
+        val resolvedImport = result.resolvedImports.find { it.localName == name }
+        if (resolvedImport != null) return resolvedImport.type
+
+        // Check local bindings
+        return findLocalBindingType(name, result.program, position.line + 1)
     }
 
     private fun getKeywordCompletions(): List<CompletionItem> {

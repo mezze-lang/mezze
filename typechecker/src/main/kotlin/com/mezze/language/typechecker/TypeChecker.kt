@@ -698,7 +698,8 @@ class TypeChecker(
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<String, TypedModule> = emptyMap()
-        val enhancedContext = if (hasImports(program)) {
+        val shouldInjectPrelude = true  // Always inject prelude in recovery mode (used by LSP)
+        val enhancedContext = if (hasImports(program) || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
                 parentContext,
@@ -706,13 +707,28 @@ class TypeChecker(
             )
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
-            val importResult = importResolver.resolveImports(program)
+            val importResult = if (hasImports(program)) {
+                importResolver.resolveImports(program)
+            } else {
+                ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
+            }
 
             when (importResult) {
                 is ImportResolutionResult.Success -> {
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
-                    mergeImportContext(parentContext, importResult.importContext)
+
+                    // Inject prelude for method syntax (same as checkProgram)
+                    if (shouldInjectPrelude) {
+                        try {
+                            val preludeContext = loadPreludeModules(importResolver, importContext!!)
+                            importContext = importContext!!.merge(preludeContext)
+                        } catch (_: Exception) {
+                            // Prelude loading failure is non-fatal in recovery mode
+                        }
+                    }
+
+                    mergeImportContext(parentContext, importContext!!)
                 }
                 is ImportResolutionResult.Failure -> {
                     // Collect import errors but continue with parent context
@@ -1757,7 +1773,9 @@ class TypeChecker(
                     program = result.program,
                     monomorphicInstances = result.monomorphicInstances,
                     resolvedImports = resolvedImports,
-                    warnings = structuredWarnings
+                    warnings = structuredWarnings,
+                    importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
+                    importedEffects = result.importContext?.importedEffects ?: emptyMap()
                 )
             }
             is TypeCheckResult.Failure -> {

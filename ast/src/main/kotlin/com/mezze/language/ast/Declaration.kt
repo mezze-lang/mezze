@@ -85,7 +85,9 @@ data class TypeCheckResult(
     val program: Program,  // User's original AST with type information
     val monomorphicInstances: Map<String, LetBinding> = emptyMap(),  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
     val resolvedImports: List<ResolvedImport> = emptyList(),  // Resolved imports for IDE support (hover, go-to-definition)
-    val warnings: List<TypeCheckWarning> = emptyList()  // Warnings (not errors) like unused variables
+    val warnings: List<TypeCheckWarning> = emptyList(),  // Warnings (not errors) like unused variables
+    val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),  // Imported ability declarations for LSP hover
+    val importedEffects: Map<String, EffectDeclaration> = emptyMap()  // Imported effect declarations for LSP hover
 )
 
 /**
