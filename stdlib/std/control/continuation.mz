@@ -15,8 +15,15 @@
 #   let k = cont.capture {}
 #   let result = cont.resume { cont = k, value = 42 }
 
+use std::abilities::compare::{Eq}
+
 # Opaque delimiter handle - wraps native implementation
 pub newtype Delim = Delim __NativeDelim
+
+impl Eq for Delim where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Continuation record type with bound methods.
 # Type parameters:

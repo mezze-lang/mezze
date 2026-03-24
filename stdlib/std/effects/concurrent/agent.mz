@@ -24,8 +24,15 @@
 #   await_agent {agent = counter}
 #   let final = deref_agent {agent = counter}  # 2
 
+use std::abilities::compare::{Eq}
+
 # Agent type - opaque wrapper around native agent
 pub newtype Agent 'a = Agent __NativeAgent
+
+impl Eq 'a for Agent 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Create a new agent with the given initial value
 #

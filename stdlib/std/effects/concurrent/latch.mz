@@ -10,7 +10,14 @@
 ##   # In main thread:
 ##   await_latch {latch = l}  # Blocks until count reaches 0
 
+use std::abilities::compare::{Eq}
+
 pub newtype Latch = Latch __NativeLatch
+
+impl Eq for Latch where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 ## Create a new latch with the given count.
 ## The count must be non-negative.

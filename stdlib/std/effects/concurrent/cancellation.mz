@@ -18,8 +18,15 @@
 #   # In async code: check is_cancelled, or use check_cancelled
 #   # When done: cancel {token = ct, reason = "User requested"}
 
+use std::abilities::compare::{Eq}
+
 # Opaque type wrapping the native CancellationToken
 pub newtype CancellationToken = CancellationToken __NativeCancellationToken
+
+impl Eq for CancellationToken where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # =============================================================================
 # Creation

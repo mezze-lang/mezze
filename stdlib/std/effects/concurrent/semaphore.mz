@@ -18,8 +18,15 @@
 #   # ... do work with limited resource ...
 #   let _ = release {sem = pool}
 
+use std::abilities::compare::{Eq}
+
 # Semaphore type wrapping Java's Semaphore
 pub newtype Semaphore = Semaphore __NativeSemaphore
+
+impl Eq for Semaphore where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Create a new semaphore with specified number of permits
 #

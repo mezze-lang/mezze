@@ -16,8 +16,15 @@
 #   swap {atom = counter, f = {current} -> current + 1}  # Increment atomically
 #   let current = deref {atom = counter}      # Read current value
 
+use std::abilities::compare::{Eq}
+
 # Opaque type wrapping Java's AtomicReference
 pub newtype Atom 'a = Atom __NativeAtomicRef
+
+impl Eq 'a for Atom 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Create a new atom with an initial value
 #

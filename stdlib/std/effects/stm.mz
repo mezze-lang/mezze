@@ -3,6 +3,7 @@
 # STM provides composable, lock-free concurrent programming with transactions.
 use std::collections::list
 use std::int
+use std::abilities::compare::{Eq}
 # All reads and writes to shared memory happen atomically within transactions.
 #
 # Key features:
@@ -34,6 +35,11 @@ use std::int
 # A mutable reference that can only be read/written inside transactions.
 # Outside transactions, use tvar to create and deref to read (without consistency).
 pub newtype TVar 'a = TVar __NativeTVar
+
+impl Eq 'a for TVar 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Create a new TVar with an initial value
 #
@@ -304,6 +310,11 @@ pub let write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {} <STM> =
 # TMVar type - a TVar that can be empty or full
 pub newtype TMVar 'a = TMVar (TVar (Option 'a))
 
+impl Eq 'a for TMVar 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
+
 # Internal helper to unwrap the TMVar to get the underlying TVar
 let unwrap_tmvar: {var: TMVar 'a} -> TVar (Option 'a) =
     {var} -> match var is
@@ -453,6 +464,11 @@ pub let is_empty_tmvar: {var: TMVar 'a} -> Bool <STM> =
 # read: items to be dequeued (reversed)
 # write: items recently enqueued
 pub newtype TQueue 'a = TQueue (TVar {read: List 'a, write: List 'a})
+
+impl Eq 'a for TQueue 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Internal helper to unwrap TQueue
 let unwrap_tqueue: {q: TQueue 'a} -> TVar {read: List 'a, write: List 'a} =
@@ -609,6 +625,11 @@ pub let length_tqueue: {q: TQueue 'a} -> Int <STM> =
 
 # TBQueue type - bounded queue with capacity
 pub newtype TBQueue 'a = TBQueue (TVar {read: List 'a, write: List 'a, size: Int, capacity: Int})
+
+impl Eq 'a for TBQueue 'a where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Internal helper to unwrap TBQueue
 let unwrap_tbqueue: {q: TBQueue 'a} -> TVar {read: List 'a, write: List 'a, size: Int, capacity: Int} =

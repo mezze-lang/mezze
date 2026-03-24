@@ -93,10 +93,18 @@ class NewtypeImplTest {
     @Nested
     inner class ChannelImpls {
 
-        // TODO: Parametric newtype Eq (impl Eq 'a for Chan 'a) doesn't resolve yet.
-        // Non-parametric newtypes (WaitGroup, Promise with concrete type) work.
-        // The structural matching in ConstraintSolver doesn't handle parametric newtype impls.
-        // @Test
-        // fun `Chan has Eq`() { ... }
+        @Test
+        fun `Chan has Eq`() {
+            val source = """
+                use std::effects::concurrent::channel::{Chan, chan}
+
+                let ch1: Chan Int = chan {}
+                let ch2 = ch1
+                let same = ch1 == ch2
+            """.trimIndent()
+            val result = typeChecker.checkProgram(parser.parse(source))
+            assertTrue(result is TypeChecker.TypeCheckResult.Success,
+                "Chan should have Eq: $result")
+        }
     }
 }

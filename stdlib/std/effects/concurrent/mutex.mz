@@ -17,8 +17,15 @@
 #       update_shared_state {}
 #   }
 
+use std::abilities::compare::{Eq}
+
 # Mutex type wrapping Java's ReentrantLock
 pub newtype Mutex = Mutex __NativeLock
+
+impl Eq for Mutex where {
+    eq = {it, r} -> __native_ref_eq {l = it, r = r},
+    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+}
 
 # Create a new mutex
 #
