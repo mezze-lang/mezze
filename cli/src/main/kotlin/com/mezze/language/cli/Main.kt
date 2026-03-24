@@ -1951,7 +1951,7 @@ private fun handleCompileStdlibCommand(args: List<String>) {
             val source = file.readText()
             val ast = parser.parse(source, file = file.toString())
             // typeCheck throws TypeCheckError on failure, returns TypeCheckResult on success
-            val result = typeChecker.typeCheck(ast, projectRoot.toPath())
+            val result = typeChecker.typeCheck(ast, projectRoot.toPath(), modulePath = modulePath)
             stdlibModules[modulePath] = result.program
             successCount++
         } catch (e: TypeCheckError) {

@@ -1751,12 +1751,12 @@ class TypeChecker(
      * @throws TypeCheckError if type checking fails
      */
     @JvmOverloads
-    fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false): com.mezze.language.ast.TypeCheckResult {
+    fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
 
         // Note: checkProgram() clears the unification cache internally
-        val result = checkProgram(program, currentPath, enablePrelude = enablePrelude)
+        val result = checkProgram(program, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
