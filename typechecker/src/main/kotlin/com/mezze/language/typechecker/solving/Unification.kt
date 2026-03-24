@@ -118,16 +118,6 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         }
     }
 
-    // SPECIAL CASE: NewtypeType with TypeApplication
-    // TypeAnnotation "UserId" becomes TypeApplication("UserId", []) in the constraint generator,
-    // but the actual type is NewtypeType("UserId", ...). Unify them by name.
-    if (type1 is MezzeType.NewtypeType && type2 is MezzeType.TypeApplication && type1.name == type2.constructor) {
-        return UnificationResult.Success(Substitution.empty)
-    }
-    if (type1 is MezzeType.TypeApplication && type2 is MezzeType.NewtypeType && type1.constructor == type2.name) {
-        return UnificationResult.Success(Substitution.empty)
-    }
-
     // SPECIAL CASE: TypeApplication expansion
     // Handle cross-type unification: VariantType with TypeApplication
     when {

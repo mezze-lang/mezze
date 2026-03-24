@@ -277,14 +277,16 @@ class ContextBuilder {
                 // Importers can use the TYPE but not construct or destruct it.
                 if (isImported) return result
 
-                // Newtype constructor: UserId : Int -> NewtypeType("UserId", "UserId", IntType)
+                // Newtype constructor: UserId : Int -> TypeApplication("UserId", [])
+                // The return type is TypeApplication (not NewtypeType) so type parameters
+                // are preserved during unification. NewtypeType is only used in typeDeclarations
+                // for derivation checking.
                 typeVarCache.clear()
                 val wrappedMezzeType = convertTypeAnnotationInternal(definition.wrappedType)
-                val newtypeResult = MezzeType.NewtypeType(
-                    name = typeDecl.name,
-                    constructor = definition.constructor,
-                    wrappedType = wrappedMezzeType
-                )
+                val typeArgs = typeDecl.typeParams.map { param ->
+                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
+                }
+                val newtypeResult = MezzeType.TypeApplication(typeDecl.name, typeArgs)
                 val constructorType = MezzeType.FunctionType(
                     paramType = wrappedMezzeType,
                     returnType = newtypeResult
@@ -312,13 +314,8 @@ class ContextBuilder {
             // Get constructors from the variant definition
             when (val def = typeDecl.definition) {
                 is NewtypeDefinition -> {
-                    // Newtypes get their own MezzeType — not a VariantType
-                    val wrappedMezzeType = convertTypeAnnotationInternal(def.wrappedType)
-                    MezzeType.NewtypeType(
-                        name = typeDecl.name,
-                        constructor = def.constructor,
-                        wrappedType = wrappedMezzeType
-                    )
+                    // Use TypeApplication so type parameters are preserved during unification
+                    MezzeType.TypeApplication(typeDecl.name, emptyList())
                 }
                 else -> {
                     val constructors = when (def) {
