@@ -910,4 +910,165 @@ class FormatterTest {
         val output = formatter.format(input)
         assertEquals("let x = (a + b) |> f { n = @ }\n", output)
     }
+
+    // =========================================================================
+    // ABILITY & IMPL FORMATTING (regression tests)
+    // =========================================================================
+
+    @Test
+    fun `format ability with explicit it param`() {
+        val input = """
+            ability Eq for 'a where {
+                eq: {it: 'a, r: 'a} -> Bool,
+                neq: {it: 'a, r: 'a} -> Bool
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("ability Eq for 'a"))
+        assertTrue(output.contains("eq:"))
+        assertTrue(output.contains("neq:"))
+    }
+
+    @Test
+    fun `format multi-param ability declaration`() {
+        val input = """
+            ability Into 'b for 'a where {
+                into: {it: 'a} -> 'b
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("ability Into 'b for 'a"))
+        assertTrue(output.contains("into:"))
+    }
+
+    @Test
+    fun `format impl preserves ability type args`() {
+        val input = """
+            impl Into Str for Int where { into = {it} -> __native_int_to_str {n = it} }
+            impl Into Float for Int where { into = {it} -> __native_int_to_float {n = it} }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("impl Into Str for Int"), "Missing 'Into Str for Int'")
+        assertTrue(output.contains("impl Into Float for Int"), "Missing 'Into Float for Int'")
+    }
+
+    @Test
+    fun `format impl with parametric type args`() {
+        val input = "impl Eq 'a for List 'a where { eq = {it, r} -> true, neq = {it, r} -> false }"
+        val output = formatter.format(input)
+        assertTrue(output.contains("impl Eq 'a for List 'a"), "Missing parametric type args")
+    }
+
+    @Test
+    fun `format inherent impl`() {
+        val input = """
+            impl Point where {
+                get_x: {it: Point} -> Int = {it} -> it.x,
+                get_y: {it: Point} -> Int = {it} -> it.y
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("impl Point where"))
+        assertTrue(output.contains("get_x"))
+        assertTrue(output.contains("get_y"))
+    }
+
+    @Test
+    fun `format function type annotation preserves ability constraints`() {
+        val input = "pub let min: {l: 'a, r: 'a} with Ord 'a -> 'a = {l, r} -> if l < r then l else r"
+        val output = formatter.format(input)
+        assertTrue(output.contains("with Ord 'a"), "Missing ability constraint 'with Ord 'a'")
+    }
+
+    @Test
+    fun `format function type annotation preserves multiple constraints`() {
+        val input = "pub let f: {x: 'a} with Eq 'a, Ord 'a -> Bool = {x} -> true"
+        val output = formatter.format(input)
+        assertTrue(output.contains("with Eq 'a, Ord 'a"), "Missing multiple constraints")
+    }
+
+    @Test
+    fun `format record type annotation stays single line`() {
+        val input = "pub let config = {pretty: Bool, indent: Int, field_transform: Str, skip_null: Bool} -> {pretty = pretty, indent = indent, field_transform = field_transform, skip_null = skip_null}"
+        val output = formatter.format(input)
+        // Record type annotation must be on one line (no INDENT tokens)
+        val typeAnnotationLine = output.lines().first { it.contains("pretty: Bool") }
+        assertTrue(typeAnnotationLine.contains("skip_null: Bool"), "Record type annotation should be single-line")
+    }
+
+    @Test
+    fun `format impl with match body keeps comma on same line`() {
+        val input = """
+            impl Eq for Color where {
+                eq = {it, r} -> match it is
+                    Red -> match r is
+                        Red -> True
+                        _ -> False
+                    _ -> False,
+                neq = {it, r} -> !(it.eq {r = r})
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        // The comma after eq's match body should NOT be on its own line
+        assertFalse(output.lines().any { it.trim() == "," }, "Comma should not be on its own line")
+        assertTrue(output.contains("eq ="))
+        assertTrue(output.contains("neq ="))
+    }
+
+    @Test
+    fun `format nested match has no blank lines between arms`() {
+        val input = """
+            let x = match a is
+                Ok {val} -> match b is
+                    Ok {val = v} -> v
+                    Err {error} -> 0
+                Err {error} -> 0
+        """.trimIndent()
+        val output = formatter.format(input)
+        // No blank lines between match arms
+        val lines = output.lines()
+        for (i in 0 until lines.size - 1) {
+            if (lines[i].isBlank() && lines[i + 1].isBlank()) {
+                fail<Unit>("Found consecutive blank lines at line ${i + 1}")
+            }
+        }
+    }
+
+    @Test
+    fun `format impl with TryInto preserves error type`() {
+        val input = """
+            impl TryInto Int |ConversionError {msg: Str}| for Float where {
+                try_into = {it} -> Ok {val = 0}
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("TryInto Int"), "Missing 'TryInto Int'")
+        assertTrue(output.contains("for Float"), "Missing 'for Float'")
+    }
+
+    @Test
+    fun `format ability impl is idempotent`() {
+        val input = """
+            impl Into Str for Int where {
+              into = { it } -> __native_int_to_str { n = it }
+            }
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second, "Ability impl formatting should be idempotent")
+    }
+
+    @Test
+    fun `format impl with effect annotation`() {
+        val input = """
+            impl Channel for BlockingChannel where {
+                send = {ch, value} -> __native_channel_send {ch = ch, value = value},
+                recv = {ch} -> __native_channel_recv {ch = ch}
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("impl Channel for BlockingChannel"))
+        assertTrue(output.contains("send ="))
+        assertTrue(output.contains("recv ="))
+    }
 }
