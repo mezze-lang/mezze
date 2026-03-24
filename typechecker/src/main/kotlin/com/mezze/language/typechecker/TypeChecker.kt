@@ -1392,13 +1392,20 @@ class TypeChecker(
                 context = contextBuilder.registerImportedInherentImpl(context, implDecl, implKey)
             } else {
                 // Named ability impls only need AbilityImplInfo
+                // Extract type variable names from abilityTypeArgs for structural matching
+                val implTypeVars = implDecl.abilityTypeArgs
+                    .filterIsInstance<IdentifierTypeAnnotation>()
+                    .filter { it.name.startsWith("'") }
+                    .map { it.name }
+                    .toSet()
                 val implInfo = TypingContext.AbilityImplInfo(
-                    abilityName = implDecl.abilityName,  // null for inherent impls
+                    abilityName = implDecl.abilityName,
                     targetTypes = implDecl.allTypeArgs.map { typeAnnotationToString(it) },
-                    targetTypeAnnotations = implDecl.allTypeArgs,  // Store original annotations for structural matching
-                    associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
-                    sourceModule = null,  // TODO: Track source module
-                    contentHash = implKey  // Use map key which is the content hash
+                    targetTypeAnnotations = implDecl.allTypeArgs,
+                    associatedTypeBindings = implDecl.associatedTypeBindings,
+                    sourceModule = null,
+                    contentHash = implKey,
+                    typeVars = implTypeVars
                 )
                 context = context.extendWithImpl(implKey, implInfo)
             }
