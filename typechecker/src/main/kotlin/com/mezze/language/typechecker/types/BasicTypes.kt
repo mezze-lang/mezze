@@ -233,6 +233,10 @@ object BasicTypes {
             MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
             MezzeType.FloatType
         )
+        context["__native_float_mod"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
         context["__native_float_neg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
             MezzeType.FloatType

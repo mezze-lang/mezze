@@ -1,5 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 use std::int
+
+impl Default for SortedMap 'k 'v where { default = {} -> empty {} }
 
 impl Eq 'k 'v for SortedMap 'k 'v where {
     eq: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_equals {m1 = it, m2 = r},

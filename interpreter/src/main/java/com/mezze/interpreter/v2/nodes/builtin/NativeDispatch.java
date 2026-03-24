@@ -377,6 +377,8 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatMultiply(getDouble(r, "l"), getDouble(r, "r")));
         HANDLERS.put("__native_float_divide", (r, c) ->
             PrimitiveNatives.floatDivide(getDouble(r, "l"), getDouble(r, "r")));
+        HANDLERS.put("__native_float_mod", (r, c) ->
+            getDouble(r, "l") % getDouble(r, "r"));
         HANDLERS.put("__native_float_neg", (r, c) ->
             PrimitiveNatives.floatNegate(getDouble(r, "n")));
         // Float comparisons

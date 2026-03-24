@@ -1,5 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 use std::int
+
+impl Default for Set 'a where { default = {} -> empty {} }
 
 impl Eq 'a for Set 'a where {
     eq: {it: Set 'a, r: Set 'a} with Eq 'a -> Bool = {it, r} -> __native_set_equals {s1 = it, s2 = r},

@@ -12,6 +12,7 @@ impl Eq for Nat where { eq = {it, r} -> __native_nat_eq {l = it, r = r}, neq = {
 impl Ord for Nat where { lt = {it, r} -> __native_nat_lt {l = it, r = r}, le = {it, r} -> __native_nat_le {l = it, r = r}, gt = {it, r} -> __native_nat_gt {l = it, r = r}, ge = {it, r} -> __native_nat_ge {l = it, r = r} }
 impl Into Int for Nat where { into = {it} -> __native_nat_to_int {n = it} }
 impl Into Str for Nat where { into = {it} -> __native_nat_to_str {n = it} }
+impl Into Float for Nat where { into = {it} -> __native_float_from_nat {n = it} }
 impl TryInto Nat |ConversionError {msg: Str}| for Str where {
     try_into = {it} -> match __native_nat_from_string {s = it} is
         Some {val} -> Ok {val = val}

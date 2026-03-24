@@ -1,5 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 use std::int
+
+impl Default for Map 'k 'v where { default = {} -> empty {} }
 
 impl Eq 'k 'v for Map 'k 'v where {
     eq: {it: Map 'k 'v, r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_map_equals {m1 = it, m2 = r},

@@ -1,5 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 use std::int
+
+impl Default for Deque 'a where { default = {} -> empty {} }
 
 impl Eq 'a for Deque 'a where {
     eq: {it: Deque 'a, r: Deque 'a} with Eq 'a -> Bool = {it, r} -> __native_deque_equals {d1 = it, d2 = r},

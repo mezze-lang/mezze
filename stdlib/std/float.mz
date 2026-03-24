@@ -1,4 +1,4 @@
-use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumZero, NumOne}
+use std::abilities::numeric::{NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne}
 use std::abilities::compare::{Eq, Ord}
 use std::abilities::convert::{Into, TryInto}
 use std::abilities::default::{Default}
@@ -7,6 +7,7 @@ impl NumAdd for Float where { add = {it, r} -> __native_float_add {l = it, r = r
 impl NumSub for Float where { sub = {it, r} -> __native_float_subtract {l = it, r = r}, neg = {it} -> 0.0 - it }
 impl NumMul for Float where { mul = {it, r} -> __native_float_multiply {l = it, r = r} }
 impl NumDiv for Float where { div = {it, r} -> __native_float_divide {l = it, r = r} }
+impl NumMod for Float where { mod = {it, r} -> __native_float_mod {l = it, r = r} }
 impl Eq for Float where { eq = {it, r} -> __native_float_eq {l = it, r = r}, neq = {it, r} -> __native_float_neq {l = it, r = r} }
 impl Ord for Float where { lt = {it, r} -> __native_float_lt {l = it, r = r}, le = {it, r} -> __native_float_le {l = it, r = r}, gt = {it, r} -> __native_float_gt {l = it, r = r}, ge = {it, r} -> __native_float_ge {l = it, r = r} }
 impl Into Str for Float where { into = {it} -> __native_float_to_str {n = it} }

@@ -1,5 +1,8 @@
 use std::abilities::compare::{Eq, Ord}
+use std::abilities::default::{Default}
 use std::int
+
+impl Default for Bytes where { default = {} -> empty {} }
 
 impl Eq for Bytes where {
     eq: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_equals {b1 = it, b2 = r},
