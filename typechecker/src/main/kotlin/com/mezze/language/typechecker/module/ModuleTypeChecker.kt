@@ -85,6 +85,15 @@ class ModuleTypeChecker(
         }
 
         /**
+         * Preload a typed module into the global cache from pre-compiled stdlib.
+         * Prevents re-type-checking when the prelude loads these modules.
+         */
+        @JvmStatic
+        fun preloadIntoGlobalCache(modulePath: String, module: TypedModule) {
+            putInGlobalCache(modulePath, module)
+        }
+
+        /**
          * Clear the type-checking stack. Used in tests.
          */
         @JvmStatic

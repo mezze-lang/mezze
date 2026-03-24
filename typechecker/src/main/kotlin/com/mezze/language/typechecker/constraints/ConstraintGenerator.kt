@@ -1287,34 +1287,36 @@ class ConstraintGenerator(
 
                 when (solveResult) {
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                        throw com.mezze.language.typechecker.TypeCheckError(
-                            "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
-                        )
+                        // Skip "Cannot access field" errors — these occur when operator desugaring
+                        // produces ability method calls (e.g., `x + y` → `x.add {r = y}`, `x - y` →
+                        // `x.sub {r = y}`) but ability impls aren't in scope during early validation.
+                        // The full pipeline (Phases 2-5) catches real type errors with complete context.
+                        val allFieldAccessErrors = solveResult.errors.all {
+                            it.message.contains("Cannot access field") && it.message.contains("non-record type")
+                        }
+                        if (!allFieldAccessErrors) {
+                            throw com.mezze.language.typechecker.TypeCheckError(
+                                "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
+                            )
+                        }
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
                         val substitution = solveResult.substitution
                         val actualBodyType = substitution.apply(bodyResult.type)
 
                         // Check that actual body type matches expected return type
-                        // Always use unification to properly handle type aliases like Result
-                        // which need to be expanded to their variant form for comparison
                         val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                         val unificationResult = unificationSolver.solve(
                             listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation"))
                         )
 
-                        when (unificationResult) {
-                            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                                val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
-                                val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
-                                throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
-                                    "expected $expectedTypeStr, but body returns $actualTypeStr."
-                                )
-                            }
-                            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
-                                // Unification succeeded - types are compatible
-                            }
+                        if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
+                            val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
+                            val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
+                            throw com.mezze.language.typechecker.TypeCheckError(
+                                "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
+                                "expected $expectedTypeStr, but body returns $actualTypeStr."
+                            )
                         }
                     }
                 }

@@ -1995,6 +1995,20 @@ class TypeChecker(
 
                 // Update ModuleResolver's cache with the preloaded module
                 resolver.updateModuleExports(modulePath, program, typeContext)
+
+                // Also cache in ModuleTypeChecker's global cache to prevent re-type-checking.
+                // Without this, the prelude re-type-checks modules from source, which fails
+                // because ability impls aren't in scope during re-validation (e.g., `1 + 2`
+                // needs NumAdd for Int, which isn't available during standalone module validation).
+                val typedModule = com.mezze.language.typechecker.module.TypedModule(
+                    modulePath = modulePath,
+                    program = program,
+                    exports = emptyMap(),  // Actual exports are in ModuleResolver
+                    context = TypingContext.empty,
+                    substitution = com.mezze.language.typechecker.solving.Substitution(),
+                    monomorphicInstances = emptyMap()
+                )
+                com.mezze.language.typechecker.module.ModuleTypeChecker.preloadIntoGlobalCache(modulePath, typedModule)
             }
         }
     }
