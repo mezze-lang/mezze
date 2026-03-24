@@ -2260,6 +2260,24 @@ class ExpressionConstraintGenerator {
     private fun generateVariantConstruction(expr: VariantConstruction, context: ConstraintContext): ConstraintResult {
         // Constructor {payload}
 
+        // Check if this constructor is an imported newtype (opaque — can't construct)
+        val constructorBinding = context.typingContext.lookup(BindingKey.unqualified(expr.constructor))
+        if (constructorBinding is TypingContext.LookupResult.NotFound) {
+            // Constructor not in scope — could be an imported newtype (constructor not exported)
+            // Check type declarations for a newtype with this constructor name
+            val newtypeDecl = context.typeDeclarations.values.find {
+                it.definition is NewtypeDefinition && (it.definition as NewtypeDefinition).constructor == expr.constructor
+            }
+            if (newtypeDecl != null) {
+                throw TypeCheckError(
+                    message = "Cannot construct newtype '${expr.constructor}' — its constructor is private to the defining module. " +
+                        "Use a public constructor function from the module instead.",
+                    expression = expr,
+                    errorType = ErrorType.MISSING_FIELD
+                )
+            }
+        }
+
         // CRITICAL: Check if this is an ability or effect being used as a value (without payload)
         // Abilities and effects should NOT be treated as variant constructors
         val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(expr.constructor)

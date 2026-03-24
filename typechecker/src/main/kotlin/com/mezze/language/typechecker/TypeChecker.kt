@@ -1382,12 +1382,9 @@ class TypeChecker(
             context = tempBuildResult.context
         }
 
-        // Add imported types
+        // Add imported types (newtype constructors are private — not imported)
         for ((typeName, typeDecl) in importContext.importedTypes) {
-            // Use ContextBuilder to add type constructors
-            val tempProgram = Program(items = listOf(typeDecl))
-            val tempBuildResult = contextBuilder.build(tempProgram, context)
-            context = tempBuildResult.context
+            context = contextBuilder.addTypeConstructors(context, typeDecl, isImported = true)
         }
 
         // Add imported ability implementations

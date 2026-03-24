@@ -305,4 +305,59 @@ class NewtypeComprehensiveTest {
             assertNotNull(result.program)
         }
     }
+
+    // ========================================================================
+    // OPACITY — CONSTRUCTOR PRIVATE TO DEFINING MODULE
+    // ========================================================================
+
+    @Nested
+    inner class Opacity {
+
+        @org.junit.jupiter.api.io.TempDir
+        lateinit var tempDir: java.nio.file.Path
+
+        @Test
+        fun `cannot construct imported newtype from another module`() {
+            // Define newtype in one module
+            java.nio.file.Files.writeString(tempDir.resolve("types.mz"), """
+                pub newtype UserId = UserId Int
+            """.trimIndent())
+
+            // Try to construct it from another module — should fail
+            java.nio.file.Files.writeString(tempDir.resolve("user.mz"), """
+                use types::{UserId}
+                let uid = UserId {value = 42}
+            """.trimIndent())
+
+            val userProgram = parser.parse(
+                java.nio.file.Files.readString(tempDir.resolve("user.mz"))
+            )
+            assertThrows<TypeCheckError> {
+                typeChecker.typeCheck(userProgram, tempDir)
+            }
+        }
+
+        @Test
+        fun `can use imported newtype as parameter type`() {
+            // Define newtype in one module
+            java.nio.file.Files.writeString(tempDir.resolve("types.mz"), """
+                pub newtype UserId = UserId Int
+                pub let make_user_id = {n: Int} -> UserId {val = n}
+            """.trimIndent())
+
+            // Use the type (but not construct/destruct)
+            java.nio.file.Files.writeString(tempDir.resolve("user.mz"), """
+                use types::{UserId, make_user_id}
+                let uid = make_user_id {n = 42}
+                let process = {id: UserId} -> id
+                let result = process {id = uid}
+            """.trimIndent())
+
+            val userProgram = parser.parse(
+                java.nio.file.Files.readString(tempDir.resolve("user.mz"))
+            )
+            val result = typeChecker.typeCheck(userProgram, tempDir)
+            assertNotNull(result.program)
+        }
+    }
 }

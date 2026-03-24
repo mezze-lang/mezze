@@ -246,9 +246,10 @@ class ContextBuilder {
     }
 
     /**
-     * Add variant constructors to context
+     * Add variant constructors to context.
+     * @param isImported If true, newtype constructors are skipped (opaque type rule).
      */
-    private fun addTypeConstructors(ctx: TypingContext, typeDecl: TypeDeclaration): TypingContext {
+    fun addTypeConstructors(ctx: TypingContext, typeDecl: TypeDeclaration, isImported: Boolean = false): TypingContext {
         var result = ctx
 
         // For variant types, add each constructor
@@ -272,6 +273,10 @@ class ContextBuilder {
                 // This will be handled separately if needed
             }
             is NewtypeDefinition -> {
+                // Newtype constructors are private to the defining module (opaque type).
+                // Importers can use the TYPE but not construct or destruct it.
+                if (isImported) return result
+
                 // Newtype constructor: UserId : Int -> NewtypeType("UserId", "UserId", IntType)
                 typeVarCache.clear()
                 val wrappedMezzeType = convertTypeAnnotationInternal(definition.wrappedType)
