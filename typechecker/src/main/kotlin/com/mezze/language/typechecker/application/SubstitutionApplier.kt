@@ -45,7 +45,10 @@ class SubstitutionApplier(
     // ImplDeclarations for populating resolvedHandlers with content hashes
     private val implDeclarations: Map<String, ImplDeclaration> = emptyMap(),
     // Content hashes for identifier resolution (keyed by BindingKey)
-    private val identifierContentHashes: Map<BindingKey, String> = emptyMap()
+    private val identifierContentHashes: Map<BindingKey, String> = emptyMap(),
+    // Nested binding types from do blocks (collected by constraint generator).
+    // Used as fallback when expression inferredType is null (e.g., effect calls).
+    private val nestedBindingTypes: Map<String, MezzeType> = emptyMap()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -1661,7 +1664,17 @@ class SubstitutionApplier(
     private fun resolveMethodCallByReceiverType(memberAccess: MemberAccess, callReturnType: MezzeType? = null): Map<String, ResolvedAbility> {
         val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
         val methodName = memberAccess.member
-        val rawReceiverType = memberAccess.receiver.inferredType?.let { substitution.apply(it) } ?: return resolvedAbilities
+        // Try inferredType first, then fall back to identifierContext lookup.
+        // Effect calls (e.g., Async.spawn) may produce FunctionCalls with null inferredType,
+        // so let bindings like `let p = Async.spawn {...}` won't have their type set on the expression.
+        // In that case, look up the receiver's type from identifierContext (which may have been
+        // populated from the constraint result's type assignment).
+        var rawReceiverType = memberAccess.receiver.inferredType?.let { substitution.apply(it) }
+        if (rawReceiverType == null && memberAccess.receiver is Identifier) {
+            val receiverKey = (memberAccess.receiver as Identifier).toBindingKey()
+            rawReceiverType = identifierContext[receiverKey]
+        }
+        if (rawReceiverType == null) return resolvedAbilities
         // Unwrap SuspendedType to get the underlying value type for method resolution
         val receiverType = when (rawReceiverType) {
             is MezzeType.SuspendedType -> rawReceiverType.valueType
@@ -2575,7 +2588,20 @@ class SubstitutionApplier(
                     // Add the let binding(s) to context for subsequent statements
                     // For simple patterns (let x = ...), this is just x -> type
                     // For complex patterns (let {a, b} = ...), extract all bindings
-                    val exprType = annotatedType?.let { substitution.apply(it) } ?: updatedExpr.inferredType
+                    var exprType = annotatedType?.let { substitution.apply(it) } ?: updatedExpr.inferredType
+                    // Fallback: use nested binding types from constraint generator.
+                    // Effect calls (e.g., Async.spawn) may produce FunctionCalls with null inferredType.
+                    // The constraint generator tracks the binding type for do-block let statements.
+                    if (exprType == null) {
+                        val varNames = stmt.pattern.extractBindings()
+                        for (varName in varNames) {
+                            val nestedType = nestedBindingTypes[varName]?.let { substitution.apply(it) }
+                            if (nestedType != null) {
+                                exprType = nestedType
+                                break
+                            }
+                        }
+                    }
                     if (exprType != null) {
                         // POLYMORPHISM FIX: Don't store polymorphic types in identifierContext.
                         // Polymorphic bindings (with ability constraints or free type variables)

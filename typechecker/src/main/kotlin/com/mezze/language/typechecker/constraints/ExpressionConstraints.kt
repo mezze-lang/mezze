@@ -54,6 +54,14 @@ class ExpressionConstraintGenerator {
     private val maxCacheSize = 1000
 
     /**
+     * Types of let bindings inside do blocks, collected during constraint generation.
+     * Keyed by binding name, value is the type variable (before substitution).
+     * The SubstitutionApplier uses these to resolve types of nested bindings
+     * that don't have inferredType set on their expressions (e.g., effect calls).
+     */
+    val nestedBindingTypes = mutableMapOf<String, MezzeType>()
+
+    /**
      * Clear all internal caches. Call this between type-checking different modules
      * to prevent stale data and memory growth.
      */
@@ -3478,6 +3486,12 @@ class ExpressionConstraintGenerator {
                     val bindingType = when (val t = exprResult.type) {
                         is MezzeType.SuspendedType -> t.valueType
                         else -> t
+                    }
+
+                    // Record nested binding types for SubstitutionApplier
+                    val variableNames = stmt.pattern.extractBindings()
+                    for (varName in variableNames) {
+                        nestedBindingTypes[varName] = bindingType
                     }
 
                     // Generate pattern constraints

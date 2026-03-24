@@ -48,7 +48,7 @@ data class ProgramConstraintResult(
 }
 
 class ConstraintGenerator(
-    private val expressionGenerator: ExpressionConstraintGenerator,
+    val expressionGenerator: ExpressionConstraintGenerator,
     private val patternGenerator: PatternConstraintGenerator,
     private val abilityGenerator: AbilityConstraintGenerator,
     private val effectGenerator: EffectConstraintGenerator,

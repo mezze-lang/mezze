@@ -545,7 +545,8 @@ class TypeChecker(
                     allTypeDeclarations,  // For resolving variant constructors
                     tailCallLocations,  // TCO: Locations of self-recursive tail calls
                     buildResult.implDeclarations,  // For populating resolvedHandlers with content hashes
-                    context.getContentHashes()  // Content hashes for identifier resolution
+                    context.getContentHashes(),  // Content hashes for identifier resolution
+                    constraintGenerator.expressionGenerator.nestedBindingTypes  // Nested do-block binding types
                 )
                 // Pre-populate imported ability impl bodies so they can be inlined.
                 // This enables the SubstitutionApplier to replace method calls like 42.abs {}
