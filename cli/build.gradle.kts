@@ -207,10 +207,29 @@ graalvmNative {
                 "-O2"
             )
 
+            // Use the system/nix C compiler so native-image finds macOS SDK headers.
+            // Without this, native-image uses its own compiler discovery which may miss
+            // Foundation.h in nix environments.
+            val ccPath = System.getenv("CC") ?: "cc"
+            val resolvedCc = try {
+                ProcessBuilder("which", ccPath).start().inputStream.bufferedReader().readLine()?.trim()
+            } catch (_: Exception) { null }
+            if (resolvedCc != null) {
+                args.add("-H:CCompilerPath=$resolvedCc")
+            }
+
             // Add zlib library path if available
             if (zlibLibPath.isNotEmpty()) {
                 args.add("-H:NativeLinkerOption=-L$zlibLibPath")
                 args.add("-H:NativeLinkerOption=-Wl,-rpath,$zlibLibPath")
+            }
+
+            // Also pass LIBRARY_PATH directories to the linker.
+            // In nix environments, zlib and other libs are in nix store paths
+            // that the linker doesn't know about by default.
+            val libraryPath = System.getenv("LIBRARY_PATH") ?: ""
+            for (libDir in libraryPath.split(":").filter { it.isNotEmpty() }) {
+                args.add("-H:NativeLinkerOption=-L$libDir")
             }
 
             // Check for PGO profile file
@@ -263,6 +282,7 @@ graalvmNative {
             if (os.contains("linux")) {
                 args.add("--gc=G1")
             }
+
 
             buildArgs.addAll(args)
         }

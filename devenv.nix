@@ -68,8 +68,9 @@ in
     pkgs-unstable.kotlin
     graalvm-oracle-linux-prebuilt
     pkgs.zlib
-    pkgs.gcc
     pkgs.nodejs
+  ] ++ lib.optionals pkgs.stdenv.isLinux [
+    pkgs.gcc
   ];
 
   languages = {
@@ -84,7 +85,7 @@ in
   env = {
     JAVA_HOME = lib.mkForce "${graalvm-oracle-linux-prebuilt}";
     JAVA_OPTS = "--enable-native-access=ALL-UNNAMED";
-    LIBRARY_PATH = "${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib";
+    LIBRARY_PATH = "${pkgs.zlib}/lib";
   };
 
   scripts = {
