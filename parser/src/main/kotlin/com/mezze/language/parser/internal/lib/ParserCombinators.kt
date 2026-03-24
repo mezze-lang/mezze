@@ -114,7 +114,7 @@ object Parsers {
             TokenType.THEN, TokenType.ELSE, TokenType.MATCH, TokenType.IS,
             TokenType.DO, TokenType.EFFECT, TokenType.IMPL, TokenType.PERFORM,
             TokenType.ABILITY, TokenType.PUB, TokenType.FOR, TokenType.WHERE,
-            TokenType.WITH, TokenType.IN, TokenType.USE, TokenType.HAVING, TokenType.FORALL
+            TokenType.WITH, TokenType.IN, TokenType.USE, TokenType.HAVING
         ) -> "keyword '${token.text}'"
         else -> "'${token.text}'"
     }
