@@ -1,21 +1,22 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for SortedSet 'a where { default = {} -> empty {} }
+impl Default for SortedSet 'a where {
+  default = {} -> empty {}
+}
 
 impl Eq 'a for SortedSet 'a where {
-    eq: {it: SortedSet 'a, r: SortedSet 'a} with Eq 'a -> Bool = {it, r} -> __native_sorted_set_equals {s1 = it, s2 = r},
-    neq: {it: SortedSet 'a, r: SortedSet 'a} with Eq 'a -> Bool = {it, r} -> if __native_sorted_set_equals {s1 = it, s2 = r} then False else True
+  eq = { it, r } -> __native_sorted_set_equals { s1 = it, s2 = r },
+  neq = { it, r } -> if __native_sorted_set_equals { s1 = it, s2 = r } then False else True,
 }
 
 impl Ord 'a for SortedSet 'a where {
-    lt: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} == (0 - 1),
-    le: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} != 1,
-    gt: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} == 1,
-    ge: {it: SortedSet 'a, r: SortedSet 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_sorted_set_compare {s1 = it, s2 = r} != (0 - 1)
+  lt = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == (0 - 1),
+  le = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != 1,
+  gt = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } == 1,
+  ge = { it, r } -> __native_sorted_set_compare { s1 = it, s2 = r } != (0 - 1),
 }
-
 # std/collections/sorted_set.mezze - Immutable sorted set operations
 #
 # SortedSet is a persistent sorted set backed by a balanced tree.
@@ -27,233 +28,184 @@ impl Ord 'a for SortedSet 'a where {
 # - size, is_empty: O(1)
 #
 # All operations are immutable and return new sets.
-
 # === Construction ===
-
 # Create an empty sorted set
-pub let empty = {} ->
-    __native_sorted_set_empty {}
 
+pub let empty = {} -> __native_sorted_set_empty {}
 # Create a sorted set with one element
-pub let singleton = { x } ->
-    __native_sorted_set_singleton { x = x }
 
+pub let singleton = { x } -> __native_sorted_set_singleton { x = x }
 # Create a sorted set from a list
-pub let from_list = { xs } ->
-    __native_sorted_set_from_list { xs = xs }
 
+pub let from_list = { xs } -> __native_sorted_set_from_list { xs = xs }
 # === Basic Operations ===
-
 # Add an element, returns new set
-pub let add = { s, x } ->
-    __native_sorted_set_add { s = s, x = x }
 
+pub let add = { s, x } -> __native_sorted_set_add { s = s, x = x }
 # Remove an element, returns new set
-pub let remove = { s, x } ->
-    __native_sorted_set_remove { s = s, x = x }
 
+pub let remove = { s, x } -> __native_sorted_set_remove { s = s, x = x }
 # Check if element exists
-pub let contains = { s, x } ->
-    __native_sorted_set_contains { s = s, x = x }
 
+pub let contains = { s, x } -> __native_sorted_set_contains { s = s, x = x }
 # === Query ===
-
 # Get number of elements
-pub let size = { s } ->
-    __native_sorted_set_size { s = s }
 
+pub let size = { s } -> __native_sorted_set_size { s = s }
 # Check if set is empty
-pub let is_empty = { s } ->
-    __native_sorted_set_is_empty { s = s }
 
+pub let is_empty = { s } -> __native_sorted_set_is_empty { s = s }
 # === Set Operations ===
-
 # Union of two sorted sets
-pub let union = { s1, s2 } ->
-    __native_sorted_set_union { s1 = s1, s2 = s2 }
 
+pub let union = { s1, s2 } -> __native_sorted_set_union { s1 = s1, s2 = s2 }
 # Intersection of two sorted sets
-pub let intersect = { s1, s2 } ->
-    __native_sorted_set_intersect { s1 = s1, s2 = s2 }
 
+pub let intersect = { s1, s2 } -> __native_sorted_set_intersect { s1 = s1, s2 = s2 }
 # Difference of two sorted sets (s1 - s2)
-pub let difference = { s1, s2 } ->
-    __native_sorted_set_difference { s1 = s1, s2 = s2 }
 
+pub let difference = { s1, s2 } -> __native_sorted_set_difference { s1 = s1, s2 = s2 }
 # === Min/Max Operations ===
-
 # Get minimum element, returns Option
-pub let min = { s } ->
-    __native_sorted_set_min { s = s }
 
+pub let min = { s } -> __native_sorted_set_min { s = s }
 # Get maximum element, returns Option
-pub let max = { s } ->
-    __native_sorted_set_max { s = s }
 
+pub let max = { s } -> __native_sorted_set_max { s = s }
 # === Conversions ===
-
 # Convert to list (in sorted order)
-pub let to_list = { s } ->
-    __native_sorted_set_to_list { s = s }
 
+pub let to_list = { s } -> __native_sorted_set_to_list { s = s }
 # Convert from regular Set to SortedSet
-pub let from_set = { s } ->
-    __native_sorted_set_from_set { s = s }
 
+pub let from_set = { s } -> __native_sorted_set_from_set { s = s }
 # Convert SortedSet to regular Set
-pub let to_set = { s } ->
-    __native_sorted_set_to_set { s = s }
 
+pub let to_set = { s } -> __native_sorted_set_to_set { s = s }
 # === Equality ===
-
 # Check if two sorted sets are equal
-pub let equals = { s1, s2 } ->
-    __native_sorted_set_equals { s1 = s1, s2 = s2 }
 
+pub let equals = { s1, s2 } -> __native_sorted_set_equals { s1 = s1, s2 = s2 }
 # === Additional Operations ===
-
 # Partition set into two sets based on predicate
-pub let partition = { s, p } ->
-    __native_sorted_set_partition { s = s, p = p }
 
+pub let partition = { s, p } -> __native_sorted_set_partition { s = s, p = p }
 # Find element with minimum key, returns Option
-pub let min_by = { s, f } ->
-    __native_sorted_set_min_by { s = s, f = f }
 
+pub let min_by = { s, f } -> __native_sorted_set_min_by { s = s, f = f }
 # Find element with maximum key, returns Option
-pub let max_by = { s, f } ->
-    __native_sorted_set_max_by { s = s, f = f }
 
+pub let max_by = { s, f } -> __native_sorted_set_max_by { s = s, f = f }
 # Take first n elements (in sorted order)
-pub let take = { s, n } ->
-    __native_sorted_set_take { s = s, n = n }
 
+pub let take = { s, n } -> __native_sorted_set_take { s = s, n = n }
 # Drop first n elements (in sorted order)
-pub let drop = { s, n } ->
-    __native_sorted_set_drop { s = s, n = n }
 
+pub let drop = { s, n } -> __native_sorted_set_drop { s = s, n = n }
 # Get elements in range [lo, hi] inclusive
-pub let range = { s, lo, hi } ->
-    __native_sorted_set_range { s = s, lo = lo, hi = hi }
 
+pub let range = { s, lo, hi } -> __native_sorted_set_range { s = s, lo = lo, hi = hi }
 # === Advanced Set Operations ===
-
 # Symmetric difference: elements in either set but not both
-pub let symmetric_difference = { s1, s2 } ->
-    __native_sorted_set_symmetric_difference { s1 = s1, s2 = s2 }
 
+pub let symmetric_difference = { s1, s2 } -> __native_sorted_set_symmetric_difference { s1 = s1, s2 = s2 }
 # Elements strictly less than given element
-pub let head_set = { s, to } ->
-    __native_sorted_set_head_set { s = s, to = to }
 
+pub let head_set = { s, to } -> __native_sorted_set_head_set { s = s, to = to }
 # Elements greater than or equal to given element
-pub let tail_set = { s, from } ->
-    __native_sorted_set_tail_set { s = s, from = from }
 
+pub let tail_set = { s, from } -> __native_sorted_set_tail_set { s = s, from = from }
 # === Collect Operations ===
-
 # Apply function returning Option to each element, collect only Some values into SortedSet
-pub let filter_map = { set, f } ->
-    __native_sorted_set_filter_map { set = set, f = f }
 
+pub let filter_map = { set, f } -> __native_sorted_set_filter_map { set = set, f = f }
 # Apply function returning Option to each element, collect only Some values into Seq
-pub let collect_seq = { set, f } ->
-    __native_sorted_set_collect_seq { set = set, f = f }
 
+pub let collect_seq = { set, f } -> __native_sorted_set_collect_seq { set = set, f = f }
 # Apply function returning Option to each element, collect only Some values into List
-pub let collect_list = { set, f } ->
-    __native_sorted_set_collect_list { set = set, f = f }
 
+pub let collect_list = { set, f } -> __native_sorted_set_collect_list { set = set, f = f }
 # === Higher-Order Functions ===
-
 # Filter elements by predicate
+
 pub let filter: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> SortedSet 'a <...> = { s, p } ->
-    __native_sorted_set_filter { s = s, p = p }
-
+  __native_sorted_set_filter { s = s, p = p }
 # Transform elements (returns SortedSet, so duplicates are removed)
+
 pub let map: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> SortedSet 'b <...> = { s, f } ->
-    __native_sorted_set_map { s = s, f = f }
-
+  __native_sorted_set_map { s = s, f = f }
 # Fold over elements in sorted order
+
 pub let fold: { s: SortedSet 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { s, init, f } ->
-    __native_sorted_set_fold { s = s, init = init, f = f }
-
+  __native_sorted_set_fold { s = s, init = init, f = f }
 # Check if any element matches predicate
+
 pub let any: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
-    __native_sorted_set_any { s = s, p = p }
-
+  __native_sorted_set_any { s = s, p = p }
 # Check if all elements match predicate
+
 pub let all: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
-    __native_sorted_set_all { s = s, p = p }
-
+  __native_sorted_set_all { s = s, p = p }
 # Check if no element matches predicate
+
 pub let none: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
-    __native_sorted_set_none { s = s, p = p }
-
+  __native_sorted_set_none { s = s, p = p }
 # Find first element matching predicate (returns Option)
+
 pub let find: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
-    __native_sorted_set_find { s = s, p = p }
-
+  __native_sorted_set_find { s = s, p = p }
 # Count elements matching predicate
+
 pub let count: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
-    __native_sorted_set_count { s = s, p = p }
-
+  __native_sorted_set_count { s = s, p = p }
 # Reduce to single value (returns Option)
+
 pub let reduce: { s: SortedSet 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
-    __native_sorted_set_reduce { s = s, f = f }
-
+  __native_sorted_set_reduce { s = s, f = f }
 # === Aggregation ===
-
 # Sum integer elements
-pub let sum: { s: SortedSet Int } -> Int = { s } ->
-    __native_sorted_set_sum { s = s }
 
+pub let sum: { s: SortedSet Int } -> Int = { s } -> __native_sorted_set_sum { s = s }
 # Sum float elements
-pub let sum_float: { s: SortedSet Float } -> Float = { s } ->
-    __native_sorted_set_sum_float { s = s }
 
+pub let sum_float: { s: SortedSet Float } -> Float = { s } -> __native_sorted_set_sum_float { s = s }
 # Product of integer elements
-pub let product: { s: SortedSet Int } -> Int = { s } ->
-    __native_sorted_set_product { s = s }
 
+pub let product: { s: SortedSet Int } -> Int = { s } -> __native_sorted_set_product { s = s }
 # Product of float elements
-pub let product_float: { s: SortedSet Float } -> Float = { s } ->
-    __native_sorted_set_product_float { s = s }
 
+pub let product_float: { s: SortedSet Float } -> Float = { s } -> __native_sorted_set_product_float { s = s }
 # === Seq Conversions ===
-
 # Convert to Seq in sorted order
-pub let to_seq: { s: SortedSet 'a } -> ['a] = { s } ->
-    __native_sorted_set_to_seq { s = s }
 
+pub let to_seq: { s: SortedSet 'a } -> ['a] = { s } -> __native_sorted_set_to_seq { s = s }
 # Create sorted set from Seq
-pub let from_seq: { xs: ['a] } -> SortedSet 'a = { xs } ->
-    __native_sorted_set_from_seq { xs = xs }
 
+pub let from_seq: { xs: ['a] } -> SortedSet 'a = { xs } -> __native_sorted_set_from_seq { xs = xs }
 # === Side Effects ===
-
 # Execute function for each element (for side effects)
+
 pub let for_each: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> {} <...> = { s, f } ->
-    __native_sorted_set_for_each { s = s, f = f }
+  __native_sorted_set_for_each { s = s, f = f }
 
 impl SortedSet 'a where {
-    add = {it, x} -> add {s = it, x = x},
-    remove = {it, x} -> remove {s = it, x = x},
-    contains = {it, x} -> contains {s = it, x = x},
-    size = {it} -> size {s = it},
-    is_empty = {it} -> is_empty {s = it},
-    union = {it, s2} -> union {s1 = it, s2 = s2},
-    intersect = {it, s2} -> intersect {s1 = it, s2 = s2},
-    difference = {it, s2} -> difference {s1 = it, s2 = s2},
-    min = {it} -> min {s = it},
-    max = {it} -> max {s = it},
-    filter = {it, p} -> filter {s = it, p = p},
-    map = {it, f} -> map {s = it, f = f},
-    fold = {it, init, f} -> fold {s = it, init = init, f = f},
-    any = {it, p} -> any {s = it, p = p},
-    all = {it, p} -> all {s = it, p = p},
-    find = {it, p} -> find {s = it, p = p},
-    to_list = {it} -> to_list {s = it},
-    to_set = {it} -> to_set {s = it},
-    to_seq = {it} -> to_seq {s = it}
+  add = { it, x } -> add { s = it, x = x },
+  remove = { it, x } -> remove { s = it, x = x },
+  contains = { it, x } -> contains { s = it, x = x },
+  size = { it } -> size { s = it },
+  is_empty = { it } -> is_empty { s = it },
+  union = { it, s2 } -> union { s1 = it, s2 = s2 },
+  intersect = { it, s2 } -> intersect { s1 = it, s2 = s2 },
+  difference = { it, s2 } -> difference { s1 = it, s2 = s2 },
+  min = { it } -> min { s = it },
+  max = { it } -> max { s = it },
+  filter = { it, p } -> filter { s = it, p = p },
+  map = { it, f } -> map { s = it, f = f },
+  fold = { it, init, f } -> fold { s = it, init = init, f = f },
+  any = { it, p } -> any { s = it, p = p },
+  all = { it, p } -> all { s = it, p = p },
+  find = { it, p } -> find { s = it, p = p },
+  to_list = { it } -> to_list { s = it },
+  to_set = { it } -> to_set { s = it },
+  to_seq = { it } -> to_seq { s = it },
 }

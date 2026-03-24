@@ -1,286 +1,252 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for Map 'k 'v where { default = {} -> empty {} }
-
-impl Eq 'k 'v for Map 'k 'v where {
-    eq: {it: Map 'k 'v, r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_map_equals {m1 = it, m2 = r},
-    neq: {it: Map 'k 'v, r: Map 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> if __native_map_equals {m1 = it, m2 = r} then False else True
+impl Default for Map 'k 'v where {
+  default = {} -> empty {}
 }
 
+impl Eq 'k 'v for Map 'k 'v where {
+  eq = { it, r } -> __native_map_equals { m1 = it, m2 = r },
+  neq = { it, r } -> if __native_map_equals { m1 = it, m2 = r } then False else True,
+}
 # std/collections/map.mezze - Map operations using HashMap
-
 # Map 'k 'v is a built-in type implemented using HashMap internally
 # No explicit type definition needed - handled by native runtime
-
 # Basic map operations
-pub let empty: {} -> Map 'k 'v = {} ->
-    __native_map_empty {}
 
-pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } -> Map 'k 'v = {m, k, v} ->
-    __native_map_insert { m = m, k = k, v = v }
+pub let empty: {} -> Map 'k 'v = {} -> __native_map_empty {}
 
-pub let get: { m: Map 'k 'v, k: 'k } -> Option 'v = {m, k} ->
-    __native_map_get { m = m, k = k }
+pub let insert: { m: Map 'k 'v, k: 'k, v: 'v } -> Map 'k 'v = { m, k, v } -> __native_map_insert { m = m, k = k, v = v }
 
-pub let remove: { m: Map 'k 'v, k: 'k } -> Map 'k 'v = {m, k} ->
-    __native_map_remove { m = m, k = k }
+pub let get: { m: Map 'k 'v, k: 'k } -> Option 'v = { m, k } -> __native_map_get { m = m, k = k }
 
-pub let contains_key: { m: Map 'k 'v, k: 'k } -> Bool= {m, k} ->
-    __native_map_contains_key { m = m, k = k }
+pub let remove: { m: Map 'k 'v, k: 'k } -> Map 'k 'v = { m, k } -> __native_map_remove { m = m, k = k }
 
-pub let size: { m: Map 'k 'v } -> Int = {m} ->
-    __native_map_size { m = m }
+pub let contains_key: { m: Map 'k 'v, k: 'k } -> Bool = { m, k } -> __native_map_contains_key { m = m, k = k }
 
-pub let is_empty: { m: Map 'k 'v } -> Bool = {m} ->
-    size { m = m } == 0
+pub let size: { m: Map 'k 'v } -> Int = { m } -> __native_map_size { m = m }
 
+pub let is_empty: { m: Map 'k 'v } -> Bool = { m } -> size { m = m } == 0
 # Map queries and utilities
-pub let keys: { m: Map 'k 'v } -> List 'k = {m} ->
-    __native_map_keys { m = m }
 
-pub let values: { m: Map 'k 'v } -> List 'v = {m} ->
-    __native_map_values { m = m }
+pub let keys: { m: Map 'k 'v } -> List 'k = { m } -> __native_map_keys { m = m }
 
+pub let values: { m: Map 'k 'v } -> List 'v = { m } -> __native_map_values { m = m }
 # TODO: Tuple syntax not yet supported in type annotations
 # pub let entries: { m: (Map 'k 'v) } -> [('k, 'v)] = {m} ->
 #     __native_map_entries { m = m }
-
 # Higher-order functions
-pub let map_values: { m: Map 'k 'v, f: { val: 'v } -> 'w <...> } -> Map 'k 'w <...> = {m, f} ->
-    __native_map_map_values { m = m, f = f }
 
-pub let filter: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Map 'k 'v <...> = {m, p} ->
-    __native_map_filter { m = m, p = p }
+pub let map_values: { m: Map 'k 'v, f: { val: 'v } -> 'w <...> } -> Map 'k 'w <...> = { m, f } ->
+  __native_map_map_values { m = m, f = f }
 
-pub let fold: { m: Map 'k 'v, init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc <...> } -> 'acc <...> = {m, init, f} ->
-    __native_map_fold { m = m, init = init, f = f }
+pub let filter: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Map 'k 'v <...> = { m, p } ->
+  __native_map_filter { m = m, p = p }
 
-pub let from_keys: { ks: List 'k, f: { val: 'k } -> 'v <...> } -> Map 'k 'v <...> = {ks, f} ->
-    __native_map_from_keys { ks = ks, f = f }
+pub let fold: { m: Map 'k 'v, init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc <...> } -> 'acc <...> = { m, init, f } ->
+  __native_map_fold { m = m, init = init, f = f }
 
+pub let from_keys: { ks: List 'k, f: { val: 'k } -> 'v <...> } -> Map 'k 'v <...> = { ks, f } ->
+  __native_map_from_keys { ks = ks, f = f }
 # Map operations
-pub let merge: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = {m1, m2} ->
-    __native_map_merge { m1 = m1, m2 = m2 }
 
-pub let merge_with: { m1: Map 'k 'v, m2: Map 'k 'v, f: { l: 'v, r: 'v } -> 'v <...> } -> Map 'k 'v <...> = {m1, m2, f} ->
-    __native_map_merge_with { m1 = m1, m2 = m2, f = f }
+pub let merge: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } -> __native_map_merge { m1 = m1, m2 = m2 }
 
+pub let merge_with: { m1: Map 'k 'v, m2: Map 'k 'v, f: { l: 'v, r: 'v } -> 'v <...> } -> Map 'k 'v <...> = { m1, m2, f } ->
+  __native_map_merge_with { m1 = m1, m2 = m2, f = f }
 # Lookup with default
-pub let get_or_default: { m: Map 'k 'v, k: 'k, def: 'v } -> 'v = {m, k, def} ->
-    match get { m = m, k = k } is
-        Some { val } -> val
-        None -> def
+
+pub let get_or_default: { m: Map 'k 'v, k: 'k, def: 'v } -> 'v = { m, k, def } ->
+  match get { m = m, k = k } is
+    Some { val } -> val
+    None -> def
 
 # Update operations
-pub let update: { m: Map 'k 'v, k: 'k, f: { x: Option 'v } -> Option 'v <...> } -> Map 'k 'v <...> = {m, k, f} -> do
+
+pub let update: { m: Map 'k 'v, k: 'k, f: { x: Option 'v } -> Option 'v <...> } -> Map 'k 'v <...> = { m, k, f } ->
+  do
     let current = get { m = m, k = k }
     let new_val = f { x = current }
     match new_val is
-        Some { val } -> insert { m = m, k = k, v = val }
-        None -> remove { m = m, k = k }
+      Some { val } -> insert { m = m, k = k, v = val }
+      None -> remove { m = m, k = k }
 
-pub let remove_all: { m: Map 'k 'v, ks: List 'k } -> Map 'k 'v = {m, ks} ->
-    __native_map_remove_all { m = m, ks = ks }
 
+pub let remove_all: { m: Map 'k 'v, ks: List 'k } -> Map 'k 'v = { m, ks } -> __native_map_remove_all { m = m, ks = ks }
 # Equality
-pub let equals: { m1: Map 'k 'v, m2: Map 'k 'v } -> Bool = {m1, m2} ->
-    __native_map_equals { m1 = m1, m2 = m2 }
 
+pub let equals: { m1: Map 'k 'v, m2: Map 'k 'v } -> Bool = { m1, m2 } -> __native_map_equals { m1 = m1, m2 = m2 }
 # =============================================================================
 # Predicate Operations
 # =============================================================================
-
 # Check if any entry matches predicate
-pub let any: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = {m, p} ->
-    __native_map_any {m = m, p = p}
 
+pub let any: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = { m, p } ->
+  __native_map_any { m = m, p = p }
 # Check if all entries match predicate
-pub let all: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = {m, p} ->
-    __native_map_all {m = m, p = p}
 
+pub let all: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = { m, p } ->
+  __native_map_all { m = m, p = p }
 # Check if no entry matches predicate
-pub let none: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = {m, p} ->
-    __native_map_none {m = m, p = p}
 
+pub let none: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Bool <...> = { m, p } ->
+  __native_map_none { m = m, p = p }
 # Find first entry matching predicate (returns Option {k, v})
-pub let find: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Option { k: 'k, v: 'v } <...> = {m, p} ->
-    __native_map_find {m = m, p = p}
 
+pub let find: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Option { k: 'k, v: 'v } <...> = { m, p } ->
+  __native_map_find { m = m, p = p }
 # Count entries matching predicate
-pub let count: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Int <...> = {m, p} ->
-    __native_map_count {m = m, p = p}
 
+pub let count: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> Int <...> = { m, p } ->
+  __native_map_count { m = m, p = p }
 # =============================================================================
 # Additional Operations
 # =============================================================================
-
 # Check if map contains a value
-pub let contains_value: { m: Map 'k 'v, v: 'v } -> Bool = {m, v} ->
-    __native_map_contains_value {m = m, v = v}
 
+pub let contains_value: { m: Map 'k 'v, v: 'v } -> Bool = { m, v } -> __native_map_contains_value { m = m, v = v }
 # Get value or return default (native version for performance)
-pub let get_or: { m: Map 'k 'v, k: 'k, default: 'v } -> 'v = {m, k, default} ->
-    __native_map_get_or_default {m = m, k = k, default = default}
 
+pub let get_or: { m: Map 'k 'v, k: 'k, default: 'v } -> 'v = { m, k, default } ->
+  __native_map_get_or_default { m = m, k = k, default = default }
 # Singleton map
-pub let singleton: { k: 'k, v: 'v } -> Map 'k 'v = {k, v} ->
-    __native_map_singleton {k = k, v = v}
 
+pub let singleton: { k: 'k, v: 'v } -> Map 'k 'v = { k, v } -> __native_map_singleton { k = k, v = v }
 # =============================================================================
 # Conversion to Seq
 # =============================================================================
-
 # Get all entries as a seq of {k, v} records
-pub let to_seq: { m: Map 'k 'v } -> [{ k: 'k, v: 'v }] = {m} ->
-    __native_map_to_seq {m = m}
 
+pub let to_seq: { m: Map 'k 'v } -> [{ k: 'k, v: 'v }] = { m } -> __native_map_to_seq { m = m }
 # Get all keys as a seq
-pub let keys_seq: { m: Map 'k 'v } -> ['k] = {m} ->
-    __native_map_keys_seq {m = m}
 
+pub let keys_seq: { m: Map 'k 'v } -> ['k] = { m } -> __native_map_keys_seq { m = m }
 # Get all values as a seq
-pub let values_seq: { m: Map 'k 'v } -> ['v] = {m} ->
-    __native_map_values_seq {m = m}
 
+pub let values_seq: { m: Map 'k 'v } -> ['v] = { m } -> __native_map_values_seq { m = m }
 # =============================================================================
 # Additional Operations
 # =============================================================================
-
 # Partition into two maps based on predicate
 # Returns {pass: matching entries, fail: non-matching entries}
-pub let partition: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> { pass: Map 'k 'v, fail: Map 'k 'v } <...> = {m, p} ->
-    __native_map_partition {m = m, p = p}
 
+pub let partition: { m: Map 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> { pass: Map 'k 'v, fail: Map 'k 'v } <...> = { m, p } ->
+  __native_map_partition { m = m, p = p }
 # =============================================================================
 # Min/Max Operations
 # =============================================================================
-
 # Find minimum key (returns Option)
-pub let min_key: { m: Map 'k 'v } -> Option 'k = {m} ->
-    __native_map_min_key {m = m}
 
+pub let min_key: { m: Map 'k 'v } -> Option 'k = { m } -> __native_map_min_key { m = m }
 # Find maximum key (returns Option)
-pub let max_key: { m: Map 'k 'v } -> Option 'k = {m} ->
-    __native_map_max_key {m = m}
 
+pub let max_key: { m: Map 'k 'v } -> Option 'k = { m } -> __native_map_max_key { m = m }
 # Find minimum value (returns Option)
-pub let min_value: { m: Map 'k 'v } -> Option 'v = {m} ->
-    __native_map_min_value {m = m}
 
+pub let min_value: { m: Map 'k 'v } -> Option 'v = { m } -> __native_map_min_value { m = m }
 # Find maximum value (returns Option)
-pub let max_value: { m: Map 'k 'v } -> Option 'v = {m} ->
-    __native_map_max_value {m = m}
 
+pub let max_value: { m: Map 'k 'v } -> Option 'v = { m } -> __native_map_max_value { m = m }
 # Invert map (swap keys and values)
 # Note: if multiple keys have the same value, only one will be kept
-pub let invert: { m: Map 'k 'v } -> Map 'v 'k = {m} ->
-    __native_map_invert {m = m}
 
+pub let invert: { m: Map 'k 'v } -> Map 'v 'k = { m } -> __native_map_invert { m = m }
 # =============================================================================
 # Key/Value Operations
 # =============================================================================
-
 # Select only the specified keys
-pub let select_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = {m, ks} ->
-    __native_map_select_keys {m = m, ks = ks}
 
+pub let select_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = { m, ks } -> __native_map_select_keys { m = m, ks = ks }
 # Remove the specified keys (opposite of select_keys)
-pub let reject_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = {m, ks} ->
-    __native_map_reject_keys {m = m, ks = ks}
 
+pub let reject_keys: { m: Map 'k 'v, ks: ['k] } -> Map 'k 'v = { m, ks } -> __native_map_reject_keys { m = m, ks = ks }
 # Reduce map to single value (returns Option)
-pub let reduce: { m: Map 'k 'v, f: { acc: { k: 'k, v: 'v }, entry: { k: 'k, v: 'v } } -> { k: 'k, v: 'v } <...> } -> Option { k: 'k, v: 'v } <...> = {m, f} ->
-    __native_map_reduce {m = m, f = f}
 
+pub let reduce: { m: Map 'k 'v, f: { acc: { k: 'k, v: 'v }, entry: { k: 'k, v: 'v } } -> { k: 'k, v: 'v } <...> } -> Option { k: 'k, v: 'v } <...> = { m, f } ->
+  __native_map_reduce { m = m, f = f }
 # Group keys by their values
 # Returns Map v (List k) where each key maps to list of original keys with that value
-pub let group_by_value: { m: Map 'k 'v } -> Map 'v (List 'k) = {m} ->
-    __native_map_group_by_value {m = m}
 
+pub let group_by_value: { m: Map 'k 'v } -> Map 'v (List 'k) = { m } -> __native_map_group_by_value { m = m }
 # =============================================================================
 # Key Transformation Operations
 # =============================================================================
-
 # Transform keys using a function
-pub let map_keys: { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } -> Map 'k2 'v <...> = {m, f} ->
-    __native_map_map_keys {m = m, f = f}
 
+pub let map_keys: { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } -> Map 'k2 'v <...> = { m, f } ->
+  __native_map_map_keys { m = m, f = f }
 # Filter by keys (keep entries where predicate returns true for key)
-pub let filter_keys: { m: Map 'k 'v, p: { val: 'k } -> Bool <...> } -> Map 'k 'v <...> = {m, p} ->
-    __native_map_filter_keys {m = m, p = p}
 
+pub let filter_keys: { m: Map 'k 'v, p: { val: 'k } -> Bool <...> } -> Map 'k 'v <...> = { m, p } ->
+  __native_map_filter_keys { m = m, p = p }
 # Filter by values (keep entries where predicate returns true for value)
-pub let filter_values: { m: Map 'k 'v, p: { val: 'v } -> Bool <...> } -> Map 'k 'v <...> = {m, p} ->
-    __native_map_filter_values {m = m, p = p}
 
+pub let filter_values: { m: Map 'k 'v, p: { val: 'v } -> Bool <...> } -> Map 'k 'v <...> = { m, p } ->
+  __native_map_filter_values { m = m, p = p }
 # === Multi-Map Operations ===
-
 # Zip two maps together by keys present in both
 # Returns map of {key, {fst: value1, snd: value2}}
-pub let zip_maps: { m1: Map 'k 'v1, m2: Map 'k 'v2 } -> Map 'k { fst: 'v1, snd: 'v2 } = {m1, m2} ->
-    __native_map_zip_maps { m1 = m1, m2 = m2 }
 
+pub let zip_maps: { m1: Map 'k 'v1, m2: Map 'k 'v2 } -> Map 'k { fst: 'v1, snd: 'v2 } = { m1, m2 } ->
+  __native_map_zip_maps { m1 = m1, m2 = m2 }
 # Difference of two maps: keys in m1 but not in m2
-pub let diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = {m1, m2} ->
-    __native_map_diff_maps { m1 = m1, m2 = m2 }
 
+pub let diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+  __native_map_diff_maps { m1 = m1, m2 = m2 }
 # Intersection of two maps: keys present in both (values from m1)
-pub let intersect_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = {m1, m2} ->
-    __native_map_intersect_maps { m1 = m1, m2 = m2 }
 
+pub let intersect_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+  __native_map_intersect_maps { m1 = m1, m2 = m2 }
 # Symmetric difference: keys in either map but not both
-pub let symmetric_diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = {m1, m2} ->
-    __native_map_symmetric_diff_maps { m1 = m1, m2 = m2 }
 
+pub let symmetric_diff_maps: { m1: Map 'k 'v, m2: Map 'k 'v } -> Map 'k 'v = { m1, m2 } ->
+  __native_map_symmetric_diff_maps { m1 = m1, m2 = m2 }
 # =============================================================================
 # List Conversions
 # =============================================================================
-
 # Convert Map to List of {k, v} records
 # Example: to_list { m = map } -> List of entries
-pub let to_list: { m: Map 'k 'v } -> List { k: 'k, v: 'v } = {m} -> __native_map_to_list {m = m}
 
+pub let to_list: { m: Map 'k 'v } -> List { k: 'k, v: 'v } = { m } -> __native_map_to_list { m = m }
 # Create Map from List of {k, v} records
 # Example: from_list { xs = list_of_entries } -> map
-pub let from_list: { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = {xs} -> __native_map_from_list {xs = xs}
 
+pub let from_list: { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } -> __native_map_from_list { xs = xs }
 # =============================================================================
 # Flat Map
 # =============================================================================
-
 # Map each entry to a Map and merge all results
 # Example: flat_map { m = #{a: 1, b: 2}, f = {k, v} -> #{k: v * 2} }
-pub let flat_map: { m: Map 'k 'v, f: { k: 'k, v: 'v } -> Map 'k2 'v2 <...> } -> Map 'k2 'v2 <...> = {m, f} ->
-    __native_map_flat_map {m = m, f = f}
 
+pub let flat_map: { m: Map 'k 'v, f: { k: 'k, v: 'v } -> Map 'k2 'v2 <...> } -> Map 'k2 'v2 <...> = { m, f } ->
+  __native_map_flat_map { m = m, f = f }
 # =============================================================================
 # SortedMap Conversion
 # =============================================================================
-
 # Convert Map to SortedMap (keys must be comparable)
 # Example: to_sorted_map { m = map } -> sorted map with keys in order
-pub let to_sorted_map: { m: Map 'k 'v } -> SortedMap 'k 'v = {m} -> __native_map_to_sorted_map {m = m}
+
+pub let to_sorted_map: { m: Map 'k 'v } -> SortedMap 'k 'v = { m } -> __native_map_to_sorted_map { m = m }
 
 impl Map 'k 'v where {
-    get = {it, k} -> get {m = it, k = k},
-    insert = {it, k, v} -> insert {m = it, k = k, v = v},
-    remove = {it, k} -> remove {m = it, k = k},
-    contains_key = {it, k} -> contains_key {m = it, k = k},
-    size = {it} -> size {m = it},
-    is_empty = {it} -> is_empty {m = it},
-    keys = {it} -> keys {m = it},
-    values = {it} -> values {m = it},
-    map_values = {it, f} -> map_values {m = it, f = f},
-    filter = {it, p} -> filter {m = it, p = p},
-    fold = {it, init, f} -> fold {m = it, init = init, f = f},
-    merge = {it, m2} -> merge {m1 = it, m2 = m2},
-    get_or_default = {it, k, def} -> get_or_default {m = it, k = k, def = def},
-    any = {it, p} -> any {m = it, p = p},
-    all = {it, p} -> all {m = it, p = p},
-    find = {it, p} -> find {m = it, p = p},
-    count = {it, p} -> count {m = it, p = p},
-    to_seq = {it} -> to_seq {m = it},
-    to_list = {it} -> to_list {m = it}
+  get = { it, k } -> get { m = it, k = k },
+  insert = { it, k, v } -> insert { m = it, k = k, v = v },
+  remove = { it, k } -> remove { m = it, k = k },
+  contains_key = { it, k } -> contains_key { m = it, k = k },
+  size = { it } -> size { m = it },
+  is_empty = { it } -> is_empty { m = it },
+  keys = { it } -> keys { m = it },
+  values = { it } -> values { m = it },
+  map_values = { it, f } -> map_values { m = it, f = f },
+  filter = { it, p } -> filter { m = it, p = p },
+  fold = { it, init, f } -> fold { m = it, init = init, f = f },
+  merge = { it, m2 } -> merge { m1 = it, m2 = m2 },
+  get_or_default = { it, k, def } -> get_or_default { m = it, k = k, def = def },
+  any = { it, p } -> any { m = it, p = p },
+  all = { it, p } -> all { m = it, p = p },
+  find = { it, p } -> find { m = it, p = p },
+  count = { it, p } -> count { m = it, p = p },
+  to_seq = { it } -> to_seq { m = it },
+  to_list = { it } -> to_list { m = it },
 }

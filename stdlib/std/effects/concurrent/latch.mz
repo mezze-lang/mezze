@@ -9,39 +9,39 @@
 ##   count_down {latch = l}
 ##   # In main thread:
 ##   await_latch {latch = l}  # Blocks until count reaches 0
-
-use std::abilities::compare::{Eq}
+use std::abilities::compare::{ Eq }
 
 pub newtype Latch = Latch __NativeLatch
 
 impl Eq for Latch where {
-    eq = {it, r} -> __native_ref_eq {l = it, r = r},
-    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-
 ## Inherent impls for Latch — method syntax for common operations
-impl Latch where {
-    count_down: {it: Latch} -> {} = {it} -> count_down {latch = it},
-    await: {it: Latch} -> {} = {it} -> await_latch {latch = it},
-    await_timeout: {it: Latch, ms: Int} -> Bool = {it, ms} -> await_latch_timeout {latch = it, ms = ms},
-    get_count: {it: Latch} -> Int = {it} -> get_count {latch = it}
-}
 
+impl Latch where {
+  count_down = { it } -> count_down { latch = it },
+  await = { it } -> await_latch { latch = it },
+  await_timeout = { it, ms } -> await_latch_timeout { latch = it, ms = ms },
+  get_count = { it } -> get_count { latch = it },
+}
 ## Create a new latch with the given count.
 ## The count must be non-negative.
-pub let latch: {count: Int} -> Latch = {count} -> __native_latch_new {count = count}
 
+pub let latch: { count: Int } -> Latch = { count } -> __native_latch_new { count = count }
 ## Decrement the latch count by one.
 ## If the count reaches zero, all waiting threads are released.
-pub let count_down: {latch: Latch} -> {} = {latch} -> __native_latch_count_down {latch = latch}
 
+pub let count_down: { latch: Latch } -> {} = { latch } -> __native_latch_count_down { latch = latch }
 ## Wait until the latch count reaches zero.
 ## If the count is already zero, returns immediately.
-pub let await_latch: {latch: Latch} -> {} = {latch} -> __native_latch_await {latch = latch}
 
+pub let await_latch: { latch: Latch } -> {} = { latch } -> __native_latch_await { latch = latch }
 ## Wait until the latch count reaches zero or timeout expires.
 ## Returns True if the count reached zero, False if timeout expired.
-pub let await_latch_timeout: {latch: Latch, ms: Int} -> Bool = {latch, ms} -> __native_latch_await_timeout {latch = latch, ms = ms}
 
+pub let await_latch_timeout: { latch: Latch, ms: Int } -> Bool = { latch, ms } ->
+  __native_latch_await_timeout { latch = latch, ms = ms }
 ## Get the current count of the latch.
-pub let get_count: {latch: Latch} -> Int = {latch} -> __native_latch_get_count {latch = latch}
+
+pub let get_count: { latch: Latch } -> Int = { latch } -> __native_latch_get_count { latch = latch }

@@ -1,180 +1,192 @@
 # Option utility functions
 # Note: Option type is now built-in to the language
-
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 
 impl Eq 'a for Option 'a where {
-    eq = {it, r} -> match it is
-        Some {val = l} -> match r is
-            Some {val = r_val} -> l == r_val
-            None -> False
-        None -> match r is
-            Some {val = _} -> False
-            None -> True,
-    neq = {it, r} -> match it is
-        Some {val = l} -> match r is
-            Some {val = r_val} -> l != r_val
-            None -> True
-        None -> match r is
-            Some {val = _} -> True
-            None -> False
+  eq = { it, r } -> match it is
+    Some { val = l } -> match r is
+      Some { val = r_val } -> l == r_val
+      None -> False
+    None -> match r is
+      Some { val = _ } -> False
+      None -> True,
+  neq = { it, r } -> match it is
+    Some { val = l } -> match r is
+      Some { val = r_val } -> l != r_val
+      None -> True
+    None -> match r is
+      Some { val = _ } -> True
+      None -> False,
 }
 
 impl Ord 'a for Option 'a where {
-    lt = {it, r} -> match it is
-        None -> match r is
-            Some {val = _} -> True
-            None -> False
-        Some {val = l} -> match r is
-            None -> False
-            Some {val = r_val} -> l < r_val,
-    le = {it, r} -> match it is
-        None -> True
-        Some {val = l} -> match r is
-            None -> False
-            Some {val = r_val} -> l <= r_val,
-    gt = {it, r} -> match it is
-        None -> False
-        Some {val = l} -> match r is
-            None -> True
-            Some {val = r_val} -> l > r_val,
-    ge = {it, r} -> match it is
-        Some {val = l} -> match r is
-            Some {val = r_val} -> l >= r_val
-            None -> True
-        None -> match r is
-            None -> True
-            Some {val = _} -> False
+  lt = { it, r } -> match it is
+    None -> match r is
+      Some { val = _ } -> True
+      None -> False
+    Some { val = l } -> match r is
+      None -> False
+      Some { val = r_val } -> l < r_val,
+  le = { it, r } -> match it is
+    None -> True
+    Some { val = l } -> match r is
+      None -> False
+      Some { val = r_val } -> l <= r_val,
+  gt = { it, r } -> match it is
+    None -> False
+    Some { val = l } -> match r is
+      None -> True
+      Some { val = r_val } -> l > r_val,
+  ge = { it, r } -> match it is
+    Some { val = l } -> match r is
+      Some { val = r_val } -> l >= r_val
+      None -> True
+    None -> match r is
+      None -> True
+      Some { val = _ } -> False,
 }
-impl Default for Option where { default = {} -> None }
 
+impl Default for Option where {
+  default = {} -> None
+}
 # Map a function over the Option value
-pub let map: { opt: Option 'a, f: {val: 'a} -> 'b <...> } -> Option 'b <...> = { opt, f } ->
-    match opt is
-        Some { val } -> Some { val = f { val } }
-        None -> None
+
+pub let map: { opt: Option 'a, f: { val: 'a } -> 'b <...> } -> Option 'b <...> = { opt, f } ->
+  match opt is
+    Some { val } -> Some { val = f { val } }
+    None -> None
 
 # Get the value or return a default
-pub let get_or_else: { opt: Option 'a, def: 'a } -> 'a = { opt, def } ->
-    match opt is
-        Some { val } -> val
-        None -> def
+
+pub let get_or_else: { opt: Option 'a, def: 'a } -> 'a = { opt, def } -> match opt is
+  Some { val } -> val
+  None -> def
 
 # Check if Option contains a value
-pub let is_some: { opt: Option 'a } -> Bool = { opt } ->
-    match opt is
-        Some { val } -> True
-        None -> False
+
+pub let is_some: { opt: Option 'a } -> Bool = { opt } -> match opt is
+  Some { val } -> True
+  None -> False
 
 # Check if Option is empty
-pub let is_none: { opt: Option 'a } -> Bool = { opt } ->
-    match opt is
-        Some { val } -> False
-        None -> True
+
+pub let is_none: { opt: Option 'a } -> Bool = { opt } -> match opt is
+  Some { val } -> False
+  None -> True
 
 # Filter Option based on predicate
-pub let filter: { opt: Option 'a, p: {val: 'a} -> Bool <...> } -> Option 'a <...> = { opt, p } ->
-    match opt is
-        Some { val } -> if p { val } then Some { val = val } else None
-        None -> None
+
+pub let filter: { opt: Option 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { opt, p } ->
+  match opt is
+    Some { val } -> if p { val } then Some { val = val } else None
+    None -> None
 
 # Chain operations that return Options
-pub let flat_map: { opt: Option 'a, f: {val: 'a} -> Option 'b <...> } -> Option 'b <...> = { opt, f } ->
-    match opt is
-        Some { val } -> f { val }
-        None -> None
+
+pub let flat_map: { opt: Option 'a, f: { val: 'a } -> Option 'b <...> } -> Option 'b <...> = { opt, f } ->
+  match opt is
+    Some { val } -> f { val }
+    None -> None
 
 # Return the first Some value, or None if both are None
+
 pub let or_else: { opt1: Option 'a, opt2: Option 'a } -> Option 'a = { opt1, opt2 } ->
-    match opt1 is
-        Some { val } -> opt1
-        None -> opt2
+  match opt1 is
+    Some { val } -> opt1
+    None -> opt2
 
 # Combine two Options with a function
+
 pub let map2: { opt_a: Option 'a, opt_b: Option 'b, f: { a: 'a, b: 'b } -> 'c <...> } -> Option 'c <...> = { opt_a, opt_b, f } ->
-    match opt_a is
-        Some { val = a } -> match opt_b is
-            Some { val = b } -> Some { val = f { a = a, b = b } }
-            None -> None
-        None -> None
+  match opt_a is
+    Some { val = a } -> match opt_b is
+      Some { val = b } -> Some { val = f { a = a, b = b } }
+      None -> None
+    None -> None
 
 # Execute an action if Option contains a value
-pub let if_some: { opt: Option 'a, action: {val: 'a} -> {} <...> } -> {} <...> = { opt, action } ->
-    match opt is
-        Some { val } -> action { val }
-        None -> {}
+
+pub let if_some: { opt: Option 'a, action: { val: 'a } -> {} <...> } -> {} <...> = { opt, action } ->
+  match opt is
+    Some { val } -> action { val }
+    None -> {}
 
 # Execute an action if Option is None
+
 pub let if_none: { opt: Option 'a, action: {} -> {} <...> } -> {} <...> = { opt, action } ->
-    match opt is
-        Some { val } -> {}
-        None -> action {}
+  match opt is
+    Some { val } -> {}
+    None -> action {}
 
 # Execute different actions based on Option state
-pub let fold: { opt: Option 'a, on_none: {} -> 'b <...>, on_some: {val: 'a} -> 'b <...> } -> 'b <...> = { opt, on_none, on_some } ->
-    match opt is
-        Some { val } -> on_some { val }
-        None -> on_none {}
+
+pub let fold: { opt: Option 'a, on_none: {} -> 'b <...>, on_some: { val: 'a } -> 'b <...> } -> 'b <...> = { opt, on_none, on_some } ->
+  match opt is
+    Some { val } -> on_some { val }
+    None -> on_none {}
 
 # =============================================================================
 # Additional Utilities
 # =============================================================================
-
 # Flatten nested Option: Option (Option a) -> Option a
 # Example: flatten {opt = Some {val = Some {val = 42}}} -> Some {val = 42}
 # Example: flatten {opt = Some {val = None}} -> None
-pub let flatten: { opt: Option (Option 'a) } -> Option 'a = { opt } ->
-    match opt is
-        Some { val } -> val
-        None -> None
+
+pub let flatten: { opt: Option (Option 'a) } -> Option 'a = { opt } -> match opt is
+  Some { val } -> val
+  None -> None
 
 # Convert Option to Result, using provided error for None case
 # Example: to_result {opt = Some {val = 42}, error = "not found"} -> Ok {val = 42}
 # Example: to_result {opt = None, error = "not found"} -> Err {error = "not found"}
+
 pub let to_result: { opt: Option 'a, error: 'e } -> Result 'a 'e = { opt, error } ->
-    match opt is
-        Some { val } -> Ok { val = val }
-        None -> Err { error = error }
+  match opt is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = error }
 
 # Convert Option to a list (empty list for None, singleton for Some)
 # Example: to_list {opt = Some {val = 42}} -> [42]
 # Example: to_list {opt = None} -> []
-pub let to_list: { opt: Option 'a } -> ['a] = { opt } ->
-    match opt is
-        Some { val } -> [val]
-        None -> []
+
+pub let to_list: { opt: Option 'a } -> ['a] = { opt } -> match opt is
+  Some { val } -> [val]
+  None -> []
 
 # Combine two Options into an Option of a record
 # Returns None if either input is None
 # Example: zip {a = Some {val = 1}, b = Some {val = "x"}} -> Some {val = {fst = 1, snd = "x"}}
-pub let zip: { a: Option 'a, b: Option 'b } -> Option {fst: 'a, snd: 'b} = { a, b } ->
-    match a is
-        Some { val = av } -> match b is
-            Some { val = bv } -> Some { val = { fst = av, snd = bv } }
-            None -> None
-        None -> None
+
+pub let zip: { a: Option 'a, b: Option 'b } -> Option { fst: 'a, snd: 'b } = { a, b } ->
+  match a is
+    Some { val = av } -> match b is
+      Some { val = bv } -> Some { val = { fst = av, snd = bv } }
+      None -> None
+    None -> None
 
 # Combine two Options with a function
 # Returns None if either input is None
 # Example: zip_with {a = Some {val = 1}, b = Some {val = 2}, f = {x, y} -> x + y} -> Some {val = 3}
-pub let zip_with: { a: Option 'a, b: Option 'b, f: {x: 'a, y: 'b} -> 'c <...> } -> Option 'c <...> = { a, b, f } ->
-    match a is
-        Some { val = av } -> match b is
-            Some { val = bv } -> Some { val = f { x = av, y = bv } }
-            None -> None
-        None -> None
+
+pub let zip_with: { a: Option 'a, b: Option 'b, f: { x: 'a, y: 'b } -> 'c <...> } -> Option 'c <...> = { a, b, f } ->
+  match a is
+    Some { val = av } -> match b is
+      Some { val = bv } -> Some { val = f { x = av, y = bv } }
+      None -> None
+    None -> None
+
 
 impl Option 'a where {
-    map = {it, f} -> map {opt = it, f = f},
-    flat_map = {it, f} -> flat_map {opt = it, f = f},
-    get_or_else = {it, def} -> get_or_else {opt = it, def = def},
-    is_some = {it} -> is_some {opt = it},
-    is_none = {it} -> is_none {opt = it},
-    filter = {it, p} -> filter {opt = it, p = p},
-    or_else = {it, opt2} -> or_else {opt1 = it, opt2 = opt2},
-    fold = {it, on_none, on_some} -> fold {opt = it, on_none = on_none, on_some = on_some},
-    flatten = {it} -> flatten {opt = it},
-    to_result = {it, error} -> to_result {opt = it, error = error},
-    to_list = {it} -> to_list {opt = it}
+  map = { it, f } -> map { opt = it, f = f },
+  flat_map = { it, f } -> flat_map { opt = it, f = f },
+  get_or_else = { it, def } -> get_or_else { opt = it, def = def },
+  is_some = { it } -> is_some { opt = it },
+  is_none = { it } -> is_none { opt = it },
+  filter = { it, p } -> filter { opt = it, p = p },
+  or_else = { it, opt2 } -> or_else { opt1 = it, opt2 = opt2 },
+  fold = { it, on_none, on_some } -> fold { opt = it, on_none = on_none, on_some = on_some },
+  flatten = { it } -> flatten { opt = it },
+  to_result = { it, error } -> to_result { opt = it, error = error },
+  to_list = { it } -> to_list { opt = it },
 }

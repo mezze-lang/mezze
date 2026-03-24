@@ -1,41 +1,37 @@
 # std/effects/concurrency.mezze - Virtual thread concurrency using Promises
-
-use std::effects::async::{Promise}
-
+use std::effects::async::{ Promise }
 # Concurrency effect - spawn computations on virtual threads
 # Note: Callback parameters use <...> for effect polymorphism - they accept any effects
+
 effect Concurrency where {
-  # Spawn computation on new virtual thread, returns Promise
-  # The computation can have any effects (<...>)
-  spawn: {computation: {} -> 'a <...>} -> Promise 'a <Concurrency>,
-
-  # Wait for Promise (blocks current thread until result ready)
-  await: {promise: Promise 'a} -> 'a <Concurrency>
+  spawn: { computation: {} -> 'a <...> } -> Promise 'a <Concurrency>,
+  await: { promise: Promise 'a } -> 'a <Concurrency>
 }
-
+# Spawn computation on new virtual thread, returns Promise
+# The computation can have any effects (<...>)
+# Wait for Promise (blocks current thread until result ready)
 # Loom implementation - uses Project Loom virtual threads (Java 21+)
 # This is the primary implementation for concurrency in Mezze
+
 impl Concurrency for Loom where {
-  # spawn - creates new virtual thread, returns Promise
-  spawn = {computation} ->
-    __native_loom_spawn_cfg {f = computation, max_concurrent = 0},
-
-  # await - blocks current thread until Promise resolves
-  await = {promise} ->
-    __native_loom_await {p = promise}
+  spawn = { computation } -> __native_loom_spawn_cfg { f = computation, max_concurrent = 0 },
+  await = { promise } -> __native_loom_await { p = promise },
 }
-
+# spawn - creates new virtual thread, returns Promise
+# await - blocks current thread until Promise resolves
 # Helper: spawn and immediately await (blocks until done)
-pub let run: {computation: {} -> 'a} -> 'a <Concurrency> = {computation} -> do
-  let promise = Concurrency.spawn {computation = computation}
-  Concurrency.await {promise = promise}
 
+pub let run: { computation: {} -> 'a } -> 'a <Concurrency> = { computation } -> do
+  let promise = Concurrency.spawn { computation = computation }
+  Concurrency.await { promise = promise }
 # Helper: spawn multiple, await all
 # Uses native loom spawn_all which handles the concurrent spawning internally
-pub let all: {computations: [{} -> 'a]} -> ['a] <Concurrency> = {computations} -> do
-  # Native spawn_all spawns all computations and returns seq of results
-  __native_loom_spawn_all {fs = computations}
 
+pub let all: { computations: [{} -> 'a] } -> ['a] <Concurrency> = { computations } ->
+  do
+    __native_loom_spawn_all { fs = computations }
+
+# Native spawn_all spawns all computations and returns seq of results
 # Usage examples:
 #
 # Simple spawn/await:

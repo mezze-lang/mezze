@@ -1,77 +1,69 @@
 # std/effects/environment.mezze - Environment and system information effects
-
 effect Environment where {
-    # Get environment variable
-    get_env: { name: Str } -> Option Str <Environment>,
-
-    # Set environment variable (for current process)
-    set_env: { name: Str, value: Str } -> {} <Environment>,
-
-    # Get all environment variables
-    get_all_env: {} -> [{ key: Str, value: Str }] <Environment>,
-
-    # Get current working directory
-    current_dir: {} -> Str <Environment>,
-
-    # Change current working directory
-    change_dir: { path: Str } -> {} <Environment>,
-
-    # Get system information
-    os_name: {} -> Str <Environment>,
-    os_version: {} -> Str <Environment>,
-    arch: {} -> Str <Environment>,
-
-    # Get process information
-    process_id: {} -> Int <Environment>,
-    process_args: {} -> [Str] <Environment>,
-
-    # Exit the process
-    exit: { code: Int } -> {} <Environment>
+  get_env: { name: Str } -> Option Str <Environment>,
+  set_env: { name: Str, value: Str } -> {} <Environment>,
+  get_all_env: {} -> [{ key: Str, value: Str }] <Environment>,
+  current_dir: {} -> Str <Environment>,
+  change_dir: { path: Str } -> {} <Environment>,
+  os_name: {} -> Str <Environment>,
+  os_version: {} -> Str <Environment>,
+  arch: {} -> Str <Environment>,
+  process_id: {} -> Int <Environment>,
+  process_args: {} -> [Str] <Environment>,
+  exit: { code: Int } -> {} <Environment>
 }
-
+# Get environment variable
+# Set environment variable (for current process)
+# Get all environment variables
+# Get current working directory
+# Change current working directory
+# Get system information
+# Get process information
+# Exit the process
 # System environment implementation
+
 impl Environment for SystemEnvironment where {
-    get_env = { name } -> __native_env_get { name = name },
-    set_env = { name, value } -> __native_env_set { name = name, value = value },
-    get_all_env = { } -> __native_env_get_all { },
-    current_dir = { } -> __native_env_current_dir { },
-    change_dir = { path } -> __native_env_change_dir { path = path },
-    os_name = { } -> __native_env_os_name { },
-    os_version = { } -> __native_env_os_version { },
-    arch = { } -> __native_env_arch { },
-    process_id = { } -> __native_env_process_id { },
-    process_args = { } -> __native_env_process_args { },
-    exit = { code } -> __native_env_exit { code = code }
+  get_env = { name } -> __native_env_get { name = name },
+  set_env = { name, value } -> __native_env_set { name = name, value = value },
+  get_all_env = {} -> __native_env_get_all {},
+  current_dir = {} -> __native_env_current_dir {},
+  change_dir = { path } -> __native_env_change_dir { path = path },
+  os_name = {} -> __native_env_os_name {},
+  os_version = {} -> __native_env_os_version {},
+  arch = {} -> __native_env_arch {},
+  process_id = {} -> __native_env_process_id {},
+  process_args = {} -> __native_env_process_args {},
+  exit = { code } -> __native_env_exit { code = code },
 }
-
 # Mock environment for testing
-impl Environment for MockEnvironment {
-    env_vars: [{ key: Str, value: Str }],
-    current_directory: Str,
-    mock_os: Str
-} where {
-    get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
-    set_env = { name, value } -> {},  # No-op in mock
-    get_all_env = { } -> env_vars,
-    current_dir = { } -> current_directory,
-    change_dir = { path } -> {},  # No-op in mock
-    os_name = { } -> mock_os,
-    os_version = { } -> "Mock 1.0",
-    arch = { } -> "mock64",
-    process_id = { } -> 12345,
-    process_args = { } -> ["mock_program"],
-    exit = { code } -> {}  # No-op in mock
+
+impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], current_directory: Str, mock_os: Str } where {
+  get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
+  set_env = { name, value } -> {},
+  get_all_env = {} -> env_vars,
+  current_dir = {} -> current_directory,
+  change_dir = { path } -> {},
+  os_name = {} -> mock_os,
+  os_version = {} -> "Mock 1.0",
+  arch = {} -> "mock64",
+  process_id = {} -> 12345,
+  process_args = {} -> ["mock_program"],
+  exit = { code } -> {},
 }
 
-# Convenience functions
-pub let get_env: { name: Str } -> Option Str <Environment> = { name } -> Environment.get_env { name = name }
+pub let get_env: { name: Str } -> Option Str <Environment> = { name } -> Environment.get_env { name = name }  # No-op in mock
+
 pub let current_dir: {} -> Str <Environment> = {} -> Environment.current_dir {}
-pub let os_info: {} -> { name: Str, version: Str, arch: Str } <Environment> = {} -> do
+# No-op in mock
+
+pub let os_info: {} -> { name: Str, version: Str, arch: Str } <Environment> = {} ->
+  do
     let name = Environment.os_name {}
     let version = Environment.os_version {}
-    let architecture = Environment.arch {}
+    let architecture = Environment.arch {}  # No-op in mock
     { name = name, version = version, arch = architecture }
 
+# Convenience functions
 # Usage examples:
 # 
 # Using system environment:

@@ -1,21 +1,22 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for ['a] where { default = {} -> [] }
+impl Default for ['a] where {
+  default = {} -> []
+}
 
 impl Eq 'a for ['a] where {
-    eq: {it: ['a], r: ['a]} with Eq 'a -> Bool = {it, r} -> __native_seq_equals {l = it, r = r},
-    neq: {it: ['a], r: ['a]} with Eq 'a -> Bool = {it, r} -> if __native_seq_equals {l = it, r = r} then False else True
+  eq = { it, r } -> __native_seq_equals { l = it, r = r },
+  neq = { it, r } -> if __native_seq_equals { l = it, r = r } then False else True,
 }
 
 impl Ord 'a for ['a] where {
-    lt: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} == (0 - 1),
-    le: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} != 1,
-    gt: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} == 1,
-    ge: {it: ['a], r: ['a]} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_seq_compare {xs = it, ys = r} != (0 - 1)
+  lt = { it, r } -> __native_seq_compare { xs = it, ys = r } == (0 - 1),
+  le = { it, r } -> __native_seq_compare { xs = it, ys = r } != 1,
+  gt = { it, r } -> __native_seq_compare { xs = it, ys = r } == 1,
+  ge = { it, r } -> __native_seq_compare { xs = it, ys = r } != (0 - 1),
 }
-
 # std/collections/seq.mezze - Seq (Sequence) operations
 # Note: Sequences ([`a]) use optimized MezzeSeq at runtime with native seq functions
 # Sequences are immutable with structural sharing for efficient updates
@@ -24,170 +25,185 @@ impl Ord 'a for ['a] where {
 # ============================================================================
 # Get the length of a sequence
 # Example: length { xs = [1, 2, 3] } -> 3
-pub let length = {xs} -> __native_seq_length {xs = xs}
+
+pub let length = { xs } -> __native_seq_length { xs = xs }
 # Check if sequence is empty
 # Example: is_empty { xs = [] } -> True
 
-pub let is_empty = {xs} -> __native_seq_is_empty {xs = xs}
+pub let is_empty = { xs } -> __native_seq_is_empty { xs = xs }
 # Get element at index (returns Option)
 # Example: get { xs = [1, 2, 3], i = 1 } -> Some { val = 2 }
 
-pub let get = {xs, i} -> __native_seq_get {xs = xs, i = i}
+pub let get = { xs, i } -> __native_seq_get { xs = xs, i = i }
 # Set element at index (returns Option of new seq)
 # Example: set { xs = [1, 2, 3], i = 1, x = 42 } -> Some { val = [1, 42, 3] }
 
-pub let set = {xs, i, x} -> __native_seq_set {xs = xs, i = i, x = x}
+pub let set = { xs, i, x } -> __native_seq_set { xs = xs, i = i, x = x }
 # Add element to end
 # Example: add { xs = [1, 2], x = 3 } -> [1, 2, 3]
 
-pub let add = {xs, x} -> __native_seq_add {xs = xs, x = x}
+pub let add = { xs, x } -> __native_seq_add { xs = xs, x = x }
 # Alias for add - push to end
 
-pub let push = {xs, x} -> __native_seq_push {xs = xs, x = x}
+pub let push = { xs, x } -> __native_seq_push { xs = xs, x = x }
 # Push to front
 # Example: push_front { xs = [2, 3], x = 1 } -> [1, 2, 3]
 
-pub let push_front = {xs, x} -> __native_seq_push_front {xs = xs, x = x}
+pub let push_front = { xs, x } -> __native_seq_push_front { xs = xs, x = x }
 # Remove element at index (returns Option of new seq)
 # Example: remove { xs = [1, 2, 3], i = 1 } -> Some { val = [1, 3] }
 
-pub let remove = {xs, i} -> __native_seq_remove {xs = xs, i = i}
+pub let remove = { xs, i } -> __native_seq_remove { xs = xs, i = i }
 # Concatenate two sequences
 # Example: concat { xs = [1, 2], ys = [3, 4] } -> [1, 2, 3, 4]
 
-pub let concat = {xs, ys} -> __native_seq_concat {xs = xs, ys = ys}
+pub let concat = { xs, ys } -> __native_seq_concat { xs = xs, ys = ys }
 # ============================================================================
 # Access Operations
 # ============================================================================
 # Get first element (returns Option)
 # Example: head { xs = [1, 2, 3] } -> Some { val = 1 }
 
-pub let head = {xs} -> __native_seq_head {xs = xs}
+pub let head = { xs } -> __native_seq_head { xs = xs }
 # Alias for head
 
-pub let first = {xs} -> __native_seq_first {xs = xs}
+pub let first = { xs } -> __native_seq_first { xs = xs }
 # Get last element (returns Option)
 # Example: last { xs = [1, 2, 3] } -> Some { val = 3 }
 
-pub let last = {xs} -> __native_seq_last {xs = xs}
+pub let last = { xs } -> __native_seq_last { xs = xs }
 # Get all elements except first
 # Example: tail { xs = [1, 2, 3] } -> [2, 3]
 
-pub let tail = {xs} -> __native_seq_tail {xs = xs}
+pub let tail = { xs } -> __native_seq_tail { xs = xs }
 # Get all elements except last
 # Example: init { xs = [1, 2, 3] } -> [1, 2]
 
-pub let init = {xs} -> __native_seq_init {xs = xs}
+pub let init = { xs } -> __native_seq_init { xs = xs }
 # ============================================================================
 # Slicing Operations
 # ============================================================================
 # Get a slice from start (inclusive) to end (exclusive)
 # Example: slice { xs = [1, 2, 3, 4], start = 1, end = 3 } -> [2, 3]
 
-pub let slice = {xs, start, end} -> __native_seq_slice {xs = xs, start = start, end = end}
+pub let slice = { xs, start, end } -> __native_seq_slice { xs = xs, start = start, end = end }
 # Take first n elements
 # Example: take { xs = [1, 2, 3, 4], n = 2 } -> [1, 2]
 
-pub let take = {xs, n} -> __native_seq_take {xs = xs, n = n}
+pub let take = { xs, n } -> __native_seq_take { xs = xs, n = n }
 # Drop first n elements
 # Example: drop { xs = [1, 2, 3, 4], n = 2 } -> [3, 4]
 
-pub let drop = {xs, n} -> __native_seq_drop {xs = xs, n = n}
+pub let drop = { xs, n } -> __native_seq_drop { xs = xs, n = n }
 # Take elements while predicate holds
 # Example: take_while { xs = [1, 2, 3, 1], p = {x} -> x < 3 } -> [1, 2]
 
-pub let take_while: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = {xs, p} -> __native_seq_take_while {xs = xs, p = p}
+pub let take_while: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = { xs, p } ->
+  __native_seq_take_while { xs = xs, p = p }
 # Drop elements while predicate holds
 # Example: drop_while { xs = [1, 2, 3, 1], p = {x} -> x < 3 } -> [3, 1]
 
-pub let drop_while: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = {xs, p} -> __native_seq_drop_while {xs = xs, p = p}
+pub let drop_while: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = { xs, p } ->
+  __native_seq_drop_while { xs = xs, p = p }
 # ============================================================================
 # Search Operations
 # ============================================================================
 # Check if element is in sequence
 # Example: contains { xs = [1, 2, 3], x = 2 } -> True
 
-pub let contains = {xs, x} -> __native_seq_contains {xs = xs, x = x}
+pub let contains = { xs, x } -> __native_seq_contains { xs = xs, x = x }
 # Find index of element (returns Option)
 # Example: index_of { xs = [1, 2, 3], x = 2 } -> Some { val = 1 }
 
-pub let index_of = {xs, x} -> __native_seq_index_of {xs = xs, x = x}
+pub let index_of = { xs, x } -> __native_seq_index_of { xs = xs, x = x }
 # Find first element matching predicate (returns Option)
 # Example: find { xs = [1, 2, 3], p = {x} -> x > 1 } -> Some { val = 2 }
 
-pub let find: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Option 'a <...> = {xs, p} -> __native_seq_find {xs = xs, p = p}
+pub let find: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
+  __native_seq_find { xs = xs, p = p }
 # Find index of first element matching predicate (returns Option)
 # Example: find_index { xs = [1, 2, 3], p = {x} -> x > 1 } -> Some { val = 1 }
 
-pub let find_index: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Option Int <...> = {xs, p} -> __native_seq_find_index {xs = xs, p = p}
+pub let find_index: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
+  __native_seq_find_index { xs = xs, p = p }
 # ============================================================================
 # Higher-Order Functions
 # ============================================================================
 # Map a function over each element
 # Example: map { xs = [1, 2, 3], f = {x} -> x * 2 } -> [2, 4, 6]
 
-pub let map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <...> = {xs, f} -> __native_seq_map {xs = xs, f = f}
+pub let map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <...> = { xs, f } ->
+  __native_seq_map { xs = xs, f = f }
 # Filter elements that match predicate
 # Example: filter { xs = [1, 2, 3, 4], p = {x} -> x % 2 == 0 } -> [2, 4]
 
-pub let filter: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = {xs, p} -> __native_seq_filter {xs = xs, p = p}
+pub let filter: { xs: ['a], p: { x: 'a } -> Bool <...> } -> ['a] <...> = { xs, p } ->
+  __native_seq_filter { xs = xs, p = p }
 # Map and flatten results
 # Example: flat_map { xs = [1, 2], f = {x} -> [x, x * 10] } -> [1, 10, 2, 20]
 
-pub let flat_map: { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <...> = {xs, f} -> __native_seq_flat_map {xs = xs, f = f}
+pub let flat_map: { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <...> = { xs, f } ->
+  __native_seq_flat_map { xs = xs, f = f }
 # Fold left with initial value
 # Example: fold { xs = [1, 2, 3], init = 0, f = {acc, x} -> acc + x } -> 6
 
-pub let fold: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = {xs, init, f} -> __native_seq_fold {xs = xs, init = init, f = f}
+pub let fold: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { xs, init, f } ->
+  __native_seq_fold { xs = xs, init = init, f = f }
 # Reduce without initial value (returns Option)
 # Example: reduce { xs = [1, 2, 3], f = {acc, x} -> acc + x } -> Some { val = 6 }
 
-pub let reduce: { xs: ['a], f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = {xs, f} -> __native_seq_reduce {xs = xs, f = f}
+pub let reduce: { xs: ['a], f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
+  __native_seq_reduce { xs = xs, f = f }
 # ============================================================================
 # Predicate Functions
 # ============================================================================
 # Check if any element matches predicate
 # Example: any { xs = [1, 2, 3], p = {x} -> x > 2 } -> True
 
-pub let any: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = {xs, p} -> __native_seq_any {xs = xs, p = p}
+pub let any: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+  __native_seq_any { xs = xs, p = p }
 # Check if all elements match predicate
 # Example: all { xs = [2, 4, 6], p = {x} -> x % 2 == 0 } -> True
 
-pub let all: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = {xs, p} -> __native_seq_all {xs = xs, p = p}
+pub let all: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+  __native_seq_all { xs = xs, p = p }
 # Check if no element matches predicate
 # Example: none { xs = [1, 2, 3], p = {x} -> x > 10 } -> True
 
-pub let none: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = {xs, p} -> __native_seq_none {xs = xs, p = p}
+pub let none: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+  __native_seq_none { xs = xs, p = p }
 # Count elements matching predicate
 # Example: count { xs = [1, 2, 3, 4], p = {x} -> x % 2 == 0 } -> 2
 
-pub let count: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Int <...> = {xs, p} -> __native_seq_count {xs = xs, p = p}
+pub let count: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
+  __native_seq_count { xs = xs, p = p }
 # ============================================================================
 # Transform Operations
 # ============================================================================
 # Reverse the sequence
 # Example: reverse { xs = [1, 2, 3] } -> [3, 2, 1]
 
-pub let reverse = {xs} -> __native_seq_reverse {xs = xs}
+pub let reverse = { xs } -> __native_seq_reverse { xs = xs }
 # Sort in ascending order (for comparable elements)
 # Example: sort { xs = [3, 1, 2] } -> [1, 2, 3]
 
-pub let sort = {xs} -> __native_seq_sort {xs = xs}
+pub let sort = { xs } -> __native_seq_sort { xs = xs }
 # Sort using custom comparator
 # Example: sort_by { xs = ["bb", "a", "ccc"], cmp = {a, b} -> length a - length b }
 
-pub let sort_by: { xs: ['a], cmp: { a: 'a, b: 'a } -> Int <...> } -> ['a] <...> = {xs, cmp} -> __native_seq_sort_by {xs = xs, cmp = cmp}
+pub let sort_by: { xs: ['a], cmp: { a: 'a, b: 'a } -> Int <...> } -> ['a] <...> = { xs, cmp } ->
+  __native_seq_sort_by { xs = xs, cmp = cmp }
 # Remove duplicate elements (keeps first occurrence)
 # Example: unique { xs = [1, 2, 1, 3, 2] } -> [1, 2, 3]
 
-pub let unique = {xs} -> __native_seq_unique {xs = xs}
+pub let unique = { xs } -> __native_seq_unique { xs = xs }
 # Alias for unique
 
-pub let distinct = {xs} -> __native_seq_distinct {xs = xs}
+pub let distinct = { xs } -> __native_seq_distinct { xs = xs }
 # Flatten nested sequences
 # Example: flatten { xss = [[1, 2], [3, 4]] } -> [1, 2, 3, 4]
 
-pub let flatten = {xss} -> __native_seq_flatten {xs = xss}
+pub let flatten = { xss } -> __native_seq_flatten { xs = xss }
 # ============================================================================
 # Partition Operations
 # ============================================================================
@@ -195,7 +211,8 @@ pub let flatten = {xss} -> __native_seq_flatten {xs = xss}
 # Example: partition { xs = [1, 2, 3, 4], p = {x} -> x > 2 }
 #          -> { pass =[3, 4], fail =[1, 2] }
 
-pub let partition: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <...> = {xs, p} -> __native_seq_partition {xs = xs, p = p}
+pub let partition: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <...> = { xs, p } ->
+  __native_seq_partition { xs = xs, p = p }
 # ============================================================================
 # Zip Operations
 # ============================================================================
@@ -203,49 +220,49 @@ pub let partition: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { pass: ['a], fai
 # Example: zip { xs = [1, 2], ys = ["a", "b"] }
 #          -> [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
 
-pub let zip = {xs, ys} -> __native_seq_zip {xs = xs, ys = ys}
+pub let zip = { xs, ys } -> __native_seq_zip { xs = xs, ys = ys }
 # Zip with indices
 # Example: zip_with_index { xs = ["a", "b"] }
 #          -> [{ value = "a", index = 0 }, { value = "b", index = 1 }]
 
-pub let zip_with_index = {xs} -> __native_seq_zip_with_index {xs = xs}
+pub let zip_with_index = { xs } -> __native_seq_zip_with_index { xs = xs }
 # Unzip sequence of pairs
 # Example: unzip { xs = [{ fst = 1, snd = "a" }] } -> { fsts = [1], snds = ["a"] }
 
-pub let unzip = {xs} -> __native_seq_unzip {xs = xs}
+pub let unzip = { xs } -> __native_seq_unzip { xs = xs }
 # ============================================================================
 # Additional Operations
 # ============================================================================
 # Intersperse a separator between elements
 # Example: intersperse { xs = [1, 2, 3], sep = 0 } -> [1, 0, 2, 0, 3]
 
-pub let intersperse = {xs, sep} -> __native_seq_intersperse {xs = xs, sep = sep}
+pub let intersperse = { xs, sep } -> __native_seq_intersperse { xs = xs, sep = sep }
 # Split into chunks of given size
 # Example: chunk { xs = [1, 2, 3, 4, 5], size = 2 } -> [[1, 2], [3, 4], [5]]
 
-pub let chunk = {xs, size} -> __native_seq_chunk {xs = xs, size = size}
+pub let chunk = { xs, size } -> __native_seq_chunk { xs = xs, size = size }
 # Sliding window over sequence
 # Example: sliding { xs = [1, 2, 3, 4], size = 2 } -> [[1, 2], [2, 3], [3, 4]]
 
-pub let sliding = {xs, size} -> __native_seq_sliding {xs = xs, size = size}
+pub let sliding = { xs, size } -> __native_seq_sliding { xs = xs, size = size }
 # ============================================================================
 # Range Operations
 # ============================================================================
 # Create a range [start, end)
 # Example: range { start = 0, end = 5 } -> [0, 1, 2, 3, 4]
 
-pub let range = {start, end} -> __native_seq_range {start = start, end = end}
+pub let range = { start, end } -> __native_seq_range { start = start, end = end }
 # Create a range with step
 # Example: range_step { start = 0, end = 10, step = 2 } -> [0, 2, 4, 6, 8]
 
-pub let range_step = {start, end, step} -> __native_seq_range_step {start = start, end = end, step = step}
+pub let range_step = { start, end, step } -> __native_seq_range_step { start = start, end = end, step = step }
 # ============================================================================
 # Equality
 # ============================================================================
 # Check if two sequences are equal
 # Example: equals { l = [1, 2, 3], r = [1, 2, 3] } -> True
 
-pub let equals = {l, r} -> __native_seq_equals {l = l, r = r}
+pub let equals = { l, r } -> __native_seq_equals { l = l, r = r }
 # ============================================================================
 # Construction Helpers
 # ============================================================================
@@ -255,47 +272,49 @@ pub let empty = {} -> __native_seq_empty {}
 # Construct sequence with element at front
 # Example: of { x = 1, xs = [2, 3] } -> [1, 2, 3]
 
-pub let of = {x, xs} -> push_front {xs = xs, x = x}
+pub let of = { x, xs } -> push_front { xs = xs, x = x }
 # ============================================================================
 # Min/Max Operations
 # ============================================================================
 # Find minimum element (returns Option)
 # Example: min { xs = [3, 1, 2] } -> Some { val = 1 }
 
-pub let min = {xs} -> __native_seq_min {xs = xs}
+pub let min = { xs } -> __native_seq_min { xs = xs }
 # Find maximum element (returns Option)
 # Example: max { xs = [3, 1, 2] } -> Some { val = 3 }
 
-pub let max = {xs} -> __native_seq_max {xs = xs}
+pub let max = { xs } -> __native_seq_max { xs = xs }
 # Find minimum element using a key function (returns Option)
 # Example: min_by { xs = [{name = "bob", age = 30}, {name = "alice", age = 25}], f = {x} -> x.age }
 #          -> Some { val = {name = "alice", age = 25} }
 
-pub let min_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Option 'a <...> = {xs, f} -> __native_seq_min_by {xs = xs, f = f}
+pub let min_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
+  __native_seq_min_by { xs = xs, f = f }
 # Find maximum element using a key function (returns Option)
 # Example: max_by { xs = [{name = "bob", age = 30}, {name = "alice", age = 25}], f = {x} -> x.age }
 #          -> Some { val = {name = "bob", age = 30} }
 
-pub let max_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Option 'a <...> = {xs, f} -> __native_seq_max_by {xs = xs, f = f}
+pub let max_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
+  __native_seq_max_by { xs = xs, f = f }
 # ============================================================================
 # Sum/Product Operations
 # ============================================================================
 # Sum all integer elements
 # Example: sum { xs = [1, 2, 3, 4] } -> 10
 
-pub let sum = {xs} -> __native_seq_sum {xs = xs}
+pub let sum = { xs } -> __native_seq_sum { xs = xs }
 # Sum all float elements
 # Example: sum_float { xs = [1.5, 2.5, 3.0] } -> 7.0
 
-pub let sum_float = {xs} -> __native_seq_sum_float {xs = xs}
+pub let sum_float = { xs } -> __native_seq_sum_float { xs = xs }
 # Product of all integer elements
 # Example: product { xs = [2, 3, 4] } -> 24
 
-pub let product = {xs} -> __native_seq_product {xs = xs}
+pub let product = { xs } -> __native_seq_product { xs = xs }
 # Product of all float elements
 # Example: product_float { xs = [2.0, 3.0, 4.0] } -> 24.0
 
-pub let product_float = {xs} -> __native_seq_product_float {xs = xs}
+pub let product_float = { xs } -> __native_seq_product_float { xs = xs }
 # ============================================================================
 # Group By Operations
 # ============================================================================
@@ -303,7 +322,8 @@ pub let product_float = {xs} -> __native_seq_product_float {xs = xs}
 # Example: group_by { xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 }
 #          -> [{ key = 1, values = [1, 3, 5] }, { key = 0, values = [2, 4] }]
 
-pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <...> = {xs, f} -> __native_seq_group_by {xs = xs, f = f}
+pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <...> = { xs, f } ->
+  __native_seq_group_by { xs = xs, f = f }
 # ============================================================================
 # Enumerate/ForEach/Scan Operations
 # ============================================================================
@@ -311,98 +331,105 @@ pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: 
 # Example: enumerate { xs = ["a", "b", "c"] }
 #          -> [{ value = "a", index = 0 }, { value = "b", index = 1 }, { value = "c", index = 2 }]
 
-pub let enumerate = {xs} -> __native_seq_enumerate {xs = xs}
+pub let enumerate = { xs } -> __native_seq_enumerate { xs = xs }
 # Execute a function for each element (for side effects)
 # Example: for_each { xs = [1, 2, 3], f = {x} -> print x }
 
-pub let for_each: { xs: ['a], f: { x: 'a } -> 'b <...> } -> {} <...> = {xs, f} -> __native_seq_for_each {xs = xs, f = f}
+pub let for_each: { xs: ['a], f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
+  __native_seq_for_each { xs = xs, f = f }
 # Scan (like fold but returns all intermediate results)
 # Example: scan { xs = [1, 2, 3], init = 0, f = {acc, x} -> acc + x } -> [0, 1, 3, 6]
 
-pub let scan: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> ['b] <...> = {xs, init, f} -> __native_seq_scan {xs = xs, init = init, f = f}
+pub let scan: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> ['b] <...> = { xs, init, f } ->
+  __native_seq_scan { xs = xs, init = init, f = f }
 # ============================================================================
 # Split Operations
 # ============================================================================
 # Split at an index
 # Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { l = [1, 2], r = [3, 4, 5] }
 
-pub let split_at = {xs, i} -> __native_seq_split_at {xs = xs, i = i}
+pub let split_at = { xs, i } -> __native_seq_split_at { xs = xs, i = i }
 # Split while predicate holds (like take_while + drop_while combined)
 # Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { l = [1, 2], r = [3, 4, 1] }
 
-pub let span: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { l: ['a], r: ['a] } <...> = {xs, p} -> __native_seq_span {xs = xs, p = p}
+pub let span: { xs: ['a], p: { x: 'a } -> Bool <...> } -> { l: ['a], r: ['a] } <...> = { xs, p } ->
+  __native_seq_span { xs = xs, p = p }
 # ============================================================================
 # Dedup Operations
 # ============================================================================
 # Remove consecutive duplicate elements
 # Example: dedup { xs = [1, 1, 2, 2, 1, 3, 3] } -> [1, 2, 1, 3]
 
-pub let dedup = {xs} -> __native_seq_dedup {xs = xs}
+pub let dedup = { xs } -> __native_seq_dedup { xs = xs }
 # Remove consecutive duplicates using a key function
 # Example: dedup_by { xs = [1, 3, 2, 4, 5], f = {x} -> x % 2 } -> [1, 2, 5]
 
-pub let dedup_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = {xs, f} -> __native_seq_dedup_by {xs = xs, f = f}
+pub let dedup_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = { xs, f } ->
+  __native_seq_dedup_by { xs = xs, f = f }
 # ============================================================================
 # Singleton/Nth/Fill Operations
 # ============================================================================
 # Create a singleton sequence
 # Example: singleton { x = 42 } -> [42]
 
-pub let singleton = {x} -> __native_seq_singleton {x = x}
+pub let singleton = { x } -> __native_seq_singleton { x = x }
 # Get nth element (alias for get)
 # Example: nth { xs = [1, 2, 3], i = 1 } -> Some { val = 2 }
 
-pub let nth = {xs, i} -> __native_seq_nth {xs = xs, i = i}
+pub let nth = { xs, i } -> __native_seq_nth { xs = xs, i = i }
 # Create a sequence filled with a value
 # Example: fill { n = 3, x = 0 } -> [0, 0, 0]
 
-pub let fill = {n, x} -> __native_seq_fill {n = n, x = x}
+pub let fill = { n, x } -> __native_seq_fill { n = n, x = x }
 # Create a sequence filled using a generator function
 # Example: fill_with { n = 3, f = {i} -> i * 2 } -> [0, 2, 4]
 
-pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> ['a] <...> = {n, f} -> __native_seq_fill_with {n = n, f = f}
+pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> ['a] <...> = { n, f } ->
+  __native_seq_fill_with { n = n, f = f }
 # ============================================================================
 # Group Consecutive Operations
 # ============================================================================
 # Group consecutive equal elements
 # Example: group_consecutive { xs = [1, 1, 2, 2, 2, 1] } -> [[1, 1], [2, 2, 2], [1]]
 
-pub let group_consecutive = {xs} -> __native_seq_group_consecutive {xs = xs}
+pub let group_consecutive = { xs } -> __native_seq_group_consecutive { xs = xs }
 # Group consecutive elements by a key function
 # Example: group_consecutive_by { xs = [1, 3, 2, 4, 5], f = {x} -> x % 2 }
 #          -> [[1, 3], [2, 4], [5]]
 
-pub let group_consecutive_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [['a]] <...> = {xs, f} -> __native_seq_group_consecutive_by {xs = xs, f = f}
+pub let group_consecutive_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [['a]] <...> = { xs, f } ->
+  __native_seq_group_consecutive_by { xs = xs, f = f }
 # ============================================================================
 # Windows/Chunks/Rotate Operations
 # ============================================================================
 # Sliding windows (alias for sliding)
 # Example: windows { xs = [1, 2, 3, 4], size = 2 } -> [[1, 2], [2, 3], [3, 4]]
 
-pub let windows = {xs, size} -> __native_seq_windows {xs = xs, size = size}
+pub let windows = { xs, size } -> __native_seq_windows { xs = xs, size = size }
 # Split into exact chunks (drops remainder)
 # Example: chunks_exact { xs = [1, 2, 3, 4, 5], size = 2 } -> [[1, 2], [3, 4]]
 
-pub let chunks_exact = {xs, size} -> __native_seq_chunks_exact {xs = xs, size = size}
+pub let chunks_exact = { xs, size } -> __native_seq_chunks_exact { xs = xs, size = size }
 # Rotate elements left
 # Example: rotate_left { xs = [1, 2, 3, 4], n = 1 } -> [2, 3, 4, 1]
 
-pub let rotate_left = {xs, n} -> __native_seq_rotate_left {xs = xs, n = n}
+pub let rotate_left = { xs, n } -> __native_seq_rotate_left { xs = xs, n = n }
 # Rotate elements right
 # Example: rotate_right { xs = [1, 2, 3, 4], n = 1 } -> [4, 1, 2, 3]
 
-pub let rotate_right = {xs, n} -> __native_seq_rotate_right {xs = xs, n = n}
+pub let rotate_right = { xs, n } -> __native_seq_rotate_right { xs = xs, n = n }
 # ============================================================================
 # Binary Search Operations
 # ============================================================================
 # Binary search in sorted sequence (returns Option of index)
 # Example: binary_search { xs = [1, 2, 3, 4, 5], x = 3 } -> Some { val = 2 }
 
-pub let binary_search = {xs, x} -> __native_seq_binary_search {xs = xs, x = x}
+pub let binary_search = { xs, x } -> __native_seq_binary_search { xs = xs, x = x }
 # Binary search with custom comparator
 # Example: binary_search_by { xs = [5, 4, 3, 2, 1], x = 3, cmp = {a, b} -> b - a }
 
-pub let binary_search_by: { xs: ['a], x: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = {xs, x, cmp} -> __native_seq_binary_search_by {xs = xs, x = x, cmp = cmp}
+pub let binary_search_by: { xs: ['a], x: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = { xs, x, cmp } ->
+  __native_seq_binary_search_by { xs = xs, x = x, cmp = cmp }
 # ============================================================================
 # Sort By Key
 # ============================================================================
@@ -410,278 +437,268 @@ pub let binary_search_by: { xs: ['a], x: 'a, cmp: { a: 'a, b: 'a } -> Int <...> 
 # Example: sort_by_key { xs = ["banana", "apple", "cherry"], f = {x} -> string::length x }
 #          -> ["apple", "banana", "cherry"]
 
-pub let sort_by_key: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = {xs, f} -> __native_seq_sort_by_key {xs = xs, f = f}
-
+pub let sort_by_key: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['a] <...> = { xs, f } ->
+  __native_seq_sort_by_key { xs = xs, f = f }
 # ============================================================================
 # Additional Search Operations
 # ============================================================================
-
 # Find index of last occurrence of element (returns Option Int)
 # Example: last_index_of { xs = [1, 2, 3, 2, 1], x = 2 } -> Some { val = 3 }
-pub let last_index_of: { xs: ['a], x: 'a } -> Option Int = {xs, x} -> __native_seq_last_index_of {xs = xs, x = x}
 
+pub let last_index_of: { xs: ['a], x: 'a } -> Option Int = { xs, x } -> __native_seq_last_index_of { xs = xs, x = x }
 # ============================================================================
 # Replace Operations
 # ============================================================================
-
 # Replace first occurrence of old value with new value
 # Example: replace { xs = [1, 2, 3, 2], old = 2, new_val = 99 } -> [1, 99, 3, 2]
-pub let replace: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = {xs, old, new_val} -> __native_seq_replace {xs = xs, old = old, new_val = new_val}
 
+pub let replace: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = { xs, old, new_val } ->
+  __native_seq_replace { xs = xs, old = old, new_val = new_val }
 # Replace all occurrences of old value with new value
 # Example: replace_all { xs = [1, 2, 3, 2], old = 2, new_val = 99 } -> [1, 99, 3, 99]
-pub let replace_all: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = {xs, old, new_val} -> __native_seq_replace_all {xs = xs, old = old, new_val = new_val}
 
+pub let replace_all: { xs: ['a], old: 'a, new_val: 'a } -> ['a] = { xs, old, new_val } ->
+  __native_seq_replace_all { xs = xs, old = old, new_val = new_val }
 # ============================================================================
 # Insertion and Modification
 # ============================================================================
-
 # Insert element at index
 # Example: insert_at { xs = [1, 2, 3], i = 1, x = 99 } -> [1, 99, 2, 3]
-pub let insert_at: { xs: ['a], i: Int, x: 'a } -> ['a] = {xs, i, x} -> __native_seq_insert_at {xs = xs, i = i, x = x}
 
+pub let insert_at: { xs: ['a], i: Int, x: 'a } -> ['a] = { xs, i, x } -> __native_seq_insert_at { xs = xs, i = i, x = x }
 # Swap elements at two indices (returns Option)
 # Example: swap { xs = [1, 2, 3], i = 0, j = 2 } -> Some { val = [3, 2, 1] }
-pub let swap: { xs: ['a], i: Int, j: Int } -> Option ['a] = {xs, i, j} -> __native_seq_swap {xs = xs, i = i, j = j}
 
+pub let swap: { xs: ['a], i: Int, j: Int } -> Option ['a] = { xs, i, j } -> __native_seq_swap { xs = xs, i = i, j = j }
 # ============================================================================
 # Prefix/Suffix Operations
 # ============================================================================
-
 # Check if sequence starts with prefix
 # Example: starts_with { xs = [1, 2, 3], prefix = [1, 2] } -> True
-pub let starts_with: { xs: ['a], prefix: ['a] } -> Bool = {xs, prefix} -> __native_seq_starts_with {xs = xs, prefix = prefix}
 
+pub let starts_with: { xs: ['a], prefix: ['a] } -> Bool = { xs, prefix } -> __native_seq_starts_with { xs = xs, prefix = prefix }
 # Check if sequence ends with suffix
 # Example: ends_with { xs = [1, 2, 3], suffix = [2, 3] } -> True
-pub let ends_with: { xs: ['a], suffix: ['a] } -> Bool = {xs, suffix} -> __native_seq_ends_with {xs = xs, suffix = suffix}
 
+pub let ends_with: { xs: ['a], suffix: ['a] } -> Bool = { xs, suffix } -> __native_seq_ends_with { xs = xs, suffix = suffix }
 # ============================================================================
 # String Join
 # ============================================================================
-
 # Join string elements with separator
 # Example: join { xs = ["a", "b", "c"], sep = ", " } -> "a, b, c"
-pub let join: { xs: [Str], sep: Str } -> Str = {xs, sep} -> __native_seq_join {xs = xs, sep = sep}
 
+pub let join: { xs: [Str], sep: Str } -> Str = { xs, sep } -> __native_seq_join { xs = xs, sep = sep }
 # ============================================================================
 # Advanced Zip Operations
 # ============================================================================
-
 # Zip with a custom combining function
 # Example: zip_with { xs = [1, 2], ys = [10, 20], f = {a, b} -> a + b } -> [11, 22]
-pub let zip_with: { xs: ['a], ys: ['b], f: { a: 'a, b: 'b } -> 'c <...> } -> ['c] <...> = {xs, ys, f} -> __native_seq_zip_with {xs = xs, ys = ys, f = f}
 
+pub let zip_with: { xs: ['a], ys: ['b], f: { a: 'a, b: 'b } -> 'c <...> } -> ['c] <...> = { xs, ys, f } ->
+  __native_seq_zip_with { xs = xs, ys = ys, f = f }
 # Zip three sequences
 # Example: zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] } -> [{ fst = 1, snd = "a", thd = True }, ...]
-pub let zip3 = {xs, ys, zs} -> __native_seq_zip3 {xs = xs, ys = ys, zs = zs}
 
+pub let zip3 = { xs, ys, zs } -> __native_seq_zip3 { xs = xs, ys = ys, zs = zs }
 # Zip four sequences
 # Example: zip4 { xs = [1], ys = [2], zs = [3], ws = [4] } -> [{ fst = 1, snd = 2, thd = 3, fth = 4 }]
-pub let zip4 = {xs, ys, zs, ws} -> __native_seq_zip4 {xs = xs, ys = ys, zs = zs, ws = ws}
 
+pub let zip4 = { xs, ys, zs, ws } -> __native_seq_zip4 { xs = xs, ys = ys, zs = zs, ws = ws }
 # Cartesian product of two sequences
 # Example: cartesian_product { xs = [1, 2], ys = ["a", "b"] } -> [{ fst = 1, snd = "a" }, { fst = 1, snd = "b" }, ...]
-pub let cartesian_product = {xs, ys} -> __native_seq_cartesian_product {xs = xs, ys = ys}
 
+pub let cartesian_product = { xs, ys } -> __native_seq_cartesian_product { xs = xs, ys = ys }
 # ============================================================================
 # Combinatorics
 # ============================================================================
-
 # Generate all permutations of a sequence
 # Example: permutations { xs = [1, 2] } -> [[1, 2], [2, 1]]
-pub let permutations = {xs} -> __native_seq_permutations {xs = xs}
 
+pub let permutations = { xs } -> __native_seq_permutations { xs = xs }
 # Generate all combinations of k elements
 # Example: combinations { xs = [1, 2, 3], k = 2 } -> [[1, 2], [1, 3], [2, 3]]
-pub let combinations = {xs, k} -> __native_seq_combinations {xs = xs, k = k}
 
+pub let combinations = { xs, k } -> __native_seq_combinations { xs = xs, k = k }
 # Generate all subsequences (power set)
 # Example: subsequences { xs = [1, 2] } -> [[], [1], [2], [1, 2]]
-pub let subsequences = {xs} -> __native_seq_subsequences {xs = xs}
 
+pub let subsequences = { xs } -> __native_seq_subsequences { xs = xs }
 # ============================================================================
 # Statistical Operations
 # ============================================================================
-
 # Calculate average of numeric elements (returns Option Float)
 # Example: average { xs = [1, 2, 3, 4] } -> Some { val = 2.5 }
-pub let average = {xs} -> __native_seq_average {xs = xs}
 
+pub let average = { xs } -> __native_seq_average { xs = xs }
 # Calculate variance (returns Option Float)
 # Example: variance { xs = [1, 2, 3, 4, 5] } -> Some { val = 2.0 }
-pub let variance = {xs} -> __native_seq_variance {xs = xs}
 
+pub let variance = { xs } -> __native_seq_variance { xs = xs }
 # Calculate standard deviation (returns Option Float)
 # Example: stddev { xs = [1, 2, 3, 4, 5] } -> Some { val = 1.414... }
-pub let stddev = {xs} -> __native_seq_stddev {xs = xs}
 
+pub let stddev = { xs } -> __native_seq_stddev { xs = xs }
 # Calculate median (returns Option)
 # Example: median { xs = [1, 3, 2] } -> Some { val = 2 }
-pub let median = {xs} -> __native_seq_median {xs = xs}
 
+pub let median = { xs } -> __native_seq_median { xs = xs }
 # ============================================================================
 # Sorting Checks
 # ============================================================================
-
 # Check if sequence is sorted in ascending order
 # Example: is_sorted { xs = [1, 2, 3] } -> True
-pub let is_sorted = {xs} -> __native_seq_is_sorted {xs = xs}
 
+pub let is_sorted = { xs } -> __native_seq_is_sorted { xs = xs }
 # Check if sequence is sorted by a key function
 # Example: is_sorted_by { xs = [{age = 20}, {age = 30}], f = {x} -> x.age } -> True
-pub let is_sorted_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Bool <...> = {xs, f} -> __native_seq_is_sorted_by {xs = xs, f = f}
 
+pub let is_sorted_by: { xs: ['a], f: { x: 'a } -> 'b <...> } -> Bool <...> = { xs, f } ->
+  __native_seq_is_sorted_by { xs = xs, f = f }
 # Check if sequence is sorted in descending order
 # Example: is_sorted_descending { xs = [3, 2, 1] } -> True
-pub let is_sorted_descending = {xs} -> __native_seq_is_sorted_descending {xs = xs}
 
+pub let is_sorted_descending = { xs } -> __native_seq_is_sorted_descending { xs = xs }
 # ============================================================================
 # Comparison Operations
 # ============================================================================
-
 # Lexicographic comparison of two sequences
 # Example: compare { xs = [1, 2], ys = [1, 3] } -> Less
-pub let compare = {xs, ys} -> __native_seq_compare {xs = xs, ys = ys}
 
+pub let compare = { xs, ys } -> __native_seq_compare { xs = xs, ys = ys }
 # ============================================================================
 # Advanced Binary Search
 # ============================================================================
-
 # Find insertion point in sorted sequence
 # Example: binary_search_insert_point { xs = [1, 3, 5], x = 2 } -> 1
-pub let binary_search_insert_point = {xs, x} -> __native_seq_binary_search_insert_point {xs = xs, x = x}
 
+pub let binary_search_insert_point = { xs, x } -> __native_seq_binary_search_insert_point { xs = xs, x = x }
 # Find lower bound (first position where x could be inserted)
 # Example: lower_bound { xs = [1, 2, 2, 3], x = 2 } -> 1
-pub let lower_bound = {xs, x} -> __native_seq_lower_bound {xs = xs, x = x}
 
+pub let lower_bound = { xs, x } -> __native_seq_lower_bound { xs = xs, x = x }
 # Find upper bound (last position where x could be inserted)
 # Example: upper_bound { xs = [1, 2, 2, 3], x = 2 } -> 3
-pub let upper_bound = {xs, x} -> __native_seq_upper_bound {xs = xs, x = x}
 
+pub let upper_bound = { xs, x } -> __native_seq_upper_bound { xs = xs, x = x }
 # Find equal range (lower and upper bounds)
 # Example: equal_range { xs = [1, 2, 2, 3], x = 2 } -> { lower = 1, upper = 3 }
-pub let equal_range = {xs, x} -> __native_seq_equal_range {xs = xs, x = x}
 
+pub let equal_range = { xs, x } -> __native_seq_equal_range { xs = xs, x = x }
 # ============================================================================
 # Counting
 # ============================================================================
-
 # Count occurrences of an element
 # Example: count_element { xs = [1, 2, 1, 3, 1], x = 1 } -> 3
-pub let count_element = {xs, x} -> __native_seq_count_element {xs = xs, x = x}
 
+pub let count_element = { xs, x } -> __native_seq_count_element { xs = xs, x = x }
 # ============================================================================
 # Update Operations
 # ============================================================================
-
 # Update element at index using a function (returns Option)
 # Example: update { xs = [1, 2, 3], i = 1, f = {x} -> x * 10 } -> Some { val = [1, 20, 3] }
-pub let update: { xs: ['a], i: Int, f: { x: 'a } -> 'a <...> } -> Option ['a] <...> = {xs, i, f} -> __native_seq_update {xs = xs, i = i, f = f}
 
+pub let update: { xs: ['a], i: Int, f: { x: 'a } -> 'a <...> } -> Option ['a] <...> = { xs, i, f } ->
+  __native_seq_update { xs = xs, i = i, f = f }
 # Remove element at index (alias for remove)
 # Example: remove_at { xs = [1, 2, 3], i = 1 } -> Some { val = [1, 3] }
-pub let remove_at = {xs, i} -> __native_seq_remove_at {xs = xs, i = i}
 
+pub let remove_at = { xs, i } -> __native_seq_remove_at { xs = xs, i = i }
 # ============================================================================
 # Split Operations
 # ============================================================================
-
 # Split by separator element
 # Example: split { xs = [1, 0, 2, 0, 3], sep = 0 } -> [[1], [2], [3]]
-pub let split = {xs, sep} -> __native_seq_split {xs = xs, sep = sep}
 
+pub let split = { xs, sep } -> __native_seq_split { xs = xs, sep = sep }
 # ============================================================================
 # Cross-Collection Conversions
 # ============================================================================
-
 # Convert seq to List
-pub let to_list = {xs} -> __native_seq_to_list {xs = xs}
 
+pub let to_list = { xs } -> __native_seq_to_list { xs = xs }
 # Convert seq to Set
-pub let to_set = {xs} -> __native_seq_to_set {xs = xs}
 
+pub let to_set = { xs } -> __native_seq_to_set { xs = xs }
 # Convert seq to Deque
-pub let to_deque = {xs} -> __native_seq_to_deque {xs = xs}
 
+pub let to_deque = { xs } -> __native_seq_to_deque { xs = xs }
 # Convert seq to SortedSet
-pub let to_sorted_set = {xs} -> __native_seq_to_sorted_set {xs = xs}
 
+pub let to_sorted_set = { xs } -> __native_seq_to_sorted_set { xs = xs }
 # Convert seq of {k, v} records to Map
-pub let to_map = {xs} -> __native_seq_to_map {xs = xs}
 
+pub let to_map = { xs } -> __native_seq_to_map { xs = xs }
 # Convert seq of {k, v} records to SortedMap
-pub let to_sorted_map = {xs} -> __native_seq_to_sorted_map {xs = xs}
 
+pub let to_sorted_map = { xs } -> __native_seq_to_sorted_map { xs = xs }
 # Create seq from List
-pub let from_list = {xs} -> __native_seq_from_list {xs = xs}
 
+pub let from_list = { xs } -> __native_seq_from_list { xs = xs }
 # Create seq from Set
-pub let from_set = {s} -> __native_seq_from_set {s = s}
 
+pub let from_set = { s } -> __native_seq_from_set { s = s }
 # Create seq from Deque
-pub let from_deque = {d} -> __native_seq_from_deque {d = d}
 
+pub let from_deque = { d } -> __native_seq_from_deque { d = d }
 # Create seq from SortedSet
-pub let from_sorted_set = {s} -> __native_seq_from_sorted_set {s = s}
 
+pub let from_sorted_set = { s } -> __native_seq_from_sorted_set { s = s }
 # Create seq from Map (as {k, v} records)
-pub let from_map = {m} -> __native_seq_from_map {m = m}
 
+pub let from_map = { m } -> __native_seq_from_map { m = m }
 # Create seq from SortedMap (as {k, v} records)
-pub let from_sorted_map = {m} -> __native_seq_from_sorted_map {m = m}
 
+pub let from_sorted_map = { m } -> __native_seq_from_sorted_map { m = m }
 # ============================================================================
 # Float-specific Operations
 # ============================================================================
-
 # Find minimum float element
-pub let min_float = {xs} -> __native_seq_min_float {xs = xs}
 
+pub let min_float = { xs } -> __native_seq_min_float { xs = xs }
 # Find maximum float element
-pub let max_float = {xs} -> __native_seq_max_float {xs = xs}
+
+pub let max_float = { xs } -> __native_seq_max_float { xs = xs }
 
 impl Seq 'a where {
-    length = {it} -> length {xs = it},
-    is_empty = {it} -> is_empty {xs = it},
-    get = {it, i} -> get {xs = it, i = i},
-    set = {it, i, x} -> set {xs = it, i = i, x = x},
-    add = {it, x} -> add {xs = it, x = x},
-    push = {it, x} -> push {xs = it, x = x},
-    push_front = {it, x} -> push_front {xs = it, x = x},
-    concat = {it, ys} -> concat {xs = it, ys = ys},
-    head = {it} -> head {xs = it},
-    first = {it} -> first {xs = it},
-    last = {it} -> last {xs = it},
-    tail = {it} -> tail {xs = it},
-    take = {it, n} -> take {xs = it, n = n},
-    drop = {it, n} -> drop {xs = it, n = n},
-    slice = {it, start, end} -> slice {xs = it, start = start, end = end},
-    contains = {it, x} -> contains {xs = it, x = x},
-    find = {it, p} -> find {xs = it, p = p},
-    map = {it, f} -> map {xs = it, f = f},
-    filter = {it, p} -> filter {xs = it, p = p},
-    flat_map = {it, f} -> flat_map {xs = it, f = f},
-    fold = {it, init, f} -> fold {xs = it, init = init, f = f},
-    reduce = {it, f} -> reduce {xs = it, f = f},
-    any = {it, p} -> any {xs = it, p = p},
-    all = {it, p} -> all {xs = it, p = p},
-    none = {it, p} -> none {xs = it, p = p},
-    count = {it, p} -> count {xs = it, p = p},
-    reverse = {it} -> reverse {xs = it},
-    sort = {it} -> sort {xs = it},
-    sort_by = {it, cmp} -> sort_by {xs = it, cmp = cmp},
-    unique = {it} -> unique {xs = it},
-    flatten = {it} -> flatten {xss = it},
-    zip = {it, ys} -> zip {xs = it, ys = ys},
-    enumerate = {it} -> enumerate {xs = it},
-    for_each = {it, f} -> for_each {xs = it, f = f},
-    join = {it, sep} -> join {xs = it, sep = sep},
-    partition = {it, p} -> partition {xs = it, p = p},
-    min = {it} -> min {xs = it},
-    max = {it} -> max {xs = it},
-    sum = {it} -> sum {xs = it},
-    to_list = {it} -> to_list {xs = it},
-    to_set = {it} -> to_set {xs = it}
+  length = { it } -> length { xs = it },
+  is_empty = { it } -> is_empty { xs = it },
+  get = { it, i } -> get { xs = it, i = i },
+  set = { it, i, x } -> set { xs = it, i = i, x = x },
+  add = { it, x } -> add { xs = it, x = x },
+  push = { it, x } -> push { xs = it, x = x },
+  push_front = { it, x } -> push_front { xs = it, x = x },
+  concat = { it, ys } -> concat { xs = it, ys = ys },
+  head = { it } -> head { xs = it },
+  first = { it } -> first { xs = it },
+  last = { it } -> last { xs = it },
+  tail = { it } -> tail { xs = it },
+  take = { it, n } -> take { xs = it, n = n },
+  drop = { it, n } -> drop { xs = it, n = n },
+  slice = { it, start, end } -> slice { xs = it, start = start, end = end },
+  contains = { it, x } -> contains { xs = it, x = x },
+  find = { it, p } -> find { xs = it, p = p },
+  map = { it, f } -> map { xs = it, f = f },
+  filter = { it, p } -> filter { xs = it, p = p },
+  flat_map = { it, f } -> flat_map { xs = it, f = f },
+  fold = { it, init, f } -> fold { xs = it, init = init, f = f },
+  reduce = { it, f } -> reduce { xs = it, f = f },
+  any = { it, p } -> any { xs = it, p = p },
+  all = { it, p } -> all { xs = it, p = p },
+  none = { it, p } -> none { xs = it, p = p },
+  count = { it, p } -> count { xs = it, p = p },
+  reverse = { it } -> reverse { xs = it },
+  sort = { it } -> sort { xs = it },
+  sort_by = { it, cmp } -> sort_by { xs = it, cmp = cmp },
+  unique = { it } -> unique { xs = it },
+  flatten = { it } -> flatten { xss = it },
+  zip = { it, ys } -> zip { xs = it, ys = ys },
+  enumerate = { it } -> enumerate { xs = it },
+  for_each = { it, f } -> for_each { xs = it, f = f },
+  join = { it, sep } -> join { xs = it, sep = sep },
+  partition = { it, p } -> partition { xs = it, p = p },
+  min = { it } -> min { xs = it },
+  max = { it } -> max { xs = it },
+  sum = { it } -> sum { xs = it },
+  to_list = { it } -> to_list { xs = it },
+  to_set = { it } -> to_set { xs = it },
 }

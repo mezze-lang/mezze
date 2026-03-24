@@ -5,15 +5,14 @@
 #   x && y  ->  x.and {r = y}
 #   x || y  ->  x.or {r = y}
 #   !x      ->  x.not {}
-
 ability LogicalAnd for 'a where {
-    and: {it: 'a, r: 'a} -> 'a
+  and: { it: 'a, r: 'a } -> 'a
 }
 
 ability LogicalOr for 'a where {
-    or: {it: 'a, r: 'a} -> 'a
+  or: { it: 'a, r: 'a } -> 'a
 }
 
 ability LogicalNot for 'a where {
-    not: {it: 'a} -> 'a
+  not: { it: 'a } -> 'a
 }

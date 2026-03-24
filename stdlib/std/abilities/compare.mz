@@ -8,15 +8,14 @@
 #   x <= y  ->  x.le {r = y}
 #   x > y   ->  x.gt {r = y}
 #   x >= y  ->  x.ge {r = y}
-
 ability Eq for 'a where {
-    eq: {it: 'a, r: 'a} -> Bool,
-    neq: {it: 'a, r: 'a} -> Bool
+  eq: { it: 'a, r: 'a } -> Bool,
+  neq: { it: 'a, r: 'a } -> Bool
 }
 
 ability Ord for 'a where {
-    lt: {it: 'a, r: 'a} -> Bool,
-    le: {it: 'a, r: 'a} -> Bool,
-    gt: {it: 'a, r: 'a} -> Bool,
-    ge: {it: 'a, r: 'a} -> Bool
+  lt: { it: 'a, r: 'a } -> Bool,
+  le: { it: 'a, r: 'a } -> Bool,
+  gt: { it: 'a, r: 'a } -> Bool,
+  ge: { it: 'a, r: 'a } -> Bool
 }

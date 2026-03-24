@@ -1,145 +1,155 @@
 # std/result.mezze - Result type utility functions
 # Note: Result type (Ok/Err) is built-in to the language
-
-use std::abilities::compare::{Eq}
+use std::abilities::compare::{ Eq }
 
 impl Eq 'a 'e for Result 'a 'e where {
-    eq = {it, r} -> match it is
-        Ok {val = l} -> match r is
-            Ok {val = r_val} -> l == r_val
-            Err {error = _} -> False
-        Err {error = l_err} -> match r is
-            Ok {val = _} -> False
-            Err {error = r_err} -> l_err == r_err,
-    neq = {it, r} -> match it is
-        Ok {val = l} -> match r is
-            Ok {val = r_val} -> l != r_val
-            Err {error = _} -> True
-        Err {error = l_err} -> match r is
-            Ok {val = _} -> True
-            Err {error = r_err} -> l_err != r_err
+  eq = { it, r } -> match it is
+    Ok { val = l } -> match r is
+      Ok { val = r_val } -> l == r_val
+      Err { error = _ } -> False
+    Err { error = l_err } -> match r is
+      Ok { val = _ } -> False
+      Err { error = r_err } -> l_err == r_err,
+  neq = { it, r } -> match it is
+    Ok { val = l } -> match r is
+      Ok { val = r_val } -> l != r_val
+      Err { error = _ } -> True
+    Err { error = l_err } -> match r is
+      Ok { val = _ } -> True
+      Err { error = r_err } -> l_err != r_err,
 }
-
 # Map a function over the success value
-pub let map: { result: Result 'a 'e, f: {val: 'a} -> 'b <...> } -> Result 'b 'e <...> = { result, f } ->
-    match result is
-        Ok { val } -> Ok { val = f { val } }
-        Err { error } -> Err { error = error }
+
+pub let map: { result: Result 'a 'e, f: { val: 'a } -> 'b <...> } -> Result 'b 'e <...> = { result, f } ->
+  match result is
+    Ok { val } -> Ok { val = f { val } }
+    Err { error } -> Err { error = error }
 
 # Map a function over the error value
-pub let map_err: { result: Result 'a 'e, f: {error: 'e} -> 'f <...> } -> Result 'a 'f <...> = { result, f } ->
-    match result is
-        Ok { val } -> Ok { val = val }
-        Err { error } -> Err { error = f { error } }
+
+pub let map_err: { result: Result 'a 'e, f: { error: 'e } -> 'f <...> } -> Result 'a 'f <...> = { result, f } ->
+  match result is
+    Ok { val } -> Ok { val = val }
+    Err { error } -> Err { error = f { error } }
 
 # Get the success value or return a default
+
 pub let get_or_else: { result: Result 'a 'e, def: 'a } -> 'a = { result, def } ->
-    match result is
-        Ok { val } -> val
-        Err { error } -> def
+  match result is
+    Ok { val } -> val
+    Err { error } -> def
 
 # Check if Result is successful
-pub let is_ok: { result: Result 'a 'e } -> Bool = { result } ->
-    match result is
-        Ok { val } -> True
-        Err { error } -> False
+
+pub let is_ok: { result: Result 'a 'e } -> Bool = { result } -> match result is
+  Ok { val } -> True
+  Err { error } -> False
 
 # Check if Result is an error
-pub let is_err: { result: Result 'a 'e } -> Bool = { result } ->
-    match result is
-        Ok { val } -> False
-        Err { error } -> True
+
+pub let is_err: { result: Result 'a 'e } -> Bool = { result } -> match result is
+  Ok { val } -> False
+  Err { error } -> True
 
 # Chain operations that return Results
-pub let flat_map: { result: Result 'a 'e, f: {val: 'a} -> Result 'b 'e <...> } -> Result 'b 'e <...> = { result, f } ->
-    match result is
-        Ok { val } -> f { val }
-        Err { error } -> Err { error = error }
+
+pub let flat_map: { result: Result 'a 'e, f: { val: 'a } -> Result 'b 'e <...> } -> Result 'b 'e <...> = { result, f } ->
+  match result is
+    Ok { val } -> f { val }
+    Err { error } -> Err { error = error }
 
 # Chain operations on the error value
-pub let or_else: { result: Result 'a 'e, f: {error: 'e} -> Result 'a 'f <...> } -> Result 'a 'f <...> = { result, f } ->
-    match result is
-        Ok { val } -> Ok { val = val }
-        Err { error } -> f { error }
+
+pub let or_else: { result: Result 'a 'e, f: { error: 'e } -> Result 'a 'f <...> } -> Result 'a 'f <...> = { result, f } ->
+  match result is
+    Ok { val } -> Ok { val = val }
+    Err { error } -> f { error }
 
 # Convert Result to Option, discarding error information
-pub let to_option: { result: Result 'a 'e } -> Option 'a = { result } ->
-    match result is
-        Ok { val } -> Some { val = val }
-        Err { error } -> None
+
+pub let to_option: { result: Result 'a 'e } -> Option 'a = { result } -> match result is
+  Ok { val } -> Some { val = val }
+  Err { error } -> None
 
 # Convert Option to Result with a provided error
+
 pub let from_option: { opt: Option 'a, error: 'e } -> Result 'a 'e = { opt, error } ->
-    match opt is
-        Some { val } -> Ok { val = val }
-        None -> Err { error = error }
+  match opt is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = error }
 
 # Combine two Results with a function
+
 pub let map2: { result_a: Result 'a 'e, result_b: Result 'b 'e, f: { a: 'a, b: 'b } -> 'c <...> } -> Result 'c 'e <...> = { result_a, result_b, f } ->
-    match result_a is
-        Ok { val = a } -> match result_b is
-            Ok { val = b } -> Ok { val = f { a = a, b = b } }
-            Err { error } -> Err { error = error }
-        Err { error } -> Err { error = error }
+  match result_a is
+    Ok { val = a } -> match result_b is
+      Ok { val = b } -> Ok { val = f { a = a, b = b } }
+      Err { error } -> Err { error = error }
+    Err { error } -> Err { error = error }
 
 # Execute an action if Result is Ok
-pub let if_ok: { result: Result 'a 'e, action: {val: 'a} -> {} <...> } -> {} <...> = { result, action } ->
-    match result is
-        Ok { val } -> action { val }
-        Err { error } -> {}
+
+pub let if_ok: { result: Result 'a 'e, action: { val: 'a } -> {} <...> } -> {} <...> = { result, action } ->
+  match result is
+    Ok { val } -> action { val }
+    Err { error } -> {}
 
 # Execute an action if Result is Err
-pub let if_err: { result: Result 'a 'e, action: {error: 'e} -> {} <...> } -> {} <...> = { result, action } ->
-    match result is
-        Ok { val } -> {}
-        Err { error } -> action { error }
+
+pub let if_err: { result: Result 'a 'e, action: { error: 'e } -> {} <...> } -> {} <...> = { result, action } ->
+  match result is
+    Ok { val } -> {}
+    Err { error } -> action { error }
 
 # Execute different actions based on Result state
-pub let fold: { result: Result 'a 'e, on_err: {error: 'e} -> 'b <...>, on_ok: {val: 'a} -> 'b <...> } -> 'b <...> = { result, on_err, on_ok } ->
-    match result is
-        Ok { val } -> on_ok { val }
-        Err { error } -> on_err { error }
+
+pub let fold: { result: Result 'a 'e, on_err: { error: 'e } -> 'b <...>, on_ok: { val: 'a } -> 'b <...> } -> 'b <...> = { result, on_err, on_ok } ->
+  match result is
+    Ok { val } -> on_ok { val }
+    Err { error } -> on_err { error }
 
 # =============================================================================
 # Additional Utilities
 # =============================================================================
-
 # Flatten nested Result: Result (Result a e) e -> Result a e
 # Example: flatten {result = Ok {val = Ok {val = 42}}} -> Ok {val = 42}
 # Example: flatten {result = Ok {val = Err {error = "inner"}}} -> Err {error = "inner"}
+
 pub let flatten: { result: Result (Result 'a 'e) 'e } -> Result 'a 'e = { result } ->
-    match result is
-        Ok { val } -> val
-        Err { error } -> Err { error = error }
+  match result is
+    Ok { val } -> val
+    Err { error } -> Err { error = error }
 
 # Convert Result to a list (empty list for Err, singleton for Ok)
 # Example: to_list {result = Ok {val = 42}} -> [42]
 # Example: to_list {result = Err {error = "oops"}} -> []
-pub let to_list: { result: Result 'a 'e } -> ['a] = { result } ->
-    match result is
-        Ok { val } -> [val]
-        Err { error } -> []
+
+pub let to_list: { result: Result 'a 'e } -> ['a] = { result } -> match result is
+  Ok { val } -> [val]
+  Err { error } -> []
 
 # Combine two Results into a Result of a record
 # Returns the first Err encountered
 # Example: zip {a = Ok {val = 1}, b = Ok {val = "x"}} -> Ok {val = {fst = 1, snd = "x"}}
-pub let zip: { a: Result 'a 'e, b: Result 'b 'e } -> Result {fst: 'a, snd: 'b} 'e = { a, b } ->
-    match a is
-        Ok { val = av } -> match b is
-            Ok { val = bv } -> Ok { val = { fst = av, snd = bv } }
-            Err { error } -> Err { error = error }
-        Err { error } -> Err { error = error }
+
+pub let zip: { a: Result 'a 'e, b: Result 'b 'e } -> Result { fst: 'a, snd: 'b } 'e = { a, b } ->
+  match a is
+    Ok { val = av } -> match b is
+      Ok { val = bv } -> Ok { val = { fst = av, snd = bv } }
+      Err { error } -> Err { error = error }
+    Err { error } -> Err { error = error }
+
 
 impl Result 'a 'e where {
-    map = {it, f} -> map {result = it, f = f},
-    map_err = {it, f} -> map_err {result = it, f = f},
-    flat_map = {it, f} -> flat_map {result = it, f = f},
-    get_or_else = {it, def} -> get_or_else {result = it, def = def},
-    is_ok = {it} -> is_ok {result = it},
-    is_err = {it} -> is_err {result = it},
-    or_else = {it, f} -> or_else {result = it, f = f},
-    to_option = {it} -> to_option {result = it},
-    fold = {it, on_err, on_ok} -> fold {result = it, on_err = on_err, on_ok = on_ok},
-    flatten = {it} -> flatten {result = it},
-    to_list = {it} -> to_list {result = it}
+  map = { it, f } -> map { result = it, f = f },
+  map_err = { it, f } -> map_err { result = it, f = f },
+  flat_map = { it, f } -> flat_map { result = it, f = f },
+  get_or_else = { it, def } -> get_or_else { result = it, def = def },
+  is_ok = { it } -> is_ok { result = it },
+  is_err = { it } -> is_err { result = it },
+  or_else = { it, f } -> or_else { result = it, f = f },
+  to_option = { it } -> to_option { result = it },
+  fold = { it, on_err, on_ok } -> fold { result = it, on_err = on_err, on_ok = on_ok },
+  flatten = { it } -> flatten { result = it },
+  to_list = { it } -> to_list { result = it },
 }

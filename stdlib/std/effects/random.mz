@@ -1,120 +1,127 @@
 # std/effects/random.mezze - Random number generation as an effect
-
 use std::math::core
 use std::math::trig
 use std::collections::seq
 use std::int
 use std::float
-
 # Random effect definition
-effect Random where {
-    random_float: {} -> Float <Random>,
-    random_int: { min: Int, max: Int } -> Int <Random>,
-    random_nat: { max: Nat } -> Nat <Random>,
-    seed: { new_seed: Int } -> {} <Random>
-}
+# Random effect definition
+# Random effect definition
+# Random effect definition
 
+effect Random where {
+  random_float: {} -> Float <Random>,
+  random_int: { min: Int, max: Int } -> Int <Random>,
+  random_nat: { max: Nat } -> Nat <Random>,
+  seed: { new_seed: Int } -> {} <Random>
+}
 # Seeded random implementation with deterministic behavior
 # Uses scoped effects to reset the random state at the start of each perform block,
 # ensuring that the same seed always produces the same sequence.
-impl Random for SeededRandom { seed: Int } where {
-    initialize_scope = {} -> do
-        # Reset the seeded random to ensure deterministic behavior
-        # Each perform block with the same seed will produce identical sequences
-        __native_reset_seeded_random { seed = seed }
-        {},
-    finalize_scope = {} -> {},
-    random_float = { } -> __native_seeded_random_float { seed = seed },
-    random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
-    random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
-    seed = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed }
-}
 
+impl Random for SeededRandom { seed: Int } where {
+  initialize_scope = {} -> do
+    __native_reset_seeded_random { seed = seed }
+    {},
+  finalize_scope = {} -> {},
+  random_float = {} -> __native_seeded_random_float { seed = seed },
+  random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
+  random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
+  seed = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed },
+}
+# Reset the seeded random to ensure deterministic behavior
+# Each perform block with the same seed will produce identical sequences
 # Convenience functions that use the Random effect
+
 pub let random_float: {} -> Float <Random> = {} -> Random.random_float {}
 
 pub let random_int: { min: Int, max: Int } -> Int <Random> = { min, max } -> Random.random_int { min = min, max = max }
 
 pub let random_nat: { max: Nat } -> Nat <Random> = { max } -> Random.random_nat { max = max }
 
-pub let random_boolean: { probability: Float } -> Bool <Random> = { probability } -> do
+pub let random_boolean: { probability: Float } -> Bool <Random> = { probability } ->
+  do
     let rand = Random.random_float {}
     rand < probability
 
-pub let random_range: { min: Float, max: Float } -> Float <Random> = { min, max } -> do
+pub let random_range: { min: Float, max: Float } -> Float <Random> = { min, max } ->
+  do
     let rand = Random.random_float {}
     min + (rand * (max - min))
 
 pub let seed_random: { seed: Int } -> {} <Random> = { seed } -> Random.seed { new_seed = seed }
-
 # Distribution functions using the Random effect
-pub let uniform: { min: Float, max: Float } -> Float <Random> = { min, max } -> random_range { min = min, max = max }
 
+pub let uniform: { min: Float, max: Float } -> Float <Random> = { min, max } -> random_range { min = min, max = max }
 # Normal distribution using Box-Muller transform
-pub let normal: { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } -> do
-    let u1 = Random.random_float { }
-    let u2 = Random.random_float { }
+
+pub let normal: { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } ->
+  do
+    let u1 = Random.random_float {}
+    let u2 = Random.random_float {}
     let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
-
 # Exponential distribution
-pub let exponential: { rate: Float } -> Float <Random> = { rate } -> do
-    let u = Random.random_float { }
-    (-1.0 / rate) * core::ln { n = u }
 
+pub let exponential: { rate: Float } -> Float <Random> = { rate } -> do
+  let u = Random.random_float {}
+  (-1.0 / rate) * core::ln { n = u }
 # Bernoulli distribution (returns 0 or 1)
+
 pub let bernoulli: { p: Float } -> Int <Random> = { p } -> do
-    let r = Random.random_float {}
-    match r < p is
-        True -> 1
-        False -> 0
+  let r = Random.random_float {}
+  match r < p is
+    True -> 1
+    False -> 0
 
 # Generate random element from list (returns None for empty list)
+
 pub let random_element: { xs: ['a] } -> Option 'a <Random> = { xs } -> do
-    let len = seq::length { xs = xs }
-    match len > 0 is
-        True -> do
-            let idx = Random.random_int { min = 0, max = len - 1 }
-            seq::get { xs = xs, i = idx }
-        False -> None
+  let len = seq::length { xs = xs }
+  match len > 0 is
+    True -> do
+      let idx = Random.random_int { min = 0, max = len - 1 }
+      seq::get { xs = xs, i = idx }
+    False -> None
 
 # =============================================================================
 # Pure Mathematical Functions (no effect required)
 # =============================================================================
-
 # Box-Muller transform for normal distribution
 # Takes two uniform random values and returns a normal distributed value
-pub let box_muller: { u1: Float, u2: Float, mean: Float, std_dev: Float } -> Float = { u1, u2, mean, std_dev } -> do
+
+pub let box_muller: { u1: Float, u2: Float, mean: Float, std_dev: Float } -> Float = { u1, u2, mean, std_dev } ->
+  do
     let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
-
 # Inverse transform for exponential distribution
+
 pub let exponential_inverse: { u: Float, rate: Float } -> Float = { u, rate } ->
-    (-1.0 / rate) * core::ln { n = u }
-
+  (-1.0 / rate) * core::ln { n = u }
 # Linear interpolation for uniform distribution
-pub let uniform_transform: { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
-    min + (u * (max - min))
 
+pub let uniform_transform: { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
+  min + (u * (max - min))
 # Probability density function for normal distribution
-pub let normal_pdf: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } -> do
+
+pub let normal_pdf: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
+  do
     let variance = std_dev * std_dev
     let coefficient = 1.0 / core::sqrt { n = 2.0 * trig::pi * variance }
     let exponent = -((x - mean) * (x - mean)) / (2.0 * variance)
     coefficient * core::exp { n = exponent }
-
 # Cumulative distribution function approximation for normal distribution
-pub let normal_cdf_approx: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } -> do
+
+pub let normal_cdf_approx: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
+  do
     let z = (x - mean) / std_dev
     0.5 * (1.0 + trig::tanh { n = z * core::sqrt { n = 2.0 / trig::pi } })
-
 # Probability density function for exponential distribution
-pub let exponential_pdf: { x: Float, rate: Float } -> Float = { x, rate } ->
-    if x < 0.0 then 0.0 else rate * core::exp { n = -rate * x }
 
+pub let exponential_pdf: { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = -rate * x }
 # Cumulative distribution function for exponential distribution
-pub let exponential_cdf: { x: Float, rate: Float } -> Float = { x, rate } ->
-    if x < 0.0 then 0.0 else 1.0 - core::exp { n = -rate * x }
+
+pub let exponential_cdf: { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = -rate * x }
 
 # =============================================================================
 # Usage examples

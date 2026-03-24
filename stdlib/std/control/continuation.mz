@@ -14,17 +14,16 @@
 #   let cont = continuation::new {}
 #   let k = cont.capture {}
 #   let result = cont.resume { cont = k, value = 42 }
+use std::abilities::compare::{ Eq }
 
-use std::abilities::compare::{Eq}
-
-# Opaque delimiter handle - wraps native implementation
 pub newtype Delim = Delim __NativeDelim
+# Opaque delimiter handle - wraps native implementation
+# Opaque delimiter handle - wraps native implementation
 
 impl Eq for Delim where {
-    eq = {it, r} -> __native_ref_eq {l = it, r = r},
-    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-
 # Continuation record type with bound methods.
 # Type parameters:
 #   'suspend - type of values passed to suspend_with (yielded/suspended value)
@@ -33,115 +32,118 @@ impl Eq for Delim where {
 #
 # Note: These are ONE-SHOT continuations. Each captured continuation can only
 # be resumed once. Attempting to resume twice will result in undefined behavior.
-pub type Continuation 'suspend 'resume 'result = {
-    capture: {} -> ({ value: 'resume } -> 'result),
-    suspend: {} -> 'resume,
-    suspend_with: { value: 'suspend } -> 'result,
-    suspend_and_resume: { value: 'suspend } -> {},
-    resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
-    abort: {} -> 'result,
-    extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result }),
-    get_collected: {} -> ['suspend],
-    take_collected: {} -> ['suspend],
-    collected_count: {} -> Nat,
-    reset: {} -> {}
-}
 
+pub type Continuation 'suspend 'resume 'result = {
+  capture: {} -> { value: 'resume } -> 'result,
+  suspend: {} -> 'resume,
+  suspend_with: { value: 'suspend } -> 'result,
+  suspend_and_resume: { value: 'suspend } -> {},
+  resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
+  abort: {} -> 'result,
+  extract_suspended: { suspended: 'result } -> Option { value: 'suspend, cont: { value: 'resume } -> 'result },
+  get_collected: {} -> ['suspend],
+  take_collected: {} -> ['suspend],
+  collected_count: {} -> Nat,
+  reset: {} -> {},
+}
 # Create a new Continuation record with bound methods.
 # Returns a Continuation record with all methods bound to the same delimiter.
 # IMPORTANT: Call cont.reset {} when done to clean up the delimiter stack.
 #
 # These are ONE-SHOT continuations - each captured continuation can only be
 # resumed once.
+
 pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
-    let delim_handle = __native_continuation_delimit {}
-    let _ = __native_continuation_activate { delim = delim_handle }
-    {
-        capture = {} -> __native_continuation_capture { delim = delim_handle },
-        suspend = {} -> __native_continuation_suspend_with { delim = delim_handle, value = {} },
-        suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
-        suspend_and_resume = { value } -> __native_continuation_suspend_and_resume { delim = delim_handle, value = value },
-        resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
-        abort = {} -> __native_continuation_abort { delim = delim_handle },
-        extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended },
-        get_collected = {} -> __native_continuation_get_collected { delim = delim_handle },
-        take_collected = {} -> __native_continuation_take_collected { delim = delim_handle },
-        collected_count = {} -> __native_continuation_collected_count { delim = delim_handle },
-        reset = {} -> __native_continuation_deactivate { delim = delim_handle }
-    }
-
+  let delim_handle = __native_continuation_delimit {}
+  let _ = __native_continuation_activate { delim = delim_handle }
+  {
+    capture = {} -> __native_continuation_capture { delim = delim_handle },
+    suspend = {} -> __native_continuation_suspend_with { delim = delim_handle, value = {} },
+    suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
+    suspend_and_resume = { value } -> __native_continuation_suspend_and_resume { delim = delim_handle, value = value },
+    resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
+    abort = {} -> __native_continuation_abort { delim = delim_handle },
+    extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended },
+    get_collected = {} -> __native_continuation_get_collected { delim = delim_handle },
+    take_collected = {} -> __native_continuation_take_collected { delim = delim_handle },
+    collected_count = {} -> __native_continuation_collected_count { delim = delim_handle },
+    reset = {} -> __native_continuation_deactivate { delim = delim_handle },
+  }
 # Standalone functions using Delim handle directly
-
 # Create a new delimiter for continuation capture/resume operations.
-pub let delimit: {} -> Delim = {} -> do
-    let handle = __native_continuation_delimit {}
-    Delim { val = handle }
 
+pub let delimit: {} -> Delim = {} -> do
+  let handle = __native_continuation_delimit {}
+  Delim { val = handle }
 # Capture the current continuation up to the delimiter.
-pub let capture: { delim: Delim } -> ({ value: 'a } -> 'b) = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_capture { delim = handle }
+
+pub let capture: { delim: Delim } -> { value: 'a } -> 'b = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_capture { delim = handle }
 
 # Suspend execution, returning control to the delimiter.
 # Note: Requires an active delimiter on the stack.
-pub let suspend: { delim: Delim } -> 'a = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = {} }
+
+pub let suspend: { delim: Delim } -> 'a = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = {} }
 
 # Suspend execution with a value.
-pub let suspend_with: { delim: Delim, value: 'a } -> 'b = { delim, value } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = value }
+
+pub let suspend_with: { delim: Delim, value: 'a } -> 'b = { delim, value } -> match delim is
+  Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = value }
 
 # Resume a captured continuation with a value.
 # NOTE: One-shot only - each continuation can only be resumed once.
+
 pub let resume: { delim: Delim, cont: { value: 'a } -> 'b, value: 'a } -> 'b = { delim, cont, value } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_resume { delim = handle, cont = cont, value = value }
+  match delim is
+    Delim { val = handle } -> __native_continuation_resume { delim = handle, cont = cont, value = value }
 
 # Abort the current continuation, discarding it entirely.
-pub let abort: { delim: Delim } -> 'a = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_abort { delim = handle }
+
+pub let abort: { delim: Delim } -> 'a = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_abort { delim = handle }
 
 # Deactivate a delimiter, popping it from the stack.
 # Call this when done using a delimiter to prevent stack leaks.
-pub let reset: { delim: Delim } -> {} = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_deactivate { delim = handle }
+
+pub let reset: { delim: Delim } -> {} = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_deactivate { delim = handle }
 
 # Suspend with a value and immediately resume (for Generator yield).
 # The value is collected internally and execution continues without escaping.
 # Use take_collected to retrieve all collected values.
+
 pub let suspend_and_resume: { delim: Delim, value: 'a } -> {} = { delim, value } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_suspend_and_resume { delim = handle, value = value }
+  match delim is
+    Delim { val = handle } -> __native_continuation_suspend_and_resume { delim = handle, value = value }
 
 # Get all collected values without clearing the collector.
-pub let get_collected: { delim: Delim } -> ['a] = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_get_collected { delim = handle }
+
+pub let get_collected: { delim: Delim } -> ['a] = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_get_collected { delim = handle }
 
 # Get all collected values and clear the collector.
-pub let take_collected: { delim: Delim } -> ['a] = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_take_collected { delim = handle }
+
+pub let take_collected: { delim: Delim } -> ['a] = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_take_collected { delim = handle }
 
 # Get the count of collected values.
-pub let collected_count: { delim: Delim } -> Nat = { delim } ->
-    match delim is
-        Delim { val = handle } -> __native_continuation_collected_count { delim = handle }
+
+pub let collected_count: { delim: Delim } -> Nat = { delim } -> match delim is
+  Delim { val = handle } -> __native_continuation_collected_count { delim = handle }
 
 # =============================================================================
 # Suspendable execution
 # =============================================================================
-
 # Result type for run_suspendable
 # - Completed {value}: The thunk ran to completion and returned value
 # - Suspended {value, cont}: The thunk suspended via suspend_with with value,
 #   and cont is the continuation to resume
-pub type SuspendResult 'a 'v 'r = | Completed {value: 'a}, Suspended {value: 'v, cont: {value: 'r} -> 'a} |
 
+pub type SuspendResult 'a 'v 'r = |
+  Completed { value: 'a },
+  Suspended { value: 'v, cont: { value: 'r } -> 'a },
+|
 # Run a thunk and catch any suspension.
 #
 # This is THE KEY PRIMITIVE for generators and coroutines. It runs a thunk
@@ -160,9 +162,9 @@ pub type SuspendResult 'a 'v 'r = | Completed {value: 'a}, Suspended {value: 'v,
 #           # Process yielded value
 #           # Resume with: cont {value = resume_value}
 #           ...
-pub let run_suspendable: {thunk: {} -> 'a} -> SuspendResult 'a 'v 'r =
-    {thunk} -> __native_continuation_run_suspendable {thunk = thunk}
 
+pub let run_suspendable: { thunk: {} -> 'a } -> SuspendResult 'a 'v 'r = { thunk } ->
+  __native_continuation_run_suspendable { thunk = thunk }
 # =============================================================================
 # Serialization / Snapshot primitives
 # =============================================================================
@@ -170,7 +172,6 @@ pub let run_suspendable: {thunk: {} -> 'a} -> SuspendResult 'a 'v 'r =
 # These primitives enable continuation serialization for workflow persistence.
 # A workflow can be checkpointed to storage and later restored to continue
 # execution from where it left off.
-
 # Serialize a continuation to bytes.
 #
 # The continuation must be a state machine with serializable captured values.
@@ -181,9 +182,8 @@ pub let run_suspendable: {thunk: {} -> 'a} -> SuspendResult 'a 'v 'r =
 # Example:
 #   let data = snapshot {cont = my_suspended_continuation}
 #   # Store data to file/database
-pub let snapshot: {cont: {value: 'a} -> 'b} -> Bytes =
-    {cont} -> __native_continuation_snapshot {cont = cont}
 
+pub let snapshot: { cont: { value: 'a } -> 'b } -> Bytes = { cont } -> __native_continuation_snapshot { cont = cont }
 # Restore a continuation from serialized bytes.
 #
 # The function that created the continuation must still be available
@@ -194,9 +194,9 @@ pub let snapshot: {cont: {value: 'a} -> 'b} -> Bytes =
 #   let cont = restore {data = data, functions = {}}
 #   # Resume the workflow
 #   cont {value = resume_value}
-pub let restore: {data: Bytes, functions: {}} -> ({value: 'a} -> 'b) =
-    {data, functions} -> __native_continuation_restore {data = data, functions = functions}
 
+pub let restore: { data: Bytes, functions: {} } -> { value: 'a } -> 'b = { data, functions } ->
+  __native_continuation_restore { data = data, functions = functions }
 # Check if a continuation can be serialized.
 #
 # Returns true if all captured values are serializable types.
@@ -207,5 +207,5 @@ pub let restore: {data: Bytes, functions: {}} -> ({value: 'a} -> 'b) =
 #       snapshot {cont = my_continuation}
 #   else
 #       # Handle non-serializable case
-pub let is_serializable: {cont: {value: 'a} -> 'b} -> Bool =
-    {cont} -> __native_continuation_is_serializable {cont = cont}
+
+pub let is_serializable: { cont: { value: 'a } -> 'b } -> Bool = { cont } -> __native_continuation_is_serializable { cont = cont }

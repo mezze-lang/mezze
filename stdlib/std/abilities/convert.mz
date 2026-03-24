@@ -17,21 +17,18 @@
 #               None -> Err {error = ConversionError {msg = "invalid integer"}}
 #   }
 #   let n = "42".try_into {}
-
 # =============================================================================
 # INFALLIBLE CONVERSION
 # =============================================================================
-
 # Convert self ('a) into target type 'b
 ability Into 'b for 'a where {
-    into: {it: 'a} -> 'b
+  into: { it: 'a } -> 'b
 }
-
 # =============================================================================
 # FALLIBLE CONVERSION
 # =============================================================================
-
 # Convert self ('a) into target type 'b, possibly failing with error 'err
+
 ability TryInto 'b 'err for 'a where {
-    try_into: {it: 'a} -> Result 'b 'err
+  try_into: { it: 'a } -> Result 'b 'err
 }

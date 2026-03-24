@@ -7,7 +7,6 @@
 #   let x: Int = Default.default {}      # → 0
 #   let s: Str = Default.default {}      # → ""
 #   let xs: [Int] = Default.default {}   # → []
-
 ability Default for 'a where {
-    default: {} -> 'a
+  default: {} -> 'a
 }

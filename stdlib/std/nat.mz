@@ -1,84 +1,113 @@
-use std::abilities::numeric::{NumAdd, NumMul, NumDiv, NumMod, NumZero, NumOne}
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::convert::{Into, TryInto}
-use std::abilities::default::{Default}
+use std::abilities::numeric::{ NumAdd, NumMul, NumDiv, NumMod, NumZero, NumOne }
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::convert::{ Into, TryInto }
+use std::abilities::default::{ Default }
 use std::int
 
-impl NumAdd for Nat where { add = {it, r} -> __native_nat_add {l = it, r = r} }
-impl NumMul for Nat where { mul = {it, r} -> __native_nat_multiply {l = it, r = r} }
-impl NumDiv for Nat where { div = {it, r} -> __native_nat_divide {l = it, r = r} }
-impl NumMod for Nat where { mod = {it, r} -> __native_nat_modulo {l = it, r = r} }
-impl Eq for Nat where { eq = {it, r} -> __native_nat_eq {l = it, r = r}, neq = {it, r} -> __native_nat_neq {l = it, r = r} }
-impl Ord for Nat where { lt = {it, r} -> __native_nat_lt {l = it, r = r}, le = {it, r} -> __native_nat_le {l = it, r = r}, gt = {it, r} -> __native_nat_gt {l = it, r = r}, ge = {it, r} -> __native_nat_ge {l = it, r = r} }
-impl Into Int for Nat where { into = {it} -> __native_nat_to_int {n = it} }
-impl Into Str for Nat where { into = {it} -> __native_nat_to_str {n = it} }
-impl Into Float for Nat where { into = {it} -> __native_float_from_nat {n = it} }
-impl TryInto Nat |ConversionError {msg: Str}| for Str where {
-    try_into = {it} -> match __native_nat_from_string {s = it} is
-        Some {val} -> Ok {val = val}
-        None -> Err {error = ConversionError {msg = "invalid nat"}}
+impl NumAdd for Nat where {
+  add = { it, r } -> __native_nat_add { l = it, r = r }
 }
-impl NumZero for Nat where { zero = {} -> 0n, is_zero = {it} -> it == 0n }
-impl NumOne for Nat where { one = {} -> 1n }
-impl Default for Nat where { default = {} -> 0n }
 
+impl NumMul for Nat where {
+  mul = { it, r } -> __native_nat_multiply { l = it, r = r }
+}
+
+impl NumDiv for Nat where {
+  div = { it, r } -> __native_nat_divide { l = it, r = r }
+}
+
+impl NumMod for Nat where {
+  mod = { it, r } -> __native_nat_modulo { l = it, r = r }
+}
+
+impl Eq for Nat where {
+  eq = { it, r } -> __native_nat_eq { l = it, r = r },
+  neq = { it, r } -> __native_nat_neq { l = it, r = r },
+}
+
+impl Ord for Nat where {
+  lt = { it, r } -> __native_nat_lt { l = it, r = r },
+  le = { it, r } -> __native_nat_le { l = it, r = r },
+  gt = { it, r } -> __native_nat_gt { l = it, r = r },
+  ge = { it, r } -> __native_nat_ge { l = it, r = r },
+}
+
+impl Into Int for Nat where {
+  into = { it } -> __native_nat_to_int { n = it }
+}
+
+impl Into Str for Nat where {
+  into = { it } -> __native_nat_to_str { n = it }
+}
+
+impl Into Float for Nat where {
+  into = { it } -> __native_float_from_nat { n = it }
+}
+
+impl TryInto Nat | ConversionError { msg: Str } | for Str where {
+  try_into = { it } -> match __native_nat_from_string { s = it } is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = ConversionError { msg = "invalid nat" } }
+
+}
+
+impl NumZero for Nat where {
+  zero = {} -> 0n,
+  is_zero = { it } -> it == 0n,
+}
+
+impl NumOne for Nat where {
+  one = {} -> 1n
+}
+
+impl Default for Nat where {
+  default = {} -> 0n
+}
 # Natural number utility functions
 # This module provides utility functions for working with natural numbers
 # Note: The Nat type and basic operations are now built-in
-
 # Special subtraction that returns Int (since Nat - Nat can be negative)
-pub let subtract_to_int = { l: Nat, r: Nat } ->
-    __native_nat_subtract_to_int { l = l, r = r }
 
+pub let subtract_to_int = { l: Nat, r: Nat } -> __native_nat_subtract_to_int { l = l, r = r }
 # Type conversions
-pub let from_int = { n: Int } ->
-    __native_nat_from_int { n = n }
 
-pub let from_float = { n: Float } ->
-    __native_nat_from_float { n = n }
+pub let from_int = { n: Int } -> __native_nat_from_int { n = n }
 
-pub let from_string = { s: Str } ->
-    __native_nat_from_string { s = s }
+pub let from_float = { n: Float } -> __native_nat_from_float { n = n }
 
+pub let from_string = { s: Str } -> __native_nat_from_string { s = s }
 # Utility functions
-pub let min = { l: Nat, r: Nat } ->
-    __native_nat_min { l = l, r = r }
 
-pub let max = { l: Nat, r: Nat } ->
-    __native_nat_max { l = l, r = r }
+pub let min = { l: Nat, r: Nat } -> __native_nat_min { l = l, r = r }
 
-pub let is_zero = { n: Nat } ->
-    n == 0n
+pub let max = { l: Nat, r: Nat } -> __native_nat_max { l = l, r = r }
 
-pub let is_even = { n: Nat } ->
-    (n % 2n) == 0n
+pub let is_zero = { n: Nat } -> n == 0n
 
-pub let is_odd = { n: Nat } ->
-    if is_even { n = n } then False else True
+pub let is_even = { n: Nat } -> (n % 2n) == 0n
 
+pub let is_odd = { n: Nat } -> if is_even { n = n } then False else True
 # Convert Nat to Int (always succeeds since all naturals are valid integers)
 # Example: to_int {n = 5n} -> 5
-pub let to_int = { n: Nat } ->
-    __native_nat_to_int { n = n }
 
+pub let to_int = { n: Nat } -> __native_nat_to_int { n = n }
 # Convert Nat to String
 # Example: to_str {n = 42n} -> "42"
-pub let to_str = { n: Nat } ->
-    __native_nat_to_str { n = n }
 
+pub let to_str = { n: Nat } -> __native_nat_to_str { n = n }
 # Clamp value to range [min, max]
 # Example: clamp {n = 15n, min = 0n, max = 10n} -> 10n
-pub let clamp = { n: Nat, min: Nat, max: Nat } ->
-    __native_nat_clamp { n = n, min = min, max = max }
+
+pub let clamp = { n: Nat, min: Nat, max: Nat } -> __native_nat_clamp { n = n, min = min, max = max }
 
 impl Nat where {
-    to_int = {it} -> __native_nat_to_int {n = it},
-    to_str = {it} -> __native_nat_to_str {n = it},
-    clamp = {it, min, max} -> __native_nat_clamp {n = it, min = min, max = max},
-    min = {it, r} -> __native_nat_min {l = it, r = r},
-    max = {it, r} -> __native_nat_max {l = it, r = r},
-    is_zero = {it} -> it == 0n,
-    is_even = {it} -> __native_nat_to_int {n = it} % 2 == 0,
-    is_odd = {it} -> __native_nat_to_int {n = it} % 2 != 0,
-    subtract_to_int = {it, r} -> __native_nat_subtract_to_int {l = it, r = r}
+  to_int = { it } -> __native_nat_to_int { n = it },
+  to_str = { it } -> __native_nat_to_str { n = it },
+  clamp = { it, min, max } -> __native_nat_clamp { n = it, min = min, max = max },
+  min = { it, r } -> __native_nat_min { l = it, r = r },
+  max = { it, r } -> __native_nat_max { l = it, r = r },
+  is_zero = { it } -> it == 0n,
+  is_even = { it } -> __native_nat_to_int { n = it } % 2 == 0,
+  is_odd = { it } -> __native_nat_to_int { n = it } % 2 != 0,
+  subtract_to_int = { it, r } -> __native_nat_subtract_to_int { l = it, r = r },
 }

@@ -1,21 +1,22 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for Bytes where { default = {} -> empty {} }
+impl Default for Bytes where {
+  default = {} -> empty {}
+}
 
 impl Eq for Bytes where {
-    eq: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_equals {b1 = it, b2 = r},
-    neq: {it: Bytes, r: Bytes} -> Bool = {it, r} -> if __native_bytes_equals {b1 = it, b2 = r} then False else True
+  eq = { it, r } -> __native_bytes_equals { b1 = it, b2 = r },
+  neq = { it, r } -> if __native_bytes_equals { b1 = it, b2 = r } then False else True,
 }
 
 impl Ord for Bytes where {
-    lt: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_compare {b1 = it, b2 = r} == (0 - 1),
-    le: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_compare {b1 = it, b2 = r} != 1,
-    gt: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_compare {b1 = it, b2 = r} == 1,
-    ge: {it: Bytes, r: Bytes} -> Bool = {it, r} -> __native_bytes_compare {b1 = it, b2 = r} != (0 - 1)
+  lt = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } == (0 - 1),
+  le = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } != 1,
+  gt = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } == 1,
+  ge = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } != (0 - 1),
 }
-
 # std/collections/bytes.mezze - Binary data operations
 #
 # Bytes is a built-in type for efficient binary data handling.
@@ -26,136 +27,104 @@ impl Ord for Bytes where {
 # - Network protocols
 # - Cryptographic operations
 # - Binary serialization/deserialization
-
 # === Construction ===
-
 # Create an empty byte sequence
-pub let empty = {} ->
-    __native_bytes_empty {}
 
+pub let empty = {} -> __native_bytes_empty {}
 # Create bytes from a UTF-8 string
-pub let from_string = { s } ->
-    __native_bytes_from_string { s = s }
 
+pub let from_string = { s } -> __native_bytes_from_string { s = s }
 # Create bytes from a seq of integers (0-255)
-pub let from_seq = { arr } ->
-    __native_bytes_from_seq { arr = arr }
 
+pub let from_seq = { arr } -> __native_bytes_from_seq { arr = arr }
 # Create bytes from a hex string (e.g., "48656c6c6f"), returns Option
-pub let from_hex = { s } ->
-    __native_bytes_from_hex { s = s }
 
+pub let from_hex = { s } -> __native_bytes_from_hex { s = s }
 # Create bytes from a base64-encoded string, returns Option
-pub let from_base64 = { s } ->
-    __native_bytes_from_base64 { s = s }
 
+pub let from_base64 = { s } -> __native_bytes_from_base64 { s = s }
 # === Basic Operations ===
-
 # Get the length of the byte sequence
-pub let length = { b } ->
-    __native_bytes_length { b = b }
 
+pub let length = { b } -> __native_bytes_length { b = b }
 # Check if the byte sequence is empty
-pub let is_empty = { b } ->
-    __native_bytes_is_empty { b = b }
 
+pub let is_empty = { b } -> __native_bytes_is_empty { b = b }
 # Get the byte at an index as an unsigned int (0-255), returns Option
-pub let get = { b, i } ->
-    __native_bytes_get { b = b, i = i }
 
+pub let get = { b, i } -> __native_bytes_get { b = b, i = i }
 # === Slicing ===
-
 # Get a slice from start (inclusive) to end (exclusive)
-pub let slice = { b, start, end } ->
-    __native_bytes_slice { b = b, start = start, end = end }
 
+pub let slice = { b, start, end } -> __native_bytes_slice { b = b, start = start, end = end }
 # Take the first n bytes
-pub let take = { b, n } ->
-    __native_bytes_take { b = b, n = n }
 
+pub let take = { b, n } -> __native_bytes_take { b = b, n = n }
 # Drop the first n bytes
-pub let drop = { b, n } ->
-    __native_bytes_drop { b = b, n = n }
 
+pub let drop = { b, n } -> __native_bytes_drop { b = b, n = n }
 # === Combining ===
-
 # Concatenate two byte sequences
-pub let concat = { b1, b2 } ->
-    __native_bytes_concat { b1 = b1, b2 = b2 }
 
+pub let concat = { b1, b2 } -> __native_bytes_concat { b1 = b1, b2 = b2 }
 # Concatenate multiple byte sequences efficiently (single allocation)
-pub let concat_all = { bs } ->
-    __native_bytes_concat_all { bs = bs }
 
+pub let concat_all = { bs } -> __native_bytes_concat_all { bs = bs }
 # Repeat bytes n times
-pub let repeat = { b, n } ->
-    __native_bytes_repeat { b = b, n = n }
 
+pub let repeat = { b, n } -> __native_bytes_repeat { b = b, n = n }
 # === Searching ===
-
 # Find the index of a pattern, returns Option Int
-pub let index_of = { b, pattern } ->
-    __native_bytes_index_of { b = b, pattern = pattern }
 
+pub let index_of = { b, pattern } -> __native_bytes_index_of { b = b, pattern = pattern }
 # Check if bytes contains a pattern
-pub let contains = { b, pattern } ->
-    __native_bytes_contains { b = b, pattern = pattern }
 
+pub let contains = { b, pattern } -> __native_bytes_contains { b = b, pattern = pattern }
 # Check if bytes starts with a prefix
-pub let starts_with = { b, prefix } ->
-    __native_bytes_starts_with { b = b, prefix = prefix }
 
+pub let starts_with = { b, prefix } -> __native_bytes_starts_with { b = b, prefix = prefix }
 # Check if bytes ends with a suffix
-pub let ends_with = { b, suffix } ->
-    __native_bytes_ends_with { b = b, suffix = suffix }
 
+pub let ends_with = { b, suffix } -> __native_bytes_ends_with { b = b, suffix = suffix }
 # === Transformations ===
-
 # Reverse the byte order
-pub let reverse = { b } ->
-    __native_bytes_reverse { b = b }
 
+pub let reverse = { b } -> __native_bytes_reverse { b = b }
 # Map a function over each byte (function receives/returns 0-255 int)
-pub let map = { b, f } ->
-    __native_bytes_map { b = b, f = f }
 
+pub let map = { b, f } -> __native_bytes_map { b = b, f = f }
 # Fold over bytes from left to right
 # f receives { acc: 'a, byte: Int } and returns 'a
-pub let fold = { b, init, f } ->
-    __native_bytes_fold { b = b, init = init, f = f }
 
+pub let fold = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
 # === Conversions ===
-
 # Convert to a UTF-8 string, returns Result Str String
-pub let to_str = { b } ->
-    __native_bytes_to_str { b = b }
 
+pub let to_str = { b } -> __native_bytes_to_str { b = b }
 # Convert to a seq of integers (0-255)
-pub let to_seq = { b } ->
-    __native_bytes_to_seq { b = b }
 
+pub let to_seq = { b } -> __native_bytes_to_seq { b = b }
 # Convert to a hexadecimal string (lowercase)
-pub let to_hex = { b } ->
-    __native_bytes_to_hex { b = b }
 
+pub let to_hex = { b } -> __native_bytes_to_hex { b = b }
 # Convert to a base64-encoded string
-pub let to_base64 = { b } ->
-    __native_bytes_to_base64 { b = b }
+
+pub let to_base64 = { b } -> __native_bytes_to_base64 { b = b }
 
 impl Bytes where {
-    length = {it} -> length {b = it},
-    is_empty = {it} -> is_empty {b = it},
-    get = {it, i} -> get {b = it, i = i},
-    slice = {it, start, end} -> slice {b = it, start = start, end = end},
-    take = {it, n} -> take {b = it, n = n},
-    drop = {it, n} -> drop {b = it, n = n},
-    concat = {it, b2} -> concat {b1 = it, b2 = b2},
-    contains = {it, pattern} -> contains {b = it, pattern = pattern},
-    reverse = {it} -> reverse {b = it},
-    map = {it, f} -> map {b = it, f = f},
-    fold = {it, init, f} -> fold {b = it, init = init, f = f},
-    to_str = {it} -> to_str {b = it},
-    to_seq = {it} -> to_seq {b = it},
-    to_hex = {it} -> to_hex {b = it},
-    to_base64 = {it} -> to_base64 {b = it}
+  length = { it } -> length { b = it },
+  is_empty = { it } -> is_empty { b = it },
+  get = { it, i } -> get { b = it, i = i },
+  slice = { it, start, end } -> slice { b = it, start = start, end = end },
+  take = { it, n } -> take { b = it, n = n },
+  drop = { it, n } -> drop { b = it, n = n },
+  concat = { it, b2 } -> concat { b1 = it, b2 = b2 },
+  contains = { it, pattern } -> contains { b = it, pattern = pattern },
+  reverse = { it } -> reverse { b = it },
+  map = { it, f } -> map { b = it, f = f },
+  fold = { it, init, f } -> fold { b = it, init = init, f = f },
+  to_str = { it } -> to_str { b = it },
+  to_seq = { it } -> to_seq { b = it },
+  to_hex = { it } -> to_hex { b = it },
+  to_base64 = { it } -> to_base64 { b = it },
 }

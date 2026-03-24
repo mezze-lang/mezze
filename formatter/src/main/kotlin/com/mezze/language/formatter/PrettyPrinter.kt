@@ -420,8 +420,11 @@ class PrettyPrinter {
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-                // Trailing comma like records: always between items, plus trailing if multiple
+                // Trailing comma like records: always between items, plus trailing if multiple.
+                // Trim trailing newlines first — multi-line expressions (match, do) may add
+                // their own newlines, and the comma must stay on the last line of the expression.
                 if (decl.operations.size > 1 || index < decl.operations.size - 1) {
+                    trimTrailingNewlines()
                     append(",")
                 }
                 newLine()
@@ -454,6 +457,11 @@ class PrettyPrinter {
                 append("::")
             }
             append(decl.abilityName!!)
+            // Print ability type args (e.g., Str in `impl Into Str for Int`)
+            for (typeArg in decl.abilityTypeArgs) {
+                append(" ")
+                printTypeAnnotation(typeArg)
+            }
             append(" for ")
             decl.targetTypes.forEachIndexed { index, type ->
                 if (index > 0) append(" ")
@@ -480,8 +488,11 @@ class PrettyPrinter {
                 append(op.name)
                 append(" = ")
                 printExpression(op.implementation)
-                // Trailing comma like records: always between items, plus trailing if multiple
+                // Trailing comma like records: always between items, plus trailing if multiple.
+                // Trim trailing newlines first — multi-line expressions (match, do) may add
+                // their own newlines, and the comma must stay on the last line of the expression.
                 if (decl.operations.size > 1 || index < decl.operations.size - 1) {
+                    trimTrailingNewlines()
                     append(",")
                 }
                 newLine()
@@ -1126,6 +1137,9 @@ class PrettyPrinter {
                 }
                 append(" -> ")
                 printExpression(case.expression)
+                // Trim trailing newlines from multi-line case bodies (nested match, do)
+                // before adding the arm separator newline, to avoid blank lines between arms.
+                trimTrailingNewlines()
                 newLine()
             }
         }
@@ -1336,45 +1350,22 @@ class PrettyPrinter {
             return
         }
 
-        val estimatedWidth = calculateRecordTypeWidth(type)
-        val singleLine = estimatedWidth <= config.RECORD_SINGLE_LINE_THRESHOLD
-
-        if (singleLine) {
-            append("{ ")
-            type.entries.forEachIndexed { index, entry ->
-                if (index > 0) append(", ")
-                append(entry.name)
-                append(": ")
-                printTypeAnnotation(entry.type)
-            }
-            if (type.isOpen) {
-                if (type.entries.isNotEmpty()) append(", ")
-                append("...")
-            }
-            append(" }")
-        } else {
-            append("{")
-            newLine()
-            indent {
-                type.entries.forEachIndexed { index, entry ->
-                    printIndent()
-                    append(entry.name)
-                    append(": ")
-                    printTypeAnnotation(entry.type)
-                    if (config.TRAILING_COMMA_IN_MULTILINE || index < type.entries.size - 1 || type.isOpen) {
-                        append(",")
-                    }
-                    newLine()
-                }
-                if (type.isOpen) {
-                    printIndent()
-                    append("...")
-                    newLine()
-                }
-            }
-            printIndent()
-            append("}")
+        // Type annotations must always be single-line because the parser uses
+        // indentation-based parsing and produces INDENT tokens on newlines,
+        // which break record type parsing (e.g., `indent: Int` on a new line
+        // gets tokenized as INDENT token instead of an identifier).
+        append("{ ")
+        type.entries.forEachIndexed { index, entry ->
+            if (index > 0) append(", ")
+            append(entry.name)
+            append(": ")
+            printTypeAnnotation(entry.type)
         }
+        if (type.isOpen) {
+            if (type.entries.isNotEmpty()) append(", ")
+            append("...")
+        }
+        append(" }")
     }
 
     private fun calculateRecordTypeWidth(type: RecordTypeAnnotation): Int {
@@ -1400,6 +1391,21 @@ class PrettyPrinter {
 
     private fun printFunctionTypeAnnotation(type: FunctionTypeAnnotation) {
         printTypeAnnotation(type.paramType)
+        // Print ability constraints (e.g., `with Ord 'a`)
+        if (type.abilityConstraints.isNotEmpty()) {
+            append(" with ")
+            type.abilityConstraints.forEachIndexed { index, constraint ->
+                if (index > 0) append(", ")
+                append(constraint.abilityName)
+                if (constraint.typeArgs.isNotEmpty()) {
+                    append(" ")
+                    constraint.typeArgs.forEachIndexed { i, arg ->
+                        if (i > 0) append(" ")
+                        printTypeAnnotation(arg)
+                    }
+                }
+            }
+        }
         append(" -> ")
         printTypeAnnotation(type.returnType)
         type.effects?.let {
@@ -1495,6 +1501,17 @@ class PrettyPrinter {
         output.append("\n")
         currentLine++
         currentColumn = 0
+    }
+
+    /** Remove trailing newlines and whitespace from the output buffer. */
+    private fun trimTrailingNewlines() {
+        while (output.isNotEmpty() && output.last() in listOf('\n', ' ', '\t')) {
+            if (output.last() == '\n') currentLine--
+            output.deleteCharAt(output.length - 1)
+        }
+        // Recalculate column from last newline
+        val lastNewline = output.lastIndexOf('\n')
+        currentColumn = if (lastNewline >= 0) output.length - lastNewline - 1 else output.length
     }
 
     private fun printIndent() {

@@ -14,228 +14,187 @@
 #   let buf = buffer::new {capacity = 1024}
 #   let result = stream::stream_int {value = 42, buffer = buf, path = codec::empty_path}
 #   # result is Ok containing buffer with "42"
-
-use std::codec::core::{StreamFormat, StreamDecodeFormat, EncodeError, DecodeError, CodecConfig}
+use std::codec::core::{ StreamFormat, StreamDecodeFormat, EncodeError, DecodeError, CodecConfig }
 use std::collections::list
 use std::collections::buffer
 use std::collections::bytes
 use std::option
 use std::result
-
+# ============================================================================
+# ============================================================================
+# ============================================================================
 # ============================================================================
 # JSON STREAM FORMAT TYPE
+# JSON STREAM FORMAT TYPE
+# JSON STREAM FORMAT TYPE
+# JSON STREAM FORMAT TYPE
 # ============================================================================
-
+# ============================================================================
+# ============================================================================
+# ============================================================================
 # Marker type for JSON streaming format
-pub type JsonStream = {}
+# Marker type for JSON streaming format
+# Marker type for JSON streaming format
+# Marker type for JSON streaming format
 
+pub type JsonStream = {}
 # ============================================================================
 # STREAM ENCODE FORMAT IMPLEMENTATION
 # ============================================================================
 
 impl StreamFormat for JsonStream where {
-    stream_int = {value, buffer, path} -> do
-        let s = __native_int_to_str {n = value}
-        let buf2 = buffer::write_string {buf = buffer, s = s}
-        Ok {val = buf2},
+  stream_int = { value, buffer, path } -> do
+    let s = __native_int_to_str { n = value }
+    let buf2 = buffer::write_string { buf = buffer, s = s }
+    Ok { val = buf2 },
+  stream_float = { value, buffer, path } -> do
+    let s = __native_float_to_str { n = value }
+    let buf2 = buffer::write_string { buf = buffer, s = s }
+    Ok { val = buf2 },
+  stream_string = { value, buffer, path } -> do
+    let escaped = escape_json_string { s = value }
+    let buf1 = buffer::write_string { buf = buffer, s = "\"" }
+    let buf2 = buffer::write_string { buf = buf1, s = escaped }
+    let buf3 = buffer::write_string { buf = buf2, s = "\"" }
+    Ok { val = buf3 },
+  stream_bool = { value, buffer, path } -> do
+    let s = match value is
+      True -> "true"
+      False -> "false"
 
-    stream_float = {value, buffer, path} -> do
-        let s = __native_float_to_str {n = value}
-        let buf2 = buffer::write_string {buf = buffer, s = s}
-        Ok {val = buf2},
+    let buf2 = buffer::write_string { buf = buffer, s = s }
+    Ok { val = buf2 },
+  stream_frac = { value, buffer, path } -> do
+    let s = __native_frac_to_str { n = value }
+    let buf2 = buffer::write_string { buf = buffer, s = s }
+    Ok { val = buf2 },
+  stream_bytes = { value, buffer, path } -> do
+    let b64 = bytes::to_base64 { b = value }
+    let buf1 = buffer::write_string { buf = buffer, s = "\"" }
+    let buf2 = buffer::write_string { buf = buf1, s = b64 }
+    let buf3 = buffer::write_string { buf = buf2, s = "\"" }
+    Ok { val = buf3 },
+  stream_record_start = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "{" }
+    Ok { val = buf2 },
+  stream_record_field = { key, value, is_first, buffer, path } -> do
+    let buf1 = match is_first is
+      True -> buffer
+      False -> buffer::write_string { buf = buffer, s = "," }
 
-    stream_string = {value, buffer, path} -> do
-        let escaped = escape_json_string {s = value}
-        let buf1 = buffer::write_string {buf = buffer, s = "\""}
-        let buf2 = buffer::write_string {buf = buf1, s = escaped}
-        let buf3 = buffer::write_string {buf = buf2, s = "\""}
-        Ok {val = buf3},
+    let buf2 = buffer::write_string { buf = buf1, s = "\"" }
+    let buf3 = buffer::write_string { buf = buf2, s = key }
+    let buf4 = buffer::write_string { buf = buf3, s = "\":" }
+    let value_bytes = buffer::to_bytes { buf = value }
+    let buf5 = buffer::write { buf = buf4, bytes = value_bytes }
+    Ok { val = buf5 },
+  stream_record_end = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "}" }
+    Ok { val = buf2 },
+  stream_variant = { tag, payload, buffer, path } -> do
+    let buf1 = buffer::write_string { buf = buffer, s = "{\"tag\":\"" }
+    let buf2 = buffer::write_string { buf = buf1, s = tag }
+    let buf3 = buffer::write_string { buf = buf2, s = "\"" }
+    let buf4 = match payload is
+      Some { val = payload_buf } -> do
+        let b1 = buffer::write_string { buf = buf3, s = ",\"value\":" }
+        let payload_bytes = buffer::to_bytes { buf = payload_buf }
+        buffer::write { buf = b1, bytes = payload_bytes }
+      None -> buf3
 
-    stream_bool = {value, buffer, path} -> do
-        let s = match value is
-            True -> "true"
-            False -> "false"
-        let buf2 = buffer::write_string {buf = buffer, s = s}
-        Ok {val = buf2},
+    let buf5 = buffer::write_string { buf = buf4, s = "}" }
+    Ok { val = buf5 },
+  stream_list_start = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "[" }
+    Ok { val = buf2 },
+  stream_list_element = { value, is_first, buffer, path } -> do
+    let buf1 = match is_first is
+      True -> buffer
+      False -> buffer::write_string { buf = buffer, s = "," }
 
-    stream_frac = {value, buffer, path} -> do
-        let s = __native_frac_to_str {n = value}
-        let buf2 = buffer::write_string {buf = buffer, s = s}
-        Ok {val = buf2},
+    let value_bytes = buffer::to_bytes { buf = value }
+    let buf2 = buffer::write { buf = buf1, bytes = value_bytes }
+    Ok { val = buf2 },
+  stream_list_end = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "]" }
+    Ok { val = buf2 },
+  stream_set_start = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "[" }
+    Ok { val = buf2 },
+  stream_set_element = { value, is_first, buffer, path } -> do
+    let buf1 = match is_first is
+      True -> buffer
+      False -> buffer::write_string { buf = buffer, s = "," }
 
-    stream_bytes = {value, buffer, path} -> do
-        let b64 = bytes::to_base64 {b = value}
-        let buf1 = buffer::write_string {buf = buffer, s = "\""}
-        let buf2 = buffer::write_string {buf = buf1, s = b64}
-        let buf3 = buffer::write_string {buf = buf2, s = "\""}
-        Ok {val = buf3},
+    let value_bytes = buffer::to_bytes { buf = value }
+    let buf2 = buffer::write { buf = buf1, bytes = value_bytes }
+    Ok { val = buf2 },
+  stream_set_end = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "]" }
+    Ok { val = buf2 },
+  stream_map_start = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "{" }
+    Ok { val = buf2 },
+  stream_map_entry = { key, value, is_first, buffer, path } -> do
+    let buf1 = match is_first is
+      True -> buffer
+      False -> buffer::write_string { buf = buffer, s = "," }
 
-    stream_record_start = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "{"}
-        Ok {val = buf2},
-
-    stream_record_field = {key, value, is_first, buffer, path} -> do
-        let buf1 = match is_first is
-            True -> buffer
-            False -> buffer::write_string {buf = buffer, s = ","}
-        let buf2 = buffer::write_string {buf = buf1, s = "\""}
-        let buf3 = buffer::write_string {buf = buf2, s = key}
-        let buf4 = buffer::write_string {buf = buf3, s = "\":"}
-        let value_bytes = buffer::to_bytes {buf = value}
-        let buf5 = buffer::write {buf = buf4, bytes = value_bytes}
-        Ok {val = buf5},
-
-    stream_record_end = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "}"}
-        Ok {val = buf2},
-
-    stream_variant = {tag, payload, buffer, path} -> do
-        let buf1 = buffer::write_string {buf = buffer, s = "{\"tag\":\""}
-        let buf2 = buffer::write_string {buf = buf1, s = tag}
-        let buf3 = buffer::write_string {buf = buf2, s = "\""}
-        let buf4 = match payload is
-            Some {val = payload_buf} -> do
-                let b1 = buffer::write_string {buf = buf3, s = ",\"value\":"}
-                let payload_bytes = buffer::to_bytes {buf = payload_buf}
-                buffer::write {buf = b1, bytes = payload_bytes}
-            None -> buf3
-        let buf5 = buffer::write_string {buf = buf4, s = "}"}
-        Ok {val = buf5},
-
-    stream_list_start = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "["}
-        Ok {val = buf2},
-
-    stream_list_element = {value, is_first, buffer, path} -> do
-        let buf1 = match is_first is
-            True -> buffer
-            False -> buffer::write_string {buf = buffer, s = ","}
-        let value_bytes = buffer::to_bytes {buf = value}
-        let buf2 = buffer::write {buf = buf1, bytes = value_bytes}
-        Ok {val = buf2},
-
-    stream_list_end = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "]"}
-        Ok {val = buf2},
-
-    stream_set_start = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "["}
-        Ok {val = buf2},
-
-    stream_set_element = {value, is_first, buffer, path} -> do
-        let buf1 = match is_first is
-            True -> buffer
-            False -> buffer::write_string {buf = buffer, s = ","}
-        let value_bytes = buffer::to_bytes {buf = value}
-        let buf2 = buffer::write {buf = buf1, bytes = value_bytes}
-        Ok {val = buf2},
-
-    stream_set_end = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "]"}
-        Ok {val = buf2},
-
-    stream_map_start = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "{"}
-        Ok {val = buf2},
-
-    stream_map_entry = {key, value, is_first, buffer, path} -> do
-        let buf1 = match is_first is
-            True -> buffer
-            False -> buffer::write_string {buf = buffer, s = ","}
-        let key_bytes = buffer::to_bytes {buf = key}
-        let buf2 = buffer::write {buf = buf1, bytes = key_bytes}
-        let buf3 = buffer::write_string {buf = buf2, s = ":"}
-        let value_bytes = buffer::to_bytes {buf = value}
-        let buf4 = buffer::write {buf = buf3, bytes = value_bytes}
-        Ok {val = buf4},
-
-    stream_map_end = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "}"}
-        Ok {val = buf2},
-
-    stream_none = {buffer, path} -> do
-        let buf2 = buffer::write_string {buf = buffer, s = "null"}
-        Ok {val = buf2},
-
-    stream_some = {value, buffer, path} -> do
-        let value_bytes = buffer::to_bytes {buf = value}
-        let buf2 = buffer::write {buf = buffer, bytes = value_bytes}
-        Ok {val = buf2}
+    let key_bytes = buffer::to_bytes { buf = key }
+    let buf2 = buffer::write { buf = buf1, bytes = key_bytes }
+    let buf3 = buffer::write_string { buf = buf2, s = ":" }
+    let value_bytes = buffer::to_bytes { buf = value }
+    let buf4 = buffer::write { buf = buf3, bytes = value_bytes }
+    Ok { val = buf4 },
+  stream_map_end = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "}" }
+    Ok { val = buf2 },
+  stream_none = { buffer, path } -> do
+    let buf2 = buffer::write_string { buf = buffer, s = "null" }
+    Ok { val = buf2 },
+  stream_some = { value, buffer, path } -> do
+    let value_bytes = buffer::to_bytes { buf = value }
+    let buf2 = buffer::write { buf = buffer, bytes = value_bytes }
+    Ok { val = buf2 },
 }
-
 # ============================================================================
 # STREAM DECODE FORMAT IMPLEMENTATION
 # ============================================================================
 
 impl StreamDecodeFormat for JsonStream where {
-    stream_decode_int = {bytes, offset, path} ->
-        __native_json_stream_decode_int {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_float = {bytes, offset, path} ->
-        __native_json_stream_decode_float {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_string = {bytes, offset, path} ->
-        __native_json_stream_decode_string {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_bool = {bytes, offset, path} ->
-        __native_json_stream_decode_bool {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_frac = {bytes, offset, path} ->
-        __native_json_stream_decode_frac {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_bytes = {bytes, offset, path} ->
-        __native_json_stream_decode_bytes {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_record_start = {bytes, offset, path} ->
-        __native_json_stream_decode_record_start {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_record_field = {bytes, offset, key, path} ->
-        __native_json_stream_decode_record_field {bytes = bytes, offset = offset, key = key, path = path},
-
-    stream_decode_variant = {bytes, offset, path} ->
-        __native_json_stream_decode_variant {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_list_start = {bytes, offset, path} ->
-        __native_json_stream_decode_list_start {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_list_next = {bytes, offset, path} ->
-        __native_json_stream_decode_list_next {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_set_start = {bytes, offset, path} ->
-        __native_json_stream_decode_list_start {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_set_next = {bytes, offset, path} ->
-        __native_json_stream_decode_list_next {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_map_start = {bytes, offset, path} ->
-        __native_json_stream_decode_map_start {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_map_next = {bytes, offset, path} ->
-        __native_json_stream_decode_map_next {bytes = bytes, offset = offset, path = path},
-
-    stream_decode_option = {bytes, offset, path} ->
-        __native_json_stream_decode_option {bytes = bytes, offset = offset, path = path}
+  stream_decode_int = { bytes, offset, path } -> __native_json_stream_decode_int { bytes = bytes, offset = offset, path = path },
+  stream_decode_float = { bytes, offset, path } -> __native_json_stream_decode_float { bytes = bytes, offset = offset, path = path },
+  stream_decode_string = { bytes, offset, path } -> __native_json_stream_decode_string { bytes = bytes, offset = offset, path = path },
+  stream_decode_bool = { bytes, offset, path } -> __native_json_stream_decode_bool { bytes = bytes, offset = offset, path = path },
+  stream_decode_frac = { bytes, offset, path } -> __native_json_stream_decode_frac { bytes = bytes, offset = offset, path = path },
+  stream_decode_bytes = { bytes, offset, path } -> __native_json_stream_decode_bytes { bytes = bytes, offset = offset, path = path },
+  stream_decode_record_start = { bytes, offset, path } -> __native_json_stream_decode_record_start { bytes = bytes, offset = offset, path = path },
+  stream_decode_record_field = { bytes, offset, key, path } -> __native_json_stream_decode_record_field { bytes = bytes, offset = offset, key = key, path = path },
+  stream_decode_variant = { bytes, offset, path } -> __native_json_stream_decode_variant { bytes = bytes, offset = offset, path = path },
+  stream_decode_list_start = { bytes, offset, path } -> __native_json_stream_decode_list_start { bytes = bytes, offset = offset, path = path },
+  stream_decode_list_next = { bytes, offset, path } -> __native_json_stream_decode_list_next { bytes = bytes, offset = offset, path = path },
+  stream_decode_set_start = { bytes, offset, path } -> __native_json_stream_decode_list_start { bytes = bytes, offset = offset, path = path },
+  stream_decode_set_next = { bytes, offset, path } -> __native_json_stream_decode_list_next { bytes = bytes, offset = offset, path = path },
+  stream_decode_map_start = { bytes, offset, path } -> __native_json_stream_decode_map_start { bytes = bytes, offset = offset, path = path },
+  stream_decode_map_next = { bytes, offset, path } -> __native_json_stream_decode_map_next { bytes = bytes, offset = offset, path = path },
+  stream_decode_option = { bytes, offset, path } -> __native_json_stream_decode_option { bytes = bytes, offset = offset, path = path },
 }
-
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
 # Escape special characters in a JSON string
-let escape_json_string = {s} ->
-    __native_json_escape_string {s = s}
 
+let escape_json_string = { s } -> __native_json_escape_string { s = s }
 # ============================================================================
 # CONVENIENCE FUNCTIONS
 # ============================================================================
-
 # Create a new buffer for streaming encoding
-pub let new_buffer = {capacity} ->
-    buffer::new {capacity = capacity}
 
+pub let new_buffer = { capacity } -> buffer::new { capacity = capacity }
 # Convert buffer to string (for debugging/testing)
-pub let buffer_to_str = {buf} -> do
-    let b = buffer::to_bytes {buf = buf}
-    match bytes::to_str {b = b} is
-        Ok {val} -> val
-        Err {error} -> ""
+
+pub let buffer_to_str = { buf } -> do
+  let b = buffer::to_bytes { buf = buf }
+  match bytes::to_str { b = b } is
+    Ok { val } -> val
+    Err { error } -> ""

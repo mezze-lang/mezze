@@ -8,38 +8,37 @@
 #   x / y  ->  x.div {r = y}
 #   x % y  ->  x.mod {r = y}
 #   -x     ->  x.neg {}
-
 ability NumAdd for 'a where {
-    add: {it: 'a, r: 'a} -> 'a
+  add: { it: 'a, r: 'a } -> 'a
 }
 
 ability NumSub for 'a where {
-    sub: {it: 'a, r: 'a} -> 'a,
-    neg: {it: 'a} -> 'a
+  sub: { it: 'a, r: 'a } -> 'a,
+  neg: { it: 'a } -> 'a
 }
 
 ability NumMul for 'a where {
-    mul: {it: 'a, r: 'a} -> 'a
+  mul: { it: 'a, r: 'a } -> 'a
 }
 
 ability NumDiv for 'a where {
-    div: {it: 'a, r: 'a} -> 'a
+  div: { it: 'a, r: 'a } -> 'a
 }
 
 ability NumMod for 'a where {
-    mod: {it: 'a, r: 'a} -> 'a
+  mod: { it: 'a, r: 'a } -> 'a
 }
-
 # Additive identity — zero value and zero check
 # zero: no `it` (construction), is_zero: has `it` (method on value)
 # Usage: NumZero.zero {}  or  x.is_zero {}
-ability NumZero for 'a where {
-    zero: {} -> 'a,
-    is_zero: {it: 'a} -> Bool
-}
 
+ability NumZero for 'a where {
+  zero: {} -> 'a,
+  is_zero: { it: 'a } -> Bool
+}
 # Multiplicative identity
 # Usage: NumOne.one {}
+
 ability NumOne for 'a where {
-    one: {} -> 'a
+  one: {} -> 'a
 }

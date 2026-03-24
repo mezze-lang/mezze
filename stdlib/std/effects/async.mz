@@ -17,124 +17,115 @@
 #       let p = Async.spawn {f = {} -> expensive_computation {}}
 #       let result = Async.await {p = p}
 #       result
-
 use std::collections::seq
-use std::effects::concurrent::cancellation::{CancellationToken}
-use std::abilities::compare::{Eq}
+use std::effects::concurrent::cancellation::{ CancellationToken }
+use std::abilities::compare::{ Eq }
 
-# Promise type - opaque wrapper around native promise/future
 pub newtype Promise 'a = Promise __NativePromise
 
+pub newtype Scope 'a = Scope __NativeScope
+# Promise type - opaque wrapper around native promise/future
+# Promise type - opaque wrapper around native promise/future
+# Scope type - opaque wrapper for structured concurrency scopes
+# Scope type - opaque wrapper for structured concurrency scopes
+# Scope type - opaque wrapper for structured concurrency scopes
 # Scope type - opaque wrapper for structured concurrency scopes
 # Used with `scoped` to ensure all spawned children complete before parent
-pub newtype Scope 'a = Scope __NativeScope
-
+# Used with `scoped` to ensure all spawned children complete before parent
+# Used with `scoped` to ensure all spawned children complete before parent
+# Used with `scoped` to ensure all spawned children complete before parent
 # Eq for Promise — reference identity (same promise object)
+# Eq for Promise — reference identity (same promise object)
+# Eq for Promise — reference identity (same promise object)
+# Eq for Promise — reference identity (same promise object)
+
 impl Eq 'a for Promise 'a where {
-    eq = {it, r} -> __native_ref_eq {l = it, r = r},
-    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-
 # Eq for Scope — reference identity
+
 impl Eq 'a for Scope 'a where {
-    eq = {it, r} -> __native_ref_eq {l = it, r = r},
-    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-
 # Inherent impls for Promise — method syntax for common operations
-impl Promise 'a where {
-    await: {it: Promise 'a} -> 'a <Async> = {it} -> Async.await {p = it},
-    is_done: {it: Promise 'a} -> Bool <Async> = {it} -> Async.is_done {p = it},
-    cancel: {it: Promise 'a} -> {} <Async> = {it} -> Async.cancel {p = it}
-}
 
+impl Promise 'a where {
+  await = { it } -> Async.await { p = it },
+  is_done = { it } -> Async.is_done { p = it },
+  cancel = { it } -> Async.cancel { p = it },
+}
 # Error type for async operations
 # - AsyncFailed: Task failed with an exception
 # - AsyncCancelled: Task was cancelled
 # - AsyncTimedOut: Task timed out after ms milliseconds
-pub type AsyncError = | AsyncFailed { msg: Str }, AsyncCancelled, AsyncTimedOut { ms: Int } |
 
+pub type AsyncError = |
+  AsyncFailed { msg: Str },
+  AsyncCancelled,
+  AsyncTimedOut { ms: Int },
+|
 # Async effect - unified async operations
 # Note: Callback parameters use <...> for effect polymorphism - they accept any effects
+
 effect Async where {
-    # Spawn a computation, returns immediately with Promise
-    # The computation can have any effects (<...>)
-    spawn: {f: {} -> 'a <...>} -> Promise 'a <Async>,
-
-    # Await Promise to complete, returns result
-    await: {p: Promise 'a} -> 'a <Async>,
-
-    # Wait for first Promise to complete (others continue running)
-    race: {ps: [Promise 'a]} -> 'a <Async>,
-
-    # Wait for all Promises to complete
-    all: {ps: [Promise 'a]} -> ['a] <Async>,
-
-    # Wait with timeout, returns None if timeout expires
-    timeout: {ms: Int, p: Promise 'a} -> Option 'a <Async>,
-
-    # Cancel a Promise (request cancellation, may not be immediate)
-    cancel: {p: Promise 'a} -> {} <Async>,
-
-    # Sleep for specified milliseconds
-    sleep: {ms: Int} -> {} <Async>,
-
-    # Check if Promise is complete (non-blocking)
-    is_done: {p: Promise 'a} -> Bool <Async>,
-
-    # Check if current computation was cancelled
-    is_cancelled: {} -> Bool <Async>,
-
-    # Cancellation checkpoint - throws if cancelled
-    check: {} -> {} <Async>,
-
-    # === Structured Concurrency ===
-
-    # Run two computations concurrently, return both results
-    # If either fails, the other is cancelled
-    join: {l: {} -> 'a <...>, r: {} -> 'b <...>} -> {l: 'a, r: 'b} <Async>,
-
-    # Run three computations concurrently
-    join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c} <Async>,
-
-    # === Collection Operations ===
-
-    # Apply function to each element concurrently, results in input order
-    map: {xs: ['a], f: {x: 'a} -> 'b <...>} -> ['b] <Async>,
-
-    # Run function on each element concurrently for side effects
-    for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {} <Async>,
-
-    # Filter elements with predicate evaluated concurrently
-    filter: {xs: ['a], f: {x: 'a} -> Bool <...>} -> ['a] <Async>,
-
-    # === Error Handling ===
-
-    # Return first successful result, fail only if ALL fail
-    any: {ps: [Promise 'a]} -> 'a <Async>,
-
-    # Wait for all promises, return list of Results
-    # Never throws - each result is either Ok or Err
-    settle: {ps: [Promise 'a]} -> [Result 'a AsyncError] <Async>,
-
-    # === Structured Concurrency Scopes ===
-
-    # Run a function with a structured concurrency scope.
-    # All tasks spawned via Scope.spawn must complete before scoped returns.
-    # If the function fails, all children are cancelled.
-    # If any child fails, siblings are cancelled (fail-fast behavior).
-    # The callback can have any effects (<...>)
-    #
-    # Example:
-    #   Async.scoped {f = {sc} -> do
-    #       let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
-    #       let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
-    #       # Both p1 and p2 are awaited automatically before scoped returns
-    #       process {p1 = p1, p2 = p2}
-    #   }
-    scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a <Async>
+  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>,
+  await: { p: Promise 'a } -> 'a <Async>,
+  race: { ps: [Promise 'a] } -> 'a <Async>,
+  all: { ps: [Promise 'a] } -> ['a] <Async>,
+  timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async>,
+  cancel: { p: Promise 'a } -> {} <Async>,
+  sleep: { ms: Int } -> {} <Async>,
+  is_done: { p: Promise 'a } -> Bool <Async>,
+  is_cancelled: {} -> Bool <Async>,
+  check: {} -> {} <Async>,
+  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async>,
+  join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async>,
+  map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async>,
+  for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async>,
+  filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async>,
+  any: { ps: [Promise 'a] } -> 'a <Async>,
+  settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async>,
+  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async>
 }
-
+# Spawn a computation, returns immediately with Promise
+# The computation can have any effects (<...>)
+# Await Promise to complete, returns result
+# Wait for first Promise to complete (others continue running)
+# Wait for all Promises to complete
+# Wait with timeout, returns None if timeout expires
+# Cancel a Promise (request cancellation, may not be immediate)
+# Sleep for specified milliseconds
+# Check if Promise is complete (non-blocking)
+# Check if current computation was cancelled
+# Cancellation checkpoint - throws if cancelled
+# === Structured Concurrency ===
+# Run two computations concurrently, return both results
+# If either fails, the other is cancelled
+# Run three computations concurrently
+# === Collection Operations ===
+# Apply function to each element concurrently, results in input order
+# Run function on each element concurrently for side effects
+# Filter elements with predicate evaluated concurrently
+# === Error Handling ===
+# Return first successful result, fail only if ALL fail
+# Wait for all promises, return list of Results
+# Never throws - each result is either Ok or Err
+# === Structured Concurrency Scopes ===
+# Run a function with a structured concurrency scope.
+# All tasks spawned via Scope.spawn must complete before scoped returns.
+# If the function fails, all children are cancelled.
+# If any child fails, siblings are cancelled (fail-fast behavior).
+# The callback can have any effects (<...>)
+#
+# Example:
+#   Async.scoped {f = {sc} -> do
+#       let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
+#       let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
+#       # Both p1 and p2 are awaited automatically before scoped returns
+#       process {p1 = p1, p2 = p2}
+#   }
 # =============================================================================
 # LoomAsync Implementation - Virtual Threads (Default)
 # =============================================================================
@@ -150,35 +141,33 @@ effect Async where {
 #       let p2 = Async.spawn {f = {} -> fetch_url {url = "http://b.com"}}
 #       let results = Async.all {ps = [p1, p2]}
 #       results
-
 # Default handler - unbounded virtual threads
 # Uses scoped effects to track all spawned promises and ensure cleanup
+
 impl Async for LoomAsync where {
-    # Create a tracker for all spawned promises in this handler scope
-    initialize_scope = {} -> __native_loom_init_scope {},
-    # Await any unawaited promises (structured concurrency at handler level)
-    finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
-
-    spawn = {f} -> __native_loom_spawn_tracked {f = f, max_concurrent = 0, tracker = scope},
-    await = {p} -> __native_loom_await {p = p},
-    race = {ps} -> __native_loom_race {ps = ps},
-    all = {ps} -> __native_loom_all {ps = ps},
-    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
-    cancel = {p} -> __native_loom_cancel {p = p},
-    sleep = {ms} -> __native_loom_sleep {ms = ms},
-    is_done = {p} -> __native_loom_is_done {p = p},
-    is_cancelled = {} -> __native_loom_is_cancelled {},
-    check = {} -> __native_loom_check {},
-    join = {l, r} -> __native_loom_join {l = l, r = r},
-    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
-    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
-    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
-    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
-    any = {ps} -> __native_loom_any {ps = ps},
-    settle = {ps} -> __native_loom_settle {ps = ps},
-    scoped = {f} -> __native_loom_scoped {f = f}
+  initialize_scope = {} -> __native_loom_init_scope {},
+  finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
+  spawn = { f } -> __native_loom_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
+  await = { p } -> __native_loom_await { p = p },
+  race = { ps } -> __native_loom_race { ps = ps },
+  all = { ps } -> __native_loom_all { ps = ps },
+  timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
+  cancel = { p } -> __native_loom_cancel { p = p },
+  sleep = { ms } -> __native_loom_sleep { ms = ms },
+  is_done = { p } -> __native_loom_is_done { p = p },
+  is_cancelled = {} -> __native_loom_is_cancelled {},
+  check = {} -> __native_loom_check {},
+  join = { l, r } -> __native_loom_join { l = l, r = r },
+  join3 = { a, b, c } -> __native_loom_join3 { a = a, b = b, c = c },
+  map = { xs, f } -> __native_loom_map { xs = xs, f = f },
+  for_each = { xs, f } -> __native_loom_for_each { xs = xs, f = f },
+  filter = { xs, f } -> __native_loom_filter { xs = xs, f = f },
+  any = { ps } -> __native_loom_any { ps = ps },
+  settle = { ps } -> __native_loom_settle { ps = ps },
+  scoped = { f } -> __native_loom_scoped { f = f },
 }
-
+# Create a tracker for all spawned promises in this handler scope
+# Await any unawaited promises (structured concurrency at handler level)
 # Configurable handler - control concurrency limit
 # Parameters:
 #   max_concurrent: Maximum concurrent tasks (0 = unbounded)
@@ -186,30 +175,29 @@ impl Async for LoomAsync where {
 # Example:
 #   perform LoomAsyncWith {max_concurrent = 100} in do
 #       Async.spawn {f = ...}
+
 impl Async for LoomAsyncWith { max_concurrent: Int } where {
-    initialize_scope = {} -> __native_loom_init_scope {},
-    finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
-
-    spawn = {f} -> __native_loom_spawn_tracked {f = f, max_concurrent = max_concurrent, tracker = scope},
-    await = {p} -> __native_loom_await {p = p},
-    race = {ps} -> __native_loom_race {ps = ps},
-    all = {ps} -> __native_loom_all {ps = ps},
-    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
-    cancel = {p} -> __native_loom_cancel {p = p},
-    sleep = {ms} -> __native_loom_sleep {ms = ms},
-    is_done = {p} -> __native_loom_is_done {p = p},
-    is_cancelled = {} -> __native_loom_is_cancelled {},
-    check = {} -> __native_loom_check {},
-    join = {l, r} -> __native_loom_join {l = l, r = r},
-    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
-    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
-    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
-    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
-    any = {ps} -> __native_loom_any {ps = ps},
-    settle = {ps} -> __native_loom_settle {ps = ps},
-    scoped = {f} -> __native_loom_scoped {f = f}
+  initialize_scope = {} -> __native_loom_init_scope {},
+  finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
+  spawn = { f } -> __native_loom_spawn_tracked { f = f, max_concurrent = max_concurrent, tracker = scope },
+  await = { p } -> __native_loom_await { p = p },
+  race = { ps } -> __native_loom_race { ps = ps },
+  all = { ps } -> __native_loom_all { ps = ps },
+  timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
+  cancel = { p } -> __native_loom_cancel { p = p },
+  sleep = { ms } -> __native_loom_sleep { ms = ms },
+  is_done = { p } -> __native_loom_is_done { p = p },
+  is_cancelled = {} -> __native_loom_is_cancelled {},
+  check = {} -> __native_loom_check {},
+  join = { l, r } -> __native_loom_join { l = l, r = r },
+  join3 = { a, b, c } -> __native_loom_join3 { a = a, b = b, c = c },
+  map = { xs, f } -> __native_loom_map { xs = xs, f = f },
+  for_each = { xs, f } -> __native_loom_for_each { xs = xs, f = f },
+  filter = { xs, f } -> __native_loom_filter { xs = xs, f = f },
+  any = { ps } -> __native_loom_any { ps = ps },
+  settle = { ps } -> __native_loom_settle { ps = ps },
+  scoped = { f } -> __native_loom_scoped { f = f },
 }
-
 # =============================================================================
 # OSThreadAsync Implementation - Platform Threads
 # =============================================================================
@@ -224,35 +212,33 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
 #   perform OSThreadAsync in do
 #       let p = Async.spawn {f = {} -> cpu_intensive_work {}}
 #       Async.await {p = p}
-
 # Default handler - unbounded OS threads
 # Uses scoped effects for thread tracking and cleanup
+
 impl Async for OSThreadAsync where {
-    # Create thread tracker for cleanup
-    initialize_scope = {} -> __native_os_init_scope {},
-    # Join all spawned threads, cleanup resources
-    finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
-
-    spawn = {f} -> __native_os_spawn_tracked {f = f, pool_size = 0, tracker = scope},
-    await = {p} -> __native_os_await {p = p},
-    race = {ps} -> __native_os_race {ps = ps},
-    all = {ps} -> __native_os_all {ps = ps},
-    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
-    cancel = {p} -> __native_os_cancel {p = p},
-    sleep = {ms} -> __native_os_sleep {ms = ms},
-    is_done = {p} -> __native_os_is_done {p = p},
-    is_cancelled = {} -> __native_os_is_cancelled {},
-    check = {} -> __native_os_check {},
-    join = {l, r} -> __native_os_join {l = l, r = r},
-    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
-    map = {xs, f} -> __native_os_map {xs = xs, f = f},
-    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
-    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
-    any = {ps} -> __native_os_any {ps = ps},
-    settle = {ps} -> __native_os_settle {ps = ps},
-    scoped = {f} -> __native_os_scoped {f = f}
+  initialize_scope = {} -> __native_os_init_scope {},
+  finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
+  spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = 0, tracker = scope },
+  await = { p } -> __native_os_await { p = p },
+  race = { ps } -> __native_os_race { ps = ps },
+  all = { ps } -> __native_os_all { ps = ps },
+  timeout = { ms, p } -> __native_os_timeout { ms = ms, p = p },
+  cancel = { p } -> __native_os_cancel { p = p },
+  sleep = { ms } -> __native_os_sleep { ms = ms },
+  is_done = { p } -> __native_os_is_done { p = p },
+  is_cancelled = {} -> __native_os_is_cancelled {},
+  check = {} -> __native_os_check {},
+  join = { l, r } -> __native_os_join { l = l, r = r },
+  join3 = { a, b, c } -> __native_os_join3 { a = a, b = b, c = c },
+  map = { xs, f } -> __native_os_map { xs = xs, f = f },
+  for_each = { xs, f } -> __native_os_for_each { xs = xs, f = f },
+  filter = { xs, f } -> __native_os_filter { xs = xs, f = f },
+  any = { ps } -> __native_os_any { ps = ps },
+  settle = { ps } -> __native_os_settle { ps = ps },
+  scoped = { f } -> __native_os_scoped { f = f },
 }
-
+# Create thread tracker for cleanup
+# Join all spawned threads, cleanup resources
 # Configurable handler - control thread pool size
 # Parameters:
 #   pool_size: Maximum concurrent OS threads (0 = unbounded)
@@ -260,30 +246,29 @@ impl Async for OSThreadAsync where {
 # Example:
 #   perform OSThreadAsyncWith {pool_size = 4} in do
 #       Async.spawn {f = ...}
+
 impl Async for OSThreadAsyncWith { pool_size: Int } where {
-    initialize_scope = {} -> __native_os_init_scope {},
-    finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
-
-    spawn = {f} -> __native_os_spawn_tracked {f = f, pool_size = pool_size, tracker = scope},
-    await = {p} -> __native_os_await {p = p},
-    race = {ps} -> __native_os_race {ps = ps},
-    all = {ps} -> __native_os_all {ps = ps},
-    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
-    cancel = {p} -> __native_os_cancel {p = p},
-    sleep = {ms} -> __native_os_sleep {ms = ms},
-    is_done = {p} -> __native_os_is_done {p = p},
-    is_cancelled = {} -> __native_os_is_cancelled {},
-    check = {} -> __native_os_check {},
-    join = {l, r} -> __native_os_join {l = l, r = r},
-    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
-    map = {xs, f} -> __native_os_map {xs = xs, f = f},
-    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
-    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
-    any = {ps} -> __native_os_any {ps = ps},
-    settle = {ps} -> __native_os_settle {ps = ps},
-    scoped = {f} -> __native_os_scoped {f = f}
+  initialize_scope = {} -> __native_os_init_scope {},
+  finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
+  spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = pool_size, tracker = scope },
+  await = { p } -> __native_os_await { p = p },
+  race = { ps } -> __native_os_race { ps = ps },
+  all = { ps } -> __native_os_all { ps = ps },
+  timeout = { ms, p } -> __native_os_timeout { ms = ms, p = p },
+  cancel = { p } -> __native_os_cancel { p = p },
+  sleep = { ms } -> __native_os_sleep { ms = ms },
+  is_done = { p } -> __native_os_is_done { p = p },
+  is_cancelled = {} -> __native_os_is_cancelled {},
+  check = {} -> __native_os_check {},
+  join = { l, r } -> __native_os_join { l = l, r = r },
+  join3 = { a, b, c } -> __native_os_join3 { a = a, b = b, c = c },
+  map = { xs, f } -> __native_os_map { xs = xs, f = f },
+  for_each = { xs, f } -> __native_os_for_each { xs = xs, f = f },
+  filter = { xs, f } -> __native_os_filter { xs = xs, f = f },
+  any = { ps } -> __native_os_any { ps = ps },
+  settle = { ps } -> __native_os_settle { ps = ps },
+  scoped = { f } -> __native_os_scoped { f = f },
 }
-
 # =============================================================================
 # CoopAsync Implementation - Continuation-Based Cooperative Multitasking
 # =============================================================================
@@ -303,135 +288,112 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
 #       Async.await {p = p}
 
 impl Async for CoopAsync where {
-    # Create scheduler for cooperative scheduling
-    initialize_scope = {} -> __native_scheduler_new {},
-
-    # Drain remaining tasks to ensure all spawned tasks complete
-    finalize_scope = {} -> __native_scheduler_drain { sched = scope },
-
-    # Spawn queues task, returns promise (does NOT execute immediately)
-    spawn = {f} -> Promise { val = __native_scheduler_spawn { sched = scope, f = f } },
-
-    # Await runs scheduler until promise completes
-    await = {p} ->
-        match p is
-            Promise { val = native_p } -> __native_scheduler_await { sched = scope, p = native_p },
-
-    race = {ps} -> do
-        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
-        __native_scheduler_race { sched = scope, ps = native_ps }
-    ,
-
-    all = {ps} -> do
-        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
-        __native_scheduler_all { sched = scope, ps = native_ps }
-    ,
-
-    timeout = {ms, p} ->
-        match p is
-            Promise { val = native_p } ->
-                # In coop mode, there's no real time - just await the promise
-                # and always return Some (the task will complete eventually)
-                Some { val = __native_scheduler_await { sched = scope, p = native_p } }
-    ,
-
-    cancel = {p} -> {},  # Cancel is no-op in coop mode
-
-    sleep = {ms} -> __native_scheduler_sleep { sched = scope, ms = ms },
-
-    is_done = {p} ->
-        match p is
-            Promise { val = native_p } -> __native_scheduler_is_done { p = native_p },
-
-    is_cancelled = {} -> False,
-    check = {} -> {},
-
-    # Join runs both functions, awaiting each
-    join = {l, r} -> do
-        let p_l = __native_scheduler_spawn { sched = scope, f = l }
-        let p_r = __native_scheduler_spawn { sched = scope, f = r }
-        let r_l = __native_scheduler_await { sched = scope, p = p_l }
-        let r_r = __native_scheduler_await { sched = scope, p = p_r }
-        { l = r_l, r = r_r }
-    ,
-
-    join3 = {a, b, c} -> do
-        let p_a = __native_scheduler_spawn { sched = scope, f = a }
-        let p_b = __native_scheduler_spawn { sched = scope, f = b }
-        let p_c = __native_scheduler_spawn { sched = scope, f = c }
-        let r_a = __native_scheduler_await { sched = scope, p = p_a }
-        let r_b = __native_scheduler_await { sched = scope, p = p_b }
-        let r_c = __native_scheduler_await { sched = scope, p = p_c }
-        { a = r_a, b = r_b, c = r_c }
-    ,
-
-    # Map spawns all tasks then awaits all
-    map = {xs, f} -> do
-        let promises = seq::map { xs = xs, f = {x} -> __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } } }
-        seq::map { xs = promises, f = {x} -> __native_scheduler_await { sched = scope, p = x } }
-    ,
-
-    for_each = {xs, f} -> do
-        let promises = seq::map { xs = xs, f = {x} -> __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } } }
-        seq::for_each { xs = promises, f = {x} -> __native_scheduler_await { sched = scope, p = x } }
-        {}
-    ,
-
-    filter = {xs, f} -> do
-        # Spawn filter checks for all elements
-        let checks = seq::map { xs = xs, f = {x} -> {
-            elem = x,
-            promise = __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } }
-        } }
-        # Await and filter
-        let filtered = seq::filter { xs = checks, p = {x} ->
-            __native_scheduler_await { sched = scope, p = x.promise }
-        }
-        seq::map { xs = filtered, f = {x} -> x.elem }
-    ,
-
-    any = {ps} -> do
-        let native_ps = seq::map { xs = ps, f = {x} -> match x is Promise { val = p } -> p }
-        __native_scheduler_race { sched = scope, ps = native_ps }
-    ,
-
-    settle = {ps} -> do
-        # Await each promise, catching errors as Err
-        seq::map { xs = ps, f = {x} ->
-            match x is
-                Promise { val = native_p } ->
-                    # TODO: proper try/catch here
-                    Ok { val = __native_scheduler_await { sched = scope, p = native_p } }
-        }
-    ,
-
-    # Scoped just runs the function - structured concurrency is implicit
-    scoped = {f} -> f { sc = Scope { val = {} } }
+  initialize_scope = {} -> __native_scheduler_new {},
+  finalize_scope = {} -> __native_scheduler_drain { sched = scope },
+  spawn = { f } -> Promise { val = __native_scheduler_spawn { sched = scope, f = f } },
+  await = { p } -> match p is
+    Promise { val = native_p } -> __native_scheduler_await { sched = scope, p = native_p },
+  race = { ps } -> do
+    let native_ps = seq::map { xs = ps, f = { x } -> match x is
+      Promise { val = p } -> p
+ }
+    __native_scheduler_race { sched = scope, ps = native_ps },
+  all = { ps } -> do
+    let native_ps = seq::map { xs = ps, f = { x } -> match x is
+      Promise { val = p } -> p
+ }
+    __native_scheduler_all { sched = scope, ps = native_ps },
+  timeout = { ms, p } -> match p is
+    Promise { val = native_p } -> Some { val = __native_scheduler_await { sched = scope, p = native_p } },
+  cancel = { p } -> {},
+  sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
+  is_done = { p } -> match p is
+    Promise { val = native_p } -> __native_scheduler_is_done { p = native_p },
+  is_cancelled = {} -> False,
+  check = {} -> {},
+  join = { l, r } -> do
+    let p_l = __native_scheduler_spawn { sched = scope, f = l }
+    let p_r = __native_scheduler_spawn { sched = scope, f = r }
+    let r_l = __native_scheduler_await { sched = scope, p = p_l }
+    let r_r = __native_scheduler_await { sched = scope, p = p_r }
+    { l = r_l, r = r_r },
+  join3 = { a, b, c } -> do
+    let p_a = __native_scheduler_spawn { sched = scope, f = a }
+    let p_b = __native_scheduler_spawn { sched = scope, f = b }
+    let p_c = __native_scheduler_spawn { sched = scope, f = c }
+    let r_a = __native_scheduler_await { sched = scope, p = p_a }
+    let r_b = __native_scheduler_await { sched = scope, p = p_b }
+    let r_c = __native_scheduler_await { sched = scope, p = p_c }
+    { a = r_a, b = r_b, c = r_c },
+  map = { xs, f } -> do
+    let promises = seq::map { xs = xs, f = { x } -> __native_scheduler_spawn { sched = scope, f = {} ->
+      f { x = x } } }
+    seq::map { xs = promises, f = { x } -> __native_scheduler_await { sched = scope, p = x } },
+  for_each = { xs, f } -> do
+    let promises = seq::map { xs = xs, f = { x } -> __native_scheduler_spawn { sched = scope, f = {} ->
+      f { x = x } } }
+    seq::for_each { xs = promises, f = { x } -> __native_scheduler_await { sched = scope, p = x } }
+    {},
+  filter = { xs, f } -> do
+    let checks = seq::map { xs = xs, f = { x } -> { elem = x, promise = __native_scheduler_spawn { sched = scope, f = {} ->
+      f { x = x } } } }
+    let filtered = seq::filter { xs = checks, p = { x } -> __native_scheduler_await { sched = scope, p = x.promise } }
+    seq::map { xs = filtered, f = { x } -> x.elem },
+  any = { ps } -> do
+    let native_ps = seq::map { xs = ps, f = { x } -> match x is
+      Promise { val = p } -> p
+ }
+    __native_scheduler_race { sched = scope, ps = native_ps },
+  settle = { ps } -> do
+    seq::map { xs = ps, f = { x } -> match x is
+      Promise { val = native_p } -> Ok { val = __native_scheduler_await { sched = scope, p = native_p } }
+ },
+  scoped = { f } -> f { sc = Scope { val = {} } },
 }
+# Create scheduler for cooperative scheduling
+# Drain remaining tasks to ensure all spawned tasks complete
+# Spawn queues task, returns promise (does NOT execute immediately)
+# Await runs scheduler until promise completes
+# In coop mode, there's no real time - just await the promise
+# and always return Some (the task will complete eventually)
 
+pub let run: { f: {} -> 'a } -> 'a <Async> = { f } -> do
+  let p = Async.spawn { f = f }
+  Async.await { p = p }
+
+pub let go: { f: {} -> 'a } -> {} <Async> = { f } -> do
+  let _ = Async.spawn { f = f }
+  {}
+
+pub let run_coop: { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
+
+pub let scope_spawn: { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b = { sc, f } ->
+  __native_loom_scope_spawn { sc = sc, f = f }
+
+pub let scope_cancel_all: { sc: Scope 'a } -> {} = { sc } -> __native_loom_scope_cancel_all { sc = sc }
+
+pub let scope_get_token: { sc: Scope 'a } -> CancellationToken = { sc } -> __native_loom_scope_get_token { sc = sc }
+
+pub let scope_is_cancelled: { sc: Scope 'a } -> Bool = { sc } -> __native_loom_scope_is_cancelled { sc = sc }
+
+# Cancel is no-op in coop mode
+# Join runs both functions, awaiting each
+# Map spawns all tasks then awaits all
+# Spawn filter checks for all elements
+# Await and filter
+# Await each promise, catching errors as Err
+# TODO: proper try/catch here
+# Scoped just runs the function - structured concurrency is implicit
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
 # Short alias for spawn + wait (run synchronously)
-pub let run: {f: {} -> 'a} -> 'a <Async> = {f} -> do
-    let p = Async.spawn {f = f}
-    Async.await {p = p}
-
 # Spawn and immediately detach (fire and forget)
-pub let go: {f: {} -> 'a} -> {} <Async> = {f} -> do
-    let _ = Async.spawn {f = f}
-    {}
-
 # =============================================================================
 # Convenience Wrappers
 # =============================================================================
-
 # Run computation with CoopAsync handler (cooperative scheduling)
 # Equivalent to: perform CoopAsync in computation {}
-pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
-    perform CoopAsync in computation {}
-
 # =============================================================================
 # Scope Functions - Helpers for Structured Concurrency Scopes
 # =============================================================================
@@ -448,23 +410,16 @@ pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
 #           # p1 and p2 are awaited automatically before scoped returns
 #           process {p1 = Async.await {p = p1}, p2 = Async.await {p = p2}}
 #       }
-
 # Spawn a task within a scope
 # The scope will wait for this task to complete before exiting
 # Note: f accepts any effects (<...>) for effect polymorphism
 #
 # Example:
 #   scope_spawn {sc = sc, f = {} -> expensive_computation {}}
-pub let scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b =
-    {sc, f} -> __native_loom_scope_spawn {sc = sc, f = f}
-
 # Cancel all tasks in the scope
 #
 # Example:
 #   scope_cancel_all {sc = sc}
-pub let scope_cancel_all: {sc: Scope 'a} -> {} =
-    {sc} -> __native_loom_scope_cancel_all {sc = sc}
-
 # Get the CancellationToken for a scope
 #
 # Each scope has an associated CancellationToken that tasks can use
@@ -479,9 +434,6 @@ pub let scope_cancel_all: {sc: Scope 'a} -> {} =
 #               process_batch {}
 #       }
 #   }
-pub let scope_get_token: {sc: Scope 'a} -> CancellationToken =
-    {sc} -> __native_loom_scope_get_token {sc = sc}
-
 # Check if a scope has been cancelled
 #
 # Example:
@@ -489,5 +441,3 @@ pub let scope_get_token: {sc: Scope 'a} -> CancellationToken =
 #       cleanup {}
 #   else
 #       continue_work {}
-pub let scope_is_cancelled: {sc: Scope 'a} -> Bool =
-    {sc} -> __native_loom_scope_is_cancelled {sc = sc}

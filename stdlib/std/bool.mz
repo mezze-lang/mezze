@@ -1,67 +1,70 @@
-use std::abilities::compare::{Eq}
-use std::abilities::logic::{LogicalAnd, LogicalOr, LogicalNot}
-use std::abilities::convert::{Into}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq }
+use std::abilities::logic::{ LogicalAnd, LogicalOr, LogicalNot }
+use std::abilities::convert::{ Into }
+use std::abilities::default::{ Default }
 
-impl Eq for Bool where { eq = {it, r} -> __native_bool_eq {l = it, r = r}, neq = {it, r} -> __native_bool_neq {l = it, r = r} }
-impl LogicalAnd for Bool where { and = {it, r} -> __native_bool_and {l = it, r = r} }
-impl LogicalOr for Bool where { or = {it, r} -> __native_bool_or {l = it, r = r} }
-impl LogicalNot for Bool where { not = {it} -> __native_bool_not {b = it} }
-impl Into Str for Bool where { into = {it} -> if it then "True" else "False" }
-impl Default for Bool where { default = {} -> False }
+impl Eq for Bool where {
+  eq = { it, r } -> __native_bool_eq { l = it, r = r },
+  neq = { it, r } -> __native_bool_neq { l = it, r = r },
+}
 
+impl LogicalAnd for Bool where {
+  and = { it, r } -> __native_bool_and { l = it, r = r }
+}
+
+impl LogicalOr for Bool where {
+  or = { it, r } -> __native_bool_or { l = it, r = r }
+}
+
+impl LogicalNot for Bool where {
+  not = { it } -> __native_bool_not { b = it }
+}
+
+impl Into Str for Bool where {
+  into = { it } -> if it then "True" else "False"
+}
+
+impl Default for Bool where {
+  default = {} -> False
+}
 # Bool utility functions
 # This module provides utility functions for working with bools
 # Note: The Bool type and basic operations (&&, ||) are built-in via Truffle nodes
 # Built-in ability implementations (Eq, Inspect) are automatically available
-
 # Type conversions
-pub let to_str = { b: Bool } ->
-    __native_bool_to_str { b = b }
 
+pub let to_str = { b: Bool } -> __native_bool_to_str { b = b }
 # Bool logic operations
-pub let and = { l: Bool, r: Bool } ->
-    __native_bool_and { l = l, r = r }
 
-pub let or = { l: Bool, r: Bool } ->
-    __native_bool_or { l = l, r = r }
+pub let and = { l: Bool, r: Bool } -> __native_bool_and { l = l, r = r }
 
-pub let not = { b: Bool } ->
-    __native_bool_not { b = b }
+pub let or = { l: Bool, r: Bool } -> __native_bool_or { l = l, r = r }
 
-pub let xor = { l: Bool, r: Bool } ->
-    __native_bool_xor { l = l, r = r }
+pub let not = { b: Bool } -> __native_bool_not { b = b }
 
-pub let implies = { l: Bool, r: Bool } ->
-    __native_bool_or { l = __native_bool_not { b = l }, r = r }
+pub let xor = { l: Bool, r: Bool } -> __native_bool_xor { l = l, r = r }
 
-pub let iff = { l: Bool, r: Bool } ->
-    __native_bool_or {
-        l = __native_bool_and { l = l, r = r },
-        r = __native_bool_and { l = __native_bool_not { b = l }, r = __native_bool_not { b = r } }
-    }
+pub let implies = { l: Bool, r: Bool } -> __native_bool_or { l = __native_bool_not { b = l }, r = r }
 
+pub let iff = { l: Bool, r: Bool } -> __native_bool_or { l = __native_bool_and { l = l, r = r }, r = __native_bool_and { l = __native_bool_not { b = l }, r = __native_bool_not { b = r } } }
 # Additional bool utilities
 # TODO: Seq pattern matching [head, ...tail] not yet supported in parser
 # These functions are temporarily commented out until the feature is implemented
-
 # pub let all = { xs: [Bool] } ->
 #     match xs is
 #         [] -> True
 #         [head, ...tail] -> if head then all { xs = tail } else False
-
 # pub let any = { xs: [Bool] } ->
 #     match xs is
 #         [] -> False
 #         [head, ...tail] -> if head then True else any { xs = tail }
-
 # pub let none = { xs: [Bool] } ->
 #     not { b = any { xs = xs } }
 
 impl Bool where {
-    to_str = {it} -> __native_bool_to_str {b = it},
-    to_int = {it} -> if it then 1 else 0,
-    xor = {it, r} -> __native_bool_xor {l = it, r = r},
-    iff = {it, r} -> __native_bool_or {l = __native_bool_and {l = it, r = r}, r = __native_bool_and {l = __native_bool_not {b = it}, r = __native_bool_not {b = r}}},
-    implies = {it, r} -> if it then r else True
+  to_str = { it } -> __native_bool_to_str { b = it },
+  to_int = { it } -> if it then 1 else 0,
+  xor = { it, r } -> __native_bool_xor { l = it, r = r },
+  iff = { it, r } -> __native_bool_or { l = __native_bool_and { l = it, r = r }, r = __native_bool_and { l = __native_bool_not { b = it }, r = __native_bool_not { b = r } } },
+  implies = { it, r } -> if it then r else True,
 }

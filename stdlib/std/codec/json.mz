@@ -12,7 +12,6 @@
 #   ]}
 #
 #   let bytes = json::serialize {json = data}
-
 use std::collections::seq
 use std::collections::list
 use std::collections::set
@@ -23,153 +22,459 @@ use std::float
 use std::int
 use std::char
 use std::nat
-use std::codec::core::{Format, DecodeFormat, EncodeError, DecodeError, CodecConfig}
-
+use std::codec::core::{ Format, DecodeFormat, EncodeError, DecodeError, CodecConfig }
 # ============================================================================
 # JSON FORMAT MARKER TYPE
 # ============================================================================
-
 # Marker type for JSON format - used as the 'fmt parameter in Format/DecodeFormat
 # Use `json_fmt` as the format value when calling Encode/Decode
-pub type JsonFmt = {}
-pub let json_fmt: JsonFmt = {}
 
+pub type JsonFmt = {}
+
+pub let json_fmt: JsonFmt = {}
 # ============================================================================
 # JSON INTERMEDIATE REPRESENTATION
 # ============================================================================
-
 # The Json type represents any JSON value
 # Note: JArray and JObject use Seq for efficient construction with [...] literals
 # Using anonymous record {key: Str, value: Json} for structural compatibility with codec
-pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: Str }, JArray { items: [Json] }, JObject { fields: [{key: Str, value: Json}]} |
 
+pub type Json = |
+  JNull,
+  JBool { val: Bool },
+  JInt { val: Int },
+  JFloat { val: Float },
+  JString { val: Str },
+  JArray { items: [Json] },
+  JObject { fields: [{ key: Str, value: Json }] },
+|
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-
 # Import FieldTransform from codec for field transformations
-use std::codec::core::{FieldTransform}
 
+use std::codec::core::{ FieldTransform }
 # JSON encoding configuration
+
 pub type JsonConfig = {
-    pretty: Bool,
-    indent: Int,
-    field_transform: FieldTransform,
-    skip_null: Bool
+  pretty: Bool,
+  indent: Int,
+  field_transform: FieldTransform,
+  skip_null: Bool,
 }
-
 # Default JSON configuration
-pub let default_config: JsonConfig = {
-    pretty = False,
-    indent = 2,
-    field_transform = Identity,
-    skip_null = False
-}
 
+pub let default_config: JsonConfig = {
+  pretty = False,
+  indent = 2,
+  field_transform = Identity,
+  skip_null = False,
+}
 # Create a config with custom settings
-pub let config = {pretty: Bool, indent: Int, field_transform: FieldTransform, skip_null: Bool} -> {
+
+pub let config = { pretty: Bool, indent: Int, field_transform: FieldTransform, skip_null: Bool } ->
+  {
     pretty = pretty,
     indent = indent,
     field_transform = field_transform,
-    skip_null = skip_null
-}
-
+    skip_null = skip_null,
+  }
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
 # Get the type name of a Json value (for error messages)
-let json_type_name: {json: Json} -> Str = {json} ->
-    match json is
-        JNull -> "null"
-        JBool {val} -> "boolean"
-        JInt {val} -> "integer"
-        JFloat {val} -> "float"
-        JString {val} -> "string"
-        JArray {items} -> "array"
-        JObject {fields} -> "object"
+
+let json_type_name: { json: Json } -> Str = { json } -> match json is
+  JNull -> "null"
+  JBool { val } -> "boolean"
+  JInt { val } -> "integer"
+  JFloat { val } -> "float"
+  JString { val } -> "string"
+  JArray { items } -> "array"
+  JObject { fields } -> "object"
 
 # ============================================================================
 # SERIALIZATION (Json -> Bytes)
 # ============================================================================
-
 # Serialize Json to string with config (uses native JSON serializer for speed)
-pub let serialize_to_str: {json: Json, config: JsonConfig} -> Str = {json, config} ->
-    match __native_json_serialize {json = json, pretty = config.pretty} is
-        Ok {val} -> val
-        Err {error} -> ""  # Should not happen for valid Json
+# Should not happen for valid Json
+
+pub let serialize_to_str: { json: Json, config: JsonConfig } -> Str = { json, config } ->
+  match __native_json_serialize { json = json, pretty = config.pretty } is
+    Ok { val } -> val
+    Err { error } -> ""
 
 # Serialize with default config (uses native JSON serializer for speed)
-pub let to_str: {json: Json} -> Str = {json} ->
-    match __native_json_serialize {json = json, pretty = False} is
-        Ok {val} -> val
-        Err {error} -> ""  # Should not happen for valid Json
 
-# Compact serialization (no whitespace)
-let serialize_compact: {json: Json} -> Str = {json} ->
-    match json is
-        JNull -> "null"
-        JBool {val} -> if val then "true" else "false"
-        JInt {val} -> int::to_str {n = val}
-        JFloat {val} -> float::to_str {n = val}
-        JString {val} -> "\"$(escape_string {s = val})\""
-        JArray {items} -> do
-            let inner = seq::map {xs = items, f = {x} -> serialize_compact {json = x}}
-            "[$(str::join {strings = inner, separator = ","})]"
-        JObject {fields} -> do
-            let inner = seq::map {
-                xs = fields,
-                f = {x} -> "\"$(escape_string {s = x.key})\":$(serialize_compact {json = x.value})"
-            }
-            "{$(str::join {strings = inner, separator = ","})}"
+pub let to_str: { json: Json } -> Str = { json } -> match __native_json_serialize { json = json, pretty = False } is
+  Ok { val } -> val
+  Err { error } -> ""
 
-# Pretty serialization (with indentation)
-let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> Str = {json, indent, indent_size} -> do
-    let indent_str = str::repeat {s = " ", n = indent}
+
+let serialize_compact: { json: Json } -> Str = { json } -> match json is
+  JNull -> "null"
+  JBool { val } -> if val then "true" else "false"
+  JInt { val } -> int::to_str { n = val }
+  JFloat { val } -> float::to_str { n = val }
+  JString { val } -> "\"$(escape_string { s = val })\""
+  JArray { items } -> do
+    let inner = seq::map { xs = items, f = { x } -> serialize_compact { json = x } }
+    "[$(str::join { strings = inner, separator = "," })]"
+  JObject { fields } -> do
+    let inner = seq::map { xs = fields, f = { x } -> "\"$(escape_string { s = x.key })\":$(serialize_compact { json = x.value })" }
+    "{$(str::join { strings = inner, separator = "," })}"
+
+
+let serialize_pretty: { json: Json, indent: Int, indent_size: Int } -> Str = { json, indent, indent_size } ->
+  do
+    let indent_str = str::repeat { s = " ", n = indent }
     let next_indent = indent + indent_size
-    let next_indent_str = str::repeat {s = " ", n = next_indent}
+    let next_indent_str = str::repeat { s = " ", n = next_indent }
     match json is
-        JNull -> "null"
-        JBool {val} -> if val then "true" else "false"
-        JInt {val} -> int::to_str {n = val}
-        JFloat {val} -> float::to_str {n = val}
-        JString {val} -> "\"$(escape_string {s = val})\""
-        JArray {items} ->
-            if seq::is_empty {xs = items} then
-                "[]"
-            else do
-                let inner = seq::map {
-                    xs = items,
-                    f = {x} -> "$(next_indent_str)$(serialize_pretty {json = x, indent = next_indent, indent_size = indent_size})"
-                }
-                "[\n$(str::join {strings = inner, separator = ",\n"})\n$(indent_str)]"
-        JObject {fields} ->
-            if seq::is_empty {xs = fields} then
-                "{}"
-            else do
-                let inner = seq::map {
-                    xs = fields,
-                    f = {x} -> do
-                        let val_str = serialize_pretty {json = x.value, indent = next_indent, indent_size = indent_size}
-                        "$(next_indent_str)\"$(escape_string {s = x.key})\": $(val_str)"
-                }
-                "{\n$(str::join {strings = inner, separator = ",\n"})\n$(indent_str)}"
+      JNull -> "null"
+      JBool { val } -> if val then "true" else "false"
+      JInt { val } -> int::to_str { n = val }
+      JFloat { val } -> float::to_str { n = val }
+      JString { val } -> "\"$(escape_string { s = val })\""
+      JArray { items } -> if seq::is_empty { xs = items } then "[]" else do
+        let inner = seq::map { xs = items, f = { x } -> "$(next_indent_str)$(serialize_pretty {
+          json = x,
+          indent = next_indent,
+          indent_size = indent_size,
+        })" }
+        "[\n$(str::join { strings = inner, separator = ",\n" })\n$(indent_str)]"
+      JObject { fields } -> if seq::is_empty { xs = fields } then "{}" else do
+        let inner = seq::map { xs = fields, f = { x } -> do
+          let val_str = serialize_pretty {
+            json = x.value,
+            indent = next_indent,
+            indent_size = indent_size,
+          }
+          "$(next_indent_str)\"$(escape_string { s = x.key })\": $(val_str)" }
+        "{\n$(str::join { strings = inner, separator = ",\n" })\n$(indent_str)}"
 
+
+let escape_string: { s: Str } -> Str = { s } -> s
+
+pub let parse = { bytes } -> __native_json_parse_bytes { bytes = bytes }
+
+pub let parse_str = { s: Str } -> __native_json_parse { s = s }
+
+pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
+  Identity -> name
+  SnakeCase -> str::to_snake_case { s = name }
+  CamelCase -> str::to_camel_case { s = name }
+  KebabCase -> str::to_kebab_case { s = name }
+  ScreamingSnakeCase -> str::to_screaming_snake_case { s = name }
+
+
+pub let inverse_transform_field_name = { name: Str, transform: FieldTransform } ->
+  match transform is
+    Identity -> name
+    SnakeCase -> str::to_camel_case { s = name }
+    CamelCase -> str::to_snake_case { s = name }
+    KebabCase -> str::to_camel_case { s = name }
+    ScreamingSnakeCase -> str::to_camel_case { s = name }
+
+
+pub let transform_fields: { json: Json, transform: FieldTransform } -> Json = { json, transform } ->
+  match transform is
+    Identity -> json
+    _ -> transform_fields_impl { j = json, t = transform }
+
+
+let transform_fields_impl: { j: Json, t: FieldTransform } -> Json = { j, t } -> match j is
+  JNull -> JNull
+  JBool { val } -> JBool { val = val }
+  JInt { val } -> JInt { val = val }
+  JFloat { val } -> JFloat { val = val }
+  JString { val } -> JString { val = val }
+  JArray { items } -> JArray { items = seq::map { xs = items, f = { x } -> transform_fields_impl { j = x, t = t } } }
+  JObject { fields } -> JObject { fields = seq::map { xs = fields, f = { x } ->
+    { key = transform_field_name { name = x.key, transform = t }, value = transform_fields_impl { j = x.value, t = t } } } }
+
+
+pub let inverse_transform_fields: { json: Json, transform: FieldTransform } -> Json = { json, transform } ->
+  match transform is
+    Identity -> json
+    _ -> inverse_transform_fields_impl { j = json, t = transform }
+
+
+let inverse_transform_fields_impl: { j: Json, t: FieldTransform } -> Json = { j, t } ->
+  match j is
+    JNull -> JNull
+    JBool { val } -> JBool { val = val }
+    JInt { val } -> JInt { val = val }
+    JFloat { val } -> JFloat { val = val }
+    JString { val } -> JString { val = val }
+    JArray { items } -> JArray { items = seq::map { xs = items, f = { x } -> inverse_transform_fields_impl { j = x, t = t } } }
+    JObject { fields } -> JObject { fields = seq::map { xs = fields, f = { x } ->
+      { key = inverse_transform_field_name { name = x.key, transform = t }, value = inverse_transform_fields_impl { j = x.value, t = t } } } }
+
+
+impl Format for Json JsonFmt where {
+  encode_int = { val, config, path } -> Ok { val = JInt { val = val } },
+  encode_float = { val, config, path } -> Ok { val = JFloat { val = val } },
+  encode_string = { val, config, path } -> Ok { val = JString { val = val } },
+  encode_bool = { val, config, path } -> Ok { val = JBool { val = val } },
+  encode_frac = { val, config, path } -> do
+    let f = __native_frac_to_float { n = val }
+    Ok { val = JFloat { val = f } },
+  encode_bytes = { val, config, path } -> do
+    let b64 = bytes::to_base64 { b = val }
+    Ok { val = JString { val = b64 } },
+  encode_char = { val, config, path } -> Ok { val = JString { val = char::to_str { c = val } } },
+  encode_nat = { val, config, path } -> Ok { val = JInt { val = nat::to_int { n = val } } },
+  encode_record = { fields, config, path } -> Ok { val = JObject { fields = fields } },
+  encode_variant = { tag, payload, config, path } -> do
+    let fields = match payload is
+      Some { val = p } -> [
+        { key = "tag", value = JString { val = tag } },
+        { key = "value", value = p },
+      ]
+      None -> [{ key = "tag", value = JString { val = tag } }]
+
+    Ok { val = JObject { fields = fields } },
+  encode_list = { elems, config, path } -> Ok { val = JArray { items = elems } },
+  encode_set = { elems, config, path } -> do
+    Ok { val = JArray { items = set::to_seq { s = elems } } },
+  encode_map = { entries, config, path } -> do
+    let items = seq::map { xs = entries, f = { x } -> JObject {
+      fields = [
+        { key = "key", value = x.key },
+        { key = "value", value = x.value },
+      ],
+    } }
+    Ok { val = JArray { items = items } },
+  encode_option = { val, config, path } -> match val is
+    Some { val = v } -> Ok { val = v }
+    None -> Ok { val = JNull },
+  transform_field = { name, config } -> transform_field_name { name = name, transform = config.field_transform },
+}
+
+impl DecodeFormat for Json JsonFmt where {
+  decode_int = { val, config, path } -> match val is
+    JInt { val = v } -> Ok { val = v }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected integer",
+        expected = "Int",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_float = { val, config, path } -> match val is
+    JFloat { val = v } -> Ok { val = v }
+    JInt { val = v } -> Ok { val = __native_int_to_float { n = v } }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected float",
+        expected = "Float",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_string = { val, config, path } -> match val is
+    JString { val = v } -> Ok { val = v }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected string",
+        expected = "String",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_bool = { val, config, path } -> match val is
+    JBool { val = v } -> Ok { val = v }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected boolean",
+        expected = "Bool",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_frac = { val, config, path } -> match val is
+    JFloat { val = v } -> do
+      let f = __native_float_to_frac { f = v }
+      Ok { val = f }
+    JInt { val = v } -> do
+      let f = __native_int_to_frac { n = v }
+      Ok { val = f }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected fraction (number)",
+        expected = "Frac",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_bytes = { val, config, path } -> match val is
+    JString { val = v } -> match bytes::from_base64 { s = v } is
+      Some { val = b } -> Ok { val = b }
+      None -> Err {
+        error = {
+          path = path,
+          message = "Invalid base64 encoding",
+          expected = "Bytes (base64)",
+          found = Some { val = "invalid base64" },
+        },
+      }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected string (base64 encoded bytes)",
+        expected = "Bytes",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_char = { val, config, path } -> match val is
+    JString { val = v } -> match char::from_string { s = v } is
+      Some { val = c } -> Ok { val = c }
+      None -> Err {
+        error = {
+          path = path,
+          message = "Expected single character string",
+          expected = "Char",
+          found = Some { val = json_type_name { json = val } },
+        },
+      }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected string (single character)",
+        expected = "Char",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_nat = { val, config, path } -> match val is
+    JInt { val = v } -> match nat::from_int { n = v } is
+      Some { val = n } -> Ok { val = n }
+      None -> Err {
+        error = {
+          path = path,
+          message = "Expected non-negative integer",
+          expected = "Nat",
+          found = Some { val = "negative integer" },
+        },
+      }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected non-negative integer",
+        expected = "Nat",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_record_field = { val, key, config, path } -> match val is
+    JObject { fields } -> find_field { fields = fields, key = key, path = path }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected object",
+        expected = "Object",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_variant = { val, config, path } -> match val is
+    JObject { fields } -> do
+      match find_field_value { fields = fields, key = "tag", idx = 0 } is
+        Some { val = tag_json } -> match tag_json is
+          JString { val = tag } -> do
+            let payload = find_field_value { fields = fields, key = "value", idx = 0 }
+            Ok { val = { tag = tag, payload = payload } }
+          _ -> Err {
+            error = {
+              path = path,
+              message = "Variant tag must be a string",
+              expected = "String",
+              found = Some { val = json_type_name { json = tag_json } },
+            },
+          }
+        None -> Err {
+          error = {
+            path = path,
+            message = "Variant object missing 'tag' field",
+            expected = "Object with 'tag'",
+            found = Some { val = "Object without 'tag'" },
+          },
+        }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected variant object",
+        expected = "Object",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_list = { val, config, path } -> match val is
+    JArray { items } -> Ok { val = items }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected array",
+        expected = "Seq",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_set = { val, config, path } -> match val is
+    JArray { items } -> Ok { val = set::from_seq { xs = items } }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected array (for set)",
+        expected = "Seq",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_map = { val, config, path } -> match val is
+    JObject { fields } -> do
+      let converted = seq::map { xs = fields, f = { x } ->
+        { key = JString { val = x.key }, value = x.value } }
+      Ok { val = converted }
+    _ -> Err {
+      error = {
+        path = path,
+        message = "Expected object (for map)",
+        expected = "Object",
+        found = Some { val = json_type_name { json = val } },
+      },
+    },
+  decode_option = { val, config, path } -> match val is
+    JNull -> Ok { val = None }
+    _ -> Ok { val = Some { val = val } },
+  transform_field = { name, config } -> inverse_transform_field_name { name = name, transform = config.field_transform },
+}
+
+let find_field = { fields, key, path } -> do
+  match find_field_value { fields = fields, key = key, idx = 0 } is
+    Some { val = v } -> Ok { val = v }
+    None -> Err {
+      error = {
+        path = path,
+        message = "Missing field: $(key)",
+        expected = key,
+        found = None,
+      },
+    }
+
+
+let find_field_value = { fields, key, idx } -> if idx >= seq::length { xs = fields } then None else match seq::get { xs = fields, i = idx } is
+  Some { val = entry } -> if entry.key == key then Some { val = entry.value } else find_field_value { fields = fields, key = key, idx = idx + 1 }
+  None -> None
+
+
+# Should not happen for valid Json
+# Compact serialization (no whitespace)
+# Pretty serialization (with indentation)
 # Escape special characters in JSON strings
 # TODO: Implement proper escape when str::replace is available
 # For now, return string as-is (not correct for strings with special chars)
-let escape_string: {s: Str} -> Str = {s} ->
-    s
-
 # ============================================================================
 # PARSING (Bytes -> Json)
 # ============================================================================
-
 # Parse Bytes to Json
 # Note: This uses a native function for actual JSON parsing
-pub let parse = {bytes} ->
-    __native_json_parse_bytes {bytes = bytes}
-
 # ============================================================================
 # HIGH-LEVEL API
 # ============================================================================
@@ -188,33 +493,16 @@ pub let parse = {bytes} ->
 #
 # For snake_case field names (e.g., user_name instead of userName):
 #   let result = Encode.encode {val = person, config = {field_transform = SnakeCase}}
-
 # Parse a JSON string to Json value
-pub let parse_str = {s: Str} ->
-    __native_json_parse {s = s}
-
 # ============================================================================
 # FIELD TRANSFORMATION FUNCTIONS
 # ============================================================================
-
 # Transform a field name based on the FieldTransform config
-pub let transform_field_name = {name: Str, transform: FieldTransform} ->
-    match transform is
-        Identity -> name
-        SnakeCase -> str::to_snake_case {s = name}
-        CamelCase -> str::to_camel_case {s = name}
-        KebabCase -> str::to_kebab_case {s = name}
-        ScreamingSnakeCase -> str::to_screaming_snake_case {s = name}
-
 # Inverse transform (for decoding - e.g., snake_case JSON -> camelCase Mezze)
-pub let inverse_transform_field_name = {name: Str, transform: FieldTransform} ->
-    match transform is
-        Identity -> name
-        SnakeCase -> str::to_camel_case {s = name}  # snake_case -> camelCase
-        CamelCase -> str::to_snake_case {s = name}  # camelCase -> snake_case
-        KebabCase -> str::to_camel_case {s = name}  # kebab-case -> camelCase
-        ScreamingSnakeCase -> str::to_camel_case {s = name}  # SCREAMING -> camelCase
-
+# snake_case -> camelCase
+# camelCase -> snake_case
+# kebab-case -> camelCase
+# SCREAMING -> camelCase
 # ============================================================================
 # ENCODE/DECODE WITH CONFIG
 # ============================================================================
@@ -235,47 +523,10 @@ pub let inverse_transform_field_name = {name: Str, transform: FieldTransform} ->
 #   let json_input: Json = ...  # {"user_name": "Alice", "created_at": "2024-01-01"}
 #   let decoded: Result {userName: Str, createdAt: Str} DecodeError =
 #       Decode.decode {val = json_input, config = {field_transform = SnakeCase}}
-
 # Transform all field names in a Json value according to the config
-pub let transform_fields: {json: Json, transform: FieldTransform} -> Json = {json, transform} ->
-    match transform is
-        Identity -> json
-        _ -> transform_fields_impl {j = json, t = transform}
-
 # Recursive implementation (uses short param names to avoid shadowing issues)
-let transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t} ->
-    match j is
-        JNull -> JNull
-        JBool {val} -> JBool {val = val}
-        JInt {val} -> JInt {val = val}
-        JFloat {val} -> JFloat {val = val}
-        JString {val} -> JString {val = val}
-        JArray {items} -> JArray {items = seq::map {xs = items, f = {x} -> transform_fields_impl {j = x, t = t}}}
-        JObject {fields} -> JObject {fields = seq::map {xs = fields, f = {x} -> {
-            key = transform_field_name {name = x.key, transform = t},
-            value = transform_fields_impl {j = x.value, t = t}
-        }}}
-
 # Inverse transform all field names (for decoding)
-pub let inverse_transform_fields: {json: Json, transform: FieldTransform} -> Json = {json, transform} ->
-    match transform is
-        Identity -> json
-        _ -> inverse_transform_fields_impl {j = json, t = transform}
-
 # Recursive implementation (uses short param names to avoid shadowing issues)
-let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t} ->
-    match j is
-        JNull -> JNull
-        JBool {val} -> JBool {val = val}
-        JInt {val} -> JInt {val = val}
-        JFloat {val} -> JFloat {val = val}
-        JString {val} -> JString {val = val}
-        JArray {items} -> JArray {items = seq::map {xs = items, f = {x} -> inverse_transform_fields_impl {j = x, t = t}}}
-        JObject {fields} -> JObject {fields = seq::map {xs = fields, f = {x} -> {
-            key = inverse_transform_field_name {name = x.key, transform = t},
-            value = inverse_transform_fields_impl {j = x.value, t = t}
-        }}}
-
 # ============================================================================
 # MODULE-LEVEL ENCODING/DECODING API
 # ============================================================================
@@ -297,11 +548,9 @@ let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t}
 #   let person: Result {name: Str, age: Int} DecodeError = match json_data is
 #       Ok {val} -> json::decode {val = val}
 #       Err {error} -> Err {error = {path = [], message = "parse failed", expected = "Json", found = None}}
-
 # TODO: Add helper functions for encode/decode with default config
 # The constraint syntax for polymorphic functions with ability constraints
 # needs to be investigated for the decode case where 'a only appears in output.
-
 # ============================================================================
 # ENCODE FORMAT IMPLEMENTATION
 # ============================================================================
@@ -309,306 +558,26 @@ let inverse_transform_fields_impl: {j: Json, t: FieldTransform} -> Json = {j, t}
 # to satisfy the orphan rule: impl must be in the module that defines the type.
 # Format 'repr 'fmt - first param is representation type, second is format type
 # For JSON, both are Json (the AST is the representation)
-
-impl Format for Json JsonFmt where {
-    encode_int = {val, config, path} ->
-        Ok {val = JInt {val = val}},
-
-    encode_float = {val, config, path} ->
-        Ok {val = JFloat {val = val}},
-
-    encode_string = {val, config, path} ->
-        Ok {val = JString {val = val}},
-
-    encode_bool = {val, config, path} ->
-        Ok {val = JBool {val = val}},
-
-    encode_frac = {val, config, path} -> do
-        # JSON doesn't support fractions natively, convert to float
-        let f = __native_frac_to_float {n = val}
-        Ok {val = JFloat {val = f}},
-
-    encode_bytes = {val, config, path} -> do
-        # Encode bytes as base64 string
-        let b64 = bytes::to_base64 {b = val}
-        Ok {val = JString {val = b64}},
-
-    encode_char = {val, config, path} ->
-        # Encode char as single-character string
-        Ok {val = JString {val = char::to_str {c = val}}},
-
-    encode_nat = {val, config, path} ->
-        # Encode nat as integer
-        Ok {val = JInt {val = nat::to_int {n = val}}},
-
-    encode_record = {fields, config, path} ->
-        # fields is [{key: Str, value: Json}], matching JObject.fields
-        Ok {val = JObject {fields = fields}},
-
-    encode_variant = {tag, payload, config, path} -> do
-        let fields = match payload is
-            Some {val = p} ->
-                [{key = "tag", value = JString {val = tag}}, {key = "value", value = p}]
-            None ->
-                [{key = "tag", value = JString {val = tag}}]
-        Ok {val = JObject {fields = fields}},
-
-    encode_list = {elems, config, path} ->
-        # elems is ['repr] which is [Json]
-        Ok {val = JArray {items = elems}},
-
-    encode_set = {elems, config, path} -> do
-        # Sets encoded as JSON arrays
-        Ok {val = JArray {items = set::to_seq {s = elems}}},
-
-    encode_map = {entries, config, path} -> do
-        # Maps encoded as JSON array of {key, value} objects
-        let items = seq::map {xs = entries, f = {x} ->
-            JObject {fields = [
-                {key = "key", value = x.key},
-                {key = "value", value = x.value}
-            ]}
-        }
-        Ok {val = JArray {items = items}},
-
-    encode_option = {val, config, path} ->
-        match val is
-            Some {val = v} -> Ok {val = v}
-            None -> Ok {val = JNull},
-
-    # Transform field names according to the codec config
-    # Uses the FieldTransform from config (Identity, SnakeCase, CamelCase, etc.)
-    transform_field = {name, config} ->
-        transform_field_name {name = name, transform = config.field_transform}
-}
-
+# JSON doesn't support fractions natively, convert to float
+# Encode bytes as base64 string
+# Encode char as single-character string
+# Encode nat as integer
+# fields is [{key: Str, value: Json}], matching JObject.fields
+# elems is ['repr] which is [Json]
+# Sets encoded as JSON arrays
+# Maps encoded as JSON array of {key, value} objects
+# Transform field names according to the codec config
+# Uses the FieldTransform from config (Identity, SnakeCase, CamelCase, etc.)
 # ============================================================================
 # DECODE FORMAT IMPLEMENTATION
 # ============================================================================
-
-impl DecodeFormat for Json JsonFmt where {
-    decode_int = {val, config, path} ->
-        match val is
-            JInt {val = v} -> Ok {val = v}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected integer",
-                expected = "Int",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_float = {val, config, path} ->
-        match val is
-            JFloat {val = v} -> Ok {val = v}
-            JInt {val = v} -> Ok {val = __native_int_to_float {n = v}}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected float",
-                expected = "Float",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_string = {val, config, path} ->
-        match val is
-            JString {val = v} -> Ok {val = v}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected string",
-                expected = "String",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_bool = {val, config, path} ->
-        match val is
-            JBool {val = v} -> Ok {val = v}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected boolean",
-                expected = "Bool",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_frac = {val, config, path} ->
-        match val is
-            JFloat {val = v} -> do
-                let f = __native_float_to_frac {f = v}
-                Ok {val = f}
-            JInt {val = v} -> do
-                let f = __native_int_to_frac {n = v}
-                Ok {val = f}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected fraction (number)",
-                expected = "Frac",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_bytes = {val, config, path} ->
-        match val is
-            JString {val = v} ->
-                match bytes::from_base64 {s = v} is
-                    Some {val = b} -> Ok {val = b}
-                    None -> Err {error = {
-                        path = path,
-                        message = "Invalid base64 encoding",
-                        expected = "Bytes (base64)",
-                        found = Some {val = "invalid base64"}
-                    }}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected string (base64 encoded bytes)",
-                expected = "Bytes",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_char = {val, config, path} ->
-        match val is
-            JString {val = v} ->
-                match char::from_string {s = v} is
-                    Some {val = c} -> Ok {val = c}
-                    None -> Err {error = {
-                        path = path,
-                        message = "Expected single character string",
-                        expected = "Char",
-                        found = Some {val = json_type_name {json = val}}
-                    }}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected string (single character)",
-                expected = "Char",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_nat = {val, config, path} ->
-        match val is
-            JInt {val = v} ->
-                match nat::from_int {n = v} is
-                    Some {val = n} -> Ok {val = n}
-                    None -> Err {error = {
-                        path = path,
-                        message = "Expected non-negative integer",
-                        expected = "Nat",
-                        found = Some {val = "negative integer"}
-                    }}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected non-negative integer",
-                expected = "Nat",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_record_field = {val, key, config, path} ->
-        match val is
-            JObject {fields} ->
-                find_field {fields = fields, key = key, path = path}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected object",
-                expected = "Object",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_variant = {val, config, path} ->
-        match val is
-            JObject {fields} -> do
-                match find_field_value {fields = fields, key = "tag", idx = 0} is
-                    Some {val = tag_json} ->
-                        match tag_json is
-                            JString {val = tag} -> do
-                                let payload = find_field_value {fields = fields, key = "value", idx = 0}
-                                Ok {val = {tag = tag, payload = payload}}
-                            _ -> Err {error = {
-                                path = path,
-                                message = "Variant tag must be a string",
-                                expected = "String",
-                                found = Some {val = json_type_name {json = tag_json}}
-                            }}
-                    None -> Err {error = {
-                        path = path,
-                        message = "Variant object missing 'tag' field",
-                        expected = "Object with 'tag'",
-                        found = Some {val = "Object without 'tag'"}
-                    }}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected variant object",
-                expected = "Object",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_list = {val, config, path} ->
-        match val is
-            # JArray.items is Seq, return as seq (which is ['repr])
-            JArray {items} -> Ok {val = items}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected array",
-                expected = "Seq",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_set = {val, config, path} ->
-        match val is
-            # JArray.items is Seq, use set::from_seq
-            JArray {items} -> Ok {val = set::from_seq {xs = items}}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected array (for set)",
-                expected = "Seq",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_map = {val, config, path} ->
-        match val is
-            JObject {fields} -> do
-                # Convert object fields [{key: Str, value: Json}] to seq {key: Json, value: Json}
-                let converted = seq::map {xs = fields, f = {x} ->
-                    {key = JString {val = x.key}, value = x.value}
-                }
-                Ok {val = converted}
-            _ -> Err {error = {
-                path = path,
-                message = "Expected object (for map)",
-                expected = "Object",
-                found = Some {val = json_type_name {json = val}}
-            }},
-
-    decode_option = {val, config, path} ->
-        match val is
-            JNull -> Ok {val = None}
-            _ -> Ok {val = Some {val = val}},
-
-    # Transform field names according to the codec config (inverse transform for decoding)
-    # Uses the FieldTransform from config (Identity, SnakeCase, CamelCase, etc.)
-    transform_field = {name, config} ->
-        inverse_transform_field_name {name = name, transform = config.field_transform}
-}
-
+# JArray.items is Seq, return as seq (which is ['repr])
+# JArray.items is Seq, use set::from_seq
+# Convert object fields [{key: Str, value: Json}] to seq {key: Json, value: Json}
+# Transform field names according to the codec config (inverse transform for decoding)
+# Uses the FieldTransform from config (Identity, SnakeCase, CamelCase, etc.)
 # ============================================================================
 # DECODE HELPER FUNCTIONS
 # ============================================================================
-
 # Find a field in a seq of entries
-let find_field = {fields, key, path} -> do
-    match find_field_value {fields = fields, key = key, idx = 0} is
-        Some {val = v} -> Ok {val = v}
-        None -> Err {error = {
-            path = path,
-            message = "Missing field: $(key)",
-            expected = key,
-            found = None
-        }}
-
 # Find a field value without returning error (using seq indexing)
-let find_field_value = {fields, key, idx} ->
-    if idx >= seq::length {xs = fields} then
-        None
-    else
-        match seq::get {xs = fields, i = idx} is
-            Some {val = entry} ->
-                if entry.key == key then
-                    Some {val = entry.value}
-                else
-                    find_field_value {fields = fields, key = key, idx = idx + 1}
-            None ->
-                None

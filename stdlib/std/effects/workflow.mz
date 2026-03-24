@@ -24,31 +24,26 @@
 #       let order_id = Workflow.step {name = "create_order", f = {} -> create_order {}}
 #       let payment = Workflow.step {name = "process_payment", f = {} -> charge_card {}}
 #       Workflow.step {name = "ship_order", f = {} -> ship {}}
-
 use std::control::continuation
 use std::collections::seq
-
 # Workflow effect - durable computation with checkpointing
+# Workflow effect - durable computation with checkpointing
+# Workflow effect - durable computation with checkpointing
+# Workflow effect - durable computation with checkpointing
+
 effect Workflow where {
-    # Execute a named step - the result is persisted
-    step: {name: Str, f: {} -> 'a} -> 'a <Workflow>,
-
-    # Sleep for a duration (workflow time, not wall clock)
-    sleep: {ms: Int} -> {} <Workflow>,
-
-    # Get the current workflow run ID
-    run_id: {} -> Str <Workflow>,
-
-    # Checkpoint the workflow state explicitly
-    checkpoint: {} -> {} <Workflow>
+  step: { name: Str, f: {} -> 'a } -> 'a <Workflow>,
+  sleep: { ms: Int } -> {} <Workflow>,
+  run_id: {} -> Str <Workflow>,
+  checkpoint: {} -> {} <Workflow>
 }
-
+# Execute a named step - the result is persisted
+# Sleep for a duration (workflow time, not wall clock)
+# Get the current workflow run ID
+# Checkpoint the workflow state explicitly
 # Workflow state - tracks completed steps
-type WorkflowState = {
-    run_id: Str,
-    step_count: Nat
-}
 
+type WorkflowState = { run_id: Str, step_count: Nat }
 # =============================================================================
 # LocalWorkflow - In-memory workflow handler (for testing/development)
 # =============================================================================
@@ -57,44 +52,33 @@ type WorkflowState = {
 # For production, you'd implement a handler that persists to a database.
 
 impl Workflow for LocalWorkflow where {
-    initialize_scope = {} -> {
-        run_id = "local-workflow-1",
-        step_count = 0
-    },
-
-    finalize_scope = {} -> scope,
-
-    step = {name, f} -> f {},
-
-    sleep = {ms} -> {},
-
-    run_id = {} -> scope.run_id,
-
-    checkpoint = {} -> {}
+  initialize_scope = {} -> { run_id = "local-workflow-1", step_count = 0 },
+  finalize_scope = {} -> scope,
+  step = { name, f } -> f {},
+  sleep = { ms } -> {},
+  run_id = {} -> scope.run_id,
+  checkpoint = {} -> {},
 }
-
 # =============================================================================
 # Workflow utilities
 # =============================================================================
-
 # Run a workflow with the local (in-memory) handler
-pub let run_local: {workflow: {} -> 'a <Workflow>} -> 'a =
-    {workflow} -> perform LocalWorkflow in workflow {}
 
+pub let run_local: { workflow: {} -> 'a <Workflow> } -> 'a = { workflow } -> perform LocalWorkflow in workflow {}
 # =============================================================================
 # Higher-level patterns built on Workflow
 # =============================================================================
-
 # Retry a step with a maximum number of attempts
 # (Simplified - always succeeds on first try in local mode)
-pub let retry: {name: Str, max_attempts: Int, f: {} -> 'a} -> 'a <Workflow> =
-    {name, max_attempts, f} -> Workflow.step {name = name, f = f}
 
+pub let retry: { name: Str, max_attempts: Int, f: {} -> 'a } -> 'a <Workflow> = { name, max_attempts, f } ->
+  Workflow.step { name = name, f = f }
 # Execute a step with a timeout
 # (Simplified - always succeeds in local mode)
-pub let with_timeout: {name: Str, timeout_ms: Int, f: {} -> 'a} -> Option 'a <Workflow> =
-    {name, timeout_ms, f} -> Some {val = Workflow.step {name = name, f = f}}
 
+pub let with_timeout: { name: Str, timeout_ms: Int, f: {} -> 'a } -> Option 'a <Workflow> = { name, timeout_ms, f } ->
+  Some { val = Workflow.step { name = name, f = f } }
 # Execute multiple steps and collect results
-pub let steps: {work: [{name: Str, f: {} -> 'a}]} -> ['a] <Workflow> =
-    {work} -> seq::map {xs = work, f = {x} -> Workflow.step {name = x.name, f = x.f}}
+
+pub let steps: { work: [{ name: Str, f: {} -> 'a }] } -> ['a] <Workflow> = { work } ->
+  seq::map { xs = work, f = { x } -> Workflow.step { name = x.name, f = x.f } }

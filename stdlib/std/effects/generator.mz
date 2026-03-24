@@ -11,19 +11,16 @@
 #       Generator.yield {value = 2}
 #       Generator.yield {value = 3}
 #   # values = [1, 2, 3]
-
 use std::control::continuation
-use std::control::continuation::{Continuation}
-
+use std::control::continuation::{ Continuation }
 # Generator effect with yield operation
-effect Generator having 'a where {
-    yield: {value: 'a} -> {} <Generator>
-}
 
+effect Generator having 'a where {
+  yield: { value: 'a } -> {} <Generator>
+}
 # =============================================================================
 # Handlers
 # =============================================================================
-
 # Collect handler - collects all yielded values into a Seq
 #
 # Uses suspend_and_resume to collect values without escaping,
@@ -35,17 +32,17 @@ effect Generator having 'a where {
 #       Generator.yield {value = 2}
 #       Generator.yield {value = 3}
 #   # values = [1, 2, 3]
-impl Generator for Collect having 'a = 'x where {
-    initialize_scope = {} -> { cont = continuation::new {} },
-    finalize_scope = {} -> do
-        let collected = scope.cont.take_collected {}
-        scope.cont.suspend_with {value = collected},
-    yield = {value} -> scope.cont.suspend_and_resume {value = value}
-}
 
+impl Generator for Collect having 'a = 'x where {
+  initialize_scope = {} -> { cont = continuation::new {} },
+  finalize_scope = {} -> do
+    let collected = scope.cont.take_collected {}
+    scope.cont.suspend_with { value = collected },
+  yield = { value } -> scope.cont.suspend_and_resume { value = value },
+}
 # =============================================================================
 # Helpers
 # =============================================================================
-
 # Shorthand for Generator.yield
-pub let yield = {value} -> Generator.yield {value}
+
+pub let yield = { value } -> Generator.yield { value }

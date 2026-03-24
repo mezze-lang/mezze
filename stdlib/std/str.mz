@@ -1,220 +1,191 @@
 # String utility functions
 # This module provides utility functions for working with strings
 # Note: The Str type is built-in but ability impls live here (Str's home module)
-
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::convert::{Into}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::convert::{ Into }
+use std::abilities::default::{ Default }
 use std::int
 use std::collections::bytes
-
+# =============================================================================
+# =============================================================================
+# =============================================================================
 # =============================================================================
 # Ability implementations for Str
+# Ability implementations for Str
+# Ability implementations for Str
+# Ability implementations for Str
+# =============================================================================
+# =============================================================================
+# =============================================================================
 # =============================================================================
 
 impl Into Bytes for Str where {
-    into = {it} -> bytes::from_string {s = it}
+  into = { it } -> bytes::from_string { s = it }
 }
 
 impl Eq for Str where {
-    eq = {it, r} -> __native_string_eq {l = it, r = r},
-    neq = {it, r} -> __native_string_neq {l = it, r = r}
+  eq = { it, r } -> __native_string_eq { l = it, r = r },
+  neq = { it, r } -> __native_string_neq { l = it, r = r },
 }
 
 impl Ord for Str where {
-    lt = {it, r} -> __native_string_lt {l = it, r = r},
-    le = {it, r} -> __native_string_le {l = it, r = r},
-    gt = {it, r} -> __native_string_gt {l = it, r = r},
-    ge = {it, r} -> __native_string_ge {l = it, r = r}
+  lt = { it, r } -> __native_string_lt { l = it, r = r },
+  le = { it, r } -> __native_string_le { l = it, r = r },
+  gt = { it, r } -> __native_string_gt { l = it, r = r },
+  ge = { it, r } -> __native_string_ge { l = it, r = r },
 }
-impl Default for Str where { default = {} -> "" }
 
+impl Default for Str where {
+  default = {} -> ""
+}
 # =============================================================================
 # Inherent methods on Str (called as value.method {args})
 # =============================================================================
-impl Str where {
-    length = {it} -> length {s = it},
-    is_empty = {it} -> is_empty {s = it},
-    to_upper = {it} -> to_upper {s = it},
-    to_lower = {it} -> to_lower {s = it},
-    trim = {it} -> trim {s = it},
-    trim_start = {it} -> trim_start {s = it},
-    trim_end = {it} -> trim_end {s = it},
-    reverse = {it} -> reverse {s = it},
-    starts_with = {it, prefix: Str} -> starts_with {s = it, prefix = prefix},
-    ends_with = {it, suffix: Str} -> ends_with {s = it, suffix = suffix},
-    contains = {it, substring: Str} -> contains {s = it, substring = substring},
-    index_of = {it, sub: Str} -> index_of {s = it, sub = sub},
-    last_index_of = {it, sub: Str} -> last_index_of {s = it, sub = sub},
-    substring = {it, start: Int, end: Int} -> substring {s = it, start = start, end = end},
-    replace = {it, old: Str, new: Str} -> replace {s = it, old = old, new = new},
-    replace_all = {it, old: Str, new: Str} -> replace_all {s = it, old = old, new = new},
-    split = {it, delimiter: Str} -> split {s = it, delimiter = delimiter},
-    lines = {it} -> lines {s = it},
-    words = {it} -> words {s = it},
-    chars = {it} -> chars {s = it},
-    char_at = {it, i: Int} -> char_at {s = it, i = i},
-    repeat = {it, n: Int} -> repeat {s = it, n = n},
-    pad_left = {it, len: Int, c: Char} -> pad_left {s = it, len = len, c = c},
-    pad_right = {it, len: Int, c: Char} -> pad_right {s = it, len = len, c = c},
-    glob_match = {it, pattern: Str} -> glob_match {pattern = pattern, s = it},
-    to_snake_case = {it} -> to_snake_case {s = it},
-    to_camel_case = {it} -> to_camel_case {s = it},
-    to_kebab_case = {it} -> to_kebab_case {s = it},
-    to_screaming_snake_case = {it} -> to_screaming_snake_case {s = it}
-}
 
+impl Str where {
+  length = { it } -> length { s = it },
+  is_empty = { it } -> is_empty { s = it },
+  to_upper = { it } -> to_upper { s = it },
+  to_lower = { it } -> to_lower { s = it },
+  trim = { it } -> trim { s = it },
+  trim_start = { it } -> trim_start { s = it },
+  trim_end = { it } -> trim_end { s = it },
+  reverse = { it } -> reverse { s = it },
+  starts_with = { it: 'it, prefix: Str } -> starts_with { s = it, prefix = prefix },
+  ends_with = { it: 'it, suffix: Str } -> ends_with { s = it, suffix = suffix },
+  contains = { it: 'it, substring: Str } -> contains { s = it, substring = substring },
+  index_of = { it: 'it, sub: Str } -> index_of { s = it, sub = sub },
+  last_index_of = { it: 'it, sub: Str } -> last_index_of { s = it, sub = sub },
+  substring = { it: 'it, start: Int, end: Int } -> substring { s = it, start = start, end = end },
+  replace = { it: 'it, old: Str, new: Str } -> replace { s = it, old = old, new = new },
+  replace_all = { it: 'it, old: Str, new: Str } -> replace_all { s = it, old = old, new = new },
+  split = { it: 'it, delimiter: Str } -> split { s = it, delimiter = delimiter },
+  lines = { it } -> lines { s = it },
+  words = { it } -> words { s = it },
+  chars = { it } -> chars { s = it },
+  char_at = { it: 'it, i: Int } -> char_at { s = it, i = i },
+  repeat = { it: 'it, n: Int } -> repeat { s = it, n = n },
+  pad_left = { it: 'it, len: Int, c: Char } -> pad_left { s = it, len = len, c = c },
+  pad_right = { it: 'it, len: Int, c: Char } -> pad_right { s = it, len = len, c = c },
+  glob_match = { it: 'it, pattern: Str } -> glob_match { pattern = pattern, s = it },
+  to_snake_case = { it } -> to_snake_case { s = it },
+  to_camel_case = { it } -> to_camel_case { s = it },
+  to_kebab_case = { it } -> to_kebab_case { s = it },
+  to_screaming_snake_case = { it } -> to_screaming_snake_case { s = it },
+}
 # =============================================================================
 # String operations
 # =============================================================================
-
 # String concatenation
-pub let concat = { l: Str, r: Str } ->
-    __native_string_concat { l = l, r = r }
 
+pub let concat = { l: Str, r: Str } -> __native_string_concat { l = l, r = r }
 # String utility functions
-pub let to_str = { s: Str } ->
-    s
 
-pub let length = { s: Str } ->
-    __native_string_length { s = s }
+pub let to_str = { s: Str } -> s
 
-pub let is_empty = { s: Str } ->
-    length { s = s } == 0
+pub let length = { s: Str } -> __native_string_length { s = s }
 
-pub let to_upper = { s: Str } ->
-    __native_string_to_upper { s = s }
+pub let is_empty = { s: Str } -> length { s = s } == 0
 
-pub let to_lower = { s: Str } ->
-    __native_string_to_lower { s = s }
+pub let to_upper = { s: Str } -> __native_string_to_upper { s = s }
 
-pub let trim = { s: Str } ->
-    __native_string_trim { s = s }
+pub let to_lower = { s: Str } -> __native_string_to_lower { s = s }
 
-pub let reverse = { s: Str } ->
-    __native_string_reverse { s = s }
+pub let trim = { s: Str } -> __native_string_trim { s = s }
 
+pub let reverse = { s: Str } -> __native_string_reverse { s = s }
 # Additional string utilities
-pub let starts_with = { s: Str, prefix: Str } ->
-    __native_string_starts_with { s = s, prefix = prefix }
 
-pub let ends_with = { s: Str, suffix: Str } ->
-    __native_string_ends_with { s = s, suffix = suffix }
+pub let starts_with = { s: Str, prefix: Str } -> __native_string_starts_with { s = s, prefix = prefix }
 
-pub let contains = { s: Str, substring: Str } ->
-    __native_string_contains { s = s, substring = substring }
+pub let ends_with = { s: Str, suffix: Str } -> __native_string_ends_with { s = s, suffix = suffix }
 
-pub let repeat = { s: Str, n: Int } ->
-    if n <= 0 then ""
-    else if n == 1 then s
-    else concat { l = s, r = repeat { s = s, n = n - 1 } }
+pub let contains = { s: Str, substring: Str } -> __native_string_contains { s = s, substring = substring }
 
+pub let repeat = { s: Str, n: Int } -> if n <= 0 then "" else if n == 1 then s else concat { l = s, r = repeat { s = s, n = n - 1 } }
 # Split string by delimiter into a seq of strings
-pub let split = { s: Str, delimiter: Str } ->
-    __native_string_split { s = s, delimiter = delimiter }
 
+pub let split = { s: Str, delimiter: Str } -> __native_string_split { s = s, delimiter = delimiter }
 # Join seq of strings with separator
-pub let join = { strings: [Str], separator: Str } ->
-    __native_string_join { strings = strings, separator = separator }
 
+pub let join = { strings: [Str], separator: Str } -> __native_string_join { strings = strings, separator = separator }
 # =============================================================================
 # Substring and Slicing
 # =============================================================================
-
 # Extract substring from start (inclusive) to end (exclusive)
 # Returns empty string if indices are out of bounds
 # Example: substring {s = "hello", start = 1, end = 4} -> "ell"
-pub let substring = { s: Str, start: Int, end: Int } ->
-    __native_string_substring { s = s, start = start, end = end }
 
+pub let substring = { s: Str, start: Int, end: Int } -> __native_string_substring { s = s, start = start, end = end }
 # =============================================================================
 # Replace Operations
 # =============================================================================
-
 # Replace first occurrence of old with new
 # Example: replace {s = "hello world", old = "o", new = "0"} -> "hell0 world"
-pub let replace = { s: Str, old: Str, new: Str } ->
-    __native_string_replace { s = s, old = old, new = new }
 
+pub let replace = { s: Str, old: Str, new: Str } -> __native_string_replace { s = s, old = old, new = new }
 # Replace all occurrences of old with new
 # Example: replace_all {s = "hello world", old = "o", new = "0"} -> "hell0 w0rld"
-pub let replace_all = { s: Str, old: Str, new: Str } ->
-    __native_string_replace_all { s = s, old = old, new = new }
 
+pub let replace_all = { s: Str, old: Str, new: Str } -> __native_string_replace_all { s = s, old = old, new = new }
 # =============================================================================
 # Character Access
 # =============================================================================
-
 # Get character at index, returns None if out of bounds
 # Example: char_at {s = "hello", i = 1} -> Some {val = 'e'}
-pub let char_at = { s: Str, i: Int } ->
-    __native_string_char_at { s = s, i = i }
 
+pub let char_at = { s: Str, i: Int } -> __native_string_char_at { s = s, i = i }
 # =============================================================================
 # Index Search
 # =============================================================================
-
 # Find first index of substring, returns None if not found
 # Example: index_of {s = "hello", sub = "ll"} -> Some {val = 2}
-pub let index_of = { s: Str, sub: Str } ->
-    __native_string_index_of { s = s, sub = sub }
 
+pub let index_of = { s: Str, sub: Str } -> __native_string_index_of { s = s, sub = sub }
 # Find last index of substring, returns None if not found
 # Example: last_index_of {s = "hello hello", sub = "ll"} -> Some {val = 8}
-pub let last_index_of = { s: Str, sub: Str } ->
-    __native_string_last_index_of { s = s, sub = sub }
 
+pub let last_index_of = { s: Str, sub: Str } -> __native_string_last_index_of { s = s, sub = sub }
 # =============================================================================
 # Additional Trimming
 # =============================================================================
-
 # Trim leading whitespace only
 # Example: trim_start {s = "  hello  "} -> "hello  "
-pub let trim_start = { s: Str } ->
-    __native_string_trim_start { s = s }
 
+pub let trim_start = { s: Str } -> __native_string_trim_start { s = s }
 # Trim trailing whitespace only
 # Example: trim_end {s = "  hello  "} -> "  hello"
-pub let trim_end = { s: Str } ->
-    __native_string_trim_end { s = s }
 
+pub let trim_end = { s: Str } -> __native_string_trim_end { s = s }
 # =============================================================================
 # Splitting Utilities
 # =============================================================================
-
 # Split string by newlines
 # Example: lines {s = "a\nb\nc"} -> ["a", "b", "c"]
-pub let lines = { s: Str } ->
-    __native_string_lines { s = s }
 
+pub let lines = { s: Str } -> __native_string_lines { s = s }
 # Split string by whitespace (removes empty strings)
 # Example: words {s = "hello  world"} -> ["hello", "world"]
-pub let words = { s: Str } ->
-    __native_string_words { s = s }
 
+pub let words = { s: Str } -> __native_string_words { s = s }
 # Convert string to seq of characters
 # Example: chars {s = "abc"} -> ['a', 'b', 'c']
-pub let chars = { s: Str } ->
-    __native_string_chars { s = s }
 
+pub let chars = { s: Str } -> __native_string_chars { s = s }
 # =============================================================================
 # Padding
 # =============================================================================
-
 # Pad string on the left to reach target length
 # Example: pad_left {s = "42", len = 5, c = '0'} -> "00042"
-pub let pad_left = { s: Str, len: Int, c: Char } ->
-    __native_string_pad_left { s = s, len = len, c = c }
 
+pub let pad_left = { s: Str, len: Int, c: Char } -> __native_string_pad_left { s = s, len = len, c = c }
 # Pad string on the right to reach target length
 # Example: pad_right {s = "hi", len = 5, c = '.'} -> "hi..."
-pub let pad_right = { s: Str, len: Int, c: Char } ->
-    __native_string_pad_right { s = s, len = len, c = c }
 
+pub let pad_right = { s: Str, len: Int, c: Char } -> __native_string_pad_right { s = s, len = len, c = c }
 # =============================================================================
 # Glob Pattern Matching
 # =============================================================================
-
 # Match a string against a glob pattern
 #
 # Supported patterns:
@@ -234,33 +205,28 @@ pub let pad_right = { s: Str, len: Int, c: Char } ->
 #   glob_match { pattern = "[abc].txt", text = "a.txt" }               -> True
 #   glob_match { pattern = "[!abc].txt", text = "d.txt" }              -> True
 #
-pub let glob_match = { pattern: Str, s: Str } ->
-    __native_string_glob_match { pattern = pattern, s = s }
 
+pub let glob_match = { pattern: Str, s: Str } -> __native_string_glob_match { pattern = pattern, s = s }
 # =============================================================================
 # Case Conversion
 # =============================================================================
-
 # Convert string to snake_case
 # Example: to_snake_case {s = "HelloWorld"} -> "hello_world"
 # Example: to_snake_case {s = "myFieldName"} -> "my_field_name"
-pub let to_snake_case = { s: Str } ->
-    __native_string_to_snake_case { s = s }
 
+pub let to_snake_case = { s: Str } -> __native_string_to_snake_case { s = s }
 # Convert string to camelCase
 # Example: to_camel_case {s = "hello_world"} -> "helloWorld"
 # Example: to_camel_case {s = "my_field_name"} -> "myFieldName"
-pub let to_camel_case = { s: Str } ->
-    __native_string_to_camel_case { s = s }
 
+pub let to_camel_case = { s: Str } -> __native_string_to_camel_case { s = s }
 # Convert string to kebab-case
 # Example: to_kebab_case {s = "HelloWorld"} -> "hello-world"
 # Example: to_kebab_case {s = "myFieldName"} -> "my-field-name"
-pub let to_kebab_case = { s: Str } ->
-    __native_string_to_kebab_case { s = s }
 
+pub let to_kebab_case = { s: Str } -> __native_string_to_kebab_case { s = s }
 # Convert string to SCREAMING_SNAKE_CASE
 # Example: to_screaming_snake_case {s = "HelloWorld"} -> "HELLO_WORLD"
 # Example: to_screaming_snake_case {s = "myFieldName"} -> "MY_FIELD_NAME"
-pub let to_screaming_snake_case = { s: Str } ->
-    __native_string_to_screaming_snake_case { s = s }
+
+pub let to_screaming_snake_case = { s: Str } -> __native_string_to_screaming_snake_case { s = s }

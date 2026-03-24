@@ -1,111 +1,108 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::convert::{Into, TryInto}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::convert::{ Into, TryInto }
 use std::int
 
-impl Eq for Char where { eq = {it, r} -> __native_char_eq {a = it, b = r}, neq = {it, r} -> if __native_char_eq {a = it, b = r} then False else True }
-impl Ord for Char where { lt = {it, r} -> __native_char_compare_int {a = it, b = r} == (0 - 1), le = {it, r} -> __native_char_compare_int {a = it, b = r} != 1, gt = {it, r} -> __native_char_compare_int {a = it, b = r} == 1, ge = {it, r} -> __native_char_compare_int {a = it, b = r} != (0 - 1) }
-impl Into Int for Char where { into = {it} -> __native_char_to_int {c = it} }
-impl Into Str for Char where { into = {it} -> __native_char_to_str {c = it} }
-impl TryInto Char |ConversionError {msg: Str}| for Int where {
-    try_into = {it} -> match __native_char_from_int {code = it} is
-        Some {val} -> Ok {val = val}
-        None -> Err {error = ConversionError {msg = "invalid char code point"}}
-}
-impl TryInto Char |ConversionError {msg: Str}| for Str where {
-    try_into = {it} -> match __native_char_from_string {s = it} is
-        Some {val} -> Ok {val = val}
-        None -> Err {error = ConversionError {msg = "string must be exactly one character"}}
+impl Eq for Char where {
+  eq = { it, r } -> __native_char_eq { a = it, b = r },
+  neq = { it, r } -> if __native_char_eq { a = it, b = r } then False else True,
 }
 
+impl Ord for Char where {
+  lt = { it, r } -> __native_char_compare_int { a = it, b = r } == (0 - 1),
+  le = { it, r } -> __native_char_compare_int { a = it, b = r } != 1,
+  gt = { it, r } -> __native_char_compare_int { a = it, b = r } == 1,
+  ge = { it, r } -> __native_char_compare_int { a = it, b = r } != (0 - 1),
+}
+
+impl Into Int for Char where {
+  into = { it } -> __native_char_to_int { c = it }
+}
+
+impl Into Str for Char where {
+  into = { it } -> __native_char_to_str { c = it }
+}
+
+impl TryInto Char | ConversionError { msg: Str } | for Int where {
+  try_into = { it } -> match __native_char_from_int { code = it } is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = ConversionError { msg = "invalid char code point" } }
+
+}
+
+impl TryInto Char | ConversionError { msg: Str } | for Str where {
+  try_into = { it } -> match __native_char_from_string { s = it } is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = ConversionError { msg = "string must be exactly one character" } }
+
+}
 # std/char.mezze - Character type operations
 #
 # Char represents a single Unicode character (UTF-16 code unit).
 # Provides character classification, case conversion, and numeric operations.
-
 # === Construction ===
-
 # Create a character from a Unicode code point
 # Returns None if the code point is invalid (outside 0-65535)
-pub let from_int = { code } ->
-    __native_char_from_int { code = code }
 
+pub let from_int = { code } -> __native_char_from_int { code = code }
 # Get the first character from a string
 # Returns None if the string is empty
-pub let from_string = { s } ->
-    __native_char_from_string { s = s }
 
+pub let from_string = { s } -> __native_char_from_string { s = s }
 # === Conversion ===
-
 # Get the Unicode code point of a character
-pub let to_int = { c } ->
-    __native_char_to_int { c = c }
 
+pub let to_int = { c } -> __native_char_to_int { c = c }
 # Convert a character to a single-character string
-pub let to_str = { c } ->
-    __native_char_to_str { c = c }
 
+pub let to_str = { c } -> __native_char_to_str { c = c }
 # === Case Conversion ===
-
 # Convert to uppercase
-pub let to_upper = { c } ->
-    __native_char_to_upper { c = c }
 
+pub let to_upper = { c } -> __native_char_to_upper { c = c }
 # Convert to lowercase
-pub let to_lower = { c } ->
-    __native_char_to_lower { c = c }
 
+pub let to_lower = { c } -> __native_char_to_lower { c = c }
 # === Character Classification ===
-
 # Check if character is a digit (0-9)
-pub let is_digit = { c } ->
-    __native_char_is_digit { c = c }
 
+pub let is_digit = { c } -> __native_char_is_digit { c = c }
 # Check if character is a letter
-pub let is_letter = { c } ->
-    __native_char_is_letter { c = c }
 
+pub let is_letter = { c } -> __native_char_is_letter { c = c }
 # Check if character is alphanumeric (letter or digit)
-pub let is_alpha_numeric = { c } ->
-    __native_char_is_alpha_numeric { c = c }
 
+pub let is_alpha_numeric = { c } -> __native_char_is_alpha_numeric { c = c }
 # Check if character is whitespace
-pub let is_whitespace = { c } ->
-    __native_char_is_whitespace { c = c }
 
+pub let is_whitespace = { c } -> __native_char_is_whitespace { c = c }
 # Check if character is uppercase
-pub let is_upper = { c } ->
-    __native_char_is_upper { c = c }
 
+pub let is_upper = { c } -> __native_char_is_upper { c = c }
 # Check if character is lowercase
-pub let is_lower = { c } ->
-    __native_char_is_lower { c = c }
 
+pub let is_lower = { c } -> __native_char_is_lower { c = c }
 # === Comparison ===
-
 # Check equality of two characters
-pub let eq = { a, b } ->
-    __native_char_eq { a = a, b = b }
 
+pub let eq = { a, b } -> __native_char_eq { a = a, b = b }
 # Compare two characters, returns Ordering (LT, EQ, GT)
-pub let compare = { a, b } ->
-    __native_char_compare { a = a, b = b }
 
+pub let compare = { a, b } -> __native_char_compare { a = a, b = b }
 # === Digit Operations ===
-
 # Convert a digit character to its numeric value in the given radix
 # Returns None if the character is not a valid digit in that radix
 # Example: digit_to_int { c = 'A', radix = 16 } -> Some { val = 10 }
-pub let digit_to_int = { c, radix } ->
-    __native_char_digit_to_int { c = c, radix = radix }
+
+pub let digit_to_int = { c, radix } -> __native_char_digit_to_int { c = c, radix = radix }
 
 impl Char where {
-    to_int = {it} -> __native_char_to_int {c = it},
-    to_str = {it} -> __native_char_to_str {c = it},
-    to_upper = {it} -> __native_char_to_upper {c = it},
-    to_lower = {it} -> __native_char_to_lower {c = it},
-    is_letter = {it} -> __native_char_is_letter {c = it},
-    is_digit = {it} -> __native_char_is_digit {c = it},
-    is_whitespace = {it} -> __native_char_is_whitespace {c = it},
-    is_upper = {it} -> __native_char_is_upper {c = it},
-    is_lower = {it} -> __native_char_is_lower {c = it}
+  to_int = { it } -> __native_char_to_int { c = it },
+  to_str = { it } -> __native_char_to_str { c = it },
+  to_upper = { it } -> __native_char_to_upper { c = it },
+  to_lower = { it } -> __native_char_to_lower { c = it },
+  is_letter = { it } -> __native_char_is_letter { c = it },
+  is_digit = { it } -> __native_char_is_digit { c = it },
+  is_whitespace = { it } -> __native_char_is_whitespace { c = it },
+  is_upper = { it } -> __native_char_is_upper { c = it },
+  is_lower = { it } -> __native_char_is_lower { c = it },
 }

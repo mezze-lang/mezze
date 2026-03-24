@@ -16,33 +16,31 @@
 #       # Critical section - exclusive access here
 #       update_shared_state {}
 #   }
+use std::abilities::compare::{ Eq }
 
-use std::abilities::compare::{Eq}
-
-# Mutex type wrapping Java's ReentrantLock
 pub newtype Mutex = Mutex __NativeLock
+# Mutex type wrapping Java's ReentrantLock
+# Mutex type wrapping Java's ReentrantLock
 
 impl Eq for Mutex where {
-    eq = {it, r} -> __native_ref_eq {l = it, r = r},
-    neq = {it, r} -> __native_ref_neq {l = it, r = r}
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-
 # Inherent impls for Mutex — method syntax for common operations
-impl Mutex where {
-    with_lock: {it: Mutex, f: {} -> 'a} -> 'a = {it, f} -> with_lock {mutex = it, f = f},
-    lock: {it: Mutex} -> {} = {it} -> lock {mutex = it},
-    unlock: {it: Mutex} -> {} = {it} -> unlock {mutex = it},
-    try_lock: {it: Mutex} -> Bool = {it} -> try_lock {mutex = it},
-    is_held_by_current_thread: {it: Mutex} -> Bool = {it} -> is_held_by_current_thread {mutex = it}
-}
 
+impl Mutex where {
+  with_lock = { it, f } -> with_lock { mutex = it, f = f },
+  lock = { it } -> lock { mutex = it },
+  unlock = { it } -> unlock { mutex = it },
+  try_lock = { it } -> try_lock { mutex = it },
+  is_held_by_current_thread = { it } -> is_held_by_current_thread { mutex = it },
+}
 # Create a new mutex
 #
 # Example:
 #   let m = mutex {}
-pub let mutex: {} -> Mutex =
-    {} -> __native_mutex_new {}
 
+pub let mutex: {} -> Mutex = {} -> __native_mutex_new {}
 # Acquire lock, run function, release lock automatically
 # This is the RECOMMENDED way to use mutexes - guarantees unlock even on error
 #
@@ -51,9 +49,8 @@ pub let mutex: {} -> Mutex =
 #       # Critical section
 #       shared_counter + 1
 #   }
-pub let with_lock: {mutex: Mutex, f: {} -> 'a} -> 'a =
-    {mutex, f} -> __native_mutex_with_lock {mutex = mutex, f = f}
 
+pub let with_lock: { mutex: Mutex, f: {} -> 'a } -> 'a = { mutex, f } -> __native_mutex_with_lock { mutex = mutex, f = f }
 # Acquire lock (blocking)
 # WARNING: You MUST call unlock when done. Prefer with_lock instead.
 #
@@ -61,17 +58,15 @@ pub let with_lock: {mutex: Mutex, f: {} -> 'a} -> 'a =
 #   let _ = lock {mutex = m}
 #   # ... critical section ...
 #   let _ = unlock {mutex = m}
-pub let lock: {mutex: Mutex} -> {} =
-    {mutex} -> __native_mutex_lock {mutex = mutex}
 
+pub let lock: { mutex: Mutex } -> {} = { mutex } -> __native_mutex_lock { mutex = mutex }
 # Release lock
 # Must be called by the thread that holds the lock
 #
 # Example:
 #   unlock {mutex = m}
-pub let unlock: {mutex: Mutex} -> {} =
-    {mutex} -> __native_mutex_unlock {mutex = mutex}
 
+pub let unlock: { mutex: Mutex } -> {} = { mutex } -> __native_mutex_unlock { mutex = mutex }
 # Try to acquire lock without blocking
 # Returns true if lock acquired, false if already held by another thread
 #
@@ -84,10 +79,9 @@ pub let unlock: {mutex: Mutex} -> {} =
 #   else
 #       # Lock was busy
 #       fallback_value
-pub let try_lock: {mutex: Mutex} -> Bool =
-    {mutex} -> __native_mutex_try_lock {mutex = mutex}
 
+pub let try_lock: { mutex: Mutex } -> Bool = { mutex } -> __native_mutex_try_lock { mutex = mutex }
 # Check if mutex is held by current thread
 # Useful for assertions/debugging
-pub let is_held_by_current_thread: {mutex: Mutex} -> Bool =
-    {mutex} -> __native_mutex_is_held_by_current_thread {mutex = mutex}
+
+pub let is_held_by_current_thread: { mutex: Mutex } -> Bool = { mutex } -> __native_mutex_is_held_by_current_thread { mutex = mutex }

@@ -1,21 +1,22 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for SortedMap 'k 'v where { default = {} -> empty {} }
+impl Default for SortedMap 'k 'v where {
+  default = {} -> empty {}
+}
 
 impl Eq 'k 'v for SortedMap 'k 'v where {
-    eq: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_equals {m1 = it, m2 = r},
-    neq: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Eq 'k, Eq 'v -> Bool = {it, r} -> if __native_sorted_map_equals {m1 = it, m2 = r} then False else True
+  eq = { it, r } -> __native_sorted_map_equals { m1 = it, m2 = r },
+  neq = { it, r } -> if __native_sorted_map_equals { m1 = it, m2 = r } then False else True,
 }
 
 impl Ord 'k 'v for SortedMap 'k 'v where {
-    lt: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} == (0 - 1),
-    le: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} != 1,
-    gt: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} == 1,
-    ge: {it: SortedMap 'k 'v, r: SortedMap 'k 'v} with Ord 'k, Ord 'v, Eq 'k, Eq 'v -> Bool = {it, r} -> __native_sorted_map_compare {m1 = it, m2 = r} != (0 - 1)
+  lt = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } == (0 - 1),
+  le = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } != 1,
+  gt = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } == 1,
+  ge = { it, r } -> __native_sorted_map_compare { m1 = it, m2 = r } != (0 - 1),
 }
-
 # std/collections/sorted_map.mezze - Immutable sorted map operations
 #
 # SortedMap is a persistent sorted map backed by a balanced tree.
@@ -27,186 +28,146 @@ impl Ord 'k 'v for SortedMap 'k 'v where {
 # - size, is_empty: O(1)
 #
 # All operations are immutable and return new maps.
-
 # === Construction ===
-
 # Create an empty sorted map
-pub let empty = {} ->
-    __native_sorted_map_empty {}
 
+pub let empty = {} -> __native_sorted_map_empty {}
 # Create a sorted map with a single entry
-pub let singleton = { k, v } ->
-    __native_sorted_map_singleton { k = k, v = v }
 
+pub let singleton = { k, v } -> __native_sorted_map_singleton { k = k, v = v }
 # === Basic Operations ===
-
 # Insert a key-value pair, returns new map
-pub let insert = { m, k, v } ->
-    __native_sorted_map_insert { m = m, k = k, v = v }
 
+pub let insert = { m, k, v } -> __native_sorted_map_insert { m = m, k = k, v = v }
 # Get value by key, returns Option
-pub let get = { m, k } ->
-    __native_sorted_map_get { m = m, k = k }
 
+pub let get = { m, k } -> __native_sorted_map_get { m = m, k = k }
 # Remove a key, returns new map
-pub let remove = { m, k } ->
-    __native_sorted_map_remove { m = m, k = k }
 
+pub let remove = { m, k } -> __native_sorted_map_remove { m = m, k = k }
 # Check if key exists
-pub let contains_key = { m, k } ->
-    __native_sorted_map_contains_key { m = m, k = k }
 
+pub let contains_key = { m, k } -> __native_sorted_map_contains_key { m = m, k = k }
 # === Query ===
-
 # Get number of entries
-pub let size = { m } ->
-    __native_sorted_map_size { m = m }
 
+pub let size = { m } -> __native_sorted_map_size { m = m }
 # Check if map is empty
-pub let is_empty = { m } ->
-    __native_sorted_map_is_empty { m = m }
 
+pub let is_empty = { m } -> __native_sorted_map_is_empty { m = m }
 # Get all keys in sorted order
-pub let keys = { m } ->
-    __native_sorted_map_keys { m = m }
 
+pub let keys = { m } -> __native_sorted_map_keys { m = m }
 # Get all values in key-sorted order
-pub let values = { m } ->
-    __native_sorted_map_values { m = m }
 
+pub let values = { m } -> __native_sorted_map_values { m = m }
 # Get all entries as list of {key, value} records in sorted order
-pub let entries = { m } ->
-    __native_sorted_map_entries { m = m }
 
+pub let entries = { m } -> __native_sorted_map_entries { m = m }
 # === Min/Max Operations ===
-
 # Get minimum key, returns Option
-pub let min_key = { m } ->
-    __native_sorted_map_min_key { m = m }
 
+pub let min_key = { m } -> __native_sorted_map_min_key { m = m }
 # Get maximum key, returns Option
-pub let max_key = { m } ->
-    __native_sorted_map_max_key { m = m }
 
+pub let max_key = { m } -> __native_sorted_map_max_key { m = m }
 # Get minimum entry {key, value}, returns Option
-pub let min_entry = { m } ->
-    __native_sorted_map_min_entry { m = m }
 
+pub let min_entry = { m } -> __native_sorted_map_min_entry { m = m }
 # Get maximum entry {key, value}, returns Option
-pub let max_entry = { m } ->
-    __native_sorted_map_max_entry { m = m }
 
+pub let max_entry = { m } -> __native_sorted_map_max_entry { m = m }
 # === Conversions ===
-
 # Convert from regular Map to SortedMap
-pub let from_map = { m } ->
-    __native_sorted_map_from_map { m = m }
 
+pub let from_map = { m } -> __native_sorted_map_from_map { m = m }
 # Convert SortedMap to regular Map
-pub let to_map = { m } ->
-    __native_sorted_map_to_map { m = m }
 
+pub let to_map = { m } -> __native_sorted_map_to_map { m = m }
 # === Equality ===
-
 # Check if two sorted maps are equal
-pub let equals = { m1, m2 } ->
-    __native_sorted_map_equals { m1 = m1, m2 = m2 }
 
+pub let equals = { m1, m2 } -> __native_sorted_map_equals { m1 = m1, m2 = m2 }
 # === Navigation Operations ===
-
 # Partition map into two maps based on predicate
 # Returns {pass: SortedMap, fail: SortedMap}
-pub let partition = { m, p } ->
-    __native_sorted_map_partition { m = m, p = p }
 
+pub let partition = { m, p } -> __native_sorted_map_partition { m = m, p = p }
 # Get entries in key range [lo, hi] inclusive
-pub let range = { m, lo, hi } ->
-    __native_sorted_map_range { m = m, lo = lo, hi = hi }
 
+pub let range = { m, lo, hi } -> __native_sorted_map_range { m = m, lo = lo, hi = hi }
 # Get greatest key less than or equal to given key, returns Option
-pub let floor_key = { m, k } ->
-    __native_sorted_map_floor_key { m = m, k = k }
 
+pub let floor_key = { m, k } -> __native_sorted_map_floor_key { m = m, k = k }
 # Get least key greater than or equal to given key, returns Option
-pub let ceiling_key = { m, k } ->
-    __native_sorted_map_ceiling_key { m = m, k = k }
 
+pub let ceiling_key = { m, k } -> __native_sorted_map_ceiling_key { m = m, k = k }
 # === View Operations ===
-
 # Get entries with keys strictly less than given key
-pub let head_map = { m, to } ->
-    __native_sorted_map_head_map { m = m, to = to }
 
+pub let head_map = { m, to } -> __native_sorted_map_head_map { m = m, to = to }
 # Get entries with keys >= given key
-pub let tail_map = { m, from } ->
-    __native_sorted_map_tail_map { m = m, from = from }
 
+pub let tail_map = { m, from } -> __native_sorted_map_tail_map { m = m, from = from }
 # Get entries with keys in range [lo, hi) - lo inclusive, hi exclusive
-pub let sub_map = { m, lo, hi } ->
-    __native_sorted_map_sub_map { m = m, lo = lo, hi = hi }
 
+pub let sub_map = { m, lo, hi } -> __native_sorted_map_sub_map { m = m, lo = lo, hi = hi }
 # Take first n entries (in key-sorted order)
-pub let take = { m, n } ->
-    __native_sorted_map_take { m = m, n = n }
 
+pub let take = { m, n } -> __native_sorted_map_take { m = m, n = n }
 # Drop first n entries (in key-sorted order)
-pub let drop = { m, n } ->
-    __native_sorted_map_drop { m = m, n = n }
 
+pub let drop = { m, n } -> __native_sorted_map_drop { m = m, n = n }
 # === Higher-Order Functions ===
-
 # Filter entries by predicate
+
 pub let filter: { m: SortedMap 'k 'v, p: { k: 'k, v: 'v } -> Bool <...> } -> SortedMap 'k 'v <...> = { m, p } ->
-    __native_sorted_map_filter { m = m, p = p }
-
+  __native_sorted_map_filter { m = m, p = p }
 # Fold over entries in key-sorted order
+
 pub let fold: { m: SortedMap 'k 'v, init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc <...> } -> 'acc <...> = { m, init, f } ->
-    __native_sorted_map_fold { m = m, init = init, f = f }
-
+  __native_sorted_map_fold { m = m, init = init, f = f }
 # Transform values
+
 pub let map_values: { m: SortedMap 'k 'v, f: { val: 'v } -> 'w <...> } -> SortedMap 'k 'w <...> = { m, f } ->
-    __native_sorted_map_map_values { m = m, f = f }
-
+  __native_sorted_map_map_values { m = m, f = f }
 # Transform keys
+
 pub let map_keys: { m: SortedMap 'k 'v, f: { val: 'k } -> 'k2 <...> } -> SortedMap 'k2 'v <...> = { m, f } ->
-    __native_sorted_map_map_keys { m = m, f = f }
-
+  __native_sorted_map_map_keys { m = m, f = f }
 # Filter by key predicate
+
 pub let filter_keys: { m: SortedMap 'k 'v, p: { val: 'k } -> Bool <...> } -> SortedMap 'k 'v <...> = { m, p } ->
-    __native_sorted_map_filter_keys { m = m, p = p }
-
+  __native_sorted_map_filter_keys { m = m, p = p }
 # Filter by value predicate
+
 pub let filter_values: { m: SortedMap 'k 'v, p: { val: 'v } -> Bool <...> } -> SortedMap 'k 'v <...> = { m, p } ->
-    __native_sorted_map_filter_values { m = m, p = p }
-
+  __native_sorted_map_filter_values { m = m, p = p }
 # Invert map (swap keys and values)
-pub let invert: { m: SortedMap 'k 'v } -> SortedMap 'v 'k = { m } ->
-    __native_sorted_map_invert { m = m }
 
+pub let invert: { m: SortedMap 'k 'v } -> SortedMap 'v 'k = { m } -> __native_sorted_map_invert { m = m }
 # === List Conversions ===
-
 # Convert to List of {k, v} records
-pub let to_list: { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
-    __native_sorted_map_to_list { m = m }
 
+pub let to_list: { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m } -> __native_sorted_map_to_list { m = m }
 # Create from List of {k, v} records
-pub let from_list: { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
-    __native_sorted_map_from_list { xs = xs }
+
+pub let from_list: { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } -> __native_sorted_map_from_list { xs = xs }
 
 impl SortedMap 'k 'v where {
-    get = {it, k} -> get {m = it, k = k},
-    insert = {it, k, v} -> insert {m = it, k = k, v = v},
-    remove = {it, k} -> remove {m = it, k = k},
-    contains_key = {it, k} -> contains_key {m = it, k = k},
-    size = {it} -> size {m = it},
-    is_empty = {it} -> is_empty {m = it},
-    keys = {it} -> keys {m = it},
-    values = {it} -> values {m = it},
-    min_key = {it} -> min_key {m = it},
-    max_key = {it} -> max_key {m = it},
-    filter = {it, p} -> filter {m = it, p = p},
-    fold = {it, init, f} -> fold {m = it, init = init, f = f},
-    map_values = {it, f} -> map_values {m = it, f = f},
-    to_map = {it} -> to_map {m = it},
-    to_list = {it} -> to_list {m = it}
+  get = { it, k } -> get { m = it, k = k },
+  insert = { it, k, v } -> insert { m = it, k = k, v = v },
+  remove = { it, k } -> remove { m = it, k = k },
+  contains_key = { it, k } -> contains_key { m = it, k = k },
+  size = { it } -> size { m = it },
+  is_empty = { it } -> is_empty { m = it },
+  keys = { it } -> keys { m = it },
+  values = { it } -> values { m = it },
+  min_key = { it } -> min_key { m = it },
+  max_key = { it } -> max_key { m = it },
+  filter = { it, p } -> filter { m = it, p = p },
+  fold = { it, init, f } -> fold { m = it, init = init, f = f },
+  map_values = { it, f } -> map_values { m = it, f = f },
+  to_map = { it } -> to_map { m = it },
+  to_list = { it } -> to_list { m = it },
 }

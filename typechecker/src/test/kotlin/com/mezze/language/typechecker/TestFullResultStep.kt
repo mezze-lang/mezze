@@ -28,7 +28,7 @@ class TestFullResultStep {
         var currentFunc = mutableListOf<String>()
         var inFunction = false
 
-        for (line in lines) {
+        for ((i, line) in lines.withIndex()) {
             if (line.trim().startsWith("pub let ")) {
                 // Save previous function if we have one
                 if (currentFunc.isNotEmpty()) {
@@ -37,12 +37,23 @@ class TestFullResultStep {
                 currentFunc = mutableListOf(line)
                 inFunction = true
             } else if (inFunction) {
+                // A blank line only ends the function if the NEXT non-blank, non-comment line
+                // starts a new declaration (pub let, impl, type, etc.) or we're at EOF.
+                // This handles formatted match bodies that have blank lines between arms.
                 if (line.trim().isEmpty()) {
-                    // Empty line marks end of function
-                    if (currentFunc.isNotEmpty()) {
+                    val nextNonBlank = lines.drop(i + 1).firstOrNull { it.trim().isNotEmpty() }
+                    val isNewDecl = nextNonBlank != null && (
+                        nextNonBlank.trim().startsWith("pub let ") ||
+                        nextNonBlank.trim().startsWith("impl ") ||
+                        nextNonBlank.trim().startsWith("type ") ||
+                        nextNonBlank.trim().startsWith("# ")
+                    )
+                    if (isNewDecl || nextNonBlank == null) {
                         functions.add(currentFunc.joinToString("\n"))
                         currentFunc = mutableListOf()
                         inFunction = false
+                    } else {
+                        currentFunc.add(line)
                     }
                 } else {
                     // Non-empty line - add to current function

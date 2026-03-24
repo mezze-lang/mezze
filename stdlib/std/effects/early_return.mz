@@ -10,18 +10,15 @@
 #       let x = compute {}
 #       if x < 0 then return {val = 0}  # Early exit
 #       x * 2
-
 use std::control::continuation
-use std::control::continuation::{Continuation}
+use std::control::continuation::{ Continuation }
 
 effect Return having 'result where {
-    return: {val: 'result} -> 'a <Return>
+  return: { val: 'result } -> 'a <Return>
 }
-
 # =============================================================================
 # Built-in Handler (uses scoped continuation)
 # =============================================================================
-
 # Returns the value immediately via early return
 # Uses scoped continuation to manage lifecycle automatically.
 #
@@ -32,40 +29,35 @@ effect Return having 'result where {
 #               return {val = item}  # Found it, exit early
 #       }
 #       default_value  # Not found
-impl Return for EarlyReturn having 'result = 'r where {
-    initialize_scope = {} -> { cont = continuation::new {} },
-    finalize_scope = {} -> scope.cont.reset {},
-    return = {val} -> scope.cont.suspend_with {value = val}
-}
 
+impl Return for EarlyReturn having 'result = 'r where {
+  initialize_scope = {} -> { cont = continuation::new {} },
+  finalize_scope = {} -> scope.cont.reset {},
+  return = { val } -> scope.cont.suspend_with { value = val },
+}
 # =============================================================================
 # Helpers
 # =============================================================================
-
 # Shorthand for Return.return
-pub let return = {val} -> Return.return {val}
 
+pub let return = { val } -> Return.return { val }
 # Return if condition is true
-pub let return_if = {condition, val} ->
-    if condition then
-        Return.return {val}
-    else
-        {}
 
+pub let return_if = { condition, val } -> if condition then Return.return { val } else {}
 # Return early unless value is None
-pub let return_some = {option} ->
-    match option is
-        Some {val} -> Return.return {val = val}
-        None -> {}
+
+pub let return_some = { option } -> match option is
+  Some { val } -> Return.return { val = val }
+  None -> {}
 
 # Return early if value is None (with default)
-pub let return_none = {option, default} ->
-    match option is
-        Some {val} -> val
-        None -> Return.return {val = default}
+
+pub let return_none = { option, default } -> match option is
+  Some { val } -> val
+  None -> Return.return { val = default }
 
 # Return early if Result is Err
-pub let return_err = {result, default} ->
-    match result is
-        Ok {val} -> val
-        Err {error} -> Return.return {val = default}
+
+pub let return_err = { result, default } -> match result is
+  Ok { val } -> val
+  Err { error } -> Return.return { val = default }

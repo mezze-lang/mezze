@@ -1,21 +1,22 @@
-use std::abilities::compare::{Eq, Ord}
-use std::abilities::default::{Default}
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
 use std::int
 
-impl Default for Deque 'a where { default = {} -> empty {} }
+impl Default for Deque 'a where {
+  default = {} -> empty {}
+}
 
 impl Eq 'a for Deque 'a where {
-    eq: {it: Deque 'a, r: Deque 'a} with Eq 'a -> Bool = {it, r} -> __native_deque_equals {d1 = it, d2 = r},
-    neq: {it: Deque 'a, r: Deque 'a} with Eq 'a -> Bool = {it, r} -> if __native_deque_equals {d1 = it, d2 = r} then False else True
+  eq = { it, r } -> __native_deque_equals { d1 = it, d2 = r },
+  neq = { it, r } -> if __native_deque_equals { d1 = it, d2 = r } then False else True,
 }
 
 impl Ord 'a for Deque 'a where {
-    lt: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} == (0 - 1),
-    le: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} != 1,
-    gt: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} == 1,
-    ge: {it: Deque 'a, r: Deque 'a} with Ord 'a, Eq 'a -> Bool = {it, r} -> __native_deque_compare {d1 = it, d2 = r} != (0 - 1)
+  lt = { it, r } -> __native_deque_compare { d1 = it, d2 = r } == (0 - 1),
+  le = { it, r } -> __native_deque_compare { d1 = it, d2 = r } != 1,
+  gt = { it, r } -> __native_deque_compare { d1 = it, d2 = r } == 1,
+  ge = { it, r } -> __native_deque_compare { d1 = it, d2 = r } != (0 - 1),
 }
-
 # std/collections/deque.mezze - Double-ended queue operations
 #
 # Deque 'a is a built-in type implemented using the Banker's Queue algorithm.
@@ -25,314 +26,246 @@ impl Ord 'a for Deque 'a where {
 # - A queue (FIFO): push_back, pop_front
 # - A stack (LIFO): push_front, pop_front or push_back, pop_back
 # - A double-ended queue: all operations
-
 # ============================================
 # Construction
 # ============================================
 
-pub let empty: {} -> Deque 'a = {} ->
-    __native_deque_empty {}
+pub let empty: {} -> Deque 'a = {} -> __native_deque_empty {}
 
-pub let singleton: { x: 'a } -> Deque 'a = { x } ->
-    __native_deque_singleton { x = x }
-
+pub let singleton: { x: 'a } -> Deque 'a = { x } -> __native_deque_singleton { x = x }
 # Convert from a List (without type annotation to avoid unification issues)
-pub let from_list = { xs } ->
-    __native_deque_from_list { xs = xs }
 
+pub let from_list = { xs } -> __native_deque_from_list { xs = xs }
 # ============================================
 # Add elements
 # ============================================
-
 # Push element to the front (O(1))
-pub let push_front: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
-    __native_deque_push_front { d = d, x = x }
 
+pub let push_front: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } -> __native_deque_push_front { d = d, x = x }
 # Push element to the back (O(1))
-pub let push_back: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
-    __native_deque_push_back { d = d, x = x }
 
+pub let push_back: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } -> __native_deque_push_back { d = d, x = x }
 # ============================================
 # Remove elements (returns Option)
 # ============================================
-
 # Pop element from front - returns Option {head: 'a, tail: Deque 'a}
+
 pub let pop_front: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
-    __native_deque_pop_front { d = d }
-
+  __native_deque_pop_front { d = d }
 # Pop element from back - returns Option {init: Deque 'a, last: 'a}
-pub let pop_back: { d: Deque 'a } -> Option { init: Deque 'a, last: 'a } = { d } ->
-    __native_deque_pop_back { d = d }
 
+pub let pop_back: { d: Deque 'a } -> Option { init: Deque 'a, last: 'a } = { d } ->
+  __native_deque_pop_back { d = d }
 # ============================================
 # Peek (without removing)
 # ============================================
-
 # Peek at front element without removing
-pub let peek_front: { d: Deque 'a } -> Option 'a = { d } ->
-    __native_deque_peek_front { d = d }
 
+pub let peek_front: { d: Deque 'a } -> Option 'a = { d } -> __native_deque_peek_front { d = d }
 # Peek at back element without removing
-pub let peek_back: { d: Deque 'a } -> Option 'a = { d } ->
-    __native_deque_peek_back { d = d }
 
+pub let peek_back: { d: Deque 'a } -> Option 'a = { d } -> __native_deque_peek_back { d = d }
 # ============================================
 # Queries
 # ============================================
 
-pub let is_empty: { d: Deque 'a } -> Bool = { d } ->
-    __native_deque_is_empty { d = d }
+pub let is_empty: { d: Deque 'a } -> Bool = { d } -> __native_deque_is_empty { d = d }
 
-pub let length: { d: Deque 'a } -> Int = { d } ->
-    __native_deque_length { d = d }
-
+pub let length: { d: Deque 'a } -> Int = { d } -> __native_deque_length { d = d }
 # ============================================
 # Conversions
 # ============================================
-
 # Convert to a List (without type annotation to avoid unification issues)
-pub let to_list = { d } ->
-    __native_deque_to_list { d = d }
 
-pub let to_seq: { d: Deque 'a } -> ['a] = { d } ->
-    __native_deque_to_seq { d = d }
+pub let to_list = { d } -> __native_deque_to_list { d = d }
 
+pub let to_seq: { d: Deque 'a } -> ['a] = { d } -> __native_deque_to_seq { d = d }
 # Convert from a Seq
-pub let from_seq = { xs } ->
-    __native_deque_from_seq { xs = xs }
 
+pub let from_seq = { xs } -> __native_deque_from_seq { xs = xs }
 # ============================================
 # Higher-order functions
 # ============================================
 
 pub let map: { d: Deque 'a, f: { x: 'a } -> 'b <...> } -> Deque 'b <...> = { d, f } ->
-    __native_deque_map { d = d, f = f }
+  __native_deque_map { d = d, f = f }
 
 pub let filter: { d: Deque 'a, p: { x: 'a } -> Bool <...> } -> Deque 'a <...> = { d, p } ->
-    __native_deque_filter { d = d, p = p }
+  __native_deque_filter { d = d, p = p }
 
 pub let fold: { d: Deque 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> 'b <...> = { d, init, f } ->
-    __native_deque_fold { d = d, init = init, f = f }
-
+  __native_deque_fold { d = d, init = init, f = f }
 # ============================================
 # Transformation
 # ============================================
 
-pub let reverse: { d: Deque 'a } -> Deque 'a = { d } ->
-    __native_deque_reverse { d = d }
+pub let reverse: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_reverse { d = d }
 
-pub let concat: { d1: Deque 'a, d2: Deque 'a } -> Deque 'a = { d1, d2 } ->
-    __native_deque_concat { d1 = d1, d2 = d2 }
-
+pub let concat: { d1: Deque 'a, d2: Deque 'a } -> Deque 'a = { d1, d2 } -> __native_deque_concat { d1 = d1, d2 = d2 }
 # ============================================
 # Queue operations (FIFO convenience)
 # ============================================
-
 # Enqueue (add to back)
-pub let enqueue: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
-    push_back { d = d, x = x }
 
+pub let enqueue: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } -> push_back { d = d, x = x }
 # Dequeue (remove from front)
-pub let dequeue: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
-    pop_front { d = d }
 
+pub let dequeue: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
+  pop_front { d = d }
 # ============================================
 # Stack operations (LIFO convenience)
 # ============================================
-
 # Push (add to front)
-pub let push: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
-    push_front { d = d, x = x }
 
+pub let push: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } -> push_front { d = d, x = x }
 # Pop (remove from front)
-pub let pop: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
-    pop_front { d = d }
 
+pub let pop: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } -> pop_front { d = d }
 # ============================================
 # Equality
 # ============================================
 
-pub let equals: { d1: Deque 'a, d2: Deque 'a } -> Bool = { d1, d2 } ->
-    __native_deque_equals { d1 = d1, d2 = d2 }
-
+pub let equals: { d1: Deque 'a, d2: Deque 'a } -> Bool = { d1, d2 } -> __native_deque_equals { d1 = d1, d2 = d2 }
 # ============================================
 # Min/Max By Key
 # ============================================
-
 # Find element with minimum key (returns Option)
-pub let min_by = { d, f } ->
-    __native_deque_min_by { d = d, f = f }
 
+pub let min_by = { d, f } -> __native_deque_min_by { d = d, f = f }
 # Find element with maximum key (returns Option)
-pub let max_by = { d, f } ->
-    __native_deque_max_by { d = d, f = f }
 
+pub let max_by = { d, f } -> __native_deque_max_by { d = d, f = f }
 # ============================================
 # Indexed Access
 # ============================================
-
 # Get element at index (returns Option)
-pub let get = { d, i } ->
-    __native_deque_get { d = d, i = i }
 
+pub let get = { d, i } -> __native_deque_get { d = d, i = i }
 # Get sub-range from start to end (exclusive)
-pub let slice = { d, start, end } ->
-    __native_deque_slice { d = d, start = start, end = end }
 
+pub let slice = { d, start, end } -> __native_deque_slice { d = d, start = start, end = end }
 # Find index of element (returns Option Int)
-pub let index_of = { d, x } ->
-    __native_deque_index_of { d = d, x = x }
 
+pub let index_of = { d, x } -> __native_deque_index_of { d = d, x = x }
 # Find index of first element matching predicate (returns Option Int)
-pub let find_index = { d, p } ->
-    __native_deque_find_index { d = d, p = p }
 
+pub let find_index = { d, p } -> __native_deque_find_index { d = d, p = p }
 # ============================================
 # Slicing Operations
 # ============================================
-
 # Take elements while predicate holds
-pub let take_while = { d, p } ->
-    __native_deque_take_while { d = d, p = p }
 
+pub let take_while = { d, p } -> __native_deque_take_while { d = d, p = p }
 # Drop elements while predicate holds
-pub let drop_while = { d, p } ->
-    __native_deque_drop_while { d = d, p = p }
 
+pub let drop_while = { d, p } -> __native_deque_drop_while { d = d, p = p }
 # Split at index into {l, r}
-pub let split_at = { d, i } ->
-    __native_deque_split_at { d = d, i = i }
 
+pub let split_at = { d, i } -> __native_deque_split_at { d = d, i = i }
 # Split at first element failing predicate into {l, r}
-pub let span = { d, p } ->
-    __native_deque_span { d = d, p = p }
 
+pub let span = { d, p } -> __native_deque_span { d = d, p = p }
 # ============================================
 # Transformation Operations
 # ============================================
-
 # Running fold producing intermediate results
-pub let scan = { d, init, f } ->
-    __native_deque_scan { d = d, init = init, f = f }
 
+pub let scan = { d, init, f } -> __native_deque_scan { d = d, init = init, f = f }
 # Remove consecutive duplicates
-pub let dedup = { d } ->
-    __native_deque_dedup { d = d }
 
+pub let dedup = { d } -> __native_deque_dedup { d = d }
 # Remove consecutive duplicates by key
-pub let dedup_by = { d, f } ->
-    __native_deque_dedup_by { d = d, f = f }
 
+pub let dedup_by = { d, f } -> __native_deque_dedup_by { d = d, f = f }
 # Add separator between elements
-pub let intersperse = { d, sep } ->
-    __native_deque_intersperse { d = d, sep = sep }
 
+pub let intersperse = { d, sep } -> __native_deque_intersperse { d = d, sep = sep }
 # ============================================
 # Combining Operations
 # ============================================
-
 # Combine two deques element-wise into deque of pairs
-pub let zip = { d1, d2 } ->
-    __native_deque_zip { d1 = d1, d2 = d2 }
 
+pub let zip = { d1, d2 } -> __native_deque_zip { d1 = d1, d2 = d2 }
 # Pair each element with its index
-pub let zip_with_index = { d } ->
-    __native_deque_zip_with_index { d = d }
 
+pub let zip_with_index = { d } -> __native_deque_zip_with_index { d = d }
 # Rotate elements left by n positions
-pub let rotate_left = { d, n } ->
-    __native_deque_rotate_left { d = d, n = n }
 
+pub let rotate_left = { d, n } -> __native_deque_rotate_left { d = d, n = n }
 # Rotate elements right by n positions
-pub let rotate_right = { d, n } ->
-    __native_deque_rotate_right { d = d, n = n }
 
+pub let rotate_right = { d, n } -> __native_deque_rotate_right { d = d, n = n }
 # ============================================
 # Cross-Collection Conversions
 # ============================================
-
 # Convert deque to Set
-pub let to_set = { d } ->
-    __native_deque_to_set { d = d }
 
+pub let to_set = { d } -> __native_deque_to_set { d = d }
 # Convert deque to SortedSet
-pub let to_sorted_set = { d } ->
-    __native_deque_to_sorted_set { d = d }
 
+pub let to_sorted_set = { d } -> __native_deque_to_sorted_set { d = d }
 # Convert deque of {key, value} records to Map
-pub let to_map = { d } ->
-    __native_deque_to_map { d = d }
 
+pub let to_map = { d } -> __native_deque_to_map { d = d }
 # Convert deque of {key, value} records to SortedMap
-pub let to_sorted_map = { d } ->
-    __native_deque_to_sorted_map { d = d }
 
+pub let to_sorted_map = { d } -> __native_deque_to_sorted_map { d = d }
 # Convert Set to deque
-pub let from_set = { s } ->
-    __native_deque_from_set { s = s }
 
+pub let from_set = { s } -> __native_deque_from_set { s = s }
 # Convert SortedSet to deque (in sorted order)
-pub let from_sorted_set = { s } ->
-    __native_deque_from_sorted_set { s = s }
 
+pub let from_sorted_set = { s } -> __native_deque_from_sorted_set { s = s }
 # Convert Map to deque of {key, value} records
-pub let from_map = { m } ->
-    __native_deque_from_map { m = m }
 
+pub let from_map = { m } -> __native_deque_from_map { m = m }
 # Convert SortedMap to deque of {key, value} records (in sorted key order)
-pub let from_sorted_map = { m } ->
-    __native_deque_from_sorted_map { m = m }
 
+pub let from_sorted_map = { m } -> __native_deque_from_sorted_map { m = m }
 # ============================================
 # Additional Operations
 # ============================================
-
 # Take first n elements
-pub let take: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } ->
-    __native_deque_take { d = d, n = n }
 
+pub let take: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } -> __native_deque_take { d = d, n = n }
 # Drop first n elements
-pub let drop: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } ->
-    __native_deque_drop { d = d, n = n }
 
+pub let drop: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } -> __native_deque_drop { d = d, n = n }
 # Partition elements by predicate into {pass, fail}
+
 pub let partition: { d: Deque 'a, p: { val: 'a } -> Bool <...> } -> { pass: Deque 'a, fail: Deque 'a } <...> = { d, p } ->
-    __native_deque_partition { d = d, p = p }
-
+  __native_deque_partition { d = d, p = p }
 # Remove duplicate elements (keeps first occurrence)
-pub let unique: { d: Deque 'a } -> Deque 'a = { d } ->
-    __native_deque_unique { d = d }
 
+pub let unique: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_unique { d = d }
 # Sort elements (elements must be comparable)
-pub let sort: { d: Deque 'a } -> Deque 'a = { d } ->
-    __native_deque_sort { d = d }
 
+pub let sort: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_sort { d = d }
 # Sum float elements
-pub let sum_float: { d: Deque Float } -> Float = { d } ->
-    __native_deque_sum_float { d = d }
 
+pub let sum_float: { d: Deque Float } -> Float = { d } -> __native_deque_sum_float { d = d }
 # Product of float elements
-pub let product_float: { d: Deque Float } -> Float = { d } ->
-    __native_deque_product_float { d = d }
+
+pub let product_float: { d: Deque Float } -> Float = { d } -> __native_deque_product_float { d = d }
 
 impl Deque 'a where {
-    push_front = {it, x} -> push_front {d = it, x = x},
-    push_back = {it, x} -> push_back {d = it, x = x},
-    pop_front = {it} -> pop_front {d = it},
-    pop_back = {it} -> pop_back {d = it},
-    peek_front = {it} -> peek_front {d = it},
-    peek_back = {it} -> peek_back {d = it},
-    is_empty = {it} -> is_empty {d = it},
-    length = {it} -> length {d = it},
-    map = {it, f} -> map {d = it, f = f},
-    filter = {it, p} -> filter {d = it, p = p},
-    fold = {it, init, f} -> fold {d = it, init = init, f = f},
-    reverse = {it} -> reverse {d = it},
-    concat = {it, d2} -> concat {d1 = it, d2 = d2},
-    take = {it, n} -> take {d = it, n = n},
-    drop = {it, n} -> drop {d = it, n = n},
-    sort = {it} -> sort {d = it},
-    unique = {it} -> unique {d = it},
-    to_list = {it} -> to_list {d = it},
-    to_seq = {it} -> to_seq {d = it}
+  push_front = { it, x } -> push_front { d = it, x = x },
+  push_back = { it, x } -> push_back { d = it, x = x },
+  pop_front = { it } -> pop_front { d = it },
+  pop_back = { it } -> pop_back { d = it },
+  peek_front = { it } -> peek_front { d = it },
+  peek_back = { it } -> peek_back { d = it },
+  is_empty = { it } -> is_empty { d = it },
+  length = { it } -> length { d = it },
+  map = { it, f } -> map { d = it, f = f },
+  filter = { it, p } -> filter { d = it, p = p },
+  fold = { it, init, f } -> fold { d = it, init = init, f = f },
+  reverse = { it } -> reverse { d = it },
+  concat = { it, d2 } -> concat { d1 = it, d2 = d2 },
+  take = { it, n } -> take { d = it, n = n },
+  drop = { it, n } -> drop { d = it, n = n },
+  sort = { it } -> sort { d = it },
+  unique = { it } -> unique { d = it },
+  to_list = { it } -> to_list { d = it },
+  to_seq = { it } -> to_seq { d = it },
 }
