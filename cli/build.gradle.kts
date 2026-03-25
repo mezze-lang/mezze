@@ -207,28 +207,22 @@ graalvmNative {
                 "-O2"
             )
 
-            // Use the system/nix C compiler so native-image finds macOS SDK headers.
-            // Without this, native-image uses its own compiler discovery which may miss
-            // Foundation.h in nix environments.
-            val ccPath = System.getenv("CC") ?: "cc"
+            // Tell native-image to use the system C compiler (resolves macOS SDK
+            // headers in nix environments where cc is a clang wrapper with sysroot).
             val resolvedCc = try {
-                ProcessBuilder("which", ccPath).start().inputStream.bufferedReader().readLine()?.trim()
+                ProcessBuilder("which", System.getenv("CC") ?: "cc")
+                    .start().inputStream.bufferedReader().readLine()?.trim()
             } catch (_: Exception) { null }
             if (resolvedCc != null) {
                 args.add("-H:CCompilerPath=$resolvedCc")
             }
 
-            // Add zlib library path if available
-            if (zlibLibPath.isNotEmpty()) {
-                args.add("-H:NativeLinkerOption=-L$zlibLibPath")
-                args.add("-H:NativeLinkerOption=-Wl,-rpath,$zlibLibPath")
-            }
-
-            // Also pass LIBRARY_PATH directories to the linker.
-            // In nix environments, zlib and other libs are in nix store paths
-            // that the linker doesn't know about by default.
-            val libraryPath = System.getenv("LIBRARY_PATH") ?: ""
-            for (libDir in libraryPath.split(":").filter { it.isNotEmpty() }) {
+            // Pass library search paths to the linker (nix stores zlib etc. in /nix/store).
+            val libPaths = listOfNotNull(
+                zlibLibPath.ifEmpty { null },
+                *System.getenv("LIBRARY_PATH")?.split(":")?.filter { it.isNotEmpty() }?.toTypedArray() ?: emptyArray()
+            ).distinct()
+            for (libDir in libPaths) {
                 args.add("-H:NativeLinkerOption=-L$libDir")
             }
 
