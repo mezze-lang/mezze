@@ -53,7 +53,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test basic string variable interpolation`() {
         assertTypeChecks("""
-            let name = "World"
+                        let name = "World"
             let greeting = "Hello $(name)!"
             greeting
         """.trimIndent())
@@ -97,7 +97,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             let display = {x: Int} -> "Value: $(x.show {})"
@@ -108,12 +108,12 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test polymorphic function with Show constraint using interpolation`() {
         assertTypeChecks("""
-            ability Show for 'a where {
+                        ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             let display: {val: 'a} -> Str with Show 'a = {val} ->
@@ -129,12 +129,12 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test nested ability calls in interpolation`() {
         assertTypeChecks("""
-            ability Show for 'a where {
+                        ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             impl Show for Str where {
@@ -151,12 +151,12 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test ability constraint propagation through interpolation`() {
         assertTypeChecks("""
-            ability Show for 'a where {
+                        ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             let wrap: {val: 'a} -> Str with Show 'a = {val} ->
@@ -174,7 +174,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test match expression inside interpolation`() {
         assertTypeChecks("""
-            type Status = | Active {}, Inactive {} |
+                        type Status = | Active {}, Inactive {} |
 
             let statusToString = {s: Status} -> match s is
                 Active {} -> "active"
@@ -445,7 +445,7 @@ class StringInterpolationTypeCheckerTest {
             let x = 10
             let y = 5
             let sum = x + y
-            let result = "Sum: $(int::to_str {n = sum})"
+            let result = "Sum: $(__native_int_to_str {n = sum})"
             result
         """.trimIndent())
     }
@@ -453,7 +453,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test boolean result used with conditional in interpolation`() {
         assertTypeChecks("""
-            let a = 10
+                        let a = 10
             let b = 5
             let result = "$(if a > b then "a is greater" else "b is greater or equal")"
             result
@@ -587,7 +587,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             type Result = | Ok { value: Int }, Err { message: Str } |
@@ -616,12 +616,12 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test multiple ability constraints with interpolation in lambda chain`() {
         assertTypeChecks("""
-            ability Show for 'a where {
+                        ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
 
             impl Show for Int where {
-                show = {it} -> int::to_str {n = it}
+                show = {it} -> __native_int_to_str {n = it}
             }
 
             impl Show for Str where {
