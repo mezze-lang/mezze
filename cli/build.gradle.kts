@@ -100,20 +100,18 @@ tasks.named<ProcessResources>("processResources") {
     }
 }
 
-tasks.shadowJar {
-    archiveFileName.set("mezze.jar")
-    mergeServiceFiles()
-}
-
-// Task to pre-compile stdlib to SQLite for embedding in native image
+// Task to pre-compile stdlib to SQLite for embedding in JAR and native image.
+// Always cleans old db first to prevent stale data.
 tasks.register<JavaExec>("compileStdlib") {
-    dependsOn("shadowJar")
+    dependsOn("classes")  // Need compiled classes, not full JAR
     group = "build"
     description = "Pre-compile stdlib modules to SQLite database"
 
-    classpath = files("${layout.buildDirectory.get()}/libs/mezze.jar")
+    val stdlibDb = file("${layout.buildDirectory.get()}/resources/main/stdlib.db")
+
+    classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("com.mezze.language.cli.MainKt")
-    args = listOf("--compile-stdlib", "${layout.buildDirectory.get()}/resources/main/stdlib.db")
+    args = listOf("--compile-stdlib", stdlibDb.absolutePath)
 
     // Set project root for stdlib discovery
     systemProperty("mezze.project.root", project.rootDir.absolutePath)
@@ -125,6 +123,25 @@ tasks.register<JavaExec>("compileStdlib") {
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
     )
+
+    // Clean old db before compiling
+    doFirst {
+        if (stdlibDb.exists()) {
+            stdlibDb.delete()
+            println("Cleaned old stdlib.db")
+        }
+    }
+
+    // Re-run if any .mz file changed
+    inputs.dir(project.rootDir.resolve("stdlib/std"))
+    outputs.file(stdlibDb)
+}
+
+// shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
+tasks.shadowJar {
+    dependsOn("compileStdlib")
+    archiveFileName.set("mezze.jar")
+    mergeServiceFiles()
 }
 
 // Task to build standalone JARs with Truffle runtime for compiled Mezze programs
@@ -283,7 +300,10 @@ graalvmNative {
     }
 }
 
-// Make nativeCompile depend on compileStdlib
+// Both JAR and native builds depend on compileStdlib for fresh stdlib.db
+tasks.named("jar") {
+    dependsOn("compileStdlib")
+}
 tasks.named("nativeCompile") {
     dependsOn("compileStdlib")
 }
