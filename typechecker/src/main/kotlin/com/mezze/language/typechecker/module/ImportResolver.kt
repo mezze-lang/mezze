@@ -196,8 +196,9 @@ class ImportResolver(
                 val qualifierName = alias ?: path.segments.lastOrNull()
 
                 // CRITICAL FIX: Use exports from typedModule if available (has real inferred types),
-                // otherwise fall back to module.exports (has placeholder types)
-                val exportsToUse = typedModule?.exports ?: module.exports
+                // otherwise fall back to module.exports (has placeholder types).
+                // Preloaded modules may have empty exports — use module.exports in that case.
+                val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
                 // Build import context from all exports
                 val context = buildContextFromExports(
@@ -267,8 +268,9 @@ class ImportResolver(
                 }
 
                 // CRITICAL FIX: Use exports from typedModule if available (has real inferred types),
-                // otherwise fall back to module.exports (has placeholder types)
-                val exportsToUse = typedModule?.exports ?: module.exports
+                // otherwise fall back to module.exports (has placeholder types).
+                // Preloaded modules may have empty exports — use module.exports in that case.
+                val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
                 // Extract specific items
                 val context = buildContextFromSelectiveImports(

@@ -38,20 +38,27 @@ object BuiltInAbilities {
      */
     private fun buildAbilitiesFromMzFiles(): Map<String, Map<String, (MezzeType.VarType) -> MezzeType>> {
         val parser = com.mezze.language.parser.MezzeParser()
-        val abilityFiles = listOf(
-            "std/abilities/numeric.mz",
-            "std/abilities/compare.mz",
-            "std/abilities/logic.mz",
-            "std/abilities/inspect.mz",
-            "std/abilities/convert.mz",
-            "std/abilities/default.mz",
+        // Try both paths: without prefix (dev/test) and with stdlib/ prefix (JAR/native)
+        val abilityFileNames = listOf(
+            "abilities/numeric.mz",
+            "abilities/compare.mz",
+            "abilities/logic.mz",
+            "abilities/inspect.mz",
+            "abilities/convert.mz",
+            "abilities/default.mz",
         )
+        val abilityFiles = abilityFileNames.map { name ->
+            // Try stdlib/std/ prefix first (embedded resources), then std/ (disk fallback)
+            "stdlib/std/$name" to "std/$name"
+        }
 
         val result = mutableMapOf<String, Map<String, (MezzeType.VarType) -> MezzeType>>()
 
-        for (file in abilityFiles) {
+        for ((embeddedPath, diskPath) in abilityFiles) {
             try {
-                val source = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(file) ?: continue
+                val source = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(embeddedPath)
+                    ?: com.mezze.language.typechecker.ModuleResolver.readStdlibFile(diskPath)
+                    ?: continue
                 val program = parser.parse(source)
                 for (decl in program.items.filterIsInstance<AbilityDeclaration>()) {
                     val methods = mutableMapOf<String, (MezzeType.VarType) -> MezzeType>()
@@ -65,7 +72,7 @@ object BuiltInAbilities {
                     result[decl.name] = methods
                 }
             } catch (e: Exception) {
-                System.err.println("[BuiltInAbilities] Failed to parse $file: ${e.message}")
+                System.err.println("[BuiltInAbilities] Failed to parse $embeddedPath: ${e.message}")
             }
         }
 

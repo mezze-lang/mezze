@@ -48,7 +48,7 @@ private fun loadPrecompiledStdlib() {
         }
     } catch (e: Exception) {
         // Fall back to dynamic stdlib loading if pre-compiled not available
-        // This happens in development mode
+        System.err.println("Warning: Failed to load pre-compiled stdlib: ${e.message}")
     }
 }
 
@@ -130,6 +130,11 @@ fun main(args: Array<String>) {
             System.setProperty("mezze.project.root", projectRoot.absolutePath)
         }
     }
+
+    // Load pre-compiled stdlib from embedded resource if available.
+    // This must happen before any type-checking so preloaded modules
+    // are in the cache for prelude injection and module resolution.
+    loadPrecompiledStdlib()
 
     if (args.isEmpty()) {
         showUsage()
@@ -1016,9 +1021,6 @@ private fun handleExecCommand(args: List<String>) {
     } else {
         java.nio.file.Paths.get(".").toAbsolutePath()
     }
-
-    // Load pre-compiled stdlib if available (skips stdlib type-checking)
-    loadPrecompiledStdlib()
 
     // Type-check with main validation: main must be {} -> {} <*>
     val typeCheckStart = System.nanoTime()
