@@ -44,6 +44,9 @@ class MezzeTextDocumentService(
     // Document state
     private val documents = ConcurrentHashMap<String, DocumentState>()
 
+    // Last successful type check result per document (survives parse errors for dot-completion)
+    private val lastSuccessfulResult = ConcurrentHashMap<String, TypeCheckResult>()
+
     // Codebase for project mode
     private var projectCodebase: Codebase? = null
 
@@ -244,6 +247,9 @@ class MezzeTextDocumentService(
                     importedAbilities = recoveryResult.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = recoveryResult.importContext?.importedEffects ?: emptyMap()
                 )
+
+                // Cache for dot-completion (survives subsequent parse errors)
+                lastSuccessfulResult[uri] = typeCheckResult!!
 
                 // Populate codebase if in project mode and no errors
                 if (recoveryResult.errors.isEmpty()) {
@@ -1138,11 +1144,15 @@ class MezzeTextDocumentService(
         val line = lines[position.line]
         val beforeCursor = line.substring(0, minOf(position.character, line.length))
 
-        // Check if cursor is right after a dot: `identifier.` or `expr.`
-        val dotMatch = Regex("""(\w+)\.\s*$""").find(beforeCursor) ?: return emptyList()
+        // Check if cursor is after a dot: `identifier.` or `identifier.partial`
+        val dotMatch = Regex("""(\w+)\.(\w*)$""").find(beforeCursor) ?: return emptyList()
         val receiverName = dotMatch.groupValues[1]
+        val partialMethod = dotMatch.groupValues[2]  // May be empty
 
-        val result = state.typeCheckResult ?: return emptyList()
+        // Use current type check result, or fall back to last successful one
+        val result = state.typeCheckResult
+            ?: lastSuccessfulResult[state.uri]
+            ?: return emptyList()
         val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
 
         fun formatType(type: MezzeType): String {
@@ -1159,28 +1169,31 @@ class MezzeTextDocumentService(
 
         val items = mutableListOf<CompletionItem>()
         val typeName = getTypeName(baseType)
+        val addedMethods = mutableSetOf<String>()  // Deduplicate
 
         // 1. Collect ability methods available for this type
-        val allAbilities = result.program.items.filterIsInstance<AbilityDeclaration>() +
-            (result.importedAbilities.values)
+        // Use both imported abilities (from prelude) and local program abilities
+        val allAbilities = result.importedAbilities.values +
+            result.program.items.filterIsInstance<AbilityDeclaration>()
 
-        val allImpls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        // Check both local impls and builtin ability impls
+        val localImpls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
 
         for (abilityDecl in allAbilities) {
-            // Check if this type has an impl for this ability (or if it's auto-derived)
-            val hasImpl = allImpls.any { impl ->
-                impl.abilityName == abilityDecl.name && impl.targetTypes.any { target ->
-                    formatTypeAnnotation(target).contains(typeName ?: "")
+            val hasImpl = isBuiltinAbilityForType(abilityDecl.name, baseType) ||
+                localImpls.any { impl ->
+                    impl.abilityName == abilityDecl.name && impl.targetTypes.any { target ->
+                        formatTypeAnnotation(target).contains(typeName ?: "")
+                    }
                 }
-            } || isBuiltinAbilityForType(abilityDecl.name, baseType)
 
             if (hasImpl) {
                 for (op in abilityDecl.operations) {
-                    // Skip methods that don't have `it` (construction methods like default, zero)
+                    if (op.name in addedMethods) continue
+                    // Skip construction methods (no `it` param)
                     val paramStr = formatTypeAnnotation(op.paramType)
-                    if (!paramStr.contains("it:") && !paramStr.contains("it ")) continue
+                    if (!paramStr.contains("it")) continue
 
-                    // Build the completion snippet (exclude `it` from args the user types)
                     val argFields = extractNonItFields(op.paramType)
                     val snippet = if (argFields.isEmpty()) {
                         "${op.name} {}"
@@ -1200,16 +1213,18 @@ class MezzeTextDocumentService(
                         insertText = snippet
                         insertTextFormat = InsertTextFormat.Snippet
                     })
+                    addedMethods.add(op.name)
                 }
             }
         }
 
-        // 2. Collect inherent methods for this type
-        for (impl in allImpls) {
+        // 2. Collect inherent methods for this type (both local and imported)
+        for (impl in localImpls) {
             if (!impl.isInherent) continue
             val implTypeName = impl.targetTypes.firstOrNull()?.let { formatTypeAnnotation(it) }
             if (implTypeName != null && (implTypeName == typeName || implTypeName.startsWith(typeName ?: ""))) {
                 for (op in impl.operations) {
+                    if (op.name in addedMethods) continue
                     val argFields = extractNonItFieldsFromImpl(op)
                     val snippet = if (argFields.isEmpty()) {
                         "${op.name} {}"
@@ -1226,6 +1241,7 @@ class MezzeTextDocumentService(
                         insertText = snippet
                         insertTextFormat = InsertTextFormat.Snippet
                     })
+                    addedMethods.add(op.name)
                 }
             }
         }
@@ -1233,6 +1249,7 @@ class MezzeTextDocumentService(
         // 3. Record field access
         if (baseType is MezzeType.RecordType) {
             for ((fieldName, fieldType) in baseType.fields) {
+                if (fieldName in addedMethods) continue
                 items.add(CompletionItem(fieldName).apply {
                     kind = CompletionItemKind.Field
                     detail = formatType(fieldType)
@@ -1240,7 +1257,12 @@ class MezzeTextDocumentService(
             }
         }
 
-        return items
+        // Filter by partial method name if user already typed some characters after the dot
+        return if (partialMethod.isNotEmpty()) {
+            items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
+        } else {
+            items
+        }
     }
 
     /** Get the simple type name for ability matching. */
