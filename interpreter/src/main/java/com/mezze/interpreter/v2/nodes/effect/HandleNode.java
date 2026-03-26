@@ -73,10 +73,16 @@ final class HandlerLookupNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
-        Object handler = context.lookupGlobal(contentHash);
+        // Try local (EffectImplStorageNode uses defineLocal for performer name)
+        Object handler = context.lookupLocal(contentHash);
         if (handler == null) {
-            throw new RuntimeException("Handler not found for hash: " + contentHash);
+            handler = context.lookupGlobal(contentHash);
         }
+        if (handler == null) {
+            try { new java.io.FileWriter("/tmp/v2_debug.txt", true).append("[HandlerLookup] NOT FOUND key=" + contentHash + "\n").close(); } catch (Exception ex) {}
+            throw new RuntimeException("Handler not found for: " + contentHash);
+        }
+        try { new java.io.FileWriter("/tmp/v2_debug.txt", true).append("[HandlerLookup] FOUND key=" + contentHash + " value=" + handler + " type=" + handler.getClass().getSimpleName() + "\n").close(); } catch (Exception ex) {}
         return handler;
     }
 }
@@ -391,7 +397,6 @@ public final class HandleNode extends MezzeNode {
             // Fork completed - capture results (MezzeSeq), run finalize_scope, then return values
             forkedResults = e.values;
         } catch (Throwable t) {
-            // Capture exception for later - finalize_scope must still run
             bodyException = t;
         } finally {
             // SCOPED EFFECTS: Execute finalize_scope in finally block

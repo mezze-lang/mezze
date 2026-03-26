@@ -63,4 +63,32 @@ tasks.test {
     )
 
     maxHeapSize = "2g"
+
+    // Pass mezze.pipeline system property from gradle command line
+    // Usage: ./gradlew :interpreter:test -Dmezze.pipeline=v2
+    systemProperty("mezze.pipeline", System.getProperty("mezze.pipeline") ?: "")
+}
+
+// V2 pipeline test task — runs all interpreter tests through the v2 pipeline
+tasks.register<Test>("testV2") {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    testLogging {
+        events("started", "passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = true
+    }
+    maxParallelForks = 1
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+    systemProperty("junit.jupiter.execution.timeout.default", "120s")
+    systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
+    systemProperty("mezze.pipeline", "v2")
+    jvmArgs(
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+        "--add-modules=jdk.incubator.vector"
+    )
+    maxHeapSize = "2g"
 }

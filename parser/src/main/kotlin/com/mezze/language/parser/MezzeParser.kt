@@ -1,6 +1,8 @@
 package com.mezze.language.parser
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.ast.Visibility as AstVisibility
 import com.mezze.language.parser.internal.*
 import com.mezze.language.parser.internal.lib.*
 
@@ -97,7 +99,59 @@ class MezzeParser(
         val isSuccess: Boolean get() = errors.isEmpty()
     }
 
+    /**
+     * Convert a v1 Program to ParsedModule.
+     * Used by the typechecker to bridge from v1 input to ParsedAST-based processing.
+     */
+    fun programToParsedModule(program: Program, file: String = "<unknown>"): ParsedModule {
+        return v1ProgramToParsedModule(program, file)
+    }
+
+    companion object {
+        /** Convert v1 Expression → ParsedExpr */
+        @JvmStatic
+        fun toParsedExpr(expr: Expression, file: String = "<unknown>"): ParsedExpr = v1ExprToParsedExpr(expr, file)
+
+        /** Convert v1 Pattern → ParsedPattern */
+        @JvmStatic
+        fun toParsedPattern(pattern: Pattern, file: String = "<unknown>"): ParsedPattern = v1PatternToParsed(pattern, file)
+
+        /** Convert v1 TypeAnnotation → ParsedTypeAnnotation */
+        @JvmStatic
+        fun toParsedTypeAnnotation(ann: TypeAnnotation, file: String = "<unknown>"): ParsedTypeAnnotation = v1TypeAnnotationToParsed(ann, file)
+
+        /** Convert ParsedExpr → v1 Expression */
+        @JvmStatic
+        fun toV1Expr(expr: ParsedExpr, file: String = "<unknown>"): Expression = parsedExprToV1Expr(expr, file)
+
+        /** Convert ParsedPattern → v1 Pattern */
+        @JvmStatic
+        fun toV1Pattern(pattern: ParsedPattern, file: String = "<unknown>"): Pattern = parsedPatternToV1(pattern, file)
+
+        /** Convert ParsedTypeAnnotation → v1 TypeAnnotation */
+        @JvmStatic
+        fun toV1TypeAnnotation(ann: ParsedTypeAnnotation, file: String = "<unknown>"): TypeAnnotation = parsedTypeAnnotationToV1(ann, file)
+
+        /** Convert Loc → SourceLocation */
+        @JvmStatic
+        fun toSourceLocation(loc: Loc): SourceLocation = SourceLocation(loc.startLine, loc.startCol, loc.file)
+    }
+
     fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
+        // Delegate to parseParsedModule and convert to v1 Program for backward compatibility
+        val parsedModule = parseParsedModule(source, file ?: "<unknown>")
+        val program = parsedModuleToV1Program(parsedModule, comments.toList())
+        val resolvedProgram = resolveImplDeclarations(program)
+        val programWithComments = resolvedProgram.copy(comments = comments.toList())
+        return if (desugar) desugarProgram(programWithComments) else programWithComments
+    }
+
+    /**
+     * Parse source into ParsedModule (v2 AST — clean, no nullable typechecker fields).
+     *
+     * This is now the primary parse path. The v1 parse() method delegates here.
+     */
+    fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
         // Store for error reporting in nested parser methods
         currentSource = source
         currentFile = file
@@ -114,12 +168,8 @@ class MezzeParser(
             val tokens = lexer.tokenize()
             val stream = TokenStream(tokens)
 
-            return when (val result = programParser(stream)) {
-                is ParseResult.Success -> {
-                    val resolvedProgram = resolveImplDeclarations(result.value)
-                    val programWithComments = resolvedProgram.copy(comments = comments.toList())
-                    if (desugar) desugarProgram(programWithComments) else programWithComments
-                }
+            return when (val result = parsedModuleParser(stream)) {
+                is ParseResult.Success -> resolveParsedImplDeclarations(result.value)
                 is ParseResult.Failure -> throw ParseException(
                     result.message,
                     result.position,
@@ -149,7 +199,7 @@ class MezzeParser(
         SyntaxMetadata.clear()
 
         val errors = mutableListOf<ParseException>()
-        val items = mutableListOf<ProgramItem>()
+        val decls = mutableListOf<ParsedDecl>()
 
         try {
             val lexer = Lexer(source)
@@ -161,9 +211,9 @@ class MezzeParser(
 
             // Parse top-level items with recovery
             while (stream.current()?.type != TokenType.EOF) {
-                when (val result = topLevelItem(stream)) {
+                when (val result = parsedTopLevelItem(stream)) {
                     is ParseResult.Success -> {
-                        items.add(result.value)
+                        decls.add(result.value)
                         stream = skipNewlines(result.remaining)
                     }
                     is ParseResult.Failure -> {
@@ -183,7 +233,8 @@ class MezzeParser(
                 }
             }
 
-            val program = resolveImplDeclarations(Program(items, comments.toList()))
+            val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls))
+            val program = resolveImplDeclarations(parsedModuleToV1Program(parsedModule, comments.toList()))
             val finalProgram = if (desugar && errors.isEmpty()) desugarProgram(program) else program
 
             return ParseResultWithRecovery(finalProgram, errors, warnings.toList())
@@ -244,17 +295,17 @@ class MezzeParser(
 
     // ===== TOP LEVEL =====
 
-    private val programParser: Parser<Program> = { stream ->
+    private val parsedModuleParser: Parser<ParsedModule> = { stream ->
         // Skip leading newlines
         var currentStream = skipNewlines(stream)
-        val items = mutableListOf<ProgramItem>()
+        val decls = mutableListOf<ParsedDecl>()
         var failure: ParseResult.Failure? = null
 
         // Parse top-level items, skipping newlines between them
         while (currentStream.current()?.type != TokenType.EOF && failure == null) {
-            when (val result = topLevelItem(currentStream)) {
+            when (val result = parsedTopLevelItem(currentStream)) {
                 is ParseResult.Success -> {
-                    items.add(result.value)
+                    decls.add(result.value)
                     currentStream = skipNewlines(result.remaining)
                 }
                 is ParseResult.Failure -> {
@@ -268,37 +319,46 @@ class MezzeParser(
             }
         }
 
-        failure ?: ParseResult.Success(Program(items), currentStream)
+        failure ?: ParseResult.Success(ParsedModule(currentFile ?: "<unknown>", decls), currentStream)
     }
 
     // Declaration parsers (defined later to avoid forward reference)
-    private lateinit var effectDeclaration: Parser<ProgramItem>
-    private lateinit var implDeclaration: Parser<ProgramItem>
-    private lateinit var implAbilityDeclaration: Parser<ProgramItem>
-    private lateinit var abilityDeclaration: Parser<ProgramItem>
-    private lateinit var typeDeclaration: Parser<ProgramItem>
-    private lateinit var newtypeDeclaration: Parser<ProgramItem>
-    private lateinit var useDeclaration: Parser<ProgramItem>
-    private lateinit var letDeclaration: Parser<ProgramItem>
-    private lateinit var topLevelExpression: Parser<ProgramItem>
-    private lateinit var topLevelItem: Parser<ProgramItem>
+    private lateinit var parsedEffectDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedImplDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedImplAbilityDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedAbilityDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedTypeDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedNewtypeDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedUseDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedLetDeclaration: Parser<ParsedDecl>
+    private lateinit var parsedTopLevelExpression: Parser<ParsedDecl>
+    private lateinit var parsedTopLevelItem: Parser<ParsedDecl>
 
     // ===== LET BINDING (defined before init block) =====
 
     init {
         // Initialize parsers after all properties are available
-        effectDeclaration = { stream -> parseEffectDeclaration(stream) }
-        implDeclaration = { stream -> parseImplDeclaration(stream) }
-        implAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
-        abilityDeclaration = { stream -> parseAbilityDeclaration(stream) }
-        typeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
-        newtypeDeclaration = { stream -> parseNewtypeDeclaration(stream, Visibility.PRIVATE) }
-        useDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
-        letDeclaration = { stream -> parseLetBinding(stream) }  // Lambda wrapper
-        topLevelExpression = { stream -> Parsers.map(expression) { TopLevelExpression(it) }(stream) }
+        parsedEffectDeclaration = { stream -> parseEffectDeclaration(stream) }
+        parsedImplDeclaration = { stream -> parseImplDeclaration(stream) }
+        parsedImplAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
+        parsedAbilityDeclaration = { stream -> parseAbilityDeclaration(stream) }
+        parsedTypeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
+        parsedNewtypeDeclaration = { stream -> parseNewtypeDeclaration(stream, Visibility.PRIVATE) }
+        parsedUseDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
+        parsedLetDeclaration = { stream -> parseLetBinding(stream) }  // Lambda wrapper
+        parsedTopLevelExpression = { stream ->
+            when (val result = expression(stream)) {
+                is ParseResult.Success -> {
+                    val file = currentFile ?: "<unknown>"
+                    val loc = spanLocTo(stream.current() ?: stream.tokens.last(), result.remaining, file)
+                    ParseResult.Success(ParsedTopLevelExpr(result.value, loc = loc), result.remaining)
+                }
+                is ParseResult.Failure -> result
+            }
+        }
 
-        // Initialize topLevelItem AFTER all other parsers are initialized
-        topLevelItem = topLevelItem@{ stream ->
+        // Initialize parsedTopLevelItem AFTER all other parsers are initialized
+        parsedTopLevelItem = parsedTopLevelItem@{ stream ->
             // Check for optional 'pub' modifier
             val pubToken = tok(TokenType.PUB)(stream)
             val (visibility, streamAfterPub, pubLocation) = when (pubToken) {
@@ -314,7 +374,7 @@ class MezzeParser(
                 val nextToken = streamAfterPubSkipNl.current()
                 when (nextToken?.type) {
                     TokenType.EFFECT -> {
-                        return@topLevelItem ParseResult.Failure(
+                        return@parsedTopLevelItem ParseResult.Failure(
                             "'pub' is not allowed on effect declarations. " +
                             "Effects are always public because they must be usable in type signatures across modules. " +
                             "Remove 'pub' and just write: effect ${peekIdentifier(streamAfterPubSkipNl.advance())} where { ... }",
@@ -324,7 +384,7 @@ class MezzeParser(
                         )
                     }
                     TokenType.ABILITY -> {
-                        return@topLevelItem ParseResult.Failure(
+                        return@parsedTopLevelItem ParseResult.Failure(
                             "'pub' is not allowed on ability declarations. " +
                             "Abilities are always public because they must be usable in type signatures across modules. " +
                             "Remove 'pub' and just write: ability ${peekIdentifier(streamAfterPubSkipNl.advance())} where { ... }",
@@ -334,7 +394,7 @@ class MezzeParser(
                         )
                     }
                     TokenType.IMPL -> {
-                        return@topLevelItem ParseResult.Failure(
+                        return@parsedTopLevelItem ParseResult.Failure(
                             "'pub' is not allowed on impl declarations. " +
                             "Effect impls are always exported so the performer name can be imported for 'perform'. " +
                             "Ability impls are always exported so they can be discovered for constraint resolution. " +
@@ -358,7 +418,7 @@ class MezzeParser(
                 { s -> parseUseDeclaration(s, visibility) },
                 { s -> parseLetBindingWithVisibility(s, visibility) },
                 { s -> parseConstrainedLambda(s) },  // Try constrained lambda before general expression
-                topLevelExpression
+                parsedTopLevelExpression
             )(streamAfterPubSkipNl)
 
             declResult
@@ -732,9 +792,9 @@ class MezzeParser(
     internal fun parseStringInterpolationPattern(
         content: String,
         stream: TokenStream,
-        location: SourceLocation? = null
-    ): ParseResult<Pattern> {
-        val parts = mutableListOf<StringPatternPart>()
+        loc: Loc
+    ): ParseResult<ParsedPattern> {
+        val parts = mutableListOf<ParsedStringPatternPart>()
         var i = 0
         val currentStringPart = StringBuilder()
         var lastWasCapture = false
@@ -764,7 +824,7 @@ class MezzeParser(
 
                 // Add any accumulated string part
                 if (currentStringPart.isNotEmpty()) {
-                    parts.add(StringPatternLiteral(currentStringPart.toString()))
+                    parts.add(ParsedStringPatternPart.Literal(currentStringPart.toString()))
                     currentStringPart.clear()
                 }
 
@@ -805,7 +865,7 @@ class MezzeParser(
                 }
                 i++  // Skip ')'
 
-                parts.add(StringPatternCapture(varName))
+                parts.add(ParsedStringPatternPart.Capture(varName))
                 lastWasCapture = true
             } else {
                 currentStringPart.append(content[i])
@@ -816,19 +876,22 @@ class MezzeParser(
 
         // Add any remaining string part
         if (currentStringPart.isNotEmpty()) {
-            parts.add(StringPatternLiteral(currentStringPart.toString()))
+            parts.add(ParsedStringPatternPart.Literal(currentStringPart.toString()))
         }
 
-        // If we only have one StringPatternLiteral, it's actually not a pattern (edge case after escape processing)
-        if (parts.size == 1 && parts[0] is StringPatternLiteral) {
+        // If we only have one literal part, it's actually not a pattern (edge case after escape processing)
+        if (parts.size == 1 && parts[0] is ParsedStringPatternPart.Literal) {
             return ParseResult.Success(
-                LiteralPattern(StringLiteralValue((parts[0] as StringPatternLiteral).value)),
+                ParsedLiteralPattern(
+                    ParsedLiteralValue.StringValue((parts[0] as ParsedStringPatternPart.Literal).value),
+                    loc
+                ),
                 stream
             )
         }
 
         return ParseResult.Success(
-            StringInterpolationPattern(parts = parts, sourceLocation = location),
+            ParsedStringInterpPattern(parts = parts, loc = loc),
             stream
         )
     }

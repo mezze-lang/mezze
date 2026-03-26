@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
@@ -13,6 +14,9 @@ import com.mezze.language.typechecker.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.ast.Keywords
+
+/** Convert ParsedAST Loc to SourceLocation for error reporting */
+private fun Loc.toSL(): SourceLocation? = SourceLocation(startLine, startCol, file)
 
 /**
  * Expression constraint generator - generates constraints for all expression types.
@@ -72,92 +76,110 @@ class ExpressionConstraintGenerator {
     /**
      * Generate constraints for an expression.
      *
-     * This is the main entry point - exhaustive when on all Expression types.
+     * This is the main entry point - exhaustive when on all ParsedExpr types.
      */
-    fun generate(expr: Expression, context: ConstraintContext): ConstraintResult {
+    fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
         return when (expr) {
             // Literals - simple types, no constraints
-            is IntLiteral -> generateIntLiteral(expr, context)
-            is NatLiteral -> generateNatLiteral(expr, context)
-            is FloatLiteral -> generateFloatLiteral(expr, context)
-            is FractionLiteral -> generateFractionLiteral(expr, context)
-            is StringLiteral -> generateStringLiteral(expr, context)
-            is SeqLiteral -> generateSeqLiteral(expr, context)
+            is ParsedIntLit -> generateIntLiteral(expr, context)
+            is ParsedNatLit -> generateNatLiteral(expr, context)
+            is ParsedFloatLit -> generateFloatLiteral(expr, context)
+            is ParsedFracLit -> generateFractionLiteral(expr, context)
+            is ParsedStringLit -> generateStringLiteral(expr, context)
+            is ParsedSeqLit -> generateSeqLiteral(expr, context)
+            is ParsedCharLit -> ConstraintResult.simple(MezzeType.CharType)
 
             // Variables - lookup in context
-            is Identifier -> generateIdentifier(expr, context)
+            is ParsedIdentifier -> generateIdentifier(expr, context)
 
             // Pipe placeholder - should not reach constraint generation (desugared earlier)
-            is PipePlaceholder -> generatePipePlaceholder(expr, context)
+            is ParsedPipePlaceholder -> generatePipePlaceholder(expr, context)
 
             // Pipe expression - should not reach constraint generation (desugared earlier)
-            is PipeExpression -> generatePipeExpression(expr, context)
+            is ParsedPipe -> generatePipeExpression(expr, context)
 
             // Parenthesized expression - just delegate to inner
-            is ParenthesizedExpression -> generate(expr.expression, context)
+            is ParsedParens -> generate(expr.expr, context)
 
             // Records
-            is RecordLiteral -> generateRecordLiteral(expr, context)
-            is MemberAccess -> generateMemberAccess(expr, context)
+            is ParsedRecordLit -> generateRecordLiteral(expr, context)
+            is ParsedMemberAccess -> generateMemberAccess(expr, context)
 
             // Variants
-            is VariantConstruction -> generateVariantConstruction(expr, context)
+            is ParsedVariantConstruct -> generateVariantConstruction(expr, context)
 
             // Functions
-            is LambdaExpression -> generateLambda(expr, context)
-            is FunctionCall -> generateFunctionCall(expr, context)
+            is ParsedLambda -> generateLambda(expr, context)
+            is ParsedFunctionCall -> generateFunctionCall(expr, context)
 
             // Control flow
-            // IfExpression is unified with MatchExpression at the type-checking level.
+            // ParsedIf is unified with ParsedMatch at the type-checking level.
             // This simplifies the typechecker (one code path for all conditionals) while
-            // preserving IfExpression in the AST for tooling and IfNode in the interpreter
+            // preserving ParsedIf in the AST for tooling and IfNode in the interpreter
             // for optimal runtime performance.
-            is IfExpression -> generateMatch(expr.toMatchExpression(), context)
-            is MatchExpression -> generateMatch(expr, context)
+            is ParsedIf -> generateMatch(expr.toMatchExpr(), context)
+            is ParsedMatch -> generateMatch(expr, context)
 
             // Blocks
-            is DoExpression -> generateDo(expr, context)
+            is ParsedDo -> generateDo(expr, context)
 
             // Effects
-            is PerformExpression -> generatePerform(expr, context)
-            is EffectCallExpression -> generateEffectCall(expr, context)
-
-            // State machines (generated by compiler, not user code)
-            is StateMachineExpression -> generateStateMachine(expr, context)
+            is ParsedPerform -> generatePerform(expr, context)
+            is ParsedEffectCall -> generateEffectCall(expr, context)
         }
     }
+
+    /** Convert ParsedIf to ParsedMatch for unified type-checking. */
+    private fun ParsedIf.toMatchExpr(): ParsedMatch = ParsedMatch(
+        scrutinee = condition,
+        cases = listOf(
+            ParsedMatchCase(
+                patterns = listOf(ParsedConstructorPattern("True", null, loc)),
+                body = thenBranch,
+                loc = loc
+            ),
+            ParsedMatchCase(
+                patterns = listOf(ParsedConstructorPattern("False", null, loc)),
+                body = elseBranch,
+                loc = loc
+            )
+        ),
+        loc = loc
+    )
 
     // ========================================================================
     // LITERALS
     // ========================================================================
 
-    private fun generateIntLiteral(expr: IntLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateIntLiteral(expr: ParsedIntLit, context: ConstraintContext): ConstraintResult {
         // Int literal has type Int, no constraints
         return ConstraintResult.simple(MezzeType.IntType)
     }
 
-    private fun generateNatLiteral(expr: NatLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateNatLiteral(expr: ParsedNatLit, context: ConstraintContext): ConstraintResult {
         // Nat literal has type Nat, no constraints
         return ConstraintResult.simple(MezzeType.NatType)
     }
 
-    private fun generateFloatLiteral(expr: FloatLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateFloatLiteral(expr: ParsedFloatLit, context: ConstraintContext): ConstraintResult {
         // Float literal has type Float, no constraints
         return ConstraintResult.simple(MezzeType.FloatType)
     }
 
-    private fun generateFractionLiteral(expr: FractionLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateFractionLiteral(expr: ParsedFracLit, context: ConstraintContext): ConstraintResult {
         // Fraction literal has type Frac, no constraints
         return ConstraintResult.simple(MezzeType.FracType)
     }
 
-    private fun generateStringLiteral(expr: StringLiteral, context: ConstraintContext): ConstraintResult {
-        if (!expr.isInterpolated) {
+    private fun generateStringLiteral(expr: ParsedStringLit, context: ConstraintContext): ConstraintResult {
+        // Check if this is a simple (non-interpolated) string
+        val isInterpolated = expr.parts.any { it is ParsedStringPart.Interpolation }
+        if (!isInterpolated) {
             // Simple string has type String, no constraints
             return ConstraintResult.simple(MezzeType.StringType)
         }
 
-        // Interpolated string: each ExpressionPart must have type String
+        // Interpolated string: each Interpolation part's expression must have type String
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
@@ -167,14 +189,14 @@ class ExpressionConstraintGenerator {
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
 
         var interpolationIndex = 0
-        for (part in expr.parts!!) {
+        for (part in expr.parts) {
             when (part) {
-                is StringPart -> {
+                is ParsedStringPart.Literal -> {
                     // String parts are fine, no constraints
                 }
-                is ExpressionPart -> {
+                is ParsedStringPart.Interpolation -> {
                     // Expression must have type String
-                    val exprResult = generate(part.expression, context)
+                    val exprResult = generate(part.expr, context)
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     // Propagate effects and ability constraints from interpolated expressions
@@ -189,7 +211,7 @@ class ExpressionConstraintGenerator {
                             left = exprResult.type,
                             right = MezzeType.StringType,
                             context = "String interpolation requires String type",
-                            sourceLocation = part.expression.sourceLocation,
+                            sourceLocation = part.expr.loc.toSL(),
                             errorContext = ErrorContext.StringInterpolation(interpolationIndex)
                         )
                     )
@@ -210,7 +232,7 @@ class ExpressionConstraintGenerator {
         )
     }
 
-    private fun generateSeqLiteral(expr: SeqLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateSeqLiteral(expr: ParsedSeqLit, context: ConstraintContext): ConstraintResult {
         if (expr.elements.isEmpty()) {
             // Empty seq: [element] where element is fresh type variable
             val elementType = MezzeType.VarType(TypeVar.fresh())
@@ -229,8 +251,8 @@ class ExpressionConstraintGenerator {
         var elementIndex = 0
         for (element in expr.elements) {
             when (element) {
-                is SeqRegularElement -> {
-                    val result = generate(element.expression, context)
+                is ParsedSeqElement.Regular -> {
+                    val result = generate(element.expr, context)
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
                     abilityConstraints.addAll(result.abilityConstraints)
@@ -242,14 +264,14 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = elementType,
                             context = "Seq elements must have same type",
-                            sourceLocation = element.expression.sourceLocation,
+                            sourceLocation = element.expr.loc.toSL(),
                             errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
                     elementIndex++
                 }
-                is SeqSpreadElement -> {
-                    val result = generate(element.expression, context)
+                is ParsedSeqElement.Spread -> {
+                    val result = generate(element.expr, context)
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
                     abilityConstraints.addAll(result.abilityConstraints)
@@ -261,7 +283,7 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = MezzeType.SeqType(elementType),
                             context = "Spread element must be a seq",
-                            sourceLocation = element.expression.sourceLocation,
+                            sourceLocation = element.expr.loc.toSL(),
                             errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
@@ -284,8 +306,8 @@ class ExpressionConstraintGenerator {
     // VARIABLES
     // ========================================================================
 
-    private fun generateIdentifier(expr: Identifier, context: ConstraintContext): ConstraintResult {
-        val lookupKey = expr.toBindingKey()
+    private fun generateIdentifier(expr: ParsedIdentifier, context: ConstraintContext): ConstraintResult {
+        val lookupKey = BindingKey(qualifier = expr.qualifier?.segments?.lastOrNull(), localName = expr.localName)
         val lookupKeyString = lookupKey.toKeyString()  // For usedVariables, DefinitionRef, etc.
         if (expr.localName == "Show") {
             DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${lookupKeyString}'" }
@@ -335,7 +357,7 @@ class ExpressionConstraintGenerator {
                                 abilityName = freshConstraint.abilityName,
                                 typeArgs = freshConstraint.typeArgs,
                                 context = "Polymorphic instantiation of '${lookupKeyString}'",
-                                sourceLocation = expr.sourceLocation
+                                sourceLocation = expr.loc.toSL()
                             )
                         }
 
@@ -398,8 +420,8 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = lookupKeyString,
-                                sourceLocation = expr.sourceLocation,
-                                qualifier = expr.qualifier,
+                                sourceLocation = expr.loc.toSL(),
+                                qualifier = expr.qualifier?.let { ModulePath(it.segments) },
                                 isQualified = expr.isQualified
                             )
                         )
@@ -435,8 +457,8 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = lookupKeyString,
-                                sourceLocation = expr.sourceLocation,
-                                qualifier = expr.qualifier,
+                                sourceLocation = expr.loc.toSL(),
+                                qualifier = expr.qualifier?.let { ModulePath(it.segments) },
                                 isQualified = expr.isQualified
                             )
                         )
@@ -446,24 +468,24 @@ class ExpressionConstraintGenerator {
         }
     }
 
-    private fun generatePipePlaceholder(expr: PipePlaceholder, context: ConstraintContext): ConstraintResult {
+    private fun generatePipePlaceholder(expr: ParsedPipePlaceholder, context: ConstraintContext): ConstraintResult {
         // PipePlaceholder should be desugared before constraint generation
         // If we reach here, it means @ was used outside of a pipe expression
         throw com.mezze.language.typechecker.TypeCheckError(
             "'@' can only be used inside a pipe expression (|>).\n\n" +
             "  hint: Use '@' to refer to the piped value:\n" +
             "        value |> func { arg = @ }",
-            expr.sourceLocation
+            expr.loc.toSL()
         )
     }
 
-    private fun generatePipeExpression(expr: PipeExpression, context: ConstraintContext): ConstraintResult {
+    private fun generatePipeExpression(expr: ParsedPipe, context: ConstraintContext): ConstraintResult {
         // PipeExpression should be desugared before constraint generation
         // If we reach here, there's a bug in the transformation phase
         throw com.mezze.language.typechecker.TypeCheckError(
             "Internal error: PipeExpression was not desugared before type checking. " +
             "This is a compiler bug.",
-            expr.sourceLocation
+            expr.loc.toSL()
         )
     }
 
@@ -471,7 +493,7 @@ class ExpressionConstraintGenerator {
     // RECORDS
     // ========================================================================
 
-    private fun generateRecordLiteral(expr: RecordLiteral, context: ConstraintContext): ConstraintResult {
+    private fun generateRecordLiteral(expr: ParsedRecordLit, context: ConstraintContext): ConstraintResult {
         // {field1 = expr1, field2 = expr2, ...}
         // or {...spread, field1 = expr1, ...}
 
@@ -488,7 +510,7 @@ class ExpressionConstraintGenerator {
         // This is needed because spread validation needs to know all field names,
         // even if they appear after the spread in source order
         val explicitFieldNames = expr.entries
-            .filterIsInstance<RecordFieldEntry>()
+            .filterIsInstance<ParsedRecordEntry.Field>()
             .map { it.name }
             .toSet()
 
@@ -503,8 +525,8 @@ class ExpressionConstraintGenerator {
 
         for (entry in expr.entries) {
             when (entry) {
-                is RecordFieldEntry -> {
-                    val fieldValue = entry.value ?: Identifier(localName = entry.name)
+                is ParsedRecordEntry.Field -> {
+                    val fieldValue = entry.value ?: ParsedIdentifier(localName = entry.name, loc = entry.loc)
                     val fieldResult = generate(fieldValue, fieldContext)
 
                     // If the field value is a SuspendedType (effectful value), unwrap it:
@@ -529,10 +551,10 @@ class ExpressionConstraintGenerator {
                     effects.addAll(fieldResult.effects)  // Propagate effects from field expressions
                     effectInstances.addAll(fieldResult.effectInstances)  // Propagate effect instances
                 }
-                is RecordSpreadEntry -> {
+                is ParsedRecordEntry.Spread -> {
                     // Spread: {...baseRecord}
                     // Process the spread expression and extract its fields
-                    val spreadResult = generate(entry.expression, fieldContext)
+                    val spreadResult = generate(entry.expr, fieldContext)
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
                     abilityConstraints.addAll(spreadResult.abilityConstraints)
@@ -640,7 +662,7 @@ class ExpressionConstraintGenerator {
                         throw TypeCheckError(
                             message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
                                     "Add: { ${allFieldNames.joinToString(", ") { "$it = ..." }}, $example }",
-                            expression = expr,
+                            sourceLocation = expr.loc.toSL(),
                             errorType = ErrorType.MISSING_FIELD,
                             metadata = mapOf(
                                 "missingFields" to missingFields.toList(),
@@ -656,7 +678,7 @@ class ExpressionConstraintGenerator {
                         throw TypeCheckError(
                             message = "Record has extra ${if (extraFields.size == 1) "field" else "fields"}: $extraList. " +
                                     "Remove ${if (extraFields.size == 1) "it" else "them"}. Expected fields: $expectedList",
-                            expression = expr,
+                            sourceLocation = expr.loc.toSL(),
                             errorType = ErrorType.TYPE_MISMATCH,
                             metadata = mapOf(
                                 "extraFields" to extraFields.toList(),
@@ -670,8 +692,8 @@ class ExpressionConstraintGenerator {
 
         val recordType = MezzeType.RecordType(
             fields = fields,
-            // Use userOpen() to mark user-specified openness (won't be closed by closeGeneratedRowVars)
-            rowVar = if (expr.isOpen) RowVar.userOpen() else null
+            // ParsedRecordLit has no isOpen field — open record syntax not captured at parse level
+            rowVar = null
         )
 
         return ConstraintResult(
@@ -686,16 +708,16 @@ class ExpressionConstraintGenerator {
         )
     }
 
-    private fun generateMemberAccess(expr: MemberAccess, context: ConstraintContext): ConstraintResult {
+    private fun generateMemberAccess(expr: ParsedMemberAccess, context: ConstraintContext): ConstraintResult {
         // receiver.member
 
         // Special case: Check if this is an ability method access
         // Example: Show.show, NumAdd.add, Eq.eq, etc.
 
-        // Get receiver name (works for both Identifier and VariantConstruction)
+        // Get receiver name (works for both ParsedIdentifier and ParsedVariantConstruct)
         val receiverName = when (expr.receiver) {
-            is Identifier -> (expr.receiver as Identifier).localName
-            is VariantConstruction -> (expr.receiver as VariantConstruction).constructor
+            is ParsedIdentifier -> (expr.receiver as ParsedIdentifier).localName
+            is ParsedVariantConstruct -> (expr.receiver as ParsedVariantConstruct).constructor
             else -> null
         }
 
@@ -725,7 +747,7 @@ class ExpressionConstraintGenerator {
                             abilityName = receiverName,
                             typeArgs = emptyList(),
                             context = "Direct ability call: ${receiverName}.${expr.member}",
-                            sourceLocation = expr.sourceLocation
+                            sourceLocation = expr.loc.toSL()
                         )),
                         associatedTypeConstraints = emptyList(),
                         undefinedVariables = emptyList(),
@@ -738,7 +760,7 @@ class ExpressionConstraintGenerator {
                     val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
                     throw TypeCheckError(
                         message = "Method '${expr.member}' not found in ability '$receiverName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.MISSING_FIELD
                     )
                 }
@@ -750,7 +772,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
                         "Use 'value.${expr.member} { args }' or '${receiverName}.${expr.member} { it = value, ... }' instead.",
-                    expression = expr,
+                    sourceLocation = expr.loc.toSL(),
                     errorType = ErrorType.MISSING_FIELD
                 )
             }
@@ -805,7 +827,7 @@ class ExpressionConstraintGenerator {
 
                     throw TypeCheckError(
                         message = "'$receiverName' is not defined. Cannot access method '${expr.member}' on undefined ability or effect.$suggestion",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.UNDEFINED_VARIABLE
                     )
                 }
@@ -822,11 +844,12 @@ class ExpressionConstraintGenerator {
         // 2. Nested field access where intermediate type is a known RecordType (e.g., data.point.z)
 
         // First, determine if we should validate field existence
-        val shouldValidate = if (expr.receiver is Identifier) {
+        val shouldValidate = if (expr.receiver is ParsedIdentifier) {
             // For identifiers, only validate if bound to a record literal
-            val receiverName = (expr.receiver as Identifier).toBindingKey().toKeyString()
-            receiverName in context.recordLiteralBindings
-        } else if (expr.receiver is MemberAccess) {
+            val rcvr = expr.receiver as ParsedIdentifier
+            val rcvrKey = BindingKey(qualifier = rcvr.qualifier?.segments?.lastOrNull(), localName = rcvr.localName).toKeyString()
+            rcvrKey in context.recordLiteralBindings
+        } else if (expr.receiver is ParsedMemberAccess) {
             // For nested access, validate if the receiver type is a known RecordType
             // This handles cases like data.point.z where point has type {x: Int, y: Int}
             receiverResult.type is MezzeType.RecordType
@@ -860,7 +883,7 @@ class ExpressionConstraintGenerator {
                     // Closed record - field must exist, throw error
                     throw TypeCheckError(
                         message = "Field '${expr.member}' not found in record.$didYouMean Available fields: ${fieldNames.joinToString()}",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
                             "field" to expr.member,
@@ -872,7 +895,7 @@ class ExpressionConstraintGenerator {
                     // OldTypeChecker validates this too (line 6285-6300)
                     throw TypeCheckError(
                         message = "Field '${expr.member}' not found in open record.$didYouMean Explicitly declared fields: ${fieldNames.joinToString()}",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
                             "field" to expr.member,
@@ -943,16 +966,16 @@ class ExpressionConstraintGenerator {
      * Returns null if no matching ability method is found (fall through to field access).
      */
     private fun tryGenerateMethodCall(
-        expr: FunctionCall,
-        memberAccess: MemberAccess,
+        expr: ParsedFunctionCall,
+        memberAccess: ParsedMemberAccess,
         context: ConstraintContext
     ): ConstraintResult? {
         val methodName = memberAccess.member
 
         // FIELD ACCESS: If the receiver is known to have a field with this name,
         // it's plain field access — skip method call resolution.
-        if (memberAccess.receiver is Identifier) {
-            val receiverVarName = (memberAccess.receiver as Identifier).localName
+        if (memberAccess.receiver is ParsedIdentifier) {
+            val receiverVarName = (memberAccess.receiver as ParsedIdentifier).localName
             val lookupResult = context.typingContext.lookup(receiverVarName)
             if (lookupResult is TypingContext.LookupResult.Found) {
                 val receiverType = when (val binding = lookupResult.binding) {
@@ -1005,7 +1028,7 @@ class ExpressionConstraintGenerator {
         // disambiguate by checking which ability's parameter fields match the call-site arguments.
         // e.g., `x + y` desugars to `x.add {r = y}` which should match NumAdd.add {r} not Math.add {x, y}.
         val callSiteFieldNames: Set<String>? = when (val args = expr.arguments) {
-            is RecordLiteral -> args.entries.filterIsInstance<RecordFieldEntry>().map { entry -> entry.name }.toSet()
+            is ParsedRecordLit -> args.entries.filterIsInstance<ParsedRecordEntry.Field>().map { entry -> entry.name }.toSet()
             else -> null
         }
         val filteredMatchingAbilities = if (callSiteFieldNames != null && matchingAbilities.isNotEmpty() && builtInMatches.isNotEmpty()) {
@@ -1049,7 +1072,7 @@ class ExpressionConstraintGenerator {
                 abilityName = abilityName,
                 typeArgs = emptyList(),
                 context = "Method call: $methodName",
-                sourceLocation = expr.sourceLocation
+                sourceLocation = expr.loc.toSL()
             ))
         } else if (filteredMatchingAbilities.isNotEmpty()) {
             // User-defined ability
@@ -1118,7 +1141,7 @@ class ExpressionConstraintGenerator {
                     abilityName = abilityName,
                     typeArgs = typeArgs,
                     context = "Method call: $methodName",
-                    sourceLocation = expr.sourceLocation
+                    sourceLocation = expr.loc.toSL()
                 ))
 
                 // Build associated type vars map and add AssociatedTypeResolution constraint
@@ -1136,7 +1159,7 @@ class ExpressionConstraintGenerator {
                             primaryTypeVar = abilityTypeVars.first(),
                             associatedTypeVars = associatedTypeVarsMap,
                             context = "Associated type resolution for $abilityName.$methodName",
-                            sourceLocation = expr.sourceLocation
+                            sourceLocation = expr.loc.toSL()
                         ))
                     }
                 }
@@ -1152,7 +1175,7 @@ class ExpressionConstraintGenerator {
                             abilityName = constraint.abilityName,
                             typeArgs = constraint.typeArgs.drop(1),
                             context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
-                            sourceLocation = expr.sourceLocation
+                            sourceLocation = expr.loc.toSL()
                         ))
                     }
                 }
@@ -1196,7 +1219,7 @@ class ExpressionConstraintGenerator {
             left = receiverType,
             right = receiverConstraintType,
             context = "Method call receiver binds ${Keywords.IT}",
-            sourceLocation = expr.sourceLocation
+            sourceLocation = expr.loc.toSL()
         ))
 
         // Constrain: explicit args = stripped method's param type
@@ -1204,7 +1227,7 @@ class ExpressionConstraintGenerator {
             left = argumentResult.type,
             right = strippedMethodType.paramType,
             context = "Method call arguments for $methodName",
-            sourceLocation = expr.sourceLocation
+            sourceLocation = expr.loc.toSL()
         ))
 
         // Constrain: result type = method's return type
@@ -1212,7 +1235,7 @@ class ExpressionConstraintGenerator {
             left = resultType,
             right = strippedMethodType.returnType,
             context = "Method call return type",
-            sourceLocation = expr.sourceLocation
+            sourceLocation = expr.loc.toSL()
         ))
 
         return ConstraintResult(
@@ -1234,8 +1257,8 @@ class ExpressionConstraintGenerator {
      * The receiver type is unified with the target type from the inherent impl.
      */
     private fun generateInherentMethodCall(
-        expr: FunctionCall,
-        memberAccess: MemberAccess,
+        expr: ParsedFunctionCall,
+        memberAccess: ParsedMemberAccess,
         inherentMethods: List<TypingContext.InherentMethodInfo>,
         context: ConstraintContext
     ): ConstraintResult {
@@ -1298,7 +1321,7 @@ class ExpressionConstraintGenerator {
                     left = argumentResult.type,
                     right = strippedParamType,
                     context = "Inherent method call arguments for $methodName",
-                    sourceLocation = expr.sourceLocation
+                    sourceLocation = expr.loc.toSL()
                 ))
 
                 // Constrain return type
@@ -1306,7 +1329,7 @@ class ExpressionConstraintGenerator {
                     left = resultType,
                     right = freshMethodType.returnType,
                     context = "Inherent method call return type",
-                    sourceLocation = expr.sourceLocation
+                    sourceLocation = expr.loc.toSL()
                 ))
             }
         }
@@ -1356,7 +1379,7 @@ class ExpressionConstraintGenerator {
     }
 
     private fun tryGenerateEffectOperationCall(
-        expr: MemberAccess,
+        expr: ParsedMemberAccess,
         effectName: String,
         effectBinding: TypingContext.Binding,
         context: ConstraintContext
@@ -1392,7 +1415,7 @@ class ExpressionConstraintGenerator {
             val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
-                expression = expr,
+                sourceLocation = expr.loc.toSL(),
                 errorType = ErrorType.MISSING_FIELD
             )
         }
@@ -1633,7 +1656,7 @@ class ExpressionConstraintGenerator {
      * @return ConstraintResult if this is a valid performer method call, null otherwise
      */
     private fun tryGeneratePerformerMethodCall(
-        expr: MemberAccess,
+        expr: ParsedMemberAccess,
         performerName: String,
         effectName: String,
         effectBinding: TypingContext.Binding,
@@ -2265,7 +2288,7 @@ class ExpressionConstraintGenerator {
     // VARIANTS
     // ========================================================================
 
-    private fun generateVariantConstruction(expr: VariantConstruction, context: ConstraintContext): ConstraintResult {
+    private fun generateVariantConstruction(expr: ParsedVariantConstruct, context: ConstraintContext): ConstraintResult {
         // Constructor {payload}
 
         // Check if this constructor is an imported newtype (opaque — can't construct)
@@ -2280,7 +2303,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Cannot construct newtype '${expr.constructor}' — its constructor is private to the defining module. " +
                         "Use a public constructor function from the module instead.",
-                    expression = expr,
+                    sourceLocation = expr.loc.toSL(),
                     errorType = ErrorType.MISSING_FIELD
                 )
             }
@@ -2302,7 +2325,7 @@ class ExpressionConstraintGenerator {
                 undefinedVariables = listOf(
                     ConstraintResult.UndefinedVariable(
                         name = expr.constructor,
-                        sourceLocation = expr.sourceLocation
+                        sourceLocation = expr.loc.toSL()
                     )
                 )
             )
@@ -2332,7 +2355,7 @@ class ExpressionConstraintGenerator {
 
             // VALIDATION: Check variant constructor payload fields against type declaration
             // This validates: Red { x = 5, y = 10 } against type Color = | Red { x: Int } |
-            if (valueExpr is RecordLiteral && context.typeDeclarations.isNotEmpty()) {
+            if (valueExpr is ParsedRecordLit && context.typeDeclarations.isNotEmpty()) {
                 // Find type declarations that have this constructor
                 for ((typeName, typeDecl) in context.typeDeclarations) {
                     if (typeDecl.definition is VariantDefinition) {
@@ -2344,7 +2367,7 @@ class ExpressionConstraintGenerator {
                             val isOpen = expectedRecordType.isOpen
 
                             // Get fields from literal
-                            val literalFields = valueExpr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
+                            val literalFields = valueExpr.entries.filterIsInstance<ParsedRecordEntry.Field>().map { it.name }.toSet()
                             val expectedFields = expectedRecordType.entries.map { it.name }.toSet()
 
                             // Check for closed record (no ...)
@@ -2355,7 +2378,7 @@ class ExpressionConstraintGenerator {
                                     throw TypeCheckError(
                                         message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
-                                        expression = expr,
+                                        sourceLocation = expr.loc.toSL(),
                                         errorType = ErrorType.TYPE_MISMATCH
                                     )
                                 }
@@ -2366,7 +2389,7 @@ class ExpressionConstraintGenerator {
                                     throw TypeCheckError(
                                         message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
-                                        expression = expr,
+                                        sourceLocation = expr.loc.toSL(),
                                         errorType = ErrorType.MISSING_FIELD
                                     )
                                 }
@@ -2404,7 +2427,7 @@ class ExpressionConstraintGenerator {
     // FUNCTIONS
     // ========================================================================
 
-    private fun generateLambda(expr: LambdaExpression, context: ConstraintContext): ConstraintResult {
+    private fun generateLambda(expr: ParsedLambda, context: ConstraintContext): ConstraintResult {
         // {params} -> body
 
         // BIDIRECTIONAL TYPING: Use expected type from context if available
@@ -2419,8 +2442,8 @@ class ExpressionConstraintGenerator {
         val paramFields: Map<String, MezzeType>
         val isOpenPattern: Boolean
 
-        when (val params = expr.parameters) {
-            is UntypedParameters -> {
+        when (val params = expr.params) {
+            is ParsedLambdaParams.Untyped -> {
                 paramNames = params.names
                 isOpenPattern = params.isOpen  // Check if ... was used in parameter list
 
@@ -2437,17 +2460,16 @@ class ExpressionConstraintGenerator {
                     paramNames.associateWith { MezzeType.VarType(TypeVar.fresh()) }
                 }
             }
-            is TypedParameters -> {
+            is ParsedLambdaParams.Typed -> {
                 // Typed parameters: use the annotated types
                 // Check if the pattern is open (has ...)
-                isOpenPattern = params.recordType.isOpen
-                paramNames = params.recordType.entries.map { it.name }
-                // CRITICAL: Convert annotated types using ContextBuilder instead of fresh vars!
+                isOpenPattern = false  // ParsedLambdaParams.Typed has no isOpen; closed by default
+                paramNames = params.fields.map { it.name }
+                // CRITICAL: Convert annotated types using convertParsedTypeAnnotation instead of fresh vars!
                 // This ensures parameter types like `opt: Option Int` actually use `Option Int`
                 // instead of a fresh type variable.
-                val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
-                paramFields = params.recordType.entries.associate { entry ->
-                    entry.name to contextBuilder.convertTypeAnnotation(entry.type)
+                paramFields = params.fields.associate { entry ->
+                    entry.name to convertParsedTypeAnnotation(entry.type)
                 }
             }
         }
@@ -2549,13 +2571,12 @@ class ExpressionConstraintGenerator {
         // The lambda's own constraints take precedence since they're explicitly specified
         val abilityConstraints = when {
             expr.abilityConstraints.isNotEmpty() -> {
-                // Convert from AST FunctionAbilityConstraint to MezzeType.FunctionAbilityConstraint
-                val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
+                // Convert from ParsedFnAbilityConstraint to MezzeType.FunctionAbilityConstraint
                 expr.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
                         typeArgs = constraint.typeArgs.map { typeAnn ->
-                            contextBuilder.convertTypeAnnotation(typeAnn)
+                            convertParsedTypeAnnotation(typeAnn)
                         }
                     )
                 }
@@ -2760,7 +2781,7 @@ class ExpressionConstraintGenerator {
         return mergedTypeVar
     }
 
-    private fun generateFunctionCall(expr: FunctionCall, context: ConstraintContext): ConstraintResult {
+    private fun generateFunctionCall(expr: ParsedFunctionCall, context: ConstraintContext): ConstraintResult {
         // function(arguments)
         // Supports:
         // 1. Full application: all parameters provided
@@ -2771,23 +2792,23 @@ class ExpressionConstraintGenerator {
         // Valid: func { x = 1, y = 2 } - explicit fields
         // Valid: func { ...k, x = 1 } - spread with explicit fields
         // Invalid: func { ...k } - spread-only
-        if (expr.arguments is RecordLiteral) {
-            val recordLiteral = expr.arguments as RecordLiteral
-            val hasExplicitFields = recordLiteral.entries.any { it is RecordFieldEntry }
-            val hasSpreadEntries = recordLiteral.entries.any { it is RecordSpreadEntry }
+        if (expr.arguments is ParsedRecordLit) {
+            val recordLiteral = expr.arguments as ParsedRecordLit
+            val hasExplicitFields = recordLiteral.entries.any { it is ParsedRecordEntry.Field }
+            val hasSpreadEntries = recordLiteral.entries.any { it is ParsedRecordEntry.Spread }
 
             // Reject if ONLY spread entries (no explicit fields)
             if (hasSpreadEntries && !hasExplicitFields) {
                 // Get the function name for error message
                 val functionName = when (expr.function) {
-                    is Identifier -> (expr.function as Identifier).localName
+                    is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
                     else -> "function"
                 }
 
                 // Get the spread variable name for error message
-                val spreadEntry = recordLiteral.entries.filterIsInstance<RecordSpreadEntry>().first()
-                val spreadVarName = when (spreadEntry.expression) {
-                    is Identifier -> (spreadEntry.expression as Identifier).localName
+                val spreadEntry = recordLiteral.entries.filterIsInstance<ParsedRecordEntry.Spread>().first()
+                val spreadVarName = when (spreadEntry.expr) {
+                    is ParsedIdentifier -> (spreadEntry.expr as ParsedIdentifier).localName
                     else -> "record"
                 }
 
@@ -2795,7 +2816,7 @@ class ExpressionConstraintGenerator {
                     message = "cannot use spread-only records in function call to '$functionName'. " +
                             "Spread variable: '$spreadVarName'. " +
                             "Use explicit named arguments instead, e.g., { x = $spreadVarName.x, y = $spreadVarName.y }",
-                    expression = expr,
+                    sourceLocation = expr.loc.toSL(),
                     errorType = ErrorType.TYPE_MISMATCH,
                     metadata = mapOf(
                         "functionName" to functionName,
@@ -2806,14 +2827,14 @@ class ExpressionConstraintGenerator {
         }
 
         // METHOD CALL RESOLUTION: Detect `value.method { args }` pattern
-        // When the function is MemberAccess(receiver, methodName) and receiver is NOT an ability/effect,
+        // When the function is ParsedMemberAccess(receiver, methodName) and receiver is NOT an ability/effect,
         // check if methodName matches an ability operation. If so, transform into an ability method call
         // where the receiver is injected as the first argument.
-        if (expr.function is MemberAccess) {
-            val memberAccess = expr.function as MemberAccess
+        if (expr.function is ParsedMemberAccess) {
+            val memberAccess = expr.function as ParsedMemberAccess
             val receiverName = when (memberAccess.receiver) {
-                is Identifier -> (memberAccess.receiver as Identifier).localName
-                is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
+                is ParsedIdentifier -> (memberAccess.receiver as ParsedIdentifier).localName
+                is ParsedVariantConstruct -> (memberAccess.receiver as ParsedVariantConstruct).constructor
                 else -> null
             }
             val isAbilityOrEffect = receiverName != null && receiverName.first().isUpperCase() &&
@@ -2822,12 +2843,12 @@ class ExpressionConstraintGenerator {
                  context.performerToEffect.containsKey(receiverName) ||
                  BuiltInAbilities.isBuiltInAbility(receiverName))
 
-            // If receiver is a VariantConstruction (uppercase) that's NOT a known ability/effect,
+            // If receiver is a ParsedVariantConstruct (uppercase) that's NOT a known ability/effect,
             // check if it's a known value (variant constructor like True, Some, etc.).
             // If it's not a known value either, it's likely a misspelled ability —
             // skip method resolution and let the normal error path handle it.
             val isUnknownUppercaseName = !isAbilityOrEffect &&
-                memberAccess.receiver is VariantConstruction &&
+                memberAccess.receiver is ParsedVariantConstruct &&
                 context.typingContext.lookup(receiverName ?: "") is TypingContext.LookupResult.NotFound
 
             // Only try method resolution if receiver is NOT an ability/effect/performer
@@ -2857,12 +2878,12 @@ class ExpressionConstraintGenerator {
         // `let length = {xs} -> seq::length {xs}` where seq::length != length
         val isSelfTailCall = context.inTailPosition &&
             context.enclosingFunctionName != null &&
-            expr.function is Identifier &&
-            (expr.function as Identifier).qualifier == null &&
-            (expr.function as Identifier).localName == context.enclosingFunctionName
+            expr.function is ParsedIdentifier &&
+            (expr.function as ParsedIdentifier).qualifier == null &&
+            (expr.function as ParsedIdentifier).localName == context.enclosingFunctionName
 
         // Track tail call location if detected
-        val tailCallLocation = if (isSelfTailCall) expr.sourceLocation else null
+        val tailCallLocation = if (isSelfTailCall) expr.loc.toSL() else null
 
         // PARTIAL APPLICATION DETECTION
         // If function type is known AND argument is a record, check for partial application
@@ -2882,13 +2903,13 @@ class ExpressionConstraintGenerator {
                 if (extraFields.isNotEmpty() && funcParamType.rowVar == null) {
                     // Get function name for error message
                     val functionName = when (expr.function) {
-                        is Identifier -> (expr.function as Identifier).localName
+                        is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
                         else -> "function"
                     }
                     throw TypeCheckError(
                         message = "Extra field(s) '${extraFields.joinToString(", ")}' in call to '$functionName'. " +
                                 "Function expects fields: ${expectedFields.sorted().joinToString(", ")}",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.TYPE_MISMATCH
                     )
                 }
@@ -2910,7 +2931,7 @@ class ExpressionConstraintGenerator {
                                     left = providedType,
                                     right = expectedType,
                                     context = "Partial application field $fieldName",
-                                    sourceLocation = expr.sourceLocation
+                                    sourceLocation = expr.loc.toSL()
                                 )
                             )
                         }
@@ -2973,7 +2994,7 @@ class ExpressionConstraintGenerator {
                 // Argument must match parameter type
                 // Extract function name for better error messages
                 val functionName = when (expr.function) {
-                    is Identifier -> (expr.function as Identifier).localName
+                    is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
                     else -> null
                 }
                 constraints.add(
@@ -2981,7 +3002,7 @@ class ExpressionConstraintGenerator {
                         left = argumentResult.type,
                         right = functionType.paramType,
                         context = "Function application argument",
-                        sourceLocation = expr.sourceLocation,
+                        sourceLocation = expr.loc.toSL(),
                         errorContext = ErrorContext.FunctionArgument(
                             functionName = functionName,
                             argumentName = extractArgumentName(expr.arguments),
@@ -3020,7 +3041,7 @@ class ExpressionConstraintGenerator {
                                 abilityName = constraint.abilityName,
                                 typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                                 context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
-                                sourceLocation = expr.sourceLocation
+                                sourceLocation = expr.loc.toSL()
                             )
                         } else null
                     }
@@ -3073,7 +3094,7 @@ class ExpressionConstraintGenerator {
         // The function's actual type must match a function that takes our argument type
         // Extract function name for better error messages
         val functionName = when (expr.function) {
-            is Identifier -> (expr.function as Identifier).localName
+            is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
             else -> null
         }
         constraints.add(
@@ -3084,7 +3105,7 @@ class ExpressionConstraintGenerator {
                 ),
                 right = functionResult.type,
                 context = "Function application",
-                sourceLocation = expr.sourceLocation,
+                sourceLocation = expr.loc.toSL(),
                 errorContext = ErrorContext.FunctionArgument(
                     functionName = functionName,
                     argumentName = extractArgumentName(expr.arguments),
@@ -3118,7 +3139,7 @@ class ExpressionConstraintGenerator {
                             abilityName = constraint.abilityName,
                             typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                             context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
-                            sourceLocation = expr.sourceLocation
+                            sourceLocation = expr.loc.toSL()
                         )
                     } else null
                 }
@@ -3156,12 +3177,12 @@ class ExpressionConstraintGenerator {
     // - IfExpression in AST for tooling (error messages, LSP, formatting)
     // - IfNode in interpreter for optimal runtime performance (simple branch profile)
 
-    private fun generateMatch(expr: MatchExpression, context: ConstraintContext): ConstraintResult {
+    private fun generateMatch(expr: ParsedMatch, context: ConstraintContext): ConstraintResult {
         // match scrutinee { pattern1 -> expr1, pattern2 -> expr2 }
 
         // Step 1: Generate constraints for the scrutinee expression
         // TCO: Scrutinee is NOT in tail position
-        val scrutineeResult = generate(expr.expression, context.notInTailPosition())
+        val scrutineeResult = generate(expr.scrutinee, context.notInTailPosition())
 
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(scrutineeResult.constraints)
@@ -3195,8 +3216,8 @@ class ExpressionConstraintGenerator {
         // not the whole variant, so it doesn't make the variant open.
         val hasWildcard = expr.cases.any { matchCase ->
             matchCase.patterns.any { pattern ->
-                // Only WildcardPattern or VariablePattern at top level make the variant open
-                pattern is WildcardPattern || pattern is VariablePattern
+                // Only ParsedWildcardPattern or ParsedVariablePattern at top level make the variant open
+                pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern
             }
         }
         if (hasWildcard) {
@@ -3220,7 +3241,7 @@ class ExpressionConstraintGenerator {
 
             // Process first pattern to get bindings
             val firstPattern = matchCase.patterns.first()
-            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.sourceLocation)
+            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.loc.toSL())
             constraints.addAll(patternResult.constraints)
             patternWarnings.addAll(patternResult.warnings)
 
@@ -3228,7 +3249,7 @@ class ExpressionConstraintGenerator {
             // and add constraints (bindings must match first pattern's)
             val firstPatternBindings = patternResult.bindings.keys
             for (pattern in matchCase.patterns.drop(1)) {
-                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.sourceLocation)
+                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc.toSL())
                 constraints.addAll(orPatternResult.constraints)
                 patternWarnings.addAll(orPatternResult.warnings)
 
@@ -3246,7 +3267,7 @@ class ExpressionConstraintGenerator {
                     }
                     throw TypeCheckError(
                         "Or-pattern alternatives must bind the same variables. ${errorParts.joinToString("; ")}",
-                        expr.sourceLocation
+                        expr.loc.toSL()
                     )
                 }
 
@@ -3304,7 +3325,7 @@ class ExpressionConstraintGenerator {
             for (ifLetBinding in matchCase.ifLetBindings) {
                 // Generate constraints for the binding expression
                 // TCO: If-let expression is NOT in tail position
-                val bindingExprResult = generate(ifLetBinding.expression, caseContext.notInTailPosition())
+                val bindingExprResult = generate(ifLetBinding.expr, caseContext.notInTailPosition())
                 constraints.addAll(bindingExprResult.constraints)
                 undefinedVars.addAll(bindingExprResult.undefinedVariables)
                 abilityConstraints.addAll(bindingExprResult.abilityConstraints)
@@ -3320,7 +3341,7 @@ class ExpressionConstraintGenerator {
                     ifLetBinding.pattern,
                     bindingExprResult.type,
                     caseContext,
-                    ifLetBinding.sourceLocation
+                    ifLetBinding.loc.toSL()
                 )
                 constraints.addAll(ifLetPatternResult.constraints)
                 patternWarnings.addAll(ifLetPatternResult.warnings)
@@ -3333,7 +3354,7 @@ class ExpressionConstraintGenerator {
 
             // Generate constraints for case body with extended context
             // TCO: Case body inherits tail position from context
-            val caseBodyResult = generate(matchCase.expression, caseContext)
+            val caseBodyResult = generate(matchCase.body, caseContext)
             constraints.addAll(caseBodyResult.constraints)
             undefinedVars.addAll(caseBodyResult.undefinedVariables)
             abilityConstraints.addAll(caseBodyResult.abilityConstraints)
@@ -3354,8 +3375,8 @@ class ExpressionConstraintGenerator {
                     // Use the binding's source location from the pattern
                     // Fall back to case body location if not available
                     val patternLocation = patternResult.bindingLocations[varName]
-                        ?: matchCase.expression.sourceLocation
-                        ?: expr.sourceLocation
+                        ?: matchCase.body.loc.toSL()
+                        ?: expr.loc.toSL()
                     unusedVars.add(
                         ConstraintResult.UnusedVariable(
                             name = varName,
@@ -3406,7 +3427,7 @@ class ExpressionConstraintGenerator {
     // BLOCKS
     // ========================================================================
 
-    private fun generateDo(expr: DoExpression, context: ConstraintContext): ConstraintResult {
+    private fun generateDo(expr: ParsedDo, context: ConstraintContext): ConstraintResult {
         // do
         //     stmt1
         //     stmt2
@@ -3438,13 +3459,12 @@ class ExpressionConstraintGenerator {
         // Process statements
         for (stmt in expr.statements) {
             when (stmt) {
-                is LetStatement -> {
+                is ParsedStatement.Let -> {
                     // BIDIRECTIONAL TYPING: If there's a type annotation, use it as expected type
                     // This is CRITICAL for polymorphic abilities like Decode to work correctly
                     // (e.g., `let user: Result {name: String} DecodeError = Decode.decode {...}`)
                     val annotatedType = stmt.typeAnnotation?.let { annotation ->
-                        val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
-                        contextBuilder.convertTypeAnnotation(annotation)
+                        convertParsedTypeAnnotation(annotation)
                     }
 
                     // Generate constraints for the expression, with expected type if annotated
@@ -3453,7 +3473,7 @@ class ExpressionConstraintGenerator {
                     } else {
                         currentContext
                     }
-                    val exprResult = generate(stmt.expression, exprContext)
+                    val exprResult = generate(stmt.value, exprContext)
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
@@ -3473,7 +3493,7 @@ class ExpressionConstraintGenerator {
                                 left = exprResult.type,
                                 right = annotatedType,
                                 context = "Type annotation on let binding in do block",
-                                sourceLocation = stmt.expression.sourceLocation
+                                sourceLocation = stmt.value.loc.toSL()
                             )
                         )
                     }
@@ -3500,7 +3520,7 @@ class ExpressionConstraintGenerator {
                         stmt.pattern,
                         bindingType,
                         currentContext,
-                        stmt.expression.sourceLocation
+                        stmt.value.loc.toSL()
                     )
                     constraints.addAll(patternResult.constraints)
 
@@ -3513,37 +3533,34 @@ class ExpressionConstraintGenerator {
                     // with ability constraints, we should create a Polymorphic binding.
                     // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
                     // The user is explicitly telling us this should be polymorphic.
-                    val contextBindings = if (stmt.pattern is VariablePattern &&
-                        stmt.typeAnnotation is FunctionTypeAnnotation &&
-                        (stmt.typeAnnotation as FunctionTypeAnnotation).abilityConstraints.isNotEmpty()
+                    val contextBindings = if (stmt.pattern is ParsedVariablePattern &&
+                        stmt.typeAnnotation is ParsedFunctionType &&
+                        (stmt.typeAnnotation as ParsedFunctionType).abilityConstraints.isNotEmpty()
                     ) {
                         // User explicitly declared ability constraints - create Polymorphic binding
-                        val annotation = stmt.typeAnnotation as FunctionTypeAnnotation
-                        val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
-                        val annotatedType = contextBuilder.convertTypeAnnotation(annotation)
+                        val annotation = stmt.typeAnnotation as ParsedFunctionType
+                        val annotatedType = convertParsedTypeAnnotation(annotation)
 
                         // Collect type variables from the annotation
                         val typeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(annotatedType)
 
                         // Convert annotation's ability constraints to AbilityConstraint
-                        // FunctionAbilityConstraint has typeArgs - find the type variable(s) among them
+                        // ParsedFnAbilityConstraint has typeArgs - find the type variable(s) among them
                         // For Encode Json 'a: typeArgs = [Json, 'a], typeParam = 'a, allTypeArgs = [Json, 'a]
                         val abilityConstraints = annotation.abilityConstraints.mapNotNull { constraint ->
                             // Find the first type variable in the type args - that's the constrained parameter
-                            // For multi-param abilities like Encode Json 'a, 'a is the type var
                             val typeVarArg = constraint.typeArgs.find { arg ->
-                                arg is IdentifierTypeAnnotation &&
+                                arg is ParsedNamedType &&
                                 (arg.name.startsWith("'") || arg.name.first().isLowerCase())
                             }
                             val typeParamName = when (typeVarArg) {
-                                is IdentifierTypeAnnotation -> typeVarArg.name
+                                is ParsedNamedType -> typeVarArg.name
                                 else -> null
                             }
                             if (typeParamName != null) {
                                 // Convert ALL type args to MezzeTypes, preserving order
-                                // For Encode Json 'a, this gives us [Json, 'a]
                                 val allTypeArgs = constraint.typeArgs.map { typeArg ->
-                                    contextBuilder.convertTypeAnnotation(typeArg)
+                                    convertParsedTypeAnnotation(typeArg)
                                 }
                                 AbilityConstraint(
                                     abilityName = constraint.abilityName,
@@ -3573,15 +3590,15 @@ class ExpressionConstraintGenerator {
                     currentContext = currentContext.copy(typingContext = extendedTypingContext)
 
                     // CRITICAL: Track record literal bindings (matches OldTypeChecker.kt:1428-1429)
-                    // If this is a simple variable binding to a RecordLiteral, track it
+                    // If this is a simple variable binding to a ParsedRecordLit, track it
                     // This enables field access validation like OldTypeChecker
-                    if (stmt.pattern is VariablePattern && stmt.expression is RecordLiteral) {
-                        val varName = (stmt.pattern as VariablePattern).name
+                    if (stmt.pattern is ParsedVariablePattern && stmt.value is ParsedRecordLit) {
+                        val varName = (stmt.pattern as ParsedVariablePattern).name
                         currentContext = currentContext.withRecordLiteralBinding(varName)
                     }
                 }
-                is ExpressionStatement -> {
-                    val exprResult = generate(stmt.expression, currentContext)
+                is ParsedStatement.Expr -> {
+                    val exprResult = generate(stmt.expr, currentContext)
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
@@ -3655,7 +3672,7 @@ class ExpressionConstraintGenerator {
     // EFFECTS
     // ========================================================================
 
-    private fun generatePerform(expr: PerformExpression, context: ConstraintContext): ConstraintResult {
+    private fun generatePerform(expr: ParsedPerform, context: ConstraintContext): ConstraintResult {
         // perform Handler in expr
         // The handler handles a specific effect, removing it from the expression's effects
 
@@ -3663,7 +3680,7 @@ class ExpressionConstraintGenerator {
         // This allows effect operations to substitute associated types from the performer
         // Matches OldTypeChecker.kt lines 7353-7354
         val contextWithPerform = context.copy(performContext = expr)
-        val exprResult = generate(expr.expression, contextWithPerform)
+        val exprResult = generate(expr.body, contextWithPerform)
 
         // Map each handler name to the effect it handles
         // VALIDATION: Check that all handlers are defined performers
@@ -3689,7 +3706,7 @@ class ExpressionConstraintGenerator {
                     // Not in performerToEffect and not in context - truly unknown
                     throw TypeCheckError(
                         message = "Unknown performer '${handlerName}'. Performer has not been defined with 'impl Effect for ${handlerName}'.",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.UNDEFINED_VARIABLE
                     )
                 }
@@ -3704,7 +3721,7 @@ class ExpressionConstraintGenerator {
                 val handlerNames = handlers.map { it.first }.joinToString(", ")
                 throw TypeCheckError(
                     message = "Multiple handlers for the same effect '$effect': $handlerNames. Each effect can only be handled by one performer.",
-                    expression = expr,
+                    sourceLocation = expr.loc.toSL(),
                     errorType = ErrorType.CONSTRAINT_VIOLATION
                 )
             }
@@ -3715,7 +3732,7 @@ class ExpressionConstraintGenerator {
         // - Inner performs may have handlers that PRODUCE effects (e.g., FileLogger adds FileSystem)
         //   which need to be handled by outer performs. We can't track handler-added effects statically.
         // However, we CAN validate when effects are embedded in the result TYPE (e.g., SuspendedType)
-        val isNestedPerform = expr.expression is PerformExpression
+        val isNestedPerform = expr.body is ParsedPerform
 
         // Extract effects from the expression's result TYPE (for SuspendedType, FunctionType with effects)
         val extractedEffects = extractEffectsFromType(exprResult.type)
@@ -3754,7 +3771,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Expression is pure (has no effects), but handlers were provided: $handlerNames. " +
                         "Remove the perform block or use an expression that actually uses effects.",
-                    expression = expr,
+                    sourceLocation = expr.loc.toSL(),
                     errorType = ErrorType.CONSTRAINT_VIOLATION
                 )
             }
@@ -3772,7 +3789,7 @@ class ExpressionConstraintGenerator {
                         message = "None of the provided handlers handle effects used by the expression. " +
                             "Expression uses: ${allEffects.joinToString(", ")}. " +
                             "Handlers provided: $handlersList",
-                        expression = expr,
+                        sourceLocation = expr.loc.toSL(),
                         errorType = ErrorType.CONSTRAINT_VIOLATION
                     )
                 }
@@ -3791,7 +3808,7 @@ class ExpressionConstraintGenerator {
                             message = "Handler '$handlerName' handles effect '$effectName', but the expression doesn't use this effect. " +
                                 "Expression uses: ${allEffects.joinToString(", ")}. " +
                                 "Remove the unnecessary handler.",
-                            expression = expr,
+                            sourceLocation = expr.loc.toSL(),
                             errorType = ErrorType.CONSTRAINT_VIOLATION
                         )
                     }
@@ -3833,7 +3850,7 @@ class ExpressionConstraintGenerator {
             val performerInfo = performerInfos.firstOrNull() ?: continue
 
             // Type handler parameters if present
-            val handlerParams = handler.parameters
+            val handlerParams = handler.params
             if (handlerParams != null) {
                 val performerFields = performerInfo.performerFields
                 if (performerFields is MezzeType.RecordType) {
@@ -3846,7 +3863,7 @@ class ExpressionConstraintGenerator {
                             left = actualParamsType,
                             right = performerFields,
                             context = "Handler parameters must match performer field types",
-                            sourceLocation = handlerParams.sourceLocation
+                            sourceLocation = handlerParams.loc.toSL()
                         )
                     )
                 }
@@ -3934,7 +3951,7 @@ class ExpressionConstraintGenerator {
                         left = performResultType,
                         right = resolvedSuspensionType,
                         context = "perform body must return the same type that handler '${handler.performer.localName}' produces (e.g., wrap with Ok/Some)",
-                        sourceLocation = expr.sourceLocation
+                        sourceLocation = expr.loc.toSL()
                     )
                 )
 
@@ -4199,11 +4216,11 @@ class ExpressionConstraintGenerator {
         }
     }
 
-    private fun generateEffectCall(expr: EffectCallExpression, context: ConstraintContext): ConstraintResult {
-        // EffectCallExpression represents effect operation calls like Effect.operation(args)
+    private fun generateEffectCall(expr: ParsedEffectCall, context: ConstraintContext): ConstraintResult {
+        // ParsedEffectCall represents effect operation calls like Effect.operation(args)
         // The effectName and operationName are already parsed out
 
-        val effectName = expr.operation.qualifier?.fullPath ?: ""
+        val effectName = expr.operation.qualifier?.segments?.joinToString("::") ?: ""
         val operationName = expr.operation.localName
 
         // Look up effect type from context using dedicated map
@@ -4214,7 +4231,7 @@ class ExpressionConstraintGenerator {
                 type = MezzeType.VarType(TypeVar.fresh()),
                 constraints = emptyList(),
                 effects = setOf(effectName),
-                undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.sourceLocation))
+                undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.loc.toSL()))
             )
         }
 
@@ -4231,7 +4248,7 @@ class ExpressionConstraintGenerator {
             val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
-                expression = expr,
+                sourceLocation = expr.loc.toSL(),
                 errorType = ErrorType.MISSING_FIELD
             )
         }
@@ -4300,7 +4317,7 @@ class ExpressionConstraintGenerator {
                 left = argResult.type,
                 right = instantiatedOperationType.paramType,
                 context = "Effect operation argument type",
-                sourceLocation = expr.sourceLocation
+                sourceLocation = expr.loc.toSL()
             )
             instantiatedOperationType.returnType to listOf(paramConstraint)
         } else {
@@ -4354,80 +4371,6 @@ class ExpressionConstraintGenerator {
             effects = setOf(effectName),
             effectInstances = effectInstances + argResult.effectInstances,  // Include effect instances!
             undefinedVariables = argResult.undefinedVariables
-        )
-    }
-
-    // ========================================================================
-    // STATE MACHINES
-    // ========================================================================
-
-    private fun generateStateMachine(expr: StateMachineExpression, context: ConstraintContext): ConstraintResult {
-        // State machines are compiler-generated continuation transformations.
-        // The type of a state machine is determined by its CompleteState expressions.
-        // We need to:
-        // 1. Type-check all computations in ComputeState nodes
-        // 2. Type-check all yield expressions in YieldState nodes
-        // 3. Find all CompleteState nodes and unify their result types
-
-        val allConstraints = mutableListOf<Constraint>()
-        val allEffects = mutableSetOf<String>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-
-        // Track result types from CompleteStates to unify them
-        val resultTypes = mutableListOf<MezzeType>()
-
-        for (state in expr.states) {
-            when (state) {
-                is ComputeState -> {
-                    // Type check the computation expression
-                    val computeResult = generate(state.computation, context)
-                    allConstraints.addAll(computeResult.constraints)
-                    allEffects.addAll(computeResult.effects)
-                    undefinedVars.addAll(computeResult.undefinedVariables)
-                }
-                is YieldState -> {
-                    // Type check the yield value expression
-                    val yieldResult = generate(state.valueExpression, context)
-                    allConstraints.addAll(yieldResult.constraints)
-                    allEffects.addAll(yieldResult.effects)
-                    undefinedVars.addAll(yieldResult.undefinedVariables)
-                }
-                is CompleteState -> {
-                    // Type check the result expression and track its type
-                    val completeResult = generate(state.resultExpression, context)
-                    allConstraints.addAll(completeResult.constraints)
-                    allEffects.addAll(completeResult.effects)
-                    undefinedVars.addAll(completeResult.undefinedVariables)
-                    resultTypes.add(completeResult.type)
-                }
-            }
-        }
-
-        // Determine the state machine's result type
-        val resultType = if (resultTypes.isEmpty()) {
-            // No complete states - use a fresh type variable (will be constrained by context)
-            MezzeType.VarType(TypeVar.fresh())
-        } else if (resultTypes.size == 1) {
-            resultTypes.first()
-        } else {
-            // Multiple complete states - unify all result types
-            val unifiedType = MezzeType.VarType(TypeVar.fresh())
-            for (rt in resultTypes) {
-                allConstraints.add(Constraint.Equality(
-                    left = unifiedType,
-                    right = rt,
-                    context = "State machine branches must have same type",
-                    sourceLocation = expr.sourceLocation
-                ))
-            }
-            unifiedType
-        }
-
-        return ConstraintResult(
-            type = resultType,
-            constraints = allConstraints,
-            effects = allEffects,
-            undefinedVariables = undefinedVars
         )
     }
 
@@ -4517,10 +4460,13 @@ class ExpressionConstraintGenerator {
      *
      * Used to determine if field access should be strict (no accumulation).
      */
-    private fun isRecordLiteralAccess(expr: Expression, context: ConstraintContext): Boolean {
+    private fun isRecordLiteralAccess(expr: ParsedExpr, context: ConstraintContext): Boolean {
         return when (expr) {
-            is Identifier -> expr.toBindingKey().toKeyString() in context.recordLiteralBindings
-            is MemberAccess -> isRecordLiteralAccess(expr.receiver, context)
+            is ParsedIdentifier -> {
+                val key = BindingKey(qualifier = expr.qualifier?.segments?.lastOrNull(), localName = expr.localName).toKeyString()
+                key in context.recordLiteralBindings
+            }
+            is ParsedMemberAccess -> isRecordLiteralAccess(expr.receiver, context)
             else -> false
         }
     }
@@ -4543,13 +4489,13 @@ class ExpressionConstraintGenerator {
      * For identifiers, returns the identifier name.
      * For other expressions, returns null.
      */
-    private fun extractArgumentName(expr: Expression): String? {
+    private fun extractArgumentName(expr: ParsedExpr): String? {
         return when (expr) {
-            is RecordLiteral -> {
+            is ParsedRecordLit -> {
                 val fieldNames = expr.entries.mapNotNull { entry ->
                     when (entry) {
-                        is RecordFieldEntry -> entry.name
-                        else -> null  // RecordSpreadEntry doesn't have a name
+                        is ParsedRecordEntry.Field -> entry.name
+                        else -> null  // ParsedRecordEntry.Spread doesn't have a name
                     }
                 }
                 when {
@@ -4559,8 +4505,91 @@ class ExpressionConstraintGenerator {
                     else -> "{${fieldNames.take(3).joinToString(", ")}, ...}"
                 }
             }
-            is Identifier -> expr.localName
+            is ParsedIdentifier -> expr.localName
             else -> null
+        }
+    }
+
+    /**
+     * Convert a ParsedTypeAnnotation to a MezzeType.
+     *
+     * This is the ParsedAST-equivalent of ContextBuilder.convertTypeAnnotation.
+     * Used for type annotations on let bindings and lambda parameters.
+     */
+    private fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
+        return when (annotation) {
+            is ParsedNamedType -> {
+                // Check primitive types first
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                // Type variable or type constructor
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    MezzeType.VarType(TypeVar(annotation.name))
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList())
+                }
+            }
+            is ParsedQualifiedType -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                MezzeType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertParsedTypeAnnotation(it) }
+                )
+            }
+            is ParsedTypeApp -> {
+                // Check for built-in collection types
+                when (annotation.constructor) {
+                    "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertParsedTypeAnnotation(annotation.args[0]))
+                             else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                    "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertParsedTypeAnnotation(annotation.args[0]))
+                              else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                    "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertParsedTypeAnnotation(annotation.args[0]))
+                             else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                    "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
+                                 convertParsedTypeAnnotation(annotation.args[0]),
+                                 convertParsedTypeAnnotation(annotation.args[1])
+                             ) else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                    else -> MezzeType.TypeApplication(
+                        constructor = annotation.constructor,
+                        args = annotation.args.map { convertParsedTypeAnnotation(it) }
+                    )
+                }
+            }
+            is ParsedRecordType -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertParsedTypeAnnotation(entry.type)
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+                )
+            }
+            is ParsedVariantType -> {
+                MezzeType.VariantType(
+                    constructors = annotation.constructors.associate { ctor ->
+                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
+                    typeName = if (!annotation.isOpen) "<inline>" else null
+                )
+            }
+            is ParsedFunctionType -> {
+                MezzeType.FunctionType(
+                    paramType = convertParsedTypeAnnotation(annotation.paramType),
+                    returnType = convertParsedTypeAnnotation(annotation.returnType),
+                    effects = annotation.effects?.let { effectRow ->
+                        ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
+                    },
+                    abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                        MezzeType.FunctionAbilityConstraint(
+                            abilityName = constraint.abilityName,
+                            typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) }
+                        )
+                    }
+                )
+            }
+            is ParsedSeqType -> {
+                MezzeType.SeqType(convertParsedTypeAnnotation(annotation.elementType))
+            }
         }
     }
 }

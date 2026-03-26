@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.ParsedModule
+import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.NativeFunctionTypes
 import com.mezze.language.typechecker.application.SubstitutionApplier
 import com.mezze.language.typechecker.constraints.Constraint
@@ -121,11 +123,16 @@ class TypeChecker(
          * Type checking succeeded.
          */
         data class Success(
-            val program: Program,                              // Program with inferred types and resolved call sites
-            val substitution: Substitution,                    // Final type substitution
-            val monomorphicInstances: Map<String, LetBinding>, // Specialized function instances
-            val importContext: ModuleImportContext? = null,    // Resolved imports for IDE support
-            val warnings: List<TypeCheckWarning> = emptyList() // Structured warnings with source locations
+            val program: Program,                              // Program with inferred types AND continuation transforms
+            val substitution: Substitution,
+            val monomorphicInstances: Map<String, LetBinding>,
+            val importContext: ModuleImportContext? = null,
+            val warnings: List<TypeCheckWarning> = emptyList(),
+            val loadedModules: Map<String, TypedModule> = emptyMap(),
+            val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
+            val programBeforeContinuations: Program? = null,   // Program BEFORE StateMachine transform (for v2 emitter)
+            val typedModule: com.mezze.language.typedast.TypedModule? = null,       // Stage 1: TypedAST
+            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null  // Stage 4: TruffleIR (after mono+resolve+lower)
         ) : TypeCheckResult()
 
         /**
@@ -313,7 +320,8 @@ class TypeChecker(
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations
         )
-        val programConstraintResult = constraintGenerator.generateProgram(desugaredProgram, context)
+        val parsedModuleForConstraints = MezzeParser().programToParsedModule(desugaredProgram, currentModulePath ?: "<unknown>")
+        val programConstraintResult = constraintGenerator.generateProgram(parsedModuleForConstraints, context)
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -654,12 +662,56 @@ class TypeChecker(
                                     importContext
                                 )
 
+                                // Produce TypedAST → MonoAST → ResolvedAST → TruffleIR
+                                val emitProgram = finalProgram
+                                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
+                                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
+                                try {
+                                    // Stage 1: TypedAST
+                                    val typed = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
+                                        emitProgram,
+                                        monomorphizationResult.monomorphicInstances,
+                                        importContext,
+                                        currentModulePath ?: "<unknown>",
+                                        context.getAllAbilityImpls()
+                                    )
+                                    emittedTypedModule = typed
+
+                                    // Stage 1b: Convert dependency modules to TypedModules
+                                    val adapter = TypeCheckerV2()
+                                    val allModules = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(typed.hash to typed)
+                                    for ((path, v1Module) in loadedModules) {
+                                        val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                                        allModules[v2Module.hash] = v2Module
+                                    }
+
+                                    // Stage 2: Monomorphize
+                                    val mono = com.mezze.language.typechecker.mono.Monomorphizer()
+                                    val monoModule = mono.monomorphize(typed, allModules)
+
+                                    // Stage 3: Resolve
+                                    val resolver = com.mezze.language.typechecker.mono.Resolver()
+                                    val resolved = resolver.resolve(monoModule)
+
+                                    // Stage 4: Lower to TruffleIR
+                                    val lowerer = com.mezze.language.typechecker.mono.Lowerer()
+                                    val lowered = lowerer.lower(resolved)
+                                    loweredFns = lowered.functions
+                                } catch (_: Exception) {
+                                    // Pipeline stages are best-effort during migration
+                                }
+
                                 return TypeCheckResult.Success(
                                     program = programWithImportHashes,
                                     substitution = substitution,
                                     monomorphicInstances = monomorphizationResult.monomorphicInstances,
                                     importContext = importContext,
-                                    warnings = warnings
+                                    warnings = warnings,
+                                    loadedModules = loadedModules,
+                                    abilityImpls = context.getAllAbilityImpls(),
+                                    programBeforeContinuations = finalProgram,
+                                    typedModule = emittedTypedModule,
+                                    loweredFunctions = loweredFns
                                 )
                             }
                         }
@@ -818,7 +870,8 @@ class TypeChecker(
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations
         )
-        val programConstraintResult = constraintGenerator.generateProgram(desugaredProgram, context)
+        val parsedModuleForConstraints2 = MezzeParser().programToParsedModule(desugaredProgram, "<unknown>")
+        val programConstraintResult = constraintGenerator.generateProgram(parsedModuleForConstraints2, context)
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -1780,6 +1833,69 @@ class TypeChecker(
             }
             is TypeCheckResult.Failure -> {
                 // Throw exception for first error (old behavior)
+                val error = result.errors.firstOrNull()
+                    ?: throw TypeCheckError("Type checking failed with unknown error")
+                throw TypeCheckError(error.message, error.sourceLocation)
+            }
+        }
+    }
+
+    /**
+     * Type-check a ParsedModule and produce a TypedModule.
+     *
+     * Same algorithm as typeCheck(), just different input/output types.
+     * All declarations in the output have content hashes.
+     * All cross-references use hashes, not strings.
+     *
+     * @param module The parsed module to type-check
+     * @param currentPath Path for module resolution
+     * @param enablePrelude If true, auto-imports stdlib inherent impls
+     * @return TypedModule with hashes on all declarations
+     * @throws TypeCheckError if type checking fails
+     */
+    /**
+     * Result of checkParsedModule — includes the typed module and all loaded dependencies.
+     */
+    data class ParsedModuleCheckResult(
+        val module: com.mezze.language.typedast.TypedModule,
+        val loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
+    )
+
+    fun checkParsedModule(
+        module: ParsedModule,
+        currentPath: Path = Paths.get("."),
+        enablePrelude: Boolean = false
+    ): com.mezze.language.typedast.TypedModule {
+        return checkParsedModuleWithDeps(module, currentPath, enablePrelude).module
+    }
+
+    fun checkParsedModuleWithDeps(
+        module: ParsedModule,
+        currentPath: Path = Paths.get("."),
+        enablePrelude: Boolean = false
+    ): ParsedModuleCheckResult {
+        // Convert ParsedModule → v1 Program for the existing typechecker
+        val adapter = TypeCheckerV2()
+        val v1Program = adapter.parsedModuleToV1(module)
+
+        // Run the full typechecker
+        val result = checkProgram(v1Program, currentPath, enablePrelude = enablePrelude)
+
+        return when (result) {
+            is TypeCheckResult.Success -> {
+                // Emit from program BEFORE continuation transformation
+                // StateMachineExpression is a v1-only IR that the v2 pipeline can't handle
+                val emitProgram = result.programBeforeContinuations ?: result.program
+                val typedModule = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
+                    emitProgram,
+                    result.monomorphicInstances,
+                    result.importContext,
+                    module.path,
+                    result.abilityImpls
+                )
+                ParsedModuleCheckResult(typedModule, result.loadedModules)
+            }
+            is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
                 throw TypeCheckError(error.message, error.sourceLocation)

@@ -258,10 +258,9 @@ class EffectImplStorageNode(
     @TruffleBoundary
     private fun storeInContext(value: Any) {
         val context = MezzeContext.get(this)
-        // Register under impl content hash
+        try { java.io.FileWriter("/tmp/v2_debug.txt", true).use { it.append("[EffectImplStorage] performer=$performerName effect=$effectName implHash=${implContentHash.take(20)} value=$value\n") } } catch (_: Exception) {}
         context.defineGlobal(implContentHash, value)
         context.defineLocal(performerName, value)
-        // Also register under effect content hash for DynamicEffectCallNode O(1) lookup
         if (effectContentHash != null && effectContentHash.isNotEmpty() && effectContentHash != implContentHash) {
             context.defineGlobal(effectContentHash, value)
         }
@@ -307,6 +306,7 @@ class AbilityImplStorageNode(
         for (opName in operationNames) {
             val opFunc = record.getField(opName) ?: continue
             val opKey = com.mezze.language.ast.hashing.MezzeHash.operationHash(contentHash, opName)
+            // Debug: java.io.File("/tmp/v2_debug.txt").appendText("[StoreOp] opName=$opName opKey=$opKey\n")
             context.defineGlobal(opKey, opFunc)
         }
     }

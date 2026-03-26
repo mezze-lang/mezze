@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
@@ -12,6 +13,9 @@ import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.scope.extractScopeTypeFromAnnotation
 import com.mezze.language.typechecker.scope.validateScopedEffectSignatures
 import com.mezze.language.ast.Keywords
+
+/** Convert Loc to SourceLocation for error reporting */
+private fun Loc.toSL(): SourceLocation? = SourceLocation(startLine, startCol, file)
 
 /**
  * Constraint generator - orchestrator for constraint-based type inference.
@@ -86,7 +90,7 @@ class ConstraintGenerator(
      * This matches the old typechecker's approach (OldTypeChecker.kt lines 1165-1446)
      */
     fun generateProgram(
-        program: Program,
+        module: ParsedModule,
         context: TypingContext
     ): ProgramConstraintResult {
         DebugLogger.debugSection(Category.ConstraintGenerator, "Abilities and Effects") {
@@ -115,9 +119,9 @@ class ConstraintGenerator(
         // FIRST PASS: Add placeholders for function bindings to support mutual recursion
         // This allows functions to reference themselves and each other
         // CRITICAL: Store the converted annotations to reuse the SAME TypeVar instances in second pass!
-        val letBindings = program.items.filterIsInstance<LetBinding>()
+        val letBindings = module.decls.filterIsInstance<ParsedLetDecl>()
         val placeholderNames = mutableSetOf<String>()
-        val annotationTypes = mutableMapOf<LetBinding, MezzeType>()  // Store converted annotations
+        val annotationTypes = mutableMapOf<ParsedLetDecl, MezzeType>()  // Store converted annotations
         for (binding in letBindings) {
             // Convert and store annotation types for ALL bindings with annotations
             // This ensures type annotations with variant/record types are preserved correctly
@@ -127,7 +131,7 @@ class ConstraintGenerator(
             }
 
             // Only add placeholders for simple variable bindings with lambda expressions
-            if (binding.isSimpleBinding && binding.expression is LambdaExpression) {
+            if (binding.isSimpleBinding && binding.value is ParsedLambda) {
                 val placeholderType = annotationTypes[binding] ?: MezzeType.VarType(TypeVar.fresh())
 
                 currentContext = currentContext.extendMono(binding.variableName, placeholderType)
@@ -136,16 +140,16 @@ class ConstraintGenerator(
         }
 
         // SECOND PASS: Process each program item with placeholders in context
-        for (item in program.items) {
+        for (item in module.decls) {
             when (item) {
-                is LetBinding -> {
+                is ParsedLetDecl -> {
                     // Reuse the converted annotation type from first pass to ensure same TypeVar instances
                     val preConvertedAnnotationType = annotationTypes[item]
                     val result = generateLetBinding(item, currentContext, recordLiteralBindings, preConvertedAnnotationType)
 
                     // CRITICAL: Track record literal bindings (matches OldTypeChecker.kt:1428-1429)
-                    if (item.pattern is VariablePattern && item.expression is RecordLiteral) {
-                        recordLiteralBindings.add((item.pattern as VariablePattern).name)
+                    if (item.pattern is ParsedVariablePattern && item.value is ParsedRecordLit) {
+                        recordLiteralBindings.add((item.pattern as ParsedVariablePattern).name)
                     }
 
                     // Extend context with pattern bindings for subsequent items
@@ -156,7 +160,7 @@ class ConstraintGenerator(
                         item.pattern,
                         result.type,
                         constraintContext,
-                        item.expression.sourceLocation
+                        item.value.loc.toSL()
                     )
 
                     // Check for duplicate bindings BEFORE extending context
@@ -199,7 +203,7 @@ class ConstraintGenerator(
 
                             // Add binding to context with unsolved type
                             // Pass contentHash for simple bindings (single variable pattern)
-                            val bindingHash = if (item.isSimpleBinding) item.contentHash else null
+                            val bindingHash: String? = null  // ParsedLetDecl has no contentHash
                             currentContext = currentContext.extendAll(
                                 patternResult.bindings.map { (name, type) ->
                                     BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type, contentHash = bindingHash)
@@ -219,7 +223,7 @@ class ConstraintGenerator(
                             // IMPORTANT: Use annotation even if it has type variables (polymorphic) - generalization
                             // happens AFTER solving constraints. This matches OldTypeChecker.kt lines 1226-1411.
                             // IMPORTANT: Preserve TypeApplication from annotations (don't expand user-defined type aliases)
-                            val authoritativeType = if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
+                            val authoritativeType = if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
                                 // CRITICAL: If annotation was a TypeApplication (type alias), check if it's user-defined
                                 // Only preserve USER-DEFINED type aliases, not built-in types like Seq, List, etc.
                                 // This ensures "let x: Person = ..." has type "Person", not "{ name: String, ... }"
@@ -249,9 +253,9 @@ class ConstraintGenerator(
                             // VALIDATION: Check annotation matches inferred type
                             // Only validate specific aspects when the annotation explicitly declares them
                             // throw Error("[DEBUG PRE-VALIDATION] REACHED - item.pattern is VariablePattern=${item.pattern is VariablePattern}")
-                            if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
+                            if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
                                 val annotation = item.typeAnnotation
-                                val varName = (item.pattern as VariablePattern).name
+                                val varName = (item.pattern as ParsedVariablePattern).name
 
                                 // Build inferred type with abilities for validation
                                 val inferredTypeRaw = substitution.apply(result.type)
@@ -264,7 +268,7 @@ class ConstraintGenerator(
                                 // 1. POLYMORPHISM VALIDATION
                                 // Check that type variables in annotation are not forced to FULLY concrete types.
                                 // Only flag when substitution maps type var to something with NO type variables.
-                                if (annotation is FunctionTypeAnnotation) {
+                                if (annotation is ParsedFunctionType) {
                                     // Collect type vars that have ability constraints - these may be
                                     // mapped to concrete types by bidirectional inference and should be skipped
                                     val abilityConstrainedVars = result.abilityConstraints.map { it.typeVar }.toSet()
@@ -272,7 +276,7 @@ class ConstraintGenerator(
                                         preConvertedAnnotationType,
                                         substitution,
                                         varName,
-                                        item.expression.sourceLocation,
+                                        item.value.loc.toSL(),
                                         abilityConstrainedVars
                                     )
                                 }
@@ -281,21 +285,21 @@ class ConstraintGenerator(
                                 // Check that annotation doesn't overpromise effects.
                                 // ONLY validate when there are NO function calls - because effects propagate
                                 // through function calls and we can't easily track that here.
-                                if (annotation is FunctionTypeAnnotation &&
+                                if (annotation is ParsedFunctionType &&
                                     annotation.effects != null &&
-                                    !containsFunctionCalls(item.expression)) {
+                                    !containsFunctionCalls(item.value)) {
                                     validateEffectsNotOverpromised(
                                         preConvertedAnnotationType,
                                         inferredTypeWithAbilities,
                                         varName,
-                                        item.expression.sourceLocation
+                                        item.value.loc.toSL()
                                     )
                                 }
 
                                 // 3. ABILITY VALIDATION
                                 // Check that abilities are applied to correct type variables.
                                 // This catches cases like: annotation declares NumAdd 'b but impl uses NumAdd 'a
-                                if (annotation is FunctionTypeAnnotation && annotation.abilityConstraints.isNotEmpty()) {
+                                if (annotation is ParsedFunctionType && annotation.abilityConstraints.isNotEmpty()) {
                                     // Apply substitution to ability constraints to map fresh type vars back
                                     // The substitution may map in either direction (annotation->inferred or inferred->annotation)
                                     // so we try to resolve in both directions
@@ -312,13 +316,13 @@ class ConstraintGenerator(
                                         resolvedAbilityConstraints,
                                         varName,
                                         substitution,
-                                        item.expression.sourceLocation
+                                        item.value.loc.toSL()
                                     )
                                 }
                             }
 
                             // Apply substitution to get final solved types for pattern bindings
-                            val solvedBindings = if (item.pattern is VariablePattern && authoritativeType != substitution.apply(result.type)) {
+                            val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
                                 // For simple variable bindings where annotation differs from inferred type (e.g., closed vs open variants),
                                 // use the authoritative type (the annotation wins, whether monomorphic or polymorphic)
                                 mapOf(item.variableName to authoritativeType)
@@ -412,7 +416,7 @@ class ConstraintGenerator(
                                 // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
                                 // The user explicitly wants this to be polymorphic over 'a with Encoder 'a constraint.
                                 val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
-                                    is FunctionTypeAnnotation -> annotation.abilityConstraints.isNotEmpty()
+                                    is ParsedFunctionType -> annotation.abilityConstraints.isNotEmpty()
                                     else -> false
                                 }
 
@@ -524,14 +528,12 @@ class ConstraintGenerator(
                                         constraints = abilityConstraints,
                                         type = solvedType
                                     )
-                                    // Pass contentHash for simple bindings (single variable pattern)
-                                    val bindingHash = if (item.isSimpleBinding) item.contentHash else null
-                                    TypingContext.Binding.Polymorphic(scheme, contentHash = bindingHash)
+                                    // ParsedLetDecl has no contentHash
+                                    TypingContext.Binding.Polymorphic(scheme, contentHash = null)
                                 } else {
                                     // Monomorphic binding - either no free variables or has unsatisfied ability constraints
-                                    // Pass contentHash for simple bindings (single variable pattern)
-                                    val bindingHash = if (item.isSimpleBinding) item.contentHash else null
-                                    TypingContext.Binding.Monomorphic(solvedType, contentHash = bindingHash)
+                                    // ParsedLetDecl has no contentHash
+                                    TypingContext.Binding.Monomorphic(solvedType, contentHash = null)
                                 }
                             }}.toMap()
 
@@ -551,19 +553,19 @@ class ConstraintGenerator(
                         }
                     }
                 }
-                is TypeDeclaration,
-                is AbilityDeclaration,
-                is EffectDeclaration -> {
+                is ParsedTypeDecl,
+                is ParsedAbilityDecl,
+                is ParsedEffectDecl -> {
                     // These are handled by ContextBuilder in Phase 1
                     // Nothing to do here
                 }
-                is ImplDeclaration -> {
+                is ParsedPerformerDecl -> {
                     // CRITICAL: Validate effect implementation bodies
                     // ContextBuilder registers the performer in Phase 1
                     // Here in Phase 2, we type-check the implementation bodies
                     validateEffectImplementation(item, currentContext)
                 }
-                is ImplAbilityDeclaration -> {
+                is ParsedImplAbilityDecl -> {
                     // CRITICAL: Validate ability implementation bodies
                     // ContextBuilder registers the implementation in Phase 1
                     // Here in Phase 2, we type-check the implementation bodies
@@ -573,8 +575,8 @@ class ConstraintGenerator(
                     if (item.isInherent) {
                         val targetTypeName = item.targetTypes.firstOrNull()?.let { ann ->
                             when (ann) {
-                                is IdentifierTypeAnnotation -> ann.name
-                                is TypeApplicationAnnotation -> ann.constructor
+                                is ParsedNamedType -> ann.name
+                                is ParsedTypeApp -> ann.constructor
                                 else -> null
                             }
                         }
@@ -587,16 +589,16 @@ class ConstraintGenerator(
                                 MezzeType.VarType(TypeVar.fresh())
                             }
 
-                            if (op.implementation !is LambdaExpression) continue
-                            val lambda = op.implementation as LambdaExpression
+                            if (op.implementation !is ParsedLambda) continue
+                            val lambda = op.implementation as ParsedLambda
 
                             val methodInfo = if (targetTypeName != null) {
                                 currentContext.findAnonymousMethod(targetTypeName, op.name)
                             } else null
 
-                            val paramNames = when (val params = lambda.parameters) {
-                                is UntypedParameters -> params.names
-                                is TypedParameters -> params.recordType.entries.map { it.name }
+                            val paramNames = when (val params = lambda.params) {
+                                is ParsedLambdaParams.Untyped -> params.names
+                                is ParsedLambdaParams.Typed -> params.fields.map { it.name }
                             }
 
                             val paramTypes = if (op.paramType != null) {
@@ -609,8 +611,8 @@ class ConstraintGenerator(
                                     paramNames.associateWith { expectedParam }
                                 }
                             } else {
-                                when (val params = lambda.parameters) {
-                                    is TypedParameters -> params.recordType.entries.associate { entry ->
+                                when (val params = lambda.params) {
+                                    is ParsedLambdaParams.Typed -> params.fields.associate { entry ->
                                         entry.name to convertTypeAnnotation(entry.type)
                                     }
                                     else -> paramNames.associateWith { MezzeType.VarType(TypeVar.fresh()) }
@@ -654,7 +656,8 @@ class ConstraintGenerator(
                                 ))
                             }
 
-                            val opKey = "_inherent_${item.contentHash}_${op.name}"
+                            // ParsedImplAbilityDecl has no contentHash — use loc-based key
+                            val opKey = "_inherent_${item.loc}_${op.name}"
                             results[opKey] = ConstraintResult(
                                 type = bodyResult.type,
                                 constraints = constraints,
@@ -668,7 +671,7 @@ class ConstraintGenerator(
                         }
                     }
                 }
-                is TopLevelExpression -> {
+                is ParsedTopLevelExpr -> {
                     // Top-level expressions (for REPL)
                     val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = effectDeclarations, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     val result = expressionGenerator.generate(
@@ -678,7 +681,7 @@ class ConstraintGenerator(
                     results["_toplevel"] = result
 
                     // BIDIRECTIONAL TYPE INFERENCE: Solve HasField and HasConstructor constraints
-                    // for TopLevelExpression to enable type inference from usage sites.
+                    // for ParsedTopLevelExpr to enable type inference from usage sites.
                     // For example, `val.name` creates a HasField constraint that binds the type variable.
                     //
                     // We solve these constraints here (per-binding) rather than globally because:
@@ -701,8 +704,8 @@ class ConstraintGenerator(
                         // We don't add errors to perBindingSolveErrors - the global solver will catch real issues
                     }
                 }
-                is UseDeclaration,
-                is PubUseDeclaration -> {
+                is ParsedUseDecl,
+                is ParsedPubUseDecl -> {
                     // Module imports - handled elsewhere
                 }
             }
@@ -728,16 +731,16 @@ class ConstraintGenerator(
      * @param preConvertedAnnotationType Pre-converted type annotation from first pass (for placeholder consistency)
      */
     private fun generateLetBinding(
-        binding: LetBinding,
+        binding: ParsedLetDecl,
         context: TypingContext,
         recordLiteralBindings: Set<String>,
         preConvertedAnnotationType: MezzeType? = null
     ): ConstraintResult {
         DebugLogger.debug(Category.ConstraintGenerator) {
-            val exprInfo = if (binding.expression is Identifier) {
-                " Identifier='${(binding.expression as Identifier).localName}'"
+            val exprInfo = if (binding.value is ParsedIdentifier) {
+                " Identifier='${(binding.value as ParsedIdentifier).localName}'"
             } else ""
-            "generateLetBinding: binding=${binding.variableName} expr=${binding.expression.javaClass.simpleName}$exprInfo"
+            "generateLetBinding: binding=${binding.variableName} expr=${binding.value.javaClass.simpleName}$exprInfo"
         }
 
         // BIDIRECTIONAL TYPING: If there's a type annotation, use it as the expected type
@@ -749,7 +752,7 @@ class ConstraintGenerator(
         // TCO: Set enclosing function name if this binding is a function (lambda expression)
         // This allows tail call detection for self-recursive functions
         val bindingName = getBindingName(binding)
-        val enclosingFunctionName = if (binding.expression is LambdaExpression) bindingName else null
+        val enclosingFunctionName = if (binding.value is ParsedLambda) bindingName else null
 
         val constraintContext = ConstraintContext(
             context,
@@ -768,7 +771,7 @@ class ConstraintGenerator(
 
         // Generate constraints for the expression with expected type
         val exprResult = expressionGenerator.generate(
-            binding.expression,
+            binding.value,
             constraintContext
         )
 
@@ -788,7 +791,7 @@ class ConstraintGenerator(
             binding.pattern,
             bindingType,
             constraintContext,
-            binding.expression.sourceLocation
+            binding.value.loc.toSL()
         )
 
         // Combine expression constraints with pattern constraints
@@ -803,14 +806,14 @@ class ConstraintGenerator(
 
             // VALIDATION: Check annotation against expression BEFORE adding equality constraint
             // This catches errors that the constraint solver would silently accept
-            validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.expression, exprResult.type)
+            validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.value, exprResult.type)
 
             // Extract ability constraints from annotation if it's a function type
             // For multi-parameter abilities like Encode Json 'a:
             //   constraint.typeArgs = [Json, 'a]
             //   We find the type variable(s) and create constraint(s) for each
             //   typeArgs should contain ALL type args in order for proper impl matching
-            val annotationAbilityConstraints = if (typeAnnotationValue is FunctionTypeAnnotation) {
+            val annotationAbilityConstraints = if (typeAnnotationValue is ParsedFunctionType) {
                 typeAnnotationValue.abilityConstraints.mapNotNull { constraint ->
                     // Convert all type args to MezzeType
                     val allTypeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
@@ -857,7 +860,7 @@ class ConstraintGenerator(
      * Delegates to ExpressionConstraintGenerator.
      */
     fun generateExpression(
-        expr: Expression,
+        expr: ParsedExpr,
         context: ConstraintContext
     ): ConstraintResult {
         return expressionGenerator.generate(expr, context)
@@ -868,7 +871,7 @@ class ConstraintGenerator(
      * Delegates to PatternConstraintGenerator.
      */
     fun generatePattern(
-        pattern: Pattern,
+        pattern: ParsedPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
         sourceLocation: SourceLocation? = null
@@ -1041,14 +1044,14 @@ class ConstraintGenerator(
      * For simple patterns (let x = ...), returns the variable name.
      * For complex patterns (let {x, y} = ...), returns first binding or placeholder.
      */
-    private fun getBindingName(binding: LetBinding): String {
+    private fun getBindingName(binding: ParsedLetDecl): String {
         // Extract all bindings from the pattern
         val bindings = binding.pattern.extractBindings()
 
         // Return first binding name, or a placeholder if no bindings
         return bindings.firstOrNull() ?: when (binding.pattern) {
-            is WildcardPattern -> "_wildcard"
-            is LiteralPattern -> "_literal"
+            is ParsedWildcardPattern -> "_wildcard"
+            is ParsedLiteralPattern -> "_literal"
             else -> "_pattern"
         }
     }
@@ -1061,7 +1064,7 @@ class ConstraintGenerator(
      * type variables in separate annotations don't alias
      * Matches old typechecker behavior EXACTLY
      */
-    private fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
+    private fun convertTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
         return convertTypeAnnotationInternal(annotation)
     }
@@ -1070,9 +1073,9 @@ class ConstraintGenerator(
      * Internal recursive type annotation converter.
      * Uses cached type variables to ensure consistency within a single annotation.
      */
-    private fun convertTypeAnnotationInternal(annotation: TypeAnnotation): MezzeType {
+    private fun convertTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
+            is ParsedNamedType -> {
                 // Check primitive types first (includes Bool -> MezzeType.BoolType)
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
 
@@ -1100,7 +1103,7 @@ class ConstraintGenerator(
                     }
                 }
             }
-            is FunctionTypeAnnotation -> {
+            is ParsedFunctionType -> {
                 // Convert ability constraints from annotation to MezzeType.FunctionAbilityConstraint
                 val abilityConstraints = annotation.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
@@ -1143,7 +1146,7 @@ class ConstraintGenerator(
                     abilityConstraints = abilityConstraints
                 )
             }
-            is RecordTypeAnnotation -> {
+            is ParsedRecordType -> {
                 MezzeType.RecordType(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertTypeAnnotationInternal(entry.type)
@@ -1151,7 +1154,7 @@ class ConstraintGenerator(
                     rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
             }
-            is VariantTypeAnnotation -> {
+            is ParsedVariantType -> {
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
                         ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
@@ -1162,23 +1165,23 @@ class ConstraintGenerator(
                     typeName = if (!annotation.isOpen) "<inline>" else null
                 )
             }
-            is TypeApplicationAnnotation -> {
+            is ParsedTypeApp -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.constructor,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) }
                 )
             }
-            is SeqTypeAnnotation -> {
+            is ParsedSeqType -> {
                 MezzeType.SeqType(
                     elementType = convertTypeAnnotationInternal(annotation.elementType)
                 )
             }
-            is EffectRowAnnotation -> {
+            is ParsedEffectRow -> {
                 MezzeType.EffectRow(annotation.effects.toSet())
             }
-            is QualifiedTypeAnnotation -> {
+            is ParsedQualifiedType -> {
                 MezzeType.TypeApplication(
-                    constructor = annotation.qualifiedName,
+                    constructor = annotation.modulePath.joinToString("::") + "::" + annotation.typeName,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) }
                 )
             }
@@ -1196,23 +1199,32 @@ class ConstraintGenerator(
      *
      * This ensures soundness: implementation bodies must actually produce the declared return type.
      */
-    private fun validateAbilityImplementation(impl: ImplAbilityDeclaration, context: TypingContext) {
+    private fun validateAbilityImplementation(impl: ParsedImplAbilityDecl, context: TypingContext) {
         // Find the ability declaration
         // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
         // Inherent impls don't implement an ability — skip ability-based validation
         if (impl.isInherent) return
 
-        val abilityName = impl.abilityName!!  // safe: not inherent
-        val abilityQualifier = impl.abilityRef?.qualifier
-        val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
+        val abilityRef = (impl.target as ParsedImplTarget.Named).ability
+        val abilityName = abilityRef.localName
+        val abilityQualifier = abilityRef.qualifier
+        val qualifiedAbilityName = abilityQualifier?.let { "${it.segments.joinToString("::")}::$abilityName" } ?: abilityName
         val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Ability '${qualifiedAbilityName}' not found - cannot validate implementation"
             )
 
+        // Build allTypeArgs: concrete abilityTypeArgs (excluding type vars) + targetTypes
+        val allTypeArgs: List<ParsedTypeAnnotation> = run {
+            val concreteArgs = impl.abilityTypeArgs.filter {
+                it !is ParsedNamedType || !it.name.startsWith("'")
+            }
+            concreteArgs + impl.targetTypes
+        }
+
         // Build substitution map: 'a -> Int, etc. (type parameters from target types)
-        val typeParamSubstitution = abilityDeclaration.typeParams.zip(impl.allTypeArgs).associate { (param, targetType) ->
+        val typeParamSubstitution = abilityDeclaration.typeParams.zip(allTypeArgs).associate { (param, targetType) ->
             param to convertTypeAnnotation(targetType)
         }
 
@@ -1226,13 +1238,13 @@ class ConstraintGenerator(
             val expectedReturnType = substituteTypeParams(convertTypeAnnotation(declOp.returnType), typeParamSubstitution)
 
             // Type-check the implementation body (must be a lambda)
-            if (implOp.implementation is LambdaExpression) {
-                val lambda = implOp.implementation as LambdaExpression
+            if (implOp.implementation is ParsedLambda) {
+                val lambda = implOp.implementation as ParsedLambda
 
                 // Extract parameter names from lambda
-                val paramNames = when (val params = lambda.parameters) {
-                    is UntypedParameters -> params.names
-                    is TypedParameters -> params.recordType.entries.map { it.name }
+                val paramNames = when (val params = lambda.params) {
+                    is ParsedLambdaParams.Untyped -> params.names
+                    is ParsedLambdaParams.Typed -> params.fields.map { it.name }
                 }
 
                 // Build parameter type map for scoped context
@@ -1335,20 +1347,27 @@ class ConstraintGenerator(
      * - Compare inferred body type with expected return type
      * - Throw TypeCheckError if types don't match
      */
-    private fun validateEffectImplementation(impl: ImplDeclaration, context: TypingContext) {
+    private fun validateEffectImplementation(impl: ParsedPerformerDecl, context: TypingContext) {
         // Find the effect declaration by looking up with the exact name used in the impl.
         // The effectDeclarations map contains:
         // - Local effects keyed by their name (e.g., "MyEffect")
         // - Imported effects keyed by their import name (e.g., "log::Log" for module imports,
         //   or "Log" for selective imports like `use std::effects::log::{ Log }`)
         // We don't search by EffectDeclaration.name because that would bypass import scoping.
-        val effectLookupKey = impl.effect.toBindingKey().toKeyString()
+        val effectRef = impl.effect
+        // Replicate toBindingKey().toKeyString() from v1 QualifiedRef
+        val effectQualifier = effectRef.qualifier
+        val effectLookupKey = if (effectQualifier != null) {
+            "${effectQualifier.segments.last()}::${effectRef.localName}"
+        } else {
+            effectRef.localName
+        }
         val effectDeclaration = effectDeclarations[effectLookupKey]
-            ?: effectDeclarations[impl.effect.localName]  // Fallback to local name for selective imports
+            ?: effectDeclarations[effectRef.localName]  // Fallback to local name for selective imports
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Effect '${effectLookupKey}' is not defined or not imported. " +
                 "Use 'use module::{ EffectName }' for selective import or 'impl module::EffectName for ...' with module import.",
-                impl.sourceLocation
+                impl.loc.toSL()
             )
 
         // Build substitution map: 'state -> Int, etc. (associated type bindings)
@@ -1367,27 +1386,63 @@ class ConstraintGenerator(
         // Add performer parameters to context for all operations
         // e.g., impl State for ConfigState {initial: Int} makes 'initial' available in operation bodies
         var baseContext = context
-        for (param in impl.performerParams) {
+        for (param in impl.params) {
             val paramType = convertTypeAnnotation(param.type)
             baseContext = baseContext.extendMono(param.name, paramType)
         }
 
-        // SCOPED EFFECTS: Detect and extract scope type
-        // If this impl has initialize_scope, we need to make 'scope' available
-        // in operations and finalize_scope (but NOT in initialize_scope itself)
-        val scopedInfo = detectScopedEffectMembers(impl)
+        // SCOPED EFFECTS: Detect initialize_scope and finalize_scope inline
+        // (replacing detectScopedEffectMembers which takes v1 ImplDeclaration)
+        var initializeScope: ParsedPerformerOp? = null
+        var finalizeScope: ParsedPerformerOp? = null
+        for (operation in impl.operations) {
+            when (operation.name) {
+                ScopedEffectConstants.INITIALIZE_SCOPE -> initializeScope = operation
+                ScopedEffectConstants.FINALIZE_SCOPE -> finalizeScope = operation
+            }
+        }
+        val isScopedEffect = initializeScope != null
+        val hasFinalizer = finalizeScope != null
 
-        // SCOPED EFFECTS: Validate scoped effect signatures
-        // - initialize_scope requires finalize_scope (and vice versa)
-        // - initialize_scope must return a record type
-        // - finalize_scope must return {} (unit)
-        val scopedErrors = validateScopedEffectSignatures(scopedInfo)
-        if (scopedErrors.isNotEmpty()) {
-            val firstError = scopedErrors.first()
+        // SCOPED EFFECTS: Validate scoped effect signatures inline
+        // (replacing validateScopedEffectSignatures which takes ScopedEffectInfo with v1 types)
+        if (isScopedEffect && !hasFinalizer) {
             throw com.mezze.language.typechecker.TypeCheckError(
-                firstError.message,
-                firstError.sourceLocation
+                "initialize_scope requires finalize_scope for resource safety. " +
+                "Add 'finalize_scope = {} -> {}' to clean up resources when the perform block exits.",
+                initializeScope!!.loc.toSL()
             )
+        }
+        if (hasFinalizer && !isScopedEffect) {
+            throw com.mezze.language.typechecker.TypeCheckError(
+                "finalize_scope requires initialize_scope. " +
+                "Add initialize_scope to create the scope that finalize_scope cleans up.",
+                finalizeScope!!.loc.toSL()
+            )
+        }
+
+        // SCOPED EFFECTS: Validate return type annotations on initialize_scope / finalize_scope
+        if (isScopedEffect) {
+            // initialize_scope must return a record type
+            initializeScope!!.returnType?.let { retType ->
+                if (retType !is ParsedRecordType) {
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "initialize_scope must return a record type like { field1 = value1, ... }. " +
+                        "The returned record becomes the 'scope' variable available in operations.",
+                        initializeScope.loc.toSL()
+                    )
+                }
+            }
+            // finalize_scope must return unit ({})
+            finalizeScope?.returnType?.let { retType ->
+                if (retType !is ParsedRecordType || (retType as ParsedRecordType).entries.isNotEmpty()) {
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "finalize_scope must return {} (unit). " +
+                        "It's for cleanup side effects only, not for returning values.",
+                        finalizeScope.loc.toSL()
+                    )
+                }
+            }
         }
 
         // SCOPED EFFECTS: Validate initialize_scope body and INFER scope type
@@ -1397,9 +1452,9 @@ class ConstraintGenerator(
         // 3. Use that scope type for operations and finalize_scope
         var inferredScopeType: MezzeType? = null
 
-        scopedInfo.initializeScope?.let { initOp ->
-            if (initOp.implementation is LambdaExpression) {
-                val lambda = initOp.implementation as LambdaExpression
+        initializeScope?.let { initOp ->
+            if (initOp.implementation is ParsedLambda) {
+                val lambda = initOp.implementation as ParsedLambda
 
                 // Build context WITHOUT scope for initialize_scope
                 val initContext = baseContext
@@ -1437,7 +1492,7 @@ class ConstraintGenerator(
 
                 // Track effects from initialize_scope - they propagate to the perform site
                 // Effects run at the START of perform, before the body
-                val initEffects = bodyResult.effects - impl.effect.localName
+                val initEffects = bodyResult.effects - effectRef.localName
                 if (initEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + initEffects
@@ -1446,11 +1501,14 @@ class ConstraintGenerator(
         }
 
         // Use inferred scope type, or try annotation as fallback
-        val scopeType: MezzeType? = inferredScopeType ?: if (scopedInfo.isScopedEffect) {
+        val scopeType: MezzeType? = inferredScopeType ?: if (isScopedEffect) {
             // Fallback: try to get scope type from initialize_scope return type annotation
-            scopedInfo.initializeScope?.let { initOp ->
-                extractScopeTypeFromAnnotation(initOp) { annotation ->
-                    convertTypeAnnotation(annotation)
+            initializeScope?.let { initOp ->
+                val returnType = initOp.returnType
+                if (returnType is ParsedRecordType) {
+                    convertTypeAnnotation(returnType)
+                } else {
+                    null
                 }
             }
         } else {
@@ -1466,9 +1524,9 @@ class ConstraintGenerator(
 
         // SCOPED EFFECTS: Validate finalize_scope body and track its effects
         // finalize_scope runs in a finally block at the END of perform
-        scopedInfo.finalizeScope?.let { finalOp ->
-            if (finalOp.implementation is LambdaExpression) {
-                val lambda = finalOp.implementation as LambdaExpression
+        finalizeScope?.let { finalOp ->
+            if (finalOp.implementation is ParsedLambda) {
+                val lambda = finalOp.implementation as ParsedLambda
 
                 // finalize_scope has access to 'scope' variable
                 val finalizeContext = contextWithScope
@@ -1495,7 +1553,7 @@ class ConstraintGenerator(
 
                 // Track effects from finalize_scope - they propagate to the perform site
                 // Effects run at the END of perform, in a finally block (even if body fails)
-                val finalizeEffects = bodyResult.effects - impl.effect.localName
+                val finalizeEffects = bodyResult.effects - effectRef.localName
                 if (finalizeEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + finalizeEffects
@@ -1532,7 +1590,7 @@ class ConstraintGenerator(
             // the parser sets placeholder types (empty records). We detect these placeholders and skip
             // validation, letting the body type inference handle type checking.
             val implParamTypeAnnotation = implOp.paramType
-            val isPlaceholderParamType = implParamTypeAnnotation is RecordTypeAnnotation &&
+            val isPlaceholderParamType = implParamTypeAnnotation is ParsedRecordType &&
                 implParamTypeAnnotation.entries.isEmpty() && !implParamTypeAnnotation.isOpen
 
             if (implParamTypeAnnotation != null && !isPlaceholderParamType) {
@@ -1548,16 +1606,16 @@ class ConstraintGenerator(
                     val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedParamType)
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong parameter type: " +
-                        "expected $expectedTypeStr (from effect '${impl.effect.localName}'), " +
+                        "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr. " +
                         "Parameter names and types must match exactly.",
-                        implOp.implementation.sourceLocation
+                        implOp.implementation.loc.toSL()
                     )
                 }
             }
 
             val implReturnTypeAnnotation = implOp.returnType
-            val isPlaceholderReturnType = implReturnTypeAnnotation is RecordTypeAnnotation &&
+            val isPlaceholderReturnType = implReturnTypeAnnotation is ParsedRecordType &&
                 implReturnTypeAnnotation.entries.isEmpty() && !implReturnTypeAnnotation.isOpen
 
             if (implReturnTypeAnnotation != null && !isPlaceholderReturnType) {
@@ -1573,9 +1631,9 @@ class ConstraintGenerator(
                     val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong return type: " +
-                        "expected $expectedTypeStr (from effect '${impl.effect.localName}'), " +
+                        "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr.",
-                        implOp.implementation.sourceLocation
+                        implOp.implementation.loc.toSL()
                     )
                 }
             }
@@ -1586,24 +1644,24 @@ class ConstraintGenerator(
             // but  impl Log for Console where { info: { msg: String } -> {} <IO> = ... } is OK (transformed)
             // and  impl Log for Console where { info: { msg: String } -> {} = ... } is OK (handled/removed)
             val implEffects = implOp.effects
-            if (implEffects != null && impl.effect.localName in implEffects.effects) {
+            if (implEffects != null && effectRef.localName in implEffects.effects) {
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Effect impl '${impl.performerName}' operation '${implOp.name}' cannot require " +
-                    "the same effect '${impl.effect.localName}' it is implementing. " +
+                    "the same effect '${effectRef.localName}' it is implementing. " +
                     "The impl should handle the effect, not propagate it. " +
-                    "Either remove '${impl.effect.localName}' from the effect annotation or transform it to a different effect.",
-                    implOp.implementation.sourceLocation
+                    "Either remove '${effectRef.localName}' from the effect annotation or transform it to a different effect.",
+                    implOp.implementation.loc.toSL()
                 )
             }
 
             // Type-check the implementation body (must be a lambda)
-            if (implOp.implementation is LambdaExpression) {
-                val lambda = implOp.implementation as LambdaExpression
+            if (implOp.implementation is ParsedLambda) {
+                val lambda = implOp.implementation as ParsedLambda
 
                 // Extract parameter names from lambda
-                val paramNames = when (val params = lambda.parameters) {
-                    is UntypedParameters -> params.names
-                    is TypedParameters -> params.recordType.entries.map { it.name }
+                val paramNames = when (val params = lambda.params) {
+                    is ParsedLambdaParams.Untyped -> params.names
+                    is ParsedLambdaParams.Typed -> params.fields.map { it.name }
                 }
 
                 // Build parameter type map for scoped context
@@ -1659,7 +1717,7 @@ class ConstraintGenerator(
                 // need to be propagated so that perform expressions know what additional
                 // effects are introduced by this performer.
                 // Exclude the effect being implemented (impl handles it, doesn't add it)
-                val bodyEffects = bodyResult.effects - impl.effect.localName
+                val bodyEffects = bodyResult.effects - effectRef.localName
                 if (bodyEffects.isNotEmpty()) {
                     val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
                     performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
@@ -1677,7 +1735,7 @@ class ConstraintGenerator(
                         val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
                             "The 'scope' variable is not available in initialize_scope. " +
                             "The scope is being created here and will only be available in operations and finalize_scope."
-                        } else if (!scopedInfo.isScopedEffect) {
+                        } else if (!isScopedEffect) {
                             "The 'scope' variable is not available because this impl does not define initialize_scope. " +
                             "Add 'initialize_scope = {} -> { ... }' to create a scope."
                         } else {
@@ -1720,7 +1778,7 @@ class ConstraintGenerator(
                                         "Cannot call non-function type as function in impl '${impl.performerName}' " +
                                         "operation '${implOp.name}': type '${com.mezze.language.ast.prettyPrintType(nonFunctionType)}' " +
                                         "is not a function",
-                                        firstError.constraint.sourceLocation ?: implOp.implementation.sourceLocation
+                                        firstError.constraint.sourceLocation ?: implOp.implementation.loc.toSL()
                                     )
                                 }
                             }
@@ -1741,7 +1799,7 @@ class ConstraintGenerator(
                             if (isClearTypeMismatch) {
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
-                                    firstError.constraint.sourceLocation ?: implOp.implementation.sourceLocation
+                                    firstError.constraint.sourceLocation ?: implOp.implementation.loc.toSL()
                                 )
                             }
                         }
@@ -1763,7 +1821,7 @@ class ConstraintGenerator(
                                 val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
                                 val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Operation '${implOp.name}' in impl ${impl.effect.localName} returns wrong type: " +
+                                    "Operation '${implOp.name}' in impl ${effectRef.localName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }
@@ -1850,15 +1908,15 @@ class ConstraintGenerator(
      * 3. Polymorphic function returning function (partial application check)
      */
     private fun validateAnnotationAgainstExpression(
-        binding: LetBinding,
+        binding: ParsedLetDecl,
         annotatedType: MezzeType,
-        annotation: TypeAnnotation,
-        expression: Expression,
+        annotation: ParsedTypeAnnotation,
+        expression: ParsedExpr,
         inferredType: MezzeType
     ) {
         // 1. RECORD EXTRA FIELD VALIDATION
         // Check if annotation is a closed record type and expression is a record literal with extra fields
-        if (annotatedType is MezzeType.RecordType && expression is RecordLiteral) {
+        if (annotatedType is MezzeType.RecordType && expression is ParsedRecordLit) {
             // Only validate if annotation is closed (no rowVar)
             if (annotatedType.rowVar == null) {
                 val annotatedFields = annotatedType.fields.keys
@@ -1867,8 +1925,8 @@ class ConstraintGenerator(
                 // Extract field names from record literal
                 for (entry in expression.entries) {
                     when (entry) {
-                        is RecordFieldEntry -> literalFields.add(entry.name)
-                        is RecordSpreadEntry -> {
+                        is ParsedRecordEntry.Field -> literalFields.add(entry.name)
+                        is ParsedRecordEntry.Spread -> {
                             // Spread entries make validation complex - skip for now
                             // The constraint solver will handle these cases
                             return
@@ -1882,7 +1940,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
                         "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
-                        expression.sourceLocation
+                        expression.loc.toSL()
                     )
                 }
 
@@ -1892,7 +1950,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
                         "required by type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
-                        expression.sourceLocation
+                        expression.loc.toSL()
                     )
                 }
             }
@@ -1900,7 +1958,7 @@ class ConstraintGenerator(
 
         // 2. FUNCTION ARITY VALIDATION
         // Check if annotation is a function type and expression is a lambda with mismatched parameters
-        if (annotatedType is MezzeType.FunctionType && expression is LambdaExpression) {
+        if (annotatedType is MezzeType.FunctionType && expression is ParsedLambda) {
             val annotatedParamType = annotatedType.paramType
 
             // Get parameter count from annotation
@@ -1910,9 +1968,9 @@ class ConstraintGenerator(
             }
 
             // Get parameter count from lambda
-            val actualParamCount = when (val params = expression.parameters) {
-                is UntypedParameters -> params.names.size
-                is TypedParameters -> params.recordType.entries.size
+            val actualParamCount = when (val params = expression.params) {
+                is ParsedLambdaParams.Untyped -> params.names.size
+                is ParsedLambdaParams.Typed -> params.fields.size
             }
 
             // Check if counts match
@@ -1920,7 +1978,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
                     "but lambda has $actualParamCount parameter(s)",
-                    expression.sourceLocation
+                    expression.loc.toSL()
                 )
             }
         }
@@ -2091,7 +2149,7 @@ class ConstraintGenerator(
         annotationType: MezzeType,
         inferredType: MezzeType,
         varName: String,
-        expression: Expression
+        expression: ParsedExpr
     ) {
         if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
             val annotatedEffects = annotationType.effects?.effects ?: emptySet()
@@ -2103,7 +2161,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
                     "which are not declared in the annotation.",
-                    expression.sourceLocation
+                    expression.loc.toSL()
                 )
             }
 
@@ -2113,7 +2171,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
-                    expression.sourceLocation
+                    expression.loc.toSL()
                 )
             }
         }
@@ -2259,7 +2317,7 @@ class ConstraintGenerator(
         inferredType: MezzeType,
         inferredAbilityConstraints: List<Constraint.AbilityRequired>,
         varName: String,
-        expression: Expression
+        expression: ParsedExpr
     ) {
         if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
             val annotatedAbilities = annotationType.abilityConstraints
@@ -2290,7 +2348,7 @@ class ConstraintGenerator(
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
                                     "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'.",
-                                    expression.sourceLocation
+                                    expression.loc.toSL()
                                 )
                             }
                         }
@@ -2314,7 +2372,7 @@ class ConstraintGenerator(
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
                             "which is not used in the implementation.",
-                            expression.sourceLocation
+                            expression.loc.toSL()
                         )
                     }
                 }
@@ -2326,40 +2384,40 @@ class ConstraintGenerator(
      * Check if expression contains function calls.
      * Used to determine if we should validate unused abilities.
      */
-    private fun containsFunctionCalls(expr: Expression): Boolean {
+    private fun containsFunctionCalls(expr: ParsedExpr): Boolean {
         return when (expr) {
-            is FunctionCall -> true
-            is LambdaExpression -> containsFunctionCalls(expr.body)
-            is IfExpression -> {
+            is ParsedFunctionCall -> true
+            is ParsedLambda -> containsFunctionCalls(expr.body)
+            is ParsedIf -> {
                 containsFunctionCalls(expr.condition) ||
                 containsFunctionCalls(expr.thenBranch) ||
                 containsFunctionCalls(expr.elseBranch)
             }
-            is MatchExpression -> {
-                containsFunctionCalls(expr.expression) ||
-                expr.cases.any { containsFunctionCalls(it.expression) }
+            is ParsedMatch -> {
+                containsFunctionCalls(expr.scrutinee) ||
+                expr.cases.any { containsFunctionCalls(it.body) }
             }
-            is SeqLiteral -> expr.elements.any { element ->
+            is ParsedSeqLit -> expr.elements.any { element ->
                 when (element) {
-                    is SeqRegularElement -> containsFunctionCalls(element.expression)
-                    is SeqSpreadElement -> containsFunctionCalls(element.expression)
+                    is ParsedSeqElement.Regular -> containsFunctionCalls(element.expr)
+                    is ParsedSeqElement.Spread -> containsFunctionCalls(element.expr)
                 }
             }
-            is RecordLiteral -> expr.entries.any { entry ->
+            is ParsedRecordLit -> expr.entries.any { entry ->
                 when (entry) {
-                    is RecordFieldEntry -> entry.value?.let { containsFunctionCalls(it) } ?: false
-                    is RecordSpreadEntry -> containsFunctionCalls(entry.expression)
+                    is ParsedRecordEntry.Field -> entry.value?.let { containsFunctionCalls(it) } ?: false
+                    is ParsedRecordEntry.Spread -> containsFunctionCalls(entry.expr)
                 }
             }
-            is MemberAccess -> containsFunctionCalls(expr.receiver)
+            is ParsedMemberAccess -> containsFunctionCalls(expr.receiver)
             // String interpolation can contain function calls in its parts
-            is StringLiteral -> {
-                expr.parts?.any { part ->
-                    part is ExpressionPart && containsFunctionCalls(part.expression)
-                } ?: false
+            is ParsedStringLit -> {
+                expr.parts.any { part ->
+                    part is ParsedStringPart.Interpolation && containsFunctionCalls(part.expr)
+                }
             }
-            // For DoExpression and other complex expressions, assume they may contain function calls
-            is DoExpression -> true
+            // For ParsedDo and other complex expressions, assume they may contain function calls
+            is ParsedDo -> true
             else -> false
         }
     }

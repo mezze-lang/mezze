@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.ParsedPerform
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
 
@@ -387,7 +388,7 @@ data class ConstraintContext(
     val abilityNames: Set<String> = emptySet(),  // Set of all ability names (e.g., Show, Eq)
     val effectNames: Set<String> = emptySet(),  // Set of all effect names (e.g., Log, FileSystem)
     val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),  // Effect declarations (for associated type lookup)
-    val performContext: PerformExpression? = null,  // Current perform context for effect associated type substitution
+    val performContext: ParsedPerform? = null,  // Current perform context for effect associated type substitution
     val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
     val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)
     val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),  // Type declarations for validation only (NOT for general type resolution)

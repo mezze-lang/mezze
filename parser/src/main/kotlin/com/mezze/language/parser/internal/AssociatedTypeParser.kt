@@ -1,6 +1,6 @@
 package com.mezze.language.parser.internal
 
-import com.mezze.language.ast.TypeAnnotation
+import com.mezze.language.parsedast.ParsedTypeAnnotation
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.internal.lib.*
 
@@ -13,7 +13,7 @@ import com.mezze.language.parser.internal.lib.*
  * Extracted to eliminate code duplication across declaration parsers.
  */
 internal data class AssociatedTypeBindingsResult(
-    val bindings: Map<String, TypeAnnotation>,
+    val bindings: Map<String, ParsedTypeAnnotation>,
     val stream: TokenStream
 )
 
@@ -36,7 +36,7 @@ internal fun MezzeParser.parseAssociatedTypeBindings(
         is ParseResult.Success -> {
             val streamAfterHaving = skipNewlines(havingToken.remaining)
             var currentStream = streamAfterHaving
-            val bindings = mutableMapOf<String, TypeAnnotation>()
+            val bindings = mutableMapOf<String, ParsedTypeAnnotation>()
 
             // Parse first binding: 'typeVar = TypeAnnotation
             val firstTypeVar = identifierParser(currentStream)

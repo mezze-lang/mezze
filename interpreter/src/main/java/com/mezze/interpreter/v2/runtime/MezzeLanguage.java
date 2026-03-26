@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -216,6 +217,22 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
+     * V2 pipeline: compile source through all 5 stages to Truffle nodes.
+     *
+     * source → ParsedModule → TypedModule → MonoModule → ResolvedModule → TruffleIR → Truffle nodes
+     *
+     * This is the new compilation path that uses content-hash addressing throughout.
+     * Enable with system property: -Dmezze.pipeline=v2
+     *
+     * Delegates to Kotlin V2PipelineRunner to avoid inline class interop issues.
+     */
+    private CallTarget compileProgramV2(String sourceCode, Path projectRoot) {
+        return com.mezze.interpreter.v2.compiler.V2PipelineRunner.tryCompile(
+            this, sourceCode, projectRoot, null
+        );
+    }
+
+    /**
      * Extract module paths from UseDeclarations in the program.
      */
     private List<String> extractImportedModules(Program program) {
@@ -249,6 +266,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
+     * Create a ResultCapturingNode that stores the execution result.
+     * Used by V2PipelineRunner.
+     */
+    public static MezzeNode createResultCapturingNode(MezzeNode bodyNode) {
+        return new ResultCapturingNode(bodyNode);
+    }
+
+    /**
      * Node that captures the result for test access.
      */
     private static final class ResultCapturingNode extends MezzeNode {
@@ -262,8 +287,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
             Object result = bodyNode.execute(frame);
             lastResultStore.set(result);
-            // Return Unit to polyglot to avoid interop issues with raw Java arrays.
-            // The actual result is retrieved via getLastExecutionResult().
             return MezzeUnit.INSTANCE;
         }
     }
@@ -327,6 +350,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * Node that loads modules on first execution.
      * Loads and executes typed modules from the TypeChecker cache.
      */
+    /**
+     * Create a ModuleLoadingNode for use by V2PipelineRunner.
+     */
+    public static MezzeNode createModuleLoadingNode(MezzeNode bodyNode, java.util.List<String> importedModules, Path projectRoot) {
+        return new ModuleLoadingNode(bodyNode, importedModules, projectRoot);
+    }
+
     private static final class ModuleLoadingNode extends MezzeNode {
         @Child private MezzeNode bodyNode;
 

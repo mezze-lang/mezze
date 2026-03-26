@@ -1,13 +1,9 @@
 package com.mezze.language.parser.internal
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parser.*
 import com.mezze.language.parser.internal.lib.*
-
-/**
- * Extension function to convert a Token to SourceLocation.
- */
-private fun Token.toSourceLocation(): SourceLocation = SourceLocation(line, column, null)
 
 /**
  * Declaration parsers for module-level constructs.
@@ -22,7 +18,7 @@ private fun Token.toSourceLocation(): SourceLocation = SourceLocation(line, colu
  * - Impl ability declarations (impl ability Name for Type { ... })
  * - Use/import declarations (use path::to::module)
  *
- * All parsers return ProgramItem (sealed interface from AST).
+ * All parsers return ParsedDecl (sealed interface from parsedast).
  * All functions are internal - only used within the parser module.
  *
  * Extracted from MezzeParser.kt as part of parser refactoring (Task 13).
@@ -30,12 +26,12 @@ private fun Token.toSourceLocation(): SourceLocation = SourceLocation(line, colu
 
 // ===== LET BINDING =====
 
-internal fun MezzeParser.parseLetBinding(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseLetBinding(stream: TokenStream): ParseResult<ParsedDecl> {
     return parseLetBindingWithVisibility(stream, Visibility.PRIVATE)
 }
 
 
-internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         // Parse: let <pattern> : <type> = <expression>
         //    or: let <pattern> = <expression>
         // Where <pattern> can be:
@@ -45,6 +41,7 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
         val letToken = tok(TokenType.LET)(stream)
         return when (letToken) {
             is ParseResult.Success -> {
+                val file = currentFile ?: "<unknown>"
                 val stream1 = skipNewlines(letToken.remaining)
 
                 // Try to parse an irrefutable pattern
@@ -94,17 +91,19 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
                                 val expr = expression(stream5)
 
                                 when (expr) {
-                                    is ParseResult.Success -> ParseResult.Success(
-                                        LetBinding(
-                                            pattern,
-                                            visibility,
-                                            typeAnnotation,
-                                            null, // inferredType filled by typechecker
-                                            null, // typeScheme filled by typechecker
-                                            expr.value
-                                        ),
-                                        expr.remaining
-                                    )
+                                    is ParseResult.Success -> {
+                                        val loc = spanLoc(letToken.value, assign.value, file)
+                                        ParseResult.Success(
+                                            ParsedLetDecl(
+                                                pattern = pattern,
+                                                typeAnnotation = typeAnnotation,
+                                                value = expr.value,
+                                                visibility = visibility,
+                                                loc = loc
+                                            ),
+                                            expr.remaining
+                                        )
+                                    }
                                     is ParseResult.Failure -> expr
                                 }
                             }
@@ -123,7 +122,7 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
 
     // ===== CONSTRAINED LAMBDA =====
     // Parse: { params } -> ReturnType with Constraint1 'a, Constraint2 'b = { params } -> body
-internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResult<ParsedDecl> {
         // Only try if we see a { (record type parameter)
         if (stream.current()?.type != TokenType.LBRACE) {
             return stream.failure("Not a constrained lambda")
@@ -139,7 +138,7 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
         val typeAnnotation = typeAnn.value
 
         // Check if it's actually a function type
-        if (typeAnnotation !is FunctionTypeAnnotation) {
+        if (typeAnnotation !is ParsedFunctionType) {
             return stream.failure("Expected function type annotation")
         }
 
@@ -164,7 +163,7 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
                     is ParseResult.Success -> {
                         // Check that it's actually a lambda
                         val lambdaExpr = lambda.value
-                        if (lambdaExpr !is LambdaExpression) {
+                        if (lambdaExpr !is ParsedLambda) {
                             return stream2.failure("Expected lambda expression like {x} -> x + 1 after '='")
                         }
 
@@ -174,8 +173,10 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
                             abilityConstraints = typeAnnotation.abilityConstraints
                         )
 
+                        val file = currentFile ?: "<unknown>"
+                        val loc = spanLocTo(assignToken.value, lambda.remaining, file)
                         return ParseResult.Success(
-                            TopLevelExpression(constrainedLambda),
+                            ParsedTopLevelExpr(constrainedLambda, loc = loc),
                             lambda.remaining
                         )
                     }
@@ -186,7 +187,7 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
 
     // ===== EFFECT DECLARATION =====
 
-internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse: effect Name [having 'state] where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
@@ -274,7 +275,7 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
                                     is ParseResult.Success -> {
                                         val stream4 = skipNewlines(lbrace.remaining)
                                         // Parse operations separated by commas (trailing comma allowed)
-                                        val operations = mutableListOf<EffectOperation>()
+                                        val operations = mutableListOf<ParsedEffectOp>()
                                         var currentStream = stream4
 
                                         // Parse first operation (if any)
@@ -327,13 +328,14 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
 
                                         when (rbrace) {
                                             is ParseResult.Success -> {
+                                                val file = currentFile ?: "<unknown>"
+                                                val loc = spanLoc(effectToken.value, rbrace.value, file)
                                                 ParseResult.Success(
-                                                    EffectDeclaration(
+                                                    ParsedEffectDecl(
                                                         name = name.value.text,
                                                         operations = operations,
                                                         associatedTypes = associatedTypes,
-                                                        inferredType = null,
-                                                        sourceLocation = effectToken.value.toSourceLocation()
+                                                        loc = loc
                                                     ),
                                                     rbrace.remaining
                                                 )
@@ -364,7 +366,7 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
         }
     }
 
-internal val MezzeParser.effectOperationParser: Parser<EffectOperation> get() = { stream ->
+internal val MezzeParser.effectOperationParser: Parser<ParsedEffectOp> get() = { stream ->
         // Parse: operationName: ParamType -> ReturnType <EffectName>
         val name = identifierParser(stream)
         when (name) {
@@ -381,15 +383,19 @@ internal val MezzeParser.effectOperationParser: Parser<EffectOperation> get() = 
                         when (functionType) {
                             is ParseResult.Success -> {
                                 // Extract param and return types from function type
-                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                val funcType = functionType.value as? ParsedFunctionType
                                 if (funcType != null) {
                                     val effectList = funcType.effects?.effects ?: emptyList()
+                                    val file = currentFile ?: "<unknown>"
+                                    val loc = spanLoc(name.value, colon.value, file)
                                     ParseResult.Success(
-                                        EffectOperation(
+                                        ParsedEffectOp(
                                             name.value.text,
                                             funcType.paramType,
                                             funcType.returnType,
-                                            effectList
+                                            effectList,
+                                            null,
+                                            loc
                                         ),
                                         functionType.remaining
                                     )
@@ -422,7 +428,7 @@ internal val MezzeParser.effectOperationParser: Parser<EffectOperation> get() = 
 
     // ===== TYPE DECLARATIONS =====
 
-internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         val typeToken = tok(TokenType.TYPE)(stream)
         return when (typeToken) {
             is ParseResult.Success -> {
@@ -456,17 +462,20 @@ internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: V
                                 val typeDef = typeDefinitionParser(stream4)
 
                                 when (typeDef) {
-                                    is ParseResult.Success -> ParseResult.Success(
-                                        TypeDeclaration(
-                                            name = name.value.text,
-                                            visibility = visibility,
-                                            typeParams = typeParams,
-                                            definition = typeDef.value,
-                                            inferredType = null,
-                                            sourceLocation = typeToken.value.toSourceLocation()
-                                        ),
-                                        typeDef.remaining
-                                    )
+                                    is ParseResult.Success -> {
+                                        val file = currentFile ?: "<unknown>"
+                                        val loc = tokenLoc(typeToken.value, file)
+                                        ParseResult.Success(
+                                            ParsedTypeDecl(
+                                                name = name.value.text,
+                                                visibility = visibility,
+                                                typeParams = typeParams,
+                                                definition = typeDef.value,
+                                                loc = loc
+                                            ),
+                                            typeDef.remaining
+                                        )
+                                    }
                                     is ParseResult.Failure -> typeDef
                                 }
                             }
@@ -480,7 +489,7 @@ internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: V
         }
     }
 
-internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         val newtypeToken = tok(TokenType.NEWTYPE)(stream)
         return when (newtypeToken) {
             is ParseResult.Success -> {
@@ -519,19 +528,25 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                                         val wrappedType = typeAnnotationParser(stream5)
 
                                         when (wrappedType) {
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                TypeDeclaration(
-                                                    name = typeName.value.text,
-                                                    visibility = visibility,
-                                                    typeParams = typeParams,
-                                                    definition = NewtypeDefinition(
-                                                        constructor = constructor.value.text,
-                                                        wrappedType = wrappedType.value
+                                            is ParseResult.Success -> {
+                                                val file = currentFile ?: "<unknown>"
+                                                val loc = tokenLoc(newtypeToken.value, file)
+                                                val defLoc = spanLocTo(constructor.value, wrappedType.remaining, file)
+                                                ParseResult.Success(
+                                                    ParsedTypeDecl(
+                                                        name = typeName.value.text,
+                                                        visibility = visibility,
+                                                        typeParams = typeParams,
+                                                        definition = ParsedNewtypeDef(
+                                                            constructor = constructor.value.text,
+                                                            wrappedType = wrappedType.value,
+                                                            loc = defLoc
+                                                        ),
+                                                        loc = loc
                                                     ),
-                                                    inferredType = null
-                                                ),
-                                                wrappedType.remaining
-                                            )
+                                                    wrappedType.remaining
+                                                )
+                                            }
                                             is ParseResult.Failure -> wrappedType
                                         }
                                     }
@@ -552,7 +567,7 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
  * Parse optional deriving clause: deriving Ability1, Ability2, ...
  * Returns empty list if no deriving clause present.
  */
-internal val MezzeParser.typeDefinitionParser: Parser<TypeDefinition> get() = { stream ->
+internal val MezzeParser.typeDefinitionParser: Parser<ParsedTypeDef> get() = { stream ->
         // Try variant type first (| ... |), then record type
         val variantResult = variantTypeParser(stream)
         when (variantResult) {
@@ -570,18 +585,20 @@ internal val MezzeParser.typeDefinitionParser: Parser<TypeDefinition> get() = { 
         }
     }
 
-internal val MezzeParser.variantTypeParser: Parser<TypeDefinition> get() = { stream ->
+internal val MezzeParser.variantTypeParser: Parser<ParsedTypeDef> get() = { stream ->
         val pipe1 = tok(TokenType.PIPE)(stream)
         when (pipe1) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(pipe1.remaining)
+                val file = currentFile ?: "<unknown>"
 
                 // Check for empty variant type: | |
                 val pipe2Check = tok(TokenType.PIPE)(stream1)
                 if (pipe2Check is ParseResult.Success) {
                     // Empty variant type
+                    val loc = spanLoc(pipe1.value, pipe2Check.value, file)
                     ParseResult.Success(
-                        VariantDefinition(emptyList(), false),
+                        ParsedVariantDef(emptyList(), false, loc),
                         pipe2Check.remaining
                     )
                 } else {
@@ -630,8 +647,9 @@ internal val MezzeParser.variantTypeParser: Parser<TypeDefinition> get() = { str
                                             afterPipe.position
                                         )
                                     } else {
+                                        val loc = spanLoc(pipe1.value, pipe2.value, file)
                                         ParseResult.Success(
-                                            VariantDefinition(constructors.value, isOpen),
+                                            ParsedVariantDef(constructors.value, isOpen, loc),
                                             pipe2.remaining
                                         )
                                     }
@@ -647,10 +665,11 @@ internal val MezzeParser.variantTypeParser: Parser<TypeDefinition> get() = { str
         }
     }
 
-internal val MezzeParser.variantConstructorParser: Parser<VariantConstructorDef> get() = { stream ->
+internal val MezzeParser.variantConstructorParser: Parser<ParsedVariantCtorDef> get() = { stream ->
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
+                val file = currentFile ?: "<unknown>"
                 val stream1 = skipNewlines(name.remaining)
                 // Check for optional type annotation (record or any other type)
                 // Try record type first (for backwards compatibility), then any type annotation
@@ -660,31 +679,38 @@ internal val MezzeParser.variantConstructorParser: Parser<VariantConstructorDef>
                 )(stream1)
 
                 when (dataType) {
-                    is ParseResult.Success -> ParseResult.Success(
-                        VariantConstructorDef(name.value.text, dataType.value),
-                        dataType.remaining
-                    )
-                    is ParseResult.Failure -> ParseResult.Success(
-                        VariantConstructorDef(name.value.text, null),
-                        stream1
-                    )
+                    is ParseResult.Success -> {
+                        val loc = spanLocTo(name.value, dataType.remaining, file)
+                        ParseResult.Success(
+                            ParsedVariantCtorDef(name.value.text, dataType.value, loc),
+                            dataType.remaining
+                        )
+                    }
+                    is ParseResult.Failure -> {
+                        val loc = tokenLoc(name.value, file)
+                        ParseResult.Success(
+                            ParsedVariantCtorDef(name.value.text, null, loc),
+                            stream1
+                        )
+                    }
                 }
             }
             is ParseResult.Failure -> name
         }
     }
 
-internal val MezzeParser.recordTypeParser: Parser<TypeDefinition> get() = { stream ->
+internal val MezzeParser.recordTypeParser: Parser<ParsedTypeDef> get() = { stream ->
+        val file = currentFile ?: "<unknown>"
         val recordType = recordTypeAnnotationParser(stream)
         when (recordType) {
             is ParseResult.Success -> {
                 val value = recordType.value
-                if (value is RecordTypeAnnotation) {
+                if (value is ParsedRecordType) {
                     val fields = value.entries.map { entry ->
-                        RecordFieldDef(entry.name, entry.type)
+                        ParsedRecordFieldDef(entry.name, entry.type, entry.loc)
                     }
                     ParseResult.Success(
-                        RecordDefinition(fields, value.isOpen),
+                        ParsedRecordDef(fields, value.isOpen, value.loc),
                         recordType.remaining
                     )
                 } else {
@@ -697,7 +723,7 @@ internal val MezzeParser.recordTypeParser: Parser<TypeDefinition> get() = { stre
 
     // ===== IMPL DECLARATIONS =====
 
-internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         val implToken = tok(TokenType.IMPL)(stream)
         return when (implToken) {
             is ParseResult.Success -> {
@@ -734,7 +760,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                         // Parse optional 'having' clause with associated type bindings
                                         // Use effect local name for error messages
                                         val effectNameForErrors = if (effectRef.isQualified) {
-                                            "${effectRef.qualifier!!.fullPath}::${effectRef.localName}"
+                                            "${effectRef.qualifier!!}::${effectRef.localName}"
                                         } else {
                                             effectRef.localName
                                         }
@@ -756,29 +782,29 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                     is ParseResult.Success -> {
                                                         val stream7 = skipNewlines(lbrace.remaining)
                                                         // Parse operations separated by commas (trailing comma allowed)
-                                                        val operations = mutableListOf<PerformerOperation>()
-                                                        var currentStream = stream7
+                                                        val operations = mutableListOf<ParsedPerformerOp>()
+                                                        var currentStream2 = stream7
 
                                                         // Parse first operation (if any)
-                                                        when (val firstOp = performerOperationParser(currentStream)) {
+                                                        when (val firstOp = performerOperationParser(currentStream2)) {
                                                             is ParseResult.Success -> {
                                                                 operations.add(firstOp.value)
-                                                                currentStream = skipNewlines(firstOp.remaining)
+                                                                currentStream2 = skipNewlines(firstOp.remaining)
 
                                                                 // Parse remaining operations, each preceded by comma
                                                                 while (true) {
-                                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                                    when (val comma = tok(TokenType.COMMA)(currentStream2)) {
                                                                         is ParseResult.Success -> {
-                                                                            currentStream = skipNewlines(comma.remaining)
+                                                                            currentStream2 = skipNewlines(comma.remaining)
                                                                             // Check if this is a trailing comma (next token is })
-                                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                            if (currentStream2.current()?.type == TokenType.RBRACE) {
                                                                                 break  // Trailing comma, done
                                                                             }
                                                                             // Parse next operation
-                                                                            when (val op = performerOperationParser(currentStream)) {
+                                                                            when (val op = performerOperationParser(currentStream2)) {
                                                                                 is ParseResult.Success -> {
                                                                                     operations.add(op.value)
-                                                                                    currentStream = skipNewlines(op.remaining)
+                                                                                    currentStream2 = skipNewlines(op.remaining)
                                                                                 }
                                                                                 is ParseResult.Failure -> {
                                                                                     return op  // Return error from operation parsing
@@ -787,9 +813,9 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                                         }
                                                                         is ParseResult.Failure -> {
                                                                             // No comma - check if there's another operation (error) or }
-                                                                            val next = currentStream.current()
+                                                                            val next = currentStream2.current()
                                                                             if (next?.type == TokenType.IDENTIFIER) {
-                                                                                return currentStream.failure(
+                                                                                return currentStream2.failure(
                                                                                     "Missing ',' between effect impl operations. " +
                                                                                     "Operations must be comma-separated."
                                                                                 )
@@ -804,20 +830,21 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                             }
                                                         }
 
-                                                        val stream8 = skipNewlines(currentStream)
+                                                        val stream8 = skipNewlines(currentStream2)
                                                         val rbrace = tok(TokenType.RBRACE)(stream8)
 
                                                         when (rbrace) {
                                                             is ParseResult.Success -> {
+                                                                val file = currentFile ?: "<unknown>"
+                                                                val loc = spanLoc(implToken.value, rbrace.value, file)
                                                                 ParseResult.Success(
-                                                                    ImplDeclaration(
+                                                                    ParsedPerformerDecl(
                                                                         effect = effectRef,
                                                                         performerName = performerName.value.text,
-                                                                        performerParams = performerParams,
+                                                                        params = performerParams,
                                                                         associatedTypeBindings = associatedTypeBindings,
                                                                         operations = operations,
-                                                                        inferredType = null,
-                                                                        sourceLocation = implToken.value.toSourceLocation()
+                                                                        loc = loc
                                                                     ),
                                                                     rbrace.remaining
                                                                 )
@@ -844,7 +871,7 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
         }
     }
 
-internal val MezzeParser.performerParamsParser: Parser<List<PerformerParameter>> get() = { stream ->
+internal val MezzeParser.performerParamsParser: Parser<List<ParsedPerformerParam>> get() = { stream ->
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
@@ -874,7 +901,7 @@ internal val MezzeParser.performerParamsParser: Parser<List<PerformerParameter>>
         }
     }
 
-internal val MezzeParser.performerParamParser: Parser<PerformerParameter> get() = { stream ->
+internal val MezzeParser.performerParamParser: Parser<ParsedPerformerParam> get() = { stream ->
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
@@ -887,10 +914,14 @@ internal val MezzeParser.performerParamParser: Parser<PerformerParameter> get() 
                         val typeAnn = typeAnnotationParser(stream2)
 
                         when (typeAnn) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                PerformerParameter(name.value.text, typeAnn.value),
-                                typeAnn.remaining
-                            )
+                            is ParseResult.Success -> {
+                                val file = currentFile ?: "<unknown>"
+                                val loc = spanLocTo(name.value, typeAnn.remaining, file)
+                                ParseResult.Success(
+                                    ParsedPerformerParam(name.value.text, typeAnn.value, loc),
+                                    typeAnn.remaining
+                                )
+                            }
                             is ParseResult.Failure -> typeAnn
                         }
                     }
@@ -901,7 +932,7 @@ internal val MezzeParser.performerParamParser: Parser<PerformerParameter> get() 
         }
     }
 
-internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> get() = { stream ->
+internal val MezzeParser.performerOperationParser: Parser<ParsedPerformerOp> get() = { stream ->
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
@@ -918,10 +949,12 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
                             is ParseResult.Success -> {
                                 // Extract param, return types, and effects from the function type
                                 val (paramType, returnType, effects) = when (val ft = functionType.value) {
-                                    is FunctionTypeAnnotation -> Triple(ft.paramType, ft.returnType, ft.effects)
+                                    is ParsedFunctionType -> Triple(ft.paramType, ft.returnType, ft.effects)
                                     else -> {
                                         // If it's not a function type, treat it as param type with Unit return
-                                        Triple(ft, IdentifierTypeAnnotation("Unit"), null)
+                                        val file = currentFile ?: "<unknown>"
+                                        val unitLoc = tokenLoc(name.value, file)
+                                        Triple(ft, ParsedNamedType("Unit", unitLoc), null)
                                     }
                                 }
 
@@ -936,16 +969,21 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
                                         val impl = expression(stream4)
 
                                         when (impl) {
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                PerformerOperation(
-                                                    name = name.value.text,
-                                                    paramType = paramType,
-                                                    returnType = returnType,
-                                                    implementation = impl.value,
-                                                    effects = effects  // Now preserving effect annotations
-                                                ),
-                                                impl.remaining
-                                            )
+                                            is ParseResult.Success -> {
+                                                val file = currentFile ?: "<unknown>"
+                                                val loc = spanLocTo(name.value, impl.remaining, file)
+                                                ParseResult.Success(
+                                                    ParsedPerformerOp(
+                                                        name = name.value.text,
+                                                        paramType = paramType,
+                                                        returnType = returnType,
+                                                        implementation = impl.value,
+                                                        effects = effects,  // Now preserving effect annotations
+                                                        loc = loc
+                                                    ),
+                                                    impl.remaining
+                                                )
+                                            }
                                             is ParseResult.Failure -> impl
                                         }
                                     }
@@ -965,17 +1003,17 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
 
                                 when (impl) {
                                     is ParseResult.Success -> {
-                                        // Use placeholder types - will be inferred by typechecker
-                                        val placeholderParamType = RecordTypeAnnotation(emptyList(), false)
-                                        val placeholderReturnType = RecordTypeAnnotation(emptyList(), false)
-
+                                        val file = currentFile ?: "<unknown>"
+                                        val loc = spanLocTo(name.value, impl.remaining, file)
+                                        // Use null types - will be inferred by typechecker
                                         ParseResult.Success(
-                                            PerformerOperation(
+                                            ParsedPerformerOp(
                                                 name = name.value.text,
-                                                paramType = placeholderParamType,
-                                                returnType = placeholderReturnType,
+                                                paramType = null,
+                                                returnType = null,
                                                 implementation = impl.value,
-                                                effects = null
+                                                effects = null,
+                                                loc = loc
                                             ),
                                             impl.remaining
                                         )
@@ -994,7 +1032,7 @@ internal val MezzeParser.performerOperationParser: Parser<PerformerOperation> ge
 
     // ===== ABILITY DECLARATION =====
 
-internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse: ability Show for 'a where { operations }
         val abilityToken = tok(TokenType.ABILITY)(stream)
         return when (abilityToken) {
@@ -1088,7 +1126,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                                         is ParseResult.Failure -> {
                                                             return streamAfterComma.failure(
                                                                 "Expected type variable after ',' in having clause. " +
-                                                                "Example: ability ${name.value.text} having 'item, 'iter where { ... }"
+                                                                "Example: ability ${name.value.text} 'iter having 'item, 'iter where { ... }"
                                                             )
                                                         }
                                                     }
@@ -1110,7 +1148,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                         }
 
                         // Parse optional 'with' clause for dependencies
-                        val dependencies = mutableListOf<AbilityDependency>()
+                        val dependencies = mutableListOf<ParsedAbilityDep>()
                         val stream3 = skipNewlines(streamAfterHaving)
                         val withToken = tok(TokenType.WITH)(stream3)
                         val streamAfterWith = when (withToken) {
@@ -1125,7 +1163,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                     val abilityName = identifierParser(depStream)
                                     when (abilityName) {
                                         is ParseResult.Success -> {
-                                            val typeArgs = mutableListOf<TypeAnnotation>()
+                                            val typeArgs = mutableListOf<ParsedTypeAnnotation>()
                                             var typeStream = skipNewlines(abilityName.remaining)
 
                                             // Parse type arguments until we hit comma or 'where'
@@ -1145,7 +1183,9 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                                 }
                                             }
 
-                                            dependencies.add(AbilityDependency(abilityName.value.text, typeArgs))
+                                            val file = currentFile ?: "<unknown>"
+                                            val depLoc = spanLocTo(abilityName.value, typeStream, file)
+                                            dependencies.add(ParsedAbilityDep(abilityName.value.text, typeArgs, depLoc))
 
                                             // Check for comma (more dependencies) or 'where'
                                             val commaToken = tok(TokenType.COMMA)(typeStream)
@@ -1180,29 +1220,29 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                     is ParseResult.Success -> {
                                         val stream5 = skipNewlines(lbrace.remaining)
                                         // Parse operations separated by commas (trailing comma allowed)
-                                        val operations = mutableListOf<AbilityOperation>()
-                                        var currentStream = stream5
+                                        val operations = mutableListOf<ParsedAbilityOp>()
+                                        var currentStream2 = stream5
 
                                         // Parse first operation (if any)
-                                        when (val firstOp = abilityOperationParser(currentStream)) {
+                                        when (val firstOp = abilityOperationParser(currentStream2)) {
                                             is ParseResult.Success -> {
                                                 operations.add(firstOp.value)
-                                                currentStream = skipNewlines(firstOp.remaining)
+                                                currentStream2 = skipNewlines(firstOp.remaining)
 
                                                 // Parse remaining operations, each preceded by comma
                                                 while (true) {
-                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                    when (val comma = tok(TokenType.COMMA)(currentStream2)) {
                                                         is ParseResult.Success -> {
-                                                            currentStream = skipNewlines(comma.remaining)
+                                                            currentStream2 = skipNewlines(comma.remaining)
                                                             // Check if this is a trailing comma (next token is })
-                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                            if (currentStream2.current()?.type == TokenType.RBRACE) {
                                                                 break  // Trailing comma, done
                                                             }
                                                             // Parse next operation
-                                                            when (val op = abilityOperationParser(currentStream)) {
+                                                            when (val op = abilityOperationParser(currentStream2)) {
                                                                 is ParseResult.Success -> {
                                                                     operations.add(op.value)
-                                                                    currentStream = skipNewlines(op.remaining)
+                                                                    currentStream2 = skipNewlines(op.remaining)
                                                                 }
                                                                 is ParseResult.Failure -> {
                                                                     return op  // Return error from operation parsing
@@ -1211,9 +1251,9 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                                         }
                                                         is ParseResult.Failure -> {
                                                             // No comma - check if there's another operation (error) or }
-                                                            val next = currentStream.current()
+                                                            val next = currentStream2.current()
                                                             if (next?.type == TokenType.IDENTIFIER) {
-                                                                return currentStream.failure(
+                                                                return currentStream2.failure(
                                                                     "Missing ',' between ability methods. " +
                                                                     "Ability methods must be comma-separated."
                                                                 )
@@ -1228,24 +1268,27 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                             }
                                         }
 
-                                        val stream6 = skipNewlines(currentStream)
+                                        val stream6 = skipNewlines(currentStream2)
                                         val rbrace = tok(TokenType.RBRACE)(stream6)
 
                                         when (rbrace) {
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                AbilityDeclaration(
-                                                    name = name.value.text,
-                                                    typeParams = typeParams,
-                                                    receiverTypeParam = receiverTypeParam,
-                                                    associatedTypes = associatedTypes,  // list of associated types from 'having' clause
-                                                    constraints = emptyList(),  // constraints (for function ability constraints)
-                                                    dependencies = dependencies,  // dependencies from 'with' clause
-                                                    operations = operations,
-                                                    inferredType = null,
-                                                    sourceLocation = abilityToken.value.toSourceLocation()
-                                                ),
-                                                rbrace.remaining
-                                            )
+                                            is ParseResult.Success -> {
+                                                val file = currentFile ?: "<unknown>"
+                                                val loc = spanLoc(abilityToken.value, rbrace.value, file)
+                                                ParseResult.Success(
+                                                    ParsedAbilityDecl(
+                                                        name = name.value.text,
+                                                        typeParams = typeParams,
+                                                        receiverTypeParam = receiverTypeParam,
+                                                        associatedTypes = associatedTypes,  // list of associated types from 'having' clause
+                                                        constraints = emptyList(),  // constraints (for function ability constraints)
+                                                        dependencies = dependencies,  // dependencies from 'with' clause
+                                                        operations = operations,
+                                                        loc = loc
+                                                    ),
+                                                    rbrace.remaining
+                                                )
+                                            }
                                             is ParseResult.Failure -> {
                                                 // If we parsed no operations and see an identifier, try parsing an operation to get a better error
                                                 if (operations.isEmpty() && stream6.current()?.type == TokenType.IDENTIFIER) {
@@ -1272,7 +1315,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
         }
     }
 
-internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() = { stream ->
+internal val MezzeParser.abilityOperationParser: Parser<ParsedAbilityOp> get() = { stream ->
         // Parse: operationName : ParamType -> ReturnType [<Effects>]
         val name = identifierParser(stream)
         when (name) {
@@ -1287,17 +1330,21 @@ internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() 
 
                         when (functionType) {
                             is ParseResult.Success -> {
-                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                val funcType = functionType.value as? ParsedFunctionType
                                 if (funcType != null) {
+                                    val file = currentFile ?: "<unknown>"
+                                    val loc = spanLocTo(name.value, functionType.remaining, file)
                                     // Extract effects and ability constraints from the function type (if any)
                                     // Validation of effects (no <...> or <*>) is done in typechecker
                                     ParseResult.Success(
-                                        AbilityOperation(
+                                        ParsedAbilityOp(
                                             name.value.text,
                                             funcType.paramType,
                                             funcType.returnType,
                                             funcType.effects,
-                                            funcType.abilityConstraints
+                                            funcType.abilityConstraints,
+                                            null,
+                                            loc
                                         ),
                                         functionType.remaining
                                     )
@@ -1317,7 +1364,7 @@ internal val MezzeParser.abilityOperationParser: Parser<AbilityOperation> get() 
 
     // ===== IMPL ABILITY DECLARATION =====
 
-internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse named: impl Show for Int where { operations }
         // Parse anonymous: impl Int where { operations }
         // Also supports qualified: impl module::Encode for Int where { operations }
@@ -1350,7 +1397,8 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                 if (nextToken?.type == TokenType.WHERE) {
                                     // Anonymous impl: impl Type where { ... }
                                     // Convert the firstRef to a type annotation
-                                    val targetType = IdentifierTypeAnnotation(firstRef.localName)
+                                    val file = currentFile ?: "<unknown>"
+                                    val targetType = ParsedNamedType(firstRef.localName, firstRef.loc)
                                     val targetTypes = listOf(targetType)
 
                                     val whereToken = tok(TokenType.WHERE)(stream2)
@@ -1368,7 +1416,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                     //   impl TryInto Int {msg: Str} for Str where                    (record type)
                                     // Any type annotation is allowed between the ability name and 'for'.
                                     var argStream = stream2
-                                    val abilityTypeArgs = mutableListOf<TypeAnnotation>()
+                                    val abilityTypeArgs = mutableListOf<ParsedTypeAnnotation>()
                                     while (true) {
                                         // Stop if we see 'for' — that ends the type args
                                         val nextTok = argStream.current()
@@ -1399,9 +1447,15 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                                                 val whereToken2 = tok(TokenType.WHERE)(argStream)
                                                 when (whereToken2) {
                                                     is ParseResult.Success -> {
-                                                        val targetType = TypeApplicationAnnotation(
+                                                        val file = currentFile ?: "<unknown>"
+                                                        val loc = spanLocTo(firstRef.loc.let {
+                                                            // Create a fake token from the loc
+                                                            argStream.tokens.getOrNull(0) ?: argStream.tokens.last()
+                                                        }, argStream, file)
+                                                        val targetType = ParsedTypeApp(
                                                             firstRef.localName,
-                                                            abilityTypeArgs
+                                                            abilityTypeArgs,
+                                                            loc
                                                         )
                                                         parseImplAbilityOperationsBlock(implToken, null, listOf(targetType), emptyMap(), whereToken2)
                                                     }
@@ -1430,16 +1484,16 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
      */
     private fun MezzeParser.parseImplAbilityBody(
         implToken: ParseResult.Success<Token>,
-        abilityRef: QualifiedRef,
+        abilityRef: ParsedQualifiedRef,
         streamAfterFor: TokenStream,
-        abilityTypeArgs: List<TypeAnnotation> = emptyList()
-    ): ParseResult<ProgramItem> {
+        abilityTypeArgs: List<ParsedTypeAnnotation> = emptyList()
+    ): ParseResult<ParsedDecl> {
         // Parse target types (one or more).
         // A capitalized type name followed by type variables ('a, 'b) or structural types
-        // ([T], {fields}) is parsed as a type application (e.g., Option 'a → TypeApplicationAnnotation).
+        // ([T], {fields}) is parsed as a type application (e.g., Option 'a → ParsedTypeApp).
         // A capitalized type name followed by another capitalized type name means separate target types
         // (e.g., String Int for multi-parameter abilities).
-        val targetTypes = mutableListOf<TypeAnnotation>()
+        val targetTypes = mutableListOf<ParsedTypeAnnotation>()
         var currentStream = streamAfterFor
 
         // Parse first type — may be a type application with type variable args
@@ -1493,12 +1547,12 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
      */
     private fun MezzeParser.parseImplAbilityOperationsBlock(
         implToken: ParseResult.Success<Token>,
-        abilityRef: QualifiedRef?,
-        targetTypes: List<TypeAnnotation>,
-        associatedTypeBindings: Map<String, TypeAnnotation>,
+        abilityRef: ParsedQualifiedRef?,
+        targetTypes: List<ParsedTypeAnnotation>,
+        associatedTypeBindings: Map<String, ParsedTypeAnnotation>,
         whereToken: ParseResult.Success<Token>,
-        abilityTypeArgs: List<TypeAnnotation> = emptyList()
-    ): ParseResult<ProgramItem> {
+        abilityTypeArgs: List<ParsedTypeAnnotation> = emptyList()
+    ): ParseResult<ParsedDecl> {
         val stream4 = skipNewlines(whereToken.remaining)
         val lbrace = tok(TokenType.LBRACE)(stream4)
 
@@ -1507,7 +1561,7 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                 val stream5 = skipNewlines(lbrace.remaining)
 
                 // Parse operations separated by commas (trailing comma allowed)
-                val operations = mutableListOf<ImplAbilityOperation>()
+                val operations = mutableListOf<ParsedImplOp>()
                 var opStream = stream5
 
                 // Parse first operation (if any)
@@ -1558,20 +1612,21 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                 when (rbrace) {
                     is ParseResult.Success -> {
                         val implTarget = if (abilityRef != null) {
-                            ImplTarget.Named(abilityRef)
+                            ParsedImplTarget.Named(abilityRef)
                         } else {
-                            ImplTarget.Inherent
+                            ParsedImplTarget.Inherent
                         }
+                        val file = currentFile ?: "<unknown>"
+                        val loc = spanLoc(implToken.value, rbrace.value, file)
                         ParseResult.Success(
-                            ImplAbilityDeclaration(
+                            ParsedImplAbilityDecl(
                                 target = implTarget,
                                 targetTypes = targetTypes,
                                 abilityTypeArgs = abilityTypeArgs,
                                 forallVars = emptyList(),
                                 associatedTypeBindings = associatedTypeBindings,
                                 operations = operations,
-                                inferredType = null,
-                                sourceLocation = implToken.value.toSourceLocation()
+                                loc = loc
                             ),
                             rbrace.remaining
                         )
@@ -1590,15 +1645,15 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
  * Capitalized identifiers (String, Int) are NOT consumed as args — they are
  * separate target types for multi-parameter abilities.
  */
-internal val MezzeParser.implTargetTypeAnnotation: Parser<TypeAnnotation>
+internal val MezzeParser.implTargetTypeAnnotation: Parser<ParsedTypeAnnotation>
     get() = { stream ->
         val first = simpleTypeArgument(stream)
         when (first) {
             is ParseResult.Success -> {
                 val firstAnnotation = first.value
                 // Only try to collect type variable args for capitalized type constructors
-                if (firstAnnotation is IdentifierTypeAnnotation && firstAnnotation.name[0].isUpperCase()) {
-                    val args = mutableListOf<TypeAnnotation>()
+                if (firstAnnotation is ParsedNamedType && firstAnnotation.name[0].isUpperCase()) {
+                    val args = mutableListOf<ParsedTypeAnnotation>()
                     var currentStream = first.remaining
                     while (true) {
                         val nextTok = currentStream.current()
@@ -1628,7 +1683,9 @@ internal val MezzeParser.implTargetTypeAnnotation: Parser<TypeAnnotation>
                         }
                     }
                     if (args.isNotEmpty()) {
-                        ParseResult.Success(TypeApplicationAnnotation(firstAnnotation.name, args), currentStream)
+                        val file = currentFile ?: "<unknown>"
+                        val loc = spanLocTo(stream.current()!!, currentStream, file)
+                        ParseResult.Success(ParsedTypeApp(firstAnnotation.name, args, loc), currentStream)
                     } else {
                         first // No args, return as simple identifier
                     }
@@ -1640,7 +1697,7 @@ internal val MezzeParser.implTargetTypeAnnotation: Parser<TypeAnnotation>
         }
     }
 
-internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation> get() = { stream ->
+internal val MezzeParser.implAbilityOperationParser: Parser<ParsedImplOp> get() = { stream ->
         // Parse: operationName : ParamType -> ReturnType = implementation
         //   or:  operationName = implementation (type inferred from ability declaration)
         val name = identifierParser(stream)
@@ -1657,7 +1714,7 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation
 
                         when (functionType) {
                             is ParseResult.Success -> {
-                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                val funcType = functionType.value as? ParsedFunctionType
                                 if (funcType != null) {
                                     val stream3 = skipNewlines(functionType.remaining)
                                     val assign = tok(TokenType.ASSIGN)(stream3)
@@ -1668,16 +1725,21 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation
                                             val impl = expression(stream4)
 
                                             when (impl) {
-                                                is ParseResult.Success -> ParseResult.Success(
-                                                    ImplAbilityOperation(
-                                                        name.value.text,
-                                                        funcType.paramType,
-                                                        funcType.returnType,
-                                                        impl.value,
-                                                        funcType.abilityConstraints
-                                                    ),
-                                                    impl.remaining
-                                                )
+                                                is ParseResult.Success -> {
+                                                    val file = currentFile ?: "<unknown>"
+                                                    val loc = spanLocTo(name.value, impl.remaining, file)
+                                                    ParseResult.Success(
+                                                        ParsedImplOp(
+                                                            name.value.text,
+                                                            funcType.paramType,
+                                                            funcType.returnType,
+                                                            impl.value,
+                                                            funcType.abilityConstraints,
+                                                            loc
+                                                        ),
+                                                        impl.remaining
+                                                    )
+                                                }
                                                 is ParseResult.Failure -> impl
                                             }
                                         }
@@ -1699,15 +1761,21 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation
                                 val impl = expression(stream2)
 
                                 when (impl) {
-                                    is ParseResult.Success -> ParseResult.Success(
-                                        ImplAbilityOperation(
-                                            name.value.text,
-                                            null,  // Type will be inferred by typechecker
-                                            null,  // Type will be inferred by typechecker
-                                            impl.value
-                                        ),
-                                        impl.remaining
-                                    )
+                                    is ParseResult.Success -> {
+                                        val file = currentFile ?: "<unknown>"
+                                        val loc = spanLocTo(name.value, impl.remaining, file)
+                                        ParseResult.Success(
+                                            ParsedImplOp(
+                                                name.value.text,
+                                                null,  // Type will be inferred by typechecker
+                                                null,  // Type will be inferred by typechecker
+                                                impl.value,
+                                                emptyList(),
+                                                loc
+                                            ),
+                                            impl.remaining
+                                        )
+                                    }
                                     is ParseResult.Failure -> impl
                                 }
                             }
@@ -1722,20 +1790,14 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ImplAbilityOperation
 
     // ===== USE DECLARATION =====
 
-internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         // Parse: use std::math::basic
         //   or:  use std::math::{trig, random}
         //   or:  use std::math::basic as m
         val useToken = tok(TokenType.USE)(stream)
         return when (useToken) {
             is ParseResult.Success -> {
-                // Capture source location from the 'use' keyword
-                // Note: file name will be set later when the file context is known
-                val useSourceLocation = SourceLocation(
-                    useToken.value.line,
-                    useToken.value.column,
-                    null  // File name not available at parse time
-                )
+                val file = currentFile ?: "<unknown>"
                 val stream1 = skipNewlines(useToken.remaining)
 
                 // Parse the path segments separated by ::
@@ -1774,12 +1836,14 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
 
                                                 when (rbrace) {
                                                     is ParseResult.Success -> {
-                                                        val path = SelectivePath(pathSegments, items.value)
+                                                        val modulePath = ParsedModulePath(pathSegments)
+                                                        val loc = spanLoc(useToken.value, rbrace.value, file)
+                                                        val path = ParsedUsePath.Selective(modulePath, items.value, loc)
                                                         ParseResult.Success(
                                                             if (visibility == Visibility.PUBLIC) {
-                                                                PubUseDeclaration(path, null, useSourceLocation)
+                                                                ParsedPubUseDecl(path, null, loc = loc)
                                                             } else {
-                                                                UseDeclaration(path, null, useSourceLocation)
+                                                                ParsedUseDecl(path, null, loc = loc)
                                                             },
                                                             rbrace.remaining
                                                         )
@@ -1840,12 +1904,14 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
                                     }
 
                                     // Create the module path
-                                    val path = ModulePath(pathSegments)
+                                    val modulePath = ParsedModulePath(pathSegments)
+                                    val loc = spanLocTo(useToken.value, currentStream, file)
+                                    val path = ParsedUsePath.Module(modulePath, loc)
                                     return ParseResult.Success(
                                         if (visibility == Visibility.PUBLIC) {
-                                            PubUseDeclaration(path, alias, useSourceLocation)
+                                            ParsedPubUseDecl(path, alias, loc = loc)
                                         } else {
-                                            UseDeclaration(path, alias, useSourceLocation)
+                                            ParsedUseDecl(path, alias, loc = loc)
                                         },
                                         currentStream
                                     )
@@ -1863,11 +1929,12 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
         }
     }
 
-internal val MezzeParser.importItemParser: Parser<ImportItem> get() = { stream ->
+internal val MezzeParser.importItemParser: Parser<ParsedImportItem> get() = { stream ->
         // Parse: name or name as alias
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
+                val file = currentFile ?: "<unknown>"
                 val stream1 = skipNewlines(name.remaining)
                 val asKeyword = keyword("as", TokenType.IDENTIFIER)(stream1)
 
@@ -1878,17 +1945,21 @@ internal val MezzeParser.importItemParser: Parser<ImportItem> get() = { stream -
                         val aliasName = identifierParser(stream2)
 
                         when (aliasName) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                ImportItem(name.value.text, aliasName.value.text),
-                                aliasName.remaining
-                            )
+                            is ParseResult.Success -> {
+                                val loc = spanLoc(name.value, aliasName.value, file)
+                                ParseResult.Success(
+                                    ParsedImportItem(name.value.text, aliasName.value.text, loc),
+                                    aliasName.remaining
+                                )
+                            }
                             is ParseResult.Failure -> aliasName
                         }
                     }
                     is ParseResult.Failure -> {
                         // No alias
+                        val loc = tokenLoc(name.value, file)
                         ParseResult.Success(
-                            ImportItem(name.value.text, null),
+                            ParsedImportItem(name.value.text, null, loc),
                             stream1
                         )
                     }

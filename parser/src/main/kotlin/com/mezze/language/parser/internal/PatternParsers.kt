@@ -1,30 +1,18 @@
 package com.mezze.language.parser.internal
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.*
 
 import com.mezze.language.parser.internal.lib.*
 /**
  * Pattern parsers for all pattern matching constructs.
  *
- * This file contains internal parsers for:
- * - Wildcard patterns (_)
- * - Variable patterns (x)
- * - Constructor patterns (Cons { head, tail })
- * - Record patterns ({ x, y = pattern })
- * - Literal patterns (42, "hello", true)
- * - Seq patterns ([x, y, ...rest])
- * - Let binding patterns (irrefutable patterns only)
- * - Pattern utilities and validation
- *
- * All parsers return Pattern (sealed interface from AST).
+ * All parsers return ParsedPattern (from parsedast package).
  * All functions are internal - only used within the parser module.
- *
- * Part of the refactored parser module - previously in MezzeParser.kt.
  */
 
 // Let binding pattern parser (for irrefutable patterns in let bindings)
-internal val MezzeParser.letBindingPattern: Parser<Pattern>
+internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
     get() = { stream ->
         Parsers.oneOf(
             wildcardPattern,
@@ -33,8 +21,8 @@ internal val MezzeParser.letBindingPattern: Parser<Pattern>
         )(stream)
     }
 
-// Variable pattern for let bindings - simple identifier becomes VariablePattern
-internal val MezzeParser.variablePatternForLet: Parser<Pattern>
+// Variable pattern for let bindings - simple identifier becomes ParsedVariablePattern
+internal val MezzeParser.variablePatternForLet: Parser<ParsedPattern>
     get() = { stream ->
         val ident = identifierParser(stream)
         when (ident) {
@@ -43,8 +31,6 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
                 // Check for reserved names
                 val reservedError = checkReservedName(name)
                 if (reservedError != null) {
-                    // Use remaining position so this error "wins" over earlier failures,
-                    // but report the token's line/column for better error pointing
                     ParseResult.Failure(
                         reservedError,
                         ident.remaining.getSourcePosition(),
@@ -52,10 +38,11 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
                         ident.value.column
                     )
                 } else {
+                    val file = currentFile ?: "<unknown>"
                     ParseResult.Success(
-                        VariablePattern(
+                        ParsedVariablePattern(
                             name,
-                            SourceLocation(ident.value.line, ident.value.column, length = name.length)
+                            tokenLoc(ident.value, file)
                         ),
                         ident.remaining
                     )
@@ -66,26 +53,28 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
     }
 
 // Array pattern parser
-internal val MezzeParser.seqPattern: Parser<Pattern>
+internal val MezzeParser.seqPattern: Parser<ParsedPattern>
     get() = { stream ->
         // Parse: [] or [x] or [x, y] or [x, ...rest]
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbracket.remaining)
+                val file = currentFile ?: "<unknown>"
 
                 // Check for empty seq pattern []
                 if (stream1.current()?.type == TokenType.RBRACKET) {
+                    val loc = spanLoc(lbracket.value, stream1.current()!!, file)
                     ParseResult.Success(
-                        SeqPattern(emptyList(), null),
+                        ParsedSeqPattern(emptyList(), null, loc),
                         stream1.advance()
                     )
                 } else {
                     // Use recursive parsing approach to avoid labeled returns in loops
                     fun parseSeqElements(
                         s: TokenStream,
-                        accum: List<Pattern>
-                    ): ParseResult<Pair<List<Pattern>, Pair<String?, TokenStream>>> {
+                        accum: List<ParsedPattern>
+                    ): ParseResult<Pair<List<ParsedPattern>, Pair<String?, TokenStream>>> {
                         // Check for rest pattern: ...name or just ... (anonymous)
                         return if (s.current()?.type == TokenType.ELLIPSIS) {
                             val ellipsisStream = s.advance()
@@ -116,16 +105,12 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                 }
                                 is ParseResult.Failure -> {
                                     // No identifier after ... - this is an anonymous rest pattern: [x, ...] or [x, ...,]
-                                    // Check if we're at ] or , which indicates end of pattern
                                     when (afterEllipsis.current()?.type) {
                                         TokenType.RBRACKET -> {
-                                            // Anonymous rest pattern is valid
                                             ParseResult.Success(Pair(accum, Pair(null, afterEllipsis)), afterEllipsis)
                                         }
                                         TokenType.COMMA -> {
-                                            // Anonymous rest pattern with trailing comma: [x, ...,]
                                             val afterComma = skipNewlines(afterEllipsis.advance())
-                                            // Rest pattern must be last - check that ] follows
                                             if (afterComma.current()?.type != TokenType.RBRACKET) {
                                                 afterComma.failure(
                                                     "Rest pattern (...) must be the last element in a seq pattern. " +
@@ -136,7 +121,6 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                             }
                                         }
                                         else -> {
-                                            // Expected identifier or end of pattern
                                             ellipsisStream.failure(
                                                 "After '...' in seq pattern, expected a name for the rest or ']' to end the pattern. Examples: [first, ...rest] or [first, ...]"
                                             )
@@ -145,10 +129,8 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                 }
                             }
                         } else if (s.current()?.type == TokenType.RBRACKET) {
-                            // End of seq pattern
                             ParseResult.Success(Pair(accum, Pair(null, s)), s)
                         } else {
-                            // Parse pattern element
                             val pattern = patternParser(s)
                             when (pattern) {
                                 is ParseResult.Success -> {
@@ -158,11 +140,9 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                                     when (afterPattern.current()?.type) {
                                         TokenType.COMMA -> {
                                             val afterComma = skipNewlines(afterPattern.advance())
-                                            // Check if closing bracket (trailing comma)
                                             if (afterComma.current()?.type == TokenType.RBRACKET) {
                                                 ParseResult.Success(Pair(newAccum, Pair(null, afterComma)), afterComma)
                                             } else {
-                                                // Continue parsing
                                                 parseSeqElements(afterComma, newAccum)
                                             }
                                         }
@@ -184,13 +164,15 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
                         is ParseResult.Success -> {
                             val (elements, restAndStream) = elementsResult.value
                             val (restPat, currentStream) = restAndStream
-                            // Parse closing bracket
                             val rbracket = tok(TokenType.RBRACKET)(currentStream)
                             when (rbracket) {
-                                is ParseResult.Success -> ParseResult.Success(
-                                    SeqPattern(elements, restPat),
-                                    rbracket.remaining
-                                )
+                                is ParseResult.Success -> {
+                                    val loc = spanLoc(lbracket.value, rbracket.value, file)
+                                    ParseResult.Success(
+                                        ParsedSeqPattern(elements, restPat, loc),
+                                        rbracket.remaining
+                                    )
+                                }
                                 is ParseResult.Failure -> rbracket
                             }
                         }
@@ -203,7 +185,7 @@ internal val MezzeParser.seqPattern: Parser<Pattern>
     }
 
 // Pattern parser (main entry point)
-internal val MezzeParser.patternParser: Parser<Pattern>
+internal val MezzeParser.patternParser: Parser<ParsedPattern>
     get() = { stream ->
         Parsers.oneOf(
             wildcardPattern,
@@ -217,14 +199,13 @@ internal val MezzeParser.patternParser: Parser<Pattern>
 
 // Standalone record pattern for matching on records directly (not wrapped in a constructor)
 // Example: { name, age } -> ...
-internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
+internal val MezzeParser.standaloneRecordPattern: Parser<ParsedPattern>
     get() = parser@{ stream ->
-        // Only parse if we see a LBRACE that's not preceded by an uppercase identifier
-        // Since this is tried after wildcard and literal patterns, we can safely try parsing
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
+                val file = currentFile ?: "<unknown>"
 
                 // Check if first token after { is a reserved identifier - report error early
                 val firstToken = stream1.current()
@@ -249,14 +230,12 @@ internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(entries.remaining)
 
-                        // Check for optional comma before ellipsis
                         val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
                             skipNewlines(stream2.advance())
                         } else {
                             stream2
                         }
 
-                        // Check for ellipsis (open record marker: ...)
                         val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
 
                         val stream3 = if (isOpen) {
@@ -268,10 +247,13 @@ internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
                         val rbrace = tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                RecordPattern(entries.value, isOpen),
-                                rbrace.remaining
-                            )
+                            is ParseResult.Success -> {
+                                val loc = spanLoc(lbrace.value, rbrace.value, file)
+                                ParseResult.Success(
+                                    ParsedRecordPattern(entries.value, isOpen, loc),
+                                    rbrace.remaining
+                                )
+                            }
                             is ParseResult.Failure -> rbrace
                         }
                     }
@@ -283,25 +265,32 @@ internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
     }
 
 // Wildcard pattern parser
-internal val MezzeParser.wildcardPattern: Parser<Pattern>
+internal val MezzeParser.wildcardPattern: Parser<ParsedPattern>
     get() = { stream ->
         val placeholder = tok(TokenType.PLACEHOLDER)(stream)
         when (placeholder) {
-            is ParseResult.Success -> ParseResult.Success(WildcardPattern(), placeholder.remaining)
+            is ParseResult.Success -> {
+                val file = currentFile ?: "<unknown>"
+                ParseResult.Success(
+                    ParsedWildcardPattern(tokenLoc(placeholder.value, file)),
+                    placeholder.remaining
+                )
+            }
             is ParseResult.Failure -> placeholder
         }
     }
 
 // Literal pattern parser
-internal val MezzeParser.literalPattern: Parser<Pattern>
+internal val MezzeParser.literalPattern: Parser<ParsedPattern>
     get() = { stream ->
         val token = stream.current()
+        val file = currentFile ?: "<unknown>"
         when (token?.type) {
             TokenType.INTEGER -> {
                 val value = token.text.toLongOrNull()
                 if (value != null) {
                     ParseResult.Success(
-                        LiteralPattern(IntLiteralValue(value)),
+                        ParsedLiteralPattern(ParsedLiteralValue.IntValue(value), tokenLoc(token, file)),
                         stream.advance()
                     )
                 } else {
@@ -312,7 +301,7 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
                 val value = token.text.toLongOrNull()
                 if (value != null) {
                     ParseResult.Success(
-                        LiteralPattern(NatLiteralValue(value)),
+                        ParsedLiteralPattern(ParsedLiteralValue.NatValue(value), tokenLoc(token, file)),
                         stream.advance()
                     )
                 } else {
@@ -320,23 +309,22 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
                 }
             }
             TokenType.STRING -> {
-                // String token includes quotes, strip them
                 val text = token.text
                 val value = if (text.length >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
                     text.substring(1, text.length - 1)
                 } else {
                     text
                 }
-                val location = tokenLocation(token, currentFile)
+                val loc = tokenLoc(token, file)
 
                 // Check if this is a string interpolation pattern (has unescaped $()
                 if (hasUnescapedInterpolation(value)) {
-                    parseStringInterpolationPattern(value, stream.advance(), location)
+                    parseStringInterpolationPattern(value, stream.advance(), loc)
                 } else {
                     // Simple string literal pattern - process escape sequences
                     val processedValue = processEscapeSequences(value)
                     ParseResult.Success(
-                        LiteralPattern(StringLiteralValue(processedValue)),
+                        ParsedLiteralPattern(ParsedLiteralValue.StringValue(processedValue), loc),
                         stream.advance()
                     )
                 }
@@ -344,7 +332,7 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
             TokenType.BOOLEAN -> {
                 val value = token.text == "true"
                 ParseResult.Success(
-                    LiteralPattern(BooleanLiteralValue(value)),
+                    ParsedLiteralPattern(ParsedLiteralValue.BoolValue(value), tokenLoc(token, file)),
                     stream.advance()
                 )
             }
@@ -352,7 +340,7 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
                 val value = token.text.toDoubleOrNull()
                 if (value != null) {
                     ParseResult.Success(
-                        LiteralPattern(FloatLiteralValue(value)),
+                        ParsedLiteralPattern(ParsedLiteralValue.FloatValue(value), tokenLoc(token, file)),
                         stream.advance()
                     )
                 } else {
@@ -364,7 +352,7 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
     }
 
 // Variable pattern parser
-internal val MezzeParser.variablePattern: Parser<Pattern>
+internal val MezzeParser.variablePattern: Parser<ParsedPattern>
     get() = { stream ->
         val ident = identifierParser(stream)
         when (ident) {
@@ -372,18 +360,14 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
                 // Check if next token is LBRACE - if so, it's a constructor pattern
                 val next = ident.remaining.current()
                 if (next?.type == TokenType.LBRACE) {
-                    // User likely meant a constructor pattern - guide them to use uppercase
                     val suggestion = if (ident.value.text.firstOrNull()?.isLowerCase() == true) {
                         " Constructor names must start with uppercase (e.g., Some, None)"
                     } else ""
                     stream.failure("'${ident.value.text} {...}' is a constructor pattern, not a variable pattern.$suggestion")
                 } else {
                     val name = ident.value.text
-                    // Check for reserved names
                     val reservedError = checkReservedName(name)
                     if (reservedError != null) {
-                        // Use remaining position so this error "wins" over earlier failures,
-                        // but report the token's line/column for better error pointing
                         ParseResult.Failure(
                             reservedError,
                             ident.remaining.getSourcePosition(),
@@ -391,10 +375,11 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
                             ident.value.column
                         )
                     } else {
+                        val file = currentFile ?: "<unknown>"
                         ParseResult.Success(
-                            VariablePattern(
+                            ParsedVariablePattern(
                                 name,
-                                SourceLocation(ident.value.line, ident.value.column, length = name.length)
+                                tokenLoc(ident.value, file)
                             ),
                             ident.remaining
                         )
@@ -406,17 +391,13 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
     }
 
 // Constructor pattern parser
-internal val MezzeParser.constructorPattern: Parser<Pattern>
+internal val MezzeParser.constructorPattern: Parser<ParsedPattern>
     get() = { stream ->
-        // Parse: Constructor { field1 = pattern1, field2 = pattern2 }
-        // or: Constructor variableName (shorthand for single-field constructors)
-        // or: Constructor (no pattern)
-        // Note: Constructors are globally available (not module-qualified) once the type is imported
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {
-                // Check if constructor name starts with uppercase (convention)
                 val isConstructor = ident.value.text.firstOrNull()?.isUpperCase() == true
+                val file = currentFile ?: "<unknown>"
 
                 if (!isConstructor) {
                     stream.failure("Expected constructor name starting with uppercase letter, but got '${ident.value.text}'. Constructors must start with uppercase (e.g., Some, None, Ok, Err)")
@@ -429,10 +410,13 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                             // Has record pattern: Some {value = x}
                             val recordPat = recordPatternParser(stream1)
                             when (recordPat) {
-                                is ParseResult.Success -> ParseResult.Success(
-                                    ConstructorPattern(ident.value.text, recordPat.value),
-                                    recordPat.remaining
-                                )
+                                is ParseResult.Success -> {
+                                    val loc = spanLoc(ident.value, stream1.tokens.getOrNull(recordPat.remaining.position - 1) ?: ident.value, file)
+                                    ParseResult.Success(
+                                        ParsedConstructorPattern(ident.value.text, recordPat.value, loc),
+                                        recordPat.remaining
+                                    )
+                                }
                                 is ParseResult.Failure -> recordPat
                             }
                         }
@@ -442,11 +426,8 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                             when (varPat) {
                                 is ParseResult.Success -> {
                                     val name = varPat.value.text
-                                    // Check for reserved names
                                     val reservedError = checkReservedName(name)
                                     if (reservedError != null) {
-                                        // Use remaining position so this error "wins" over earlier failures,
-                                        // but report the token's line/column for better error pointing
                                         ParseResult.Failure(
                                             reservedError,
                                             varPat.remaining.getSourcePosition(),
@@ -454,14 +435,20 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                                             varPat.value.column
                                         )
                                     } else {
-                                        val varLoc = SourceLocation(varPat.value.line, varPat.value.column, length = name.length)
+                                        val varLoc = tokenLoc(varPat.value, file)
+                                        val innerPattern = ParsedRecordPattern(
+                                            listOf(
+                                                ParsedRecordPatternEntry("value", ParsedVariablePattern(name, varLoc), varLoc)
+                                            ),
+                                            false,
+                                            varLoc
+                                        )
+                                        val ctorLoc = spanLoc(ident.value, varPat.value, file)
                                         ParseResult.Success(
-                                            ConstructorPattern(
+                                            ParsedConstructorPattern(
                                                 ident.value.text,
-                                                RecordPattern(listOf(
-                                                    RecordPatternEntry("value", VariablePattern(name, varLoc), varLoc)
-                                                ), false),  // Shorthand patterns are always closed
-                                                SourceLocation(ident.value.line, ident.value.column, length = ident.value.text.length)
+                                                innerPattern,
+                                                ctorLoc
                                             ),
                                             varPat.remaining
                                         )
@@ -473,7 +460,7 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                         else -> {
                             // No pattern: None
                             ParseResult.Success(
-                                ConstructorPattern(ident.value.text, null),
+                                ParsedConstructorPattern(ident.value.text, null, tokenLoc(ident.value, file)),
                                 stream1
                             )
                         }
@@ -485,13 +472,13 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
     }
 
 // Record pattern parser
-internal val MezzeParser.recordPatternParser: Parser<RecordPattern>
+internal val MezzeParser.recordPatternParser: Parser<ParsedRecordPattern>
     get() = { stream ->
-        // Parse: { field1 = pattern1, field2, ... }
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
+                val file = currentFile ?: "<unknown>"
                 val entries = sepEndByWithNewlines(
                     recordPatternEntryParser,
                     tok(TokenType.COMMA)
@@ -501,18 +488,16 @@ internal val MezzeParser.recordPatternParser: Parser<RecordPattern>
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(entries.remaining)
 
-                        // Check for optional comma before ellipsis (same logic as recordTypeAnnotationParser)
                         val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
                             skipNewlines(stream2.advance())
                         } else {
                             stream2
                         }
 
-                        // Check for ellipsis (open record marker: ...)
                         val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
 
                         val stream3 = if (isOpen) {
-                            skipNewlines(afterComma.advance())  // Skip the ellipsis token
+                            skipNewlines(afterComma.advance())
                         } else {
                             afterComma
                         }
@@ -520,10 +505,13 @@ internal val MezzeParser.recordPatternParser: Parser<RecordPattern>
                         val rbrace = tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                RecordPattern(entries.value, isOpen),
-                                rbrace.remaining
-                            )
+                            is ParseResult.Success -> {
+                                val loc = spanLoc(lbrace.value, rbrace.value, file)
+                                ParseResult.Success(
+                                    ParsedRecordPattern(entries.value, isOpen, loc),
+                                    rbrace.remaining
+                                )
+                            }
                             is ParseResult.Failure -> rbrace
                         }
                     }
@@ -535,18 +523,14 @@ internal val MezzeParser.recordPatternParser: Parser<RecordPattern>
     }
 
 // Record pattern entry parser
-internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
+internal val MezzeParser.recordPatternEntryParser: Parser<ParsedRecordPatternEntry>
     get() = { stream ->
-        // Parse: field = pattern or field (punning)
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {
                 val fieldName = ident.value.text
-                // Check for reserved names
                 val reservedError = checkReservedName(fieldName)
                 if (reservedError != null) {
-                    // Use remaining position so this error "wins" over earlier failures,
-                    // but report the token's line/column for better error pointing
                     ParseResult.Failure(
                         reservedError,
                         ident.remaining.getSourcePosition(),
@@ -556,7 +540,8 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
                 } else {
                     val stream1 = ident.remaining
                     val assign = tok(TokenType.ASSIGN)(stream1)
-                    val fieldLoc = SourceLocation(ident.value.line, ident.value.column, length = fieldName.length)
+                    val file = currentFile ?: "<unknown>"
+                    val fieldLoc = tokenLoc(ident.value, file)
 
                     when (assign) {
                         is ParseResult.Success -> {
@@ -564,16 +549,16 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
                             val pattern = patternParser(assign.remaining)
                             when (pattern) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    RecordPatternEntry(fieldName, pattern.value, fieldLoc),
+                                    ParsedRecordPatternEntry(fieldName, pattern.value, fieldLoc),
                                     pattern.remaining
                                 )
                                 is ParseResult.Failure -> pattern
                             }
                         }
                         is ParseResult.Failure -> {
-                            // Punning: field - the field name IS the binding location
+                            // Punning: field
                             ParseResult.Success(
-                                RecordPatternEntry(fieldName, null, fieldLoc),
+                                ParsedRecordPatternEntry(fieldName, null, fieldLoc),
                                 stream1
                             )
                         }

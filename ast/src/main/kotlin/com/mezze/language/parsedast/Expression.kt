@@ -1,0 +1,319 @@
+package com.mezze.language.parsedast
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Expressions — all have `loc: Loc`, nothing else.
+ *
+ * No inferredType. No contentHash. No resolvedAbilities.
+ * No resolvedFunctionName. No typeSubstitution. No isTailCall.
+ * Just pure syntax.
+ */
+@Serializable
+sealed interface ParsedExpr {
+    val loc: Loc
+}
+
+// ============================================================================
+// LITERALS
+// ============================================================================
+
+/** Integer literal: `42` */
+@Serializable
+data class ParsedIntLit(
+    val value: Long,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Natural number literal: `42n` */
+@Serializable
+data class ParsedNatLit(
+    val value: Long,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Float literal: `3.14` */
+@Serializable
+data class ParsedFloatLit(
+    val value: Double,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Fraction literal: `1//2` */
+@Serializable
+data class ParsedFracLit(
+    val numerator: Long,
+    val denominator: Long,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * String literal, always represented as parts.
+ *
+ * Simple string `"hello"` → parts=[Literal("hello")]
+ * Interpolated `"hi $(name)"` → parts=[Literal("hi "), Interpolation(name)]
+ */
+@Serializable
+data class ParsedStringLit(
+    val parts: List<ParsedStringPart>,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Character literal: `'a'` */
+@Serializable
+data class ParsedCharLit(
+    val value: Char,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// VARIABLES
+// ============================================================================
+
+/**
+ * Identifier — simple or qualified variable/function reference.
+ *
+ * - Simple: `x` → localName="x", qualifier=null
+ * - Qualified: `int::add` → localName="add", qualifier=["int"]
+ * - Native: `__native_int_add` → localName="__native_int_add", qualifier=null
+ */
+@Serializable
+data class ParsedIdentifier(
+    val localName: String,
+    val qualifier: ParsedModulePath? = null,
+    override val loc: Loc
+) : ParsedExpr {
+    val isQualified: Boolean get() = qualifier != null
+}
+
+// ============================================================================
+// FUNCTIONS
+// ============================================================================
+
+/**
+ * Lambda expression: `{ x, y } -> x + y` or `{ x: Int } -> x + 1`
+ *
+ * The `->` distinguishes lambdas from record literals.
+ */
+@Serializable
+data class ParsedLambda(
+    val params: ParsedLambdaParams,
+    val body: ParsedExpr,
+    val returnType: ParsedTypeAnnotation? = null,
+    val abilityConstraints: List<ParsedFnAbilityConstraint> = emptyList(),
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * Function call: `f { x = 1 }`, `f {}`, `add { l = 1, r = 2 }`
+ *
+ * In Mezze, function arguments are always records.
+ */
+@Serializable
+data class ParsedFunctionCall(
+    val function: ParsedExpr,
+    val arguments: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// PIPE
+// ============================================================================
+
+/** Pipe expression: `value |> f { param = @ }` */
+@Serializable
+data class ParsedPipe(
+    val left: ParsedExpr,
+    val right: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+/** Pipe placeholder: `@` — the value being piped */
+@Serializable
+data class ParsedPipePlaceholder(
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// RECORDS
+// ============================================================================
+
+/**
+ * Record literal: `{ x = 1, y }`, `{ ...r, x = 2 }`, `{}`
+ */
+@Serializable
+data class ParsedRecordLit(
+    val entries: List<ParsedRecordEntry>,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * Member access: `record.field`, `"hello".length`
+ *
+ * This covers both field access and method call receivers.
+ * `x.add { r = y }` parses as FunctionCall(MemberAccess(x, "add"), {r=y}).
+ */
+@Serializable
+data class ParsedMemberAccess(
+    val receiver: ParsedExpr,
+    val member: String,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// VARIANTS
+// ============================================================================
+
+/**
+ * Variant construction: `Some { val = 42 }`, `None`, `Red`, `True`, `False`
+ *
+ * The parser treats any uppercase identifier as a variant constructor.
+ * The typechecker resolves what it actually is (variant, ability ref, effect ref, etc.)
+ */
+@Serializable
+data class ParsedVariantConstruct(
+    val constructor: String,
+    val value: ParsedExpr? = null,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// CONTROL FLOW
+// ============================================================================
+
+/** If expression: `if cond then a else b` */
+@Serializable
+data class ParsedIf(
+    val condition: ParsedExpr,
+    val thenBranch: ParsedExpr,
+    val elseBranch: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * Match expression: `match expr is  pattern -> body, ...`
+ */
+@Serializable
+data class ParsedMatch(
+    val scrutinee: ParsedExpr,
+    val cases: List<ParsedMatchCase>,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * A single match case.
+ *
+ * Supports or-patterns (`Some x | None -> ...`) and guards (`x if x > 0 -> ...`).
+ */
+@Serializable
+data class ParsedMatchCase(
+    val patterns: List<ParsedPattern>,
+    val guard: ParsedExpr? = null,
+    val ifLetBindings: List<ParsedIfLetGuard> = emptyList(),
+    val body: ParsedExpr,
+    val loc: Loc
+)
+
+/**
+ * If-let guard in a match case: `if let Some {val = x} = expr`
+ */
+@Serializable
+data class ParsedIfLetGuard(
+    val pattern: ParsedPattern,
+    val expr: ParsedExpr,
+    val loc: Loc
+)
+
+// ============================================================================
+// BLOCKS
+// ============================================================================
+
+/**
+ * Do block: `do  let x = 1  x + 1`
+ *
+ * Statements are evaluated in order. The result expression is returned.
+ */
+@Serializable
+data class ParsedDo(
+    val statements: List<ParsedStatement>,
+    val result: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+@Serializable
+sealed interface ParsedStatement {
+    val loc: Loc
+
+    @Serializable
+    data class Let(
+        val pattern: ParsedPattern,
+        val typeAnnotation: ParsedTypeAnnotation? = null,
+        val value: ParsedExpr,
+        override val loc: Loc
+    ) : ParsedStatement
+
+    @Serializable
+    data class Expr(
+        val expr: ParsedExpr,
+        override val loc: Loc
+    ) : ParsedStatement
+}
+
+// ============================================================================
+// SEQUENCES
+// ============================================================================
+
+/** Seq literal: `[1, 2, 3]`, `[x, ...rest]`, `[]` */
+@Serializable
+data class ParsedSeqLit(
+    val elements: List<ParsedSeqElement>,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// EFFECTS
+// ============================================================================
+
+/**
+ * Perform expression: `perform Handler in body`
+ *
+ * Examples:
+ * - `perform Console in expr`
+ * - `perform SeededRandom {seed = 42} in expr`
+ * - `perform Console, LocalDisk in expr`
+ */
+@Serializable
+data class ParsedPerform(
+    val handlers: List<ParsedPerformHandler>,
+    val body: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * Effect operation call.
+ *
+ * Examples:
+ * - `read_file { path = "x" }` (looks like regular call but operation is qualified)
+ * - `println { msg = "hi" }`
+ */
+@Serializable
+data class ParsedEffectCall(
+    val operation: ParsedQualifiedRef,
+    val arguments: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+// ============================================================================
+// GROUPING
+// ============================================================================
+
+/**
+ * Parenthesized expression: `(expr)`
+ *
+ * Preserved for the formatter to maintain user's grouping style.
+ */
+@Serializable
+data class ParsedParens(
+    val expr: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr

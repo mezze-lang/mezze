@@ -2,6 +2,8 @@ package com.mezze.language.cli
 
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.Visibility as PVisibility
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.ast.prettyPrintTypeWithAliases
@@ -559,10 +561,10 @@ private fun handleParseCommand(args: List<String>) {
     try {
         val startTime = System.nanoTime()
         val parser = MezzeParser()
-        val ast = parser.parse(source, file = fileName)
-        val parseTime = (System.nanoTime() - startTime) / 1_000_000.0 // Convert to milliseconds
+        val module = parser.parseParsedModule(source, file = fileName ?: "<stdin>")
+        val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        println(prettyPrintAST(ast))
+        println(prettyPrintParsedModule(module))
         println()
         println("Parsed in ${String.format("%.2f", parseTime)}ms")
     } catch (e: com.mezze.language.parser.ParseException) {
@@ -619,39 +621,37 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
     }
 
     val source = file.readText()
-
-    // Use cached parser if in project mode
     val projectRoot = file.toPath().toAbsolutePath().parent?.toFile() ?: file.parentFile ?: File(".")
 
+    // Use v1 cached parser for backward compat (CachedParser still uses v1 internally)
     CachedParser(projectRoot).use { cachedParser ->
     try {
         val startTime = System.nanoTime()
 
-        val ast = cachedParser.parseSource(source, filePath = file.absolutePath)
+        // v2 pipeline: parse into ParsedModule
+        val parser = MezzeParser()
+        val parsedModule = parser.parseParsedModule(source, file = file.absolutePath)
         val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
-        val cacheInfo = if (cachedParser.cacheHits > 0) " (cached)" else ""
 
         // Check for bare top-level expressions (not allowed in CLI mode)
-        val bareExpressions = ast.items.filterIsInstance<TopLevelExpression>()
+        val bareExpressions = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>()
         if (bareExpressions.isNotEmpty()) {
             val first = bareExpressions.first()
-            val loc = first.expression.sourceLocation
+            val loc = first.loc
             println("❌ Error: Top-level expression not allowed")
             println("━".repeat(50))
-            if (loc != null) {
-                val lines = source.lines()
-                val lineNum = loc.line
-                val col = loc.column
-                println("   --> ${file.name}:$lineNum:$col")
-                println("    |")
-                if (lineNum >= 1 && lineNum <= lines.size) {
-                    val sourceLine = lines[lineNum - 1]
-                    println("  ${lineNum.toString().padStart(2)} | $sourceLine")
-                    val underlineLength = loc.length ?: minOf(10, sourceLine.length - col + 1)
-                    println("    | ${" ".repeat(col - 1)}${"^".repeat(maxOf(1, underlineLength))} expression result is discarded")
-                }
-                println("    |")
+            val lines = source.lines()
+            val lineNum = loc.startLine
+            val col = loc.startCol
+            println("   --> ${file.name}:$lineNum:$col")
+            println("    |")
+            if (lineNum >= 1 && lineNum <= lines.size) {
+                val sourceLine = lines[lineNum - 1]
+                println("  ${lineNum.toString().padStart(2)} | $sourceLine")
+                val underlineLength = maxOf(1, loc.endCol - loc.startCol + 1)
+                println("    | ${" ".repeat(col - 1)}${"^".repeat(underlineLength)} expression result is discarded")
             }
+            println("    |")
             println()
             println("Bare expressions at module level have no effect.")
             println("Did you mean to assign it?")
@@ -661,32 +661,34 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
             kotlin.system.exitProcess(1)
         }
 
-        // Use the source file's directory for module resolution
-        // This allows the ModuleResolver to find Mezze.toml in parent directories
-        // Note: mezze.project.root is for stdlib location, NOT for user module resolution
         val typeCheckProjectRoot = file.toPath().toAbsolutePath().parent ?: file.toPath().toAbsolutePath()
 
+        // v2 pipeline: typecheck into TypedModule
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(ast, typeCheckProjectRoot)
+        val typedModule = typeChecker.checkParsedModule(parsedModule, typeCheckProjectRoot)
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        // Populate codebase in project mode
-        val codebaseUpdated = CodebaseHelper.populateIfInProject(
-            projectRoot = typeCheckProjectRoot,
-            typeCheckResult = result,
-            modulePath = null
-        )
+        // Also run v1 typecheck for codebase population (temporary — until codebase uses TypedModule)
+        try {
+            val v1Ast = cachedParser.parseSource(source, filePath = file.absolutePath)
+            val v1Result = typeChecker.typeCheck(v1Ast, typeCheckProjectRoot)
+            CodebaseHelper.populateIfInProject(
+                projectRoot = typeCheckProjectRoot,
+                typeCheckResult = v1Result,
+                modulePath = null
+            )
+        } catch (_: Exception) {
+            // v1 codebase population is best-effort during migration
+        }
 
         if (quietMode) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
         } else {
-            val typeAliases = typeChecker.getTypeAliases()
-
-            printFileCheckSuccess(result, typeAliases)
+            printTypedModuleSuccess(typedModule)
             println()
-            println("Parse: ${String.format("%.2f", parseTime)}ms$cacheInfo  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
+            println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
         println(ErrorFormatter.format(e, source))
@@ -981,6 +983,181 @@ private fun prettyPrintExpression(expr: Expression): String {
     }
 }
 
+// ============================================================================
+// PARSED AST PRETTY PRINTING
+// ============================================================================
+
+private fun prettyPrintParsedModule(module: ParsedModule): String {
+    val sb = StringBuilder()
+    sb.appendLine("Module: ${module.path}")
+    sb.appendLine("${module.decls.size} declarations:")
+    module.decls.forEachIndexed { index, decl ->
+        sb.appendLine("  ${index + 1}. ${prettyPrintParsedDecl(decl)}")
+    }
+    return sb.toString()
+}
+
+private fun prettyPrintParsedDecl(decl: ParsedDecl): String {
+    val vis = if (decl.visibility == PVisibility.PUBLIC) "pub " else ""
+    return when (decl) {
+        is ParsedLetDecl -> {
+            val name = if (decl.isSimpleBinding) decl.variableName else "<pattern>"
+            val typeAnn = decl.typeAnnotation?.let { ": ${prettyPrintParsedType(it)}" } ?: ""
+            "${vis}let $name$typeAnn = ${prettyPrintParsedExpr(decl.value)}"
+        }
+        is ParsedTypeDecl -> "${vis}type ${decl.name} = ${prettyPrintParsedTypeDef(decl.definition)}"
+        is ParsedAbilityDecl -> "${vis}ability ${decl.name} (${decl.operations.size} ops)"
+        is ParsedImplAbilityDecl -> {
+            val target = when (val t = decl.target) {
+                is ParsedImplTarget.Named -> "impl ${t.ability.localName}"
+                is ParsedImplTarget.Inherent -> "impl (inherent)"
+            }
+            "$target (${decl.operations.size} ops)"
+        }
+        is ParsedEffectDecl -> "${vis}effect ${decl.name} (${decl.operations.size} ops)"
+        is ParsedPerformerDecl -> "impl ${decl.effect.localName} for ${decl.performerName} (${decl.operations.size} ops)"
+        is ParsedUseDecl -> "use ${prettyPrintUsePath(decl.path)}"
+        is ParsedPubUseDecl -> "pub use ${prettyPrintUsePath(decl.path)}"
+        is ParsedTopLevelExpr -> prettyPrintParsedExpr(decl.expression)
+    }
+}
+
+private fun prettyPrintParsedExpr(expr: ParsedExpr): String {
+    return when (expr) {
+        is ParsedIntLit -> expr.value.toString()
+        is ParsedNatLit -> "${expr.value}n"
+        is ParsedFloatLit -> expr.value.toString()
+        is ParsedFracLit -> "${expr.numerator}//${expr.denominator}"
+        is ParsedStringLit -> {
+            val content = expr.parts.joinToString("") { part ->
+                when (part) {
+                    is ParsedStringPart.Literal -> part.value
+                    is ParsedStringPart.Interpolation -> "\$(${prettyPrintParsedExpr(part.expr)})"
+                }
+            }
+            "\"$content\""
+        }
+        is ParsedCharLit -> "'${expr.value}'"
+        is ParsedIdentifier -> {
+            if (expr.qualifier != null) "${expr.qualifier}::${expr.localName}"
+            else expr.localName
+        }
+        is ParsedLambda -> {
+            val params = when (val p = expr.params) {
+                is ParsedLambdaParams.Typed -> "{ ${p.fields.joinToString(", ") { "${it.name}: ${prettyPrintParsedType(it.type)}" }} }"
+                is ParsedLambdaParams.Untyped -> "{ ${p.names.joinToString(", ")} }"
+            }
+            "$params -> ${prettyPrintParsedExpr(expr.body)}"
+        }
+        is ParsedFunctionCall -> "${prettyPrintParsedExpr(expr.function)} ${prettyPrintParsedExpr(expr.arguments)}"
+        is ParsedRecordLit -> {
+            val entries = expr.entries.joinToString(", ") { entry ->
+                when (entry) {
+                    is ParsedRecordEntry.Field -> {
+                        if (entry.value != null) "${entry.name} = ${prettyPrintParsedExpr(entry.value!!)}"
+                        else entry.name
+                    }
+                    is ParsedRecordEntry.Spread -> "...${prettyPrintParsedExpr(entry.expr)}"
+                }
+            }
+            "{ $entries }"
+        }
+        is ParsedMemberAccess -> "${prettyPrintParsedExpr(expr.receiver)}.${expr.member}"
+        is ParsedVariantConstruct -> {
+            if (expr.value != null) "${expr.constructor} ${prettyPrintParsedExpr(expr.value!!)}"
+            else expr.constructor
+        }
+        is ParsedIf -> "if ${prettyPrintParsedExpr(expr.condition)} then ${prettyPrintParsedExpr(expr.thenBranch)} else ${prettyPrintParsedExpr(expr.elseBranch)}"
+        is ParsedMatch -> "match ${prettyPrintParsedExpr(expr.scrutinee)} is ..."
+        is ParsedDo -> "do ... ${prettyPrintParsedExpr(expr.result)}"
+        is ParsedSeqLit -> "[${expr.elements.size} elements]"
+        is ParsedPerform -> "perform ... in ${prettyPrintParsedExpr(expr.body)}"
+        is ParsedEffectCall -> "${expr.operation} ${prettyPrintParsedExpr(expr.arguments)}"
+        is ParsedPipe -> "${prettyPrintParsedExpr(expr.left)} |> ${prettyPrintParsedExpr(expr.right)}"
+        is ParsedPipePlaceholder -> "@"
+        is ParsedParens -> "(${prettyPrintParsedExpr(expr.expr)})"
+    }
+}
+
+private fun prettyPrintParsedType(type: ParsedTypeAnnotation): String {
+    return when (type) {
+        is ParsedNamedType -> type.name
+        is ParsedQualifiedType -> "${type.modulePath.joinToString("::")}::${type.typeName}"
+        is ParsedTypeApp -> "${type.constructor} ${type.args.joinToString(" ") { prettyPrintParsedType(it) }}"
+        is ParsedRecordType -> "{ ${type.entries.joinToString(", ") { "${it.name}: ${prettyPrintParsedType(it.type)}" }} }"
+        is ParsedVariantType -> "| ${type.constructors.joinToString(", ") { it.name }} |"
+        is ParsedFunctionType -> "${prettyPrintParsedType(type.paramType)} -> ${prettyPrintParsedType(type.returnType)}"
+        is ParsedSeqType -> "[${prettyPrintParsedType(type.elementType)}]"
+    }
+}
+
+private fun prettyPrintParsedTypeDef(def: ParsedTypeDef): String {
+    return when (def) {
+        is ParsedRecordDef -> "{ ${def.fields.joinToString(", ") { "${it.name}: ${prettyPrintParsedType(it.type)}" }} }"
+        is ParsedVariantDef -> "| ${def.constructors.joinToString(", ") { it.name }} |"
+        is ParsedNewtypeDef -> "${def.constructor} ${prettyPrintParsedType(def.wrappedType)}"
+    }
+}
+
+private fun prettyPrintUsePath(path: ParsedUsePath): String {
+    return when (path) {
+        is ParsedUsePath.Module -> path.path.toString()
+        is ParsedUsePath.Selective -> "${path.modulePath}::{${path.items.joinToString(", ") { it.alias?.let { a -> "${it.name} as $a" } ?: it.name }}}"
+    }
+}
+
+private fun printTypedModuleSuccess(module: com.mezze.language.typedast.TypedModule) {
+    println("Type check passed")
+    println("━".repeat(50))
+
+    // Print types
+    val typeDecls = module.decls.filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
+    if (typeDecls.isNotEmpty()) {
+        for (td in typeDecls) {
+            println("type ${td.name}")
+        }
+        println()
+    }
+
+    // Print effects
+    if (module.effectDecls.isNotEmpty()) {
+        for (ed in module.effectDecls) {
+            println("effect ${ed.name} (${ed.operations.size} operations)")
+        }
+        println()
+    }
+
+    // Print abilities
+    if (module.abilityDecls.isNotEmpty()) {
+        for (ad in module.abilityDecls) {
+            println("ability ${ad.name} (${ad.operations.size} operations)")
+        }
+        println()
+    }
+
+    // Print exports
+    if (module.exports.isNotEmpty()) {
+        println("Exports:")
+        for ((name, entry) in module.exports) {
+            val kindStr = entry.kind.name.lowercase()
+            val typeStr = prettyPrintType(entry.type)
+            println("  $name : $typeStr  [$kindStr]")
+        }
+    }
+
+    // Print let bindings with types
+    val letDecls = module.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+    if (letDecls.isNotEmpty()) {
+        println()
+        for (decl in letDecls) {
+            val vis = if (decl.isPublic) "pub " else ""
+            val typeStr = prettyPrintType(decl.scheme.type)
+            val hashStr = decl.hash.hex.take(8)
+            println("${vis}${decl.name} : $typeStr  [#$hashStr]")
+        }
+    }
+}
+
 private fun handleExecCommand(args: List<String>) {
     val showTiming = System.getenv("MEZZE_TIMING") != null
     val totalStart = System.nanoTime()
@@ -1175,14 +1352,13 @@ private fun handleExecCommand(args: List<String>) {
         System.setProperty("polyglot.log.level", "OFF")
 
         // Use the source file's directory for module resolution
-        // This allows the interpreter to find modules relative to the source file
         val projectRootPath = if (filePath != null) {
             filePath.toAbsolutePath().parent ?: filePath.toAbsolutePath()
         } else {
             java.nio.file.Paths.get(".").toAbsolutePath()
         }
 
-        // Execute using V2 interpreter (optimized Truffle implementation)
+        // Execute using V2 interpreter
         val execStart = System.nanoTime()
         executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
         val execTime = (System.nanoTime() - execStart) / 1_000_000
