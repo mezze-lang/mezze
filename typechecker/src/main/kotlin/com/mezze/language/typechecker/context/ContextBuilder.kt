@@ -99,20 +99,7 @@ class ContextBuilder {
         val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
         val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
         val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + abilityImplDecls + letDecls
-        // Validate — may throw for prelude-injected duplicates (non-fatal during module loading)
-        try {
-            DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
-        } catch (e: TypeCheckError) {
-            // Only re-throw if it's a user code duplicate, not a prelude injection duplicate.
-            // Prelude duplicates happen when stdlib modules are loaded with prelude=true.
-            if (currentModulePath == null || !currentModulePath.startsWith("std::")) {
-                // Could be user code — check if it's about a stdlib type like Int/Float/etc
-                val msg = e.message ?: ""
-                val stdlibPerformers = setOf("Int", "Float", "Nat", "Frac", "Bool", "Str", "Char")
-                val isStdlibDuplicate = stdlibPerformers.any { msg.contains("'$it'") }
-                if (!isStdlibDuplicate) throw e
-            }
-        }
+        DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
 
         // Merge local and imported effect declarations for lookups
         val allEffectDecls = effectDecls + importedEffects
