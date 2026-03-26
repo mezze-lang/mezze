@@ -84,17 +84,63 @@ class ContextBuilder {
             .map { parsedEffectDeclToV1(it, file) }
             .associateBy { it.name }
 
-        val implDecls = module.decls.filterIsInstance<ParsedPerformerDecl>()
-            .map { parsedPerformerDeclToV1(it, file) }
+        // Resolve impl declarations: the parser can't distinguish ability impls from
+        // effect impls (same `impl X for Y where {}` syntax). The typechecker knows which
+        // names are abilities vs effects from imports, so we resolve here.
+        val allAbilityNames = abilityDecls.keys + importedAbilities.keys +
+            importedAbilities.values.map { it.name }.toSet()
+        val allEffectNames = effectDecls.keys + importedEffects.keys +
+            importedEffects.values.map { it.name }.toSet()
 
-        val abilityImplDecls = module.decls.filterIsInstance<ParsedImplAbilityDecl>()
-            .map { parsedImplAbilityDeclToV1(it, file) }
+        val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers
+        val resolvedAbilityImplDecls = mutableListOf<ImplAbilityDeclaration>()  // ability impls
+
+        // First, add explicitly parsed ability impls
+        resolvedAbilityImplDecls.addAll(
+            module.decls.filterIsInstance<ParsedImplAbilityDecl>().map { parsedImplAbilityDeclToV1(it, file) }
+        )
+
+        // Then resolve ParsedPerformerDecl: ability impl or effect performer?
+        for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
+            val refName = perfDecl.effect.localName
+            val isAbility = refName in allAbilityNames
+            val isEffect = refName in allEffectNames
+
+            if (isAbility && !isEffect) {
+                // This is actually an ability impl, convert it
+                val v1Perf = parsedPerformerDeclToV1(perfDecl, file)
+                val targetType = IdentifierTypeAnnotation(v1Perf.performerName)
+                val converted = ImplAbilityDeclaration(
+                    target = ImplTarget.Named(v1Perf.effect),
+                    targetTypes = listOf(targetType),
+                    forallVars = emptyList(),
+                    associatedTypeBindings = v1Perf.associatedTypeBindings,
+                    operations = v1Perf.operations.map { op ->
+                        ImplAbilityOperation(
+                            name = op.name,
+                            paramType = op.paramType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() },
+                            returnType = op.returnType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() },
+                            implementation = op.implementation,
+                            abilityConstraints = emptyList()
+                        )
+                    },
+                    contentHash = null
+                )
+                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(converted)
+                resolvedAbilityImplDecls.add(converted.copy(contentHash = hash.toFullHexString()))
+            } else {
+                // Real effect performer
+                resolvedImplDecls.add(parsedPerformerDeclToV1(perfDecl, file))
+            }
+        }
+
+        val implDecls = resolvedImplDecls
+        val abilityImplDecls = resolvedAbilityImplDecls
 
         val letDecls = module.decls.filterIsInstance<ParsedLetDecl>()
             .map { parsedLetDeclToV1(it, file) }
 
-        // Validate duplicates using temporary v1 Program
-        // Use lists (not maps) so duplicates are visible to the validator
+        // Validate duplicates
         val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
         val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
         val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
