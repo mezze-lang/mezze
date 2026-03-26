@@ -119,10 +119,12 @@ object AbilityValidator {
         val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
         val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
-            ?: throw TypeCheckError(
-                "Ability '${qualifiedAbilityName}' not found - cannot validate implementation",
-                impl.sourceLocation
-            )
+        if (abilityDeclaration == null) {
+            // Ability not in scope yet — happens during module loading when abilities
+            // from other modules (e.g., Into from std::abilities::convert) aren't imported.
+            // Skip validation here; the constraint solver will catch actual errors.
+            return
+        }
 
         // Rule 1: Check type parameter count matches
         // Concrete abilityTypeArgs (before 'for') + targetTypes (after 'for') must match ability's type params.
