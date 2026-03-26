@@ -65,10 +65,6 @@ class ContextBuilder {
         importedEffects: Map<String, EffectDeclaration> = emptyMap(),
         currentModulePath: String? = null
     ): BuildResult {
-        // TODO: Reimplement DuplicateDeclarationValidator for ParsedModule.
-        // Skipped for now — the constraint solver catches real type errors.
-        // DuplicateDeclarationValidator.validateProgram(program)
-
         val file = module.path
 
         // Collect declarations by type, converting from ParsedDecl → v1
@@ -93,6 +89,17 @@ class ContextBuilder {
 
         val abilityImplDecls = module.decls.filterIsInstance<ParsedImplAbilityDecl>()
             .map { parsedImplAbilityDeclToV1(it, file) }
+
+        val letDecls = module.decls.filterIsInstance<ParsedLetDecl>()
+            .map { parsedLetDeclToV1(it, file) }
+
+        // Validate duplicates using temporary v1 Program
+        // Use lists (not maps) so duplicates are visible to the validator
+        val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
+        val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
+        val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
+        val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + abilityImplDecls + letDecls
+        DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
 
         // Merge local and imported effect declarations for lookups
         val allEffectDecls = effectDecls + importedEffects
@@ -1470,19 +1477,21 @@ class ContextBuilder {
                 wrappedType = ParserBridge.toV1TypeAnnotation(def.wrappedType, file)
             )
         }
-        return TypeDeclaration(
+        val result = TypeDeclaration(
             name = decl.name,
             visibility = convertVisibility(decl.visibility),
             typeParams = decl.typeParams,
             definition = definition
         )
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashTypeDeclaration(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     /**
      * Convert a ParsedAbilityDecl to a v1 AbilityDeclaration.
      */
     private fun parsedAbilityDeclToV1(decl: ParsedAbilityDecl, file: String): AbilityDeclaration {
-        return AbilityDeclaration(
+        val result = AbilityDeclaration(
             name = decl.name,
             typeParams = decl.typeParams,
             receiverTypeParam = decl.receiverTypeParam,
@@ -1531,13 +1540,15 @@ class ContextBuilder {
                 )
             }
         )
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     /**
      * Convert a ParsedEffectDecl to a v1 EffectDeclaration.
      */
     private fun parsedEffectDeclToV1(decl: ParsedEffectDecl, file: String): EffectDeclaration {
-        return EffectDeclaration(
+        val result = EffectDeclaration(
             name = decl.name,
             operations = decl.operations.map { op ->
                 EffectOperation(
@@ -1549,6 +1560,8 @@ class ContextBuilder {
             },
             associatedTypes = decl.associatedTypes
         )
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashEffectDeclaration(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     /**
@@ -1559,7 +1572,7 @@ class ContextBuilder {
             localName = decl.effect.localName,
             qualifier = decl.effect.qualifier?.let { ModulePath(it.segments) }
         )
-        return ImplDeclaration(
+        val result = ImplDeclaration(
             effect = effect,
             performerName = decl.performerName,
             performerParams = decl.params.map { p ->
@@ -1595,6 +1608,9 @@ class ContextBuilder {
                 )
             }
         )
+        // Compute content hash
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     /**
@@ -1610,7 +1626,7 @@ class ContextBuilder {
             )
             is ParsedImplTarget.Inherent -> ImplTarget.Inherent
         }
-        return ImplAbilityDeclaration(
+        val result = ImplAbilityDeclaration(
             target = target,
             targetTypes = decl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) },
             abilityTypeArgs = decl.abilityTypeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
@@ -1635,22 +1651,25 @@ class ContextBuilder {
                     }
                 )
             },
-            // contentHash is not available on ParsedDecl nodes; it will be computed
-            // by ContentHashComputer in Phase 0.6 after conversion to v1 types.
             contentHash = null
         )
+        // Compute content hash (same as Phase 0.6)
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     /**
      * Convert a ParsedLetDecl to a v1 LetBinding.
      */
     private fun parsedLetDeclToV1(decl: ParsedLetDecl, file: String): LetBinding {
-        return LetBinding(
+        val result = LetBinding(
             pattern = ParserBridge.toV1Pattern(decl.pattern, file),
             visibility = convertVisibility(decl.visibility),
             typeAnnotation = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, file) },
             expression = ParserBridge.toV1Expr(decl.value, file)
         )
+        val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(result)
+        return result.copy(contentHash = hash.toFullHexString())
     }
 
     companion object {

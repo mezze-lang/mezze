@@ -267,10 +267,10 @@ class TypeChecker(
         // Convert to ParsedModule for new pipeline stages
         val parsedModule = MezzeParser().programToParsedModule(desugaredProgram, currentModulePath ?: "<unknown>")
 
-        // PHASE 1: Build Context
+        // PHASE 1: Build Context (reads ParsedModule)
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
-            program = desugaredProgram,
+            module = parsedModule,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap(),
