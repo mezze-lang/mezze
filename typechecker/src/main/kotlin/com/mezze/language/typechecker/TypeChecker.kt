@@ -663,18 +663,24 @@ class TypeChecker(
                                 )
 
                                 // Produce TypedAST → MonoAST → ResolvedAST → TruffleIR
-                                val emitProgram = finalProgram
                                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                                 try {
-                                    // Stage 1: TypedAST
-                                    val typed = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
-                                        emitProgram,
-                                        monomorphizationResult.monomorphicInstances,
-                                        importContext,
-                                        currentModulePath ?: "<unknown>",
-                                        context.getAllAbilityImpls()
+                                    // Stage 1: TypedAST — built directly from ParsedAST + Substitution
+                                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
+                                        substitution = substitution,
+                                        constraintResults = globallyResolvedConstraintResults,
+                                        abilityImpls = context.getAllAbilityImpls(),
+                                        typeDeclarations = allTypeDeclarations,
+                                        abilityDeclarations = allAbilityDeclarations,
+                                        effectDeclarations = allEffectDeclarations,
+                                        performerToEffect = buildResult.performerToEffect,
+                                        importContext = importContext,
+                                        identifierContentHashes = context.getContentHashes(),
+                                        implDeclarations = buildResult.implDeclarations,
+                                        tailCallLocations = tailCallLocations
                                     )
+                                    val typed = builder.build(parsedModuleForConstraints)
                                     emittedTypedModule = typed
 
                                     // Stage 1b: Convert dependency modules to TypedModules

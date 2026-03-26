@@ -1,0 +1,1167 @@
+package com.mezze.language.typechecker.emit
+
+import com.mezze.language.ast.*
+import com.mezze.language.ast.hashing.MezzeHashBuilder
+import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.Visibility as ParsedVisibility
+import com.mezze.language.typedast.*
+import com.mezze.language.typedast.TypeScheme as V2TypeScheme
+import com.mezze.language.typechecker.constraints.ConstraintResult
+import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.module.ModuleImportContext
+import com.mezze.language.typechecker.solving.Substitution
+
+/**
+ * TypedAstBuilder — walks ParsedModule + Substitution + ConstraintResults
+ * and directly produces TypedModule (from the typedast package).
+ *
+ * This is the replacement for both SubstitutionApplier AND TypedAstEmitter.
+ * It reads from ParsedAST (not v1 AST) and has no dependency on the v1 AST types.
+ *
+ * Key design:
+ * - Reads ParsedExpr, not v1 Expression
+ * - Re-derives types by looking up constraintResults and identifierContext
+ * - Applies substitution to resolve type variables to concrete types
+ * - Produces TypedModule suitable for the Monomorphizer
+ *
+ * Type resolution strategy:
+ * 1. Literals → known type
+ * 2. Identifiers → lookup in identifierContext (populated as let-bindings are processed)
+ * 3. Top-level bindings → look up in constraintResults by binding name
+ * 4. All types → apply substitution to resolve type variables
+ */
+class TypedAstBuilder(
+    private val substitution: Substitution,
+    private val constraintResults: Map<String, ConstraintResult>,
+    private val abilityImpls: Map<String, TypingContext.AbilityImplInfo>,
+    private val typeDeclarations: Map<String, TypeDeclaration>,   // v1 for now, will migrate later
+    private val abilityDeclarations: Map<String, AbilityDeclaration>,  // v1 for now
+    private val effectDeclarations: Map<String, EffectDeclaration>,    // v1 for now
+    private val performerToEffect: Map<String, String>,
+    private val importContext: ModuleImportContext?,
+    private val identifierContentHashes: Map<BindingKey, String>,
+    private val implDeclarations: Map<String, ImplDeclaration>,
+    private val tailCallLocations: Set<SourceLocation>
+) {
+
+    // ========================================================================
+    // Internal state
+    // ========================================================================
+
+    /**
+     * Local identifier type context — populated as we process let-bindings.
+     *
+     * Maps binding name → MezzeType (after substitution applied).
+     * This mirrors SubstitutionApplier.identifierContext, but for ParsedAST.
+     */
+    private val identifierContext = mutableMapOf<String, MezzeType>()
+
+    /**
+     * Local binding hash index — name → content hash string.
+     *
+     * Populated from identifierContentHashes (unqualified keys only) and
+     * importContext bindings.
+     */
+    private val localBindingHashes: Map<String, String> by lazy {
+        val result = mutableMapOf<String, String>()
+        // From identifierContentHashes: only unqualified keys
+        for ((key, hash) in identifierContentHashes) {
+            if (key.qualifier == null) {
+                result[key.localName] = hash
+            }
+        }
+        // From import context
+        importContext?.importedBindings?.forEach { (_, binding) ->
+            result[binding.name] = binding.contentHash
+        }
+        result
+    }
+
+    /**
+     * Ability impl index — abilityName → list of (contentHash, targetTypes).
+     * Used for resolving builtin ability calls to real impl hashes.
+     */
+    private val abilityImplIndex: Map<String, List<AbilityImplIndexEntry>> by lazy {
+        val index = mutableMapOf<String, MutableList<AbilityImplIndexEntry>>()
+        for ((hash, info) in abilityImpls) {
+            val name = info.abilityName ?: continue
+            index.getOrPut(name) { mutableListOf() }
+                .add(AbilityImplIndexEntry(hash, info.targetTypes))
+        }
+        index
+    }
+
+    /** Cache for ParsedTypeAnnotation → MezzeType conversion (type var cache) */
+    private val typeVarCache = mutableMapOf<String, TypeVar>()
+
+    // ========================================================================
+    // Helpers — types shared only within this file
+    // ========================================================================
+
+    private data class AbilityImplIndexEntry(
+        val contentHash: String,
+        val targetTypes: List<String>
+    )
+
+    // ========================================================================
+    // Main entry point
+    // ========================================================================
+
+    /**
+     * Walk a ParsedModule and produce a TypedModule.
+     *
+     * Processes declarations in order, populating identifierContext
+     * so that later bindings can reference earlier ones.
+     */
+    fun build(module: ParsedModule): TypedModule {
+        val decls = mutableListOf<TypedDecl>()
+        val abilityDeclsList = mutableListOf<TypedAbilityDecl>()
+        val abilityImplsList = mutableListOf<TypedAbilityImpl>()
+        val effectDeclsList = mutableListOf<TypedEffectDecl>()
+        val performerDeclsList = mutableListOf<TypedPerformerDecl>()
+        val exports = mutableMapOf<String, ExportEntry>()
+
+        for (decl in module.decls) {
+            when (decl) {
+                is ParsedLetDecl -> buildLetDecl(decl, module.path, decls, exports)
+                is ParsedTypeDecl -> buildTypeDecl(decl, module.path, decls, exports)
+                is ParsedAbilityDecl -> buildAbilityDecl(decl, module.path, abilityDeclsList, exports)
+                is ParsedImplAbilityDecl -> buildAbilityImpl(decl, module.path, abilityImplsList)
+                is ParsedEffectDecl -> buildEffectDecl(decl, module.path, effectDeclsList, exports)
+                is ParsedPerformerDecl -> buildPerformerDecl(decl, module.path, performerDeclsList, exports)
+                is ParsedTopLevelExpr -> buildTopLevelExpr(decl, module.path, decls)
+                is ParsedUseDecl -> { /* resolved at import phase */ }
+                is ParsedPubUseDecl -> { /* resolved at import phase */ }
+            }
+        }
+
+        // Build imports from import context
+        val imports = buildImports(module.path)
+
+        // Compute module hash from all declaration hashes
+        val allHashes = decls.map { it.hash.hex } +
+            abilityDeclsList.map { it.hash.hex } +
+            abilityImplsList.map { it.hash.hex } +
+            effectDeclsList.map { it.hash.hex } +
+            performerDeclsList.map { it.hash.hex }
+        val moduleHash = computeHash(allHashes.sorted().joinToString(""))
+
+        return TypedModule(
+            path = module.path,
+            hash = moduleHash,
+            imports = imports,
+            exports = exports,
+            decls = decls,
+            abilityDecls = abilityDeclsList,
+            abilityImpls = abilityImplsList,
+            effectDecls = effectDeclsList,
+            performerDecls = performerDeclsList,
+            dependencies = emptyList() // TODO: compute from imports
+        )
+    }
+
+    // ========================================================================
+    // Declaration building
+    // ========================================================================
+
+    private fun buildLetDecl(
+        decl: ParsedLetDecl,
+        file: String,
+        decls: MutableList<TypedDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        val name = if (decl.isSimpleBinding) decl.variableName else "__destructured__"
+        val loc = decl.loc
+
+        // Look up type from constraintResults
+        val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
+            ?: MezzeType.VarType(TypeVar("unknown"))
+        val type = rawType
+
+        // Build the expression
+        val value = buildExpr(decl.value, file, type)
+
+        // Register binding in identifier context so later bindings can reference it
+        identifierContext[name] = type
+
+        // Compute hash for this declaration
+        val hash = computeHash("let_$name:${typeToString(type)}")
+
+        val scheme = V2TypeScheme(emptyList(), emptyList(), type)
+        val isPublic = decl.visibility == ParsedVisibility.PUBLIC
+
+        decls.add(TypedLetDecl(
+            hash = hash,
+            name = name,
+            typeParams = emptyList(),
+            value = value,
+            scheme = scheme,
+            isPublic = isPublic,
+            loc = loc
+        ))
+
+        if (isPublic && decl.isSimpleBinding) {
+            exports[name] = ExportEntry(name, hash, type, ExportKind.FUNCTION)
+        }
+    }
+
+    private fun buildTypeDecl(
+        decl: ParsedTypeDecl,
+        file: String,
+        decls: MutableList<TypedDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("type_${decl.name}")
+
+        val def: TypedTypeDef = when (val d = decl.definition) {
+            is ParsedRecordDef -> TypedRecordDef(
+                fields = d.fields.associate { it.name to convertParsedTypeAnnotation(it.type) },
+                isOpen = d.isOpen
+            )
+            is ParsedVariantDef -> TypedVariantDef(
+                constructors = d.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedTypeAnnotation(dt) } },
+                isOpen = d.isOpen
+            )
+            is ParsedNewtypeDef -> TypedNewtypeDef(
+                constructor = d.constructor,
+                wrappedType = convertParsedTypeAnnotation(d.wrappedType),
+                derivedAbilities = emptyList()
+            )
+        }
+
+        val isPublic = decl.visibility == ParsedVisibility.PUBLIC
+        decls.add(TypedTypeDecl(hash, decl.name, emptyList(), def, isPublic, loc))
+        if (isPublic) {
+            exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.TYPE)
+        }
+    }
+
+    private fun buildAbilityDecl(
+        decl: ParsedAbilityDecl,
+        file: String,
+        decls: MutableList<TypedAbilityDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("ability_${decl.name}")
+
+        val ops = decl.operations.mapIndexed { idx, op ->
+            typeVarCache.clear()
+            val paramType = convertParsedTypeAnnotation(op.paramType)
+            typeVarCache.clear()
+            val returnType = convertParsedTypeAnnotation(op.returnType)
+            TypedAbilityOp(op.name, idx, paramType, returnType, op.loc)
+        }
+
+        decls.add(TypedAbilityDecl(
+            hash = hash,
+            name = decl.name,
+            typeParams = emptyList(),
+            receiverTypeParam = decl.receiverTypeParam,
+            associatedTypes = decl.associatedTypes,
+            dependencies = emptyList(), // TODO: resolve dependency hashes
+            operations = ops,
+            loc = loc
+        ))
+
+        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.ABILITY)
+    }
+
+    private fun buildAbilityImpl(
+        decl: ParsedImplAbilityDecl,
+        file: String,
+        impls: MutableList<TypedAbilityImpl>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("impl_${decl.loc.startLine}_${decl.loc.startCol}")
+
+        // Resolve ability hash from target
+        val abilityHash = when (val target = decl.target) {
+            is ParsedImplTarget.Named -> {
+                val abilityName = target.ability.localName
+                // Look up from abilityDeclarations (v1) or importContext
+                val v1AbilityDecl = abilityDeclarations[abilityName]
+                    ?: importContext?.importedAbilities?.get(abilityName)
+                Hash.fromV1(v1AbilityDecl?.contentHash)
+            }
+            is ParsedImplTarget.Inherent -> Hash.ZERO
+        }
+
+        // Build target types
+        val targetTypes = decl.targetTypes.map { convertParsedTypeAnnotation(it) }
+
+        // Build associated type bindings
+        val assocTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
+            convertParsedTypeAnnotation(ann)
+        }
+
+        // Build operation expressions
+        val ops = decl.operations.associate { op ->
+            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar("op_${op.name}")))
+            op.name to opExpr
+        }
+
+        impls.add(TypedAbilityImpl(
+            hash = hash,
+            abilityHash = abilityHash,
+            targetTypes = targetTypes,
+            forallVars = emptyList(), // TODO: extract from forallVars
+            associatedTypeBindings = assocTypeBindings,
+            operations = ops,
+            loc = loc
+        ))
+    }
+
+    private fun buildEffectDecl(
+        decl: ParsedEffectDecl,
+        file: String,
+        decls: MutableList<TypedEffectDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("effect_${decl.name}")
+
+        val ops = decl.operations.mapIndexed { idx, op ->
+            typeVarCache.clear()
+            val paramType = convertParsedTypeAnnotation(op.paramType)
+            typeVarCache.clear()
+            val returnType = convertParsedTypeAnnotation(op.returnType)
+            TypedEffectOp(op.name, idx, paramType, returnType, op.loc)
+        }
+
+        decls.add(TypedEffectDecl(hash, decl.name, ops, decl.associatedTypes, loc))
+        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.EFFECT)
+    }
+
+    private fun buildPerformerDecl(
+        decl: ParsedPerformerDecl,
+        file: String,
+        decls: MutableList<TypedPerformerDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("performer_${decl.performerName}")
+
+        // Resolve effect hash
+        val effectName = decl.effect.localName
+        val v1EffectDecl = effectDeclarations[effectName]
+            ?: importContext?.importedEffects?.get(effectName)
+        val effectHash = Hash.fromV1(v1EffectDecl?.contentHash)
+
+        // Build params
+        val params = decl.params.map { param ->
+            typeVarCache.clear()
+            TypedPerformerParam(param.name, convertParsedTypeAnnotation(param.type), param.loc)
+        }
+
+        // Build associated type bindings
+        val assocTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
+            convertParsedTypeAnnotation(ann)
+        }
+
+        // Build operation expressions
+        val ops = decl.operations.associate { op ->
+            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar("op_${op.name}")))
+            op.name to opExpr
+        }
+
+        decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, loc))
+        exports[decl.performerName] = ExportEntry(
+            decl.performerName, hash, MezzeType.VarType(TypeVar(decl.performerName)), ExportKind.PERFORMER
+        )
+    }
+
+    private fun buildTopLevelExpr(
+        decl: ParsedTopLevelExpr,
+        file: String,
+        decls: MutableList<TypedDecl>
+    ) {
+        val loc = decl.loc
+        val hash = computeHash("__toplevel_expr_${decls.size}")
+        val type = MezzeType.VarType(TypeVar("unknown"))
+        val value = buildExpr(decl.expression, file, type)
+        decls.add(TypedLetDecl(
+            hash = hash,
+            name = "__toplevel_expr_${decls.size}",
+            typeParams = emptyList(),
+            value = value,
+            scheme = V2TypeScheme(emptyList(), emptyList(), type),
+            isPublic = false,
+            loc = loc
+        ))
+    }
+
+    // ========================================================================
+    // Expression building — the core of TypedAstBuilder
+    // ========================================================================
+
+    /**
+     * Convert a ParsedExpr to a TypedExpr.
+     *
+     * The [contextType] is a hint for the expected type (used when no other
+     * type information is available). For most expressions the type is derived
+     * by recursion.
+     */
+    fun buildExpr(expr: ParsedExpr, file: String, contextType: MezzeType = MezzeType.VarType(TypeVar("unknown"))): TypedExpr {
+        val loc = expr.loc
+        return when (expr) {
+
+            // ------------------------------------------------------------------
+            // LITERALS — type is known
+            // ------------------------------------------------------------------
+
+            is ParsedIntLit -> TypedIntLit(expr.value, MezzeType.IntType, loc)
+            is ParsedNatLit -> TypedNatLit(expr.value, MezzeType.NatType, loc)
+            is ParsedFloatLit -> TypedFloatLit(expr.value, MezzeType.FloatType, loc)
+            is ParsedFracLit -> TypedFracLit(expr.numerator, expr.denominator, MezzeType.FracType, loc)
+            is ParsedCharLit -> TypedCharLit(expr.value, MezzeType.CharType, loc)
+
+            is ParsedStringLit -> {
+                val parts = expr.parts.map { part ->
+                    when (part) {
+                        is ParsedStringPart.Literal -> TypedStringPart.Literal(part.value)
+                        is ParsedStringPart.Interpolation ->
+                            TypedStringPart.Interpolation(buildExpr(part.expr, file, MezzeType.StringType))
+                    }
+                }
+                TypedStringLit(parts, MezzeType.StringType, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // VARIANT CONSTRUCTION — True/False are booleans
+            // ------------------------------------------------------------------
+
+            is ParsedVariantConstruct -> {
+                if (expr.constructor == "True" && expr.value == null) {
+                    TypedBoolLit(true, MezzeType.BoolType, loc)
+                } else if (expr.constructor == "False" && expr.value == null) {
+                    TypedBoolLit(false, MezzeType.BoolType, loc)
+                } else {
+                    val payload = expr.value?.let { buildExpr(it, file) }
+                    val type = substitution.apply(contextType)
+                    TypedVariantConstruct(expr.constructor, payload, type, loc)
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // IDENTIFIER — resolve binding ref and type
+            // ------------------------------------------------------------------
+
+            is ParsedIdentifier -> {
+                val name = expr.localName
+                val qualifier = expr.qualifier
+
+                // Resolve type: check identifierContext, then constraintResults
+                val type = resolveIdentifierType(name, qualifier)
+
+                // Resolve binding reference
+                val binding = resolveBinding(name, qualifier)
+
+                TypedVar(name, binding, type, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // LAMBDA
+            // ------------------------------------------------------------------
+
+            is ParsedLambda -> {
+                // Determine parameter types
+                val params = buildLambdaParams(expr.params, contextType, loc)
+
+                // Infer return type from context if available
+                val returnType = when (val ct = substitution.apply(contextType)) {
+                    is MezzeType.FunctionType -> substitution.apply(ct.returnType)
+                    else -> MezzeType.VarType(TypeVar("ret"))
+                }
+
+                val body = buildExpr(expr.body, file, returnType)
+
+                // Function type: param record type → body type
+                val paramRecordType = when (val ct = substitution.apply(contextType)) {
+                    is MezzeType.FunctionType -> ct.paramType
+                    else -> MezzeType.RecordType(params.associate { p -> p.name to p.type })
+                }
+                val funcType = MezzeType.FunctionType(paramRecordType, body.type)
+
+                TypedLambda(
+                    params = params,
+                    body = body,
+                    captures = emptyList(), // filled by resolver later
+                    type = funcType,
+                    loc = loc
+                )
+            }
+
+            // ------------------------------------------------------------------
+            // FUNCTION CALL
+            // ------------------------------------------------------------------
+
+            is ParsedFunctionCall -> {
+                val fn = buildExpr(expr.function, file)
+                val argExpr = buildExpr(expr.arguments, file)
+
+                // Derive call return type from function type
+                val callType = when (val ft = substitution.apply(fn.type)) {
+                    is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                    else -> substitution.apply(contextType)
+                }
+
+                val isTailCall = isTailCallLocation(expr.loc)
+
+                TypedCall(
+                    function = fn,
+                    arg = argExpr,
+                    instantiation = null,
+                    isTailCall = isTailCall,
+                    type = callType,
+                    loc = loc
+                )
+            }
+
+            // ------------------------------------------------------------------
+            // MEMBER ACCESS — field access or ability method
+            // ------------------------------------------------------------------
+
+            is ParsedMemberAccess -> {
+                val receiver = buildExpr(expr.receiver, file)
+                val memberName = expr.member
+                val receiverType = substitution.apply(receiver.type)
+
+                val fieldType = when (receiverType) {
+                    is MezzeType.RecordType -> receiverType.fields[memberName]
+                        ?: substitution.apply(contextType)
+                    else -> substitution.apply(contextType)
+                }
+
+                TypedFieldAccess(
+                    record = receiver,
+                    field = memberName,
+                    fieldIndex = -1, // filled by resolver later
+                    type = fieldType,
+                    loc = loc
+                )
+            }
+
+            // ------------------------------------------------------------------
+            // RECORD LITERAL
+            // ------------------------------------------------------------------
+
+            is ParsedRecordLit -> {
+                val entries = expr.entries.map { entry ->
+                    when (entry) {
+                        is ParsedRecordEntry.Field -> {
+                            val entryValue = entry.value
+                            val fieldExpr = if (entryValue != null) {
+                                buildExpr(entryValue, file)
+                            } else {
+                                // Punning: `{ x }` means `{ x = x }`
+                                val type = resolveIdentifierType(entry.name, null)
+                                val binding = resolveBinding(entry.name, null)
+                                TypedVar(entry.name, binding, type, entry.loc)
+                            }
+                            TypedRecordEntry.Field(entry.name, fieldExpr, entry.loc)
+                        }
+                        is ParsedRecordEntry.Spread -> {
+                            val spreadExpr = buildExpr(entry.expr, file)
+                            TypedRecordEntry.Spread(spreadExpr, entry.loc)
+                        }
+                    }
+                }
+
+                // Derive record type from field entries
+                val fieldTypes = entries
+                    .filterIsInstance<TypedRecordEntry.Field>()
+                    .associate { it.name to it.value.type }
+                val recordType = MezzeType.RecordType(fieldTypes)
+
+                TypedRecord(entries, recordType, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // IF EXPRESSION
+            // ------------------------------------------------------------------
+
+            is ParsedIf -> {
+                val cond = buildExpr(expr.condition, file, MezzeType.BoolType)
+                val thenBranch = buildExpr(expr.thenBranch, file, contextType)
+                val elseBranch = buildExpr(expr.elseBranch, file, thenBranch.type)
+                TypedIf(cond, thenBranch, elseBranch, thenBranch.type, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // MATCH EXPRESSION
+            // ------------------------------------------------------------------
+
+            is ParsedMatch -> {
+                val scrutinee = buildExpr(expr.scrutinee, file)
+
+                // Check for boolean match (True/False patterns) → convert to if-else
+                val isBoolMatch = expr.cases.size == 2 &&
+                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == "True" } } &&
+                    expr.cases.any { c -> c.patterns.any { it is ParsedConstructorPattern && it.constructor == "False" } }
+
+                if (isBoolMatch) {
+                    val trueCase = expr.cases.find { c ->
+                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == "True" }
+                    }
+                    val falseCase = expr.cases.find { c ->
+                        c.patterns.any { it is ParsedConstructorPattern && it.constructor == "False" }
+                    }
+                    val thenBranch = buildExpr(trueCase!!.body, file, contextType)
+                    val elseBranch = buildExpr(falseCase!!.body, file, thenBranch.type)
+                    TypedIf(scrutinee, thenBranch, elseBranch, thenBranch.type, loc)
+                } else {
+                    val cases = expr.cases.map { c ->
+                        buildMatchCase(c, file, contextType)
+                    }
+                    val resultType = cases.firstOrNull()?.body?.type ?: substitution.apply(contextType)
+                    TypedMatch(scrutinee, cases, resultType, loc)
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // DO BLOCK
+            // ------------------------------------------------------------------
+
+            is ParsedDo -> {
+                val stmts = mutableListOf<TypedStatement>()
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is ParsedStatement.Let -> {
+                            val name = when (val p = stmt.pattern) {
+                                is ParsedVariablePattern -> p.name
+                                else -> "__pattern__"
+                            }
+                            val valueType = stmt.typeAnnotation
+                                ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
+                                ?: MezzeType.VarType(TypeVar("let_$name"))
+                            val value = buildExpr(stmt.value, file, valueType)
+                            val resolvedType = substitution.apply(value.type)
+
+                            // Register binding for later references in this block
+                            identifierContext[name] = resolvedType
+
+                            val contentHash = computeHash("do_let_$name:${typeToString(resolvedType)}")
+                            stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
+                        }
+                        is ParsedStatement.Expr -> {
+                            val exprTyped = buildExpr(stmt.expr, file)
+                            stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
+                        }
+                    }
+                }
+                val result = buildExpr(expr.result, file, contextType)
+                TypedBlock(stmts, result, result.type, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // SEQ LITERAL
+            // ------------------------------------------------------------------
+
+            is ParsedSeqLit -> {
+                // Determine element type from context or first element
+                val elementContextType = when (val ct = substitution.apply(contextType)) {
+                    is MezzeType.SeqType -> ct.elementType
+                    else -> MezzeType.VarType(TypeVar("elem"))
+                }
+                val elements = expr.elements.map { elem ->
+                    when (elem) {
+                        is ParsedSeqElement.Regular ->
+                            TypedSeqElement.Regular(buildExpr(elem.expr, file, elementContextType))
+                        is ParsedSeqElement.Spread ->
+                            TypedSeqElement.Spread(buildExpr(elem.expr, file, MezzeType.SeqType(elementContextType)))
+                    }
+                }
+                val elemType = (elements.firstOrNull() as? TypedSeqElement.Regular)?.expr?.type ?: elementContextType
+                TypedSeq(elements, MezzeType.SeqType(elemType), loc)
+            }
+
+            // ------------------------------------------------------------------
+            // PIPE
+            // ------------------------------------------------------------------
+
+            is ParsedPipe -> {
+                val left = buildExpr(expr.left, file)
+                val right = buildExpr(expr.right, file, contextType)
+                TypedPipe(left, right, right.type, loc)
+            }
+
+            is ParsedPipePlaceholder -> {
+                // Pipe placeholder should be desugared before reaching here.
+                // Emit as a special var with a recognizable name.
+                TypedVar("@", BindingRef.Local(0, 0), substitution.apply(contextType), loc)
+            }
+
+            // ------------------------------------------------------------------
+            // PARENTHESES — transparent
+            // ------------------------------------------------------------------
+
+            is ParsedParens -> buildExpr(expr.expr, file, contextType)
+
+            // ------------------------------------------------------------------
+            // PERFORM EXPRESSION
+            // ------------------------------------------------------------------
+
+            is ParsedPerform -> {
+                val handlers = expr.handlers.map { h ->
+                    buildHandlerRef(h, file, loc)
+                }
+                val body = buildExpr(expr.body, file, contextType)
+                TypedPerform(handlers, body, body.type, loc)
+            }
+
+            // ------------------------------------------------------------------
+            // EFFECT CALL
+            // ------------------------------------------------------------------
+
+            is ParsedEffectCall -> {
+                val opName = expr.operation.localName
+                val qualifier = expr.operation.qualifier
+
+                // Resolve which effect this operation belongs to
+                val effectDecl = resolveEffectForOperation(opName, qualifier)
+                val effectHash = Hash.fromV1(effectDecl?.contentHash)
+
+                // Resolve return type from effect declaration
+                val opReturnType = effectDecl?.operations
+                    ?.find { it.name == opName }
+                    ?.returnType
+                    ?.let { substitution.apply(convertTypeAnnotationV1(it)) }
+                    ?: substitution.apply(contextType)
+
+                val argExpr = buildExpr(expr.arguments, file)
+
+                TypedPerformOp(effectHash, opName, argExpr, opReturnType, loc)
+            }
+        }
+    }
+
+    // ========================================================================
+    // Pattern building
+    // ========================================================================
+
+    private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {
+        val patterns = case.patterns.map { buildPattern(it, file) }
+        val bindings = case.patterns.flatMap { p -> p.extractBindings() }.map { name ->
+            PatternBinding(name, MezzeType.VarType(TypeVar(name)), case.loc)
+        }
+        val guard = case.guard?.let { buildExpr(it, file, MezzeType.BoolType) }
+        val body = buildExpr(case.body, file, contextType)
+        return TypedCase(patterns, bindings, guard, body, case.loc)
+    }
+
+    private fun buildPattern(pattern: ParsedPattern, file: String): TypedPattern {
+        val unknownType = MezzeType.VarType(TypeVar("pat"))
+        val loc = pattern.loc
+        return when (pattern) {
+            is ParsedVariablePattern -> TypedVarPattern(pattern.name, unknownType, loc)
+            is ParsedWildcardPattern -> TypedWildcardPattern(unknownType, loc)
+            is ParsedConstructorPattern -> {
+                if (pattern.constructor == "True" && pattern.payload == null) {
+                    TypedLiteralPattern(TypedBoolLit(true, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
+                } else if (pattern.constructor == "False" && pattern.payload == null) {
+                    TypedLiteralPattern(TypedBoolLit(false, MezzeType.BoolType, loc), MezzeType.BoolType, loc)
+                } else {
+                    val payload = pattern.payload?.let { buildPattern(it, file) }
+                    TypedVariantPattern(pattern.constructor, payload, unknownType, loc)
+                }
+            }
+            is ParsedRecordPattern -> TypedRecordPattern(
+                fields = pattern.entries.map { e ->
+                    TypedFieldPattern(e.name, e.pattern?.let { buildPattern(it, file) }, e.loc)
+                },
+                isOpen = pattern.isOpen,
+                type = unknownType,
+                loc = loc
+            )
+            is ParsedLiteralPattern -> {
+                val value = when (val v = pattern.value) {
+                    is ParsedLiteralValue.IntValue -> TypedIntLit(v.value, MezzeType.IntType, loc)
+                    is ParsedLiteralValue.NatValue -> TypedNatLit(v.value, MezzeType.NatType, loc)
+                    is ParsedLiteralValue.FloatValue -> TypedFloatLit(v.value, MezzeType.FloatType, loc)
+                    is ParsedLiteralValue.StringValue ->
+                        TypedStringLit(listOf(TypedStringPart.Literal(v.value)), MezzeType.StringType, loc)
+                    is ParsedLiteralValue.BoolValue -> TypedBoolLit(v.value, MezzeType.BoolType, loc)
+                }
+                TypedLiteralPattern(value, value.type, loc)
+            }
+            is ParsedSeqPattern -> TypedSeqPattern(
+                elements = pattern.elements.map { buildPattern(it, file) },
+                rest = pattern.restPattern,
+                type = unknownType,
+                loc = loc
+            )
+            is ParsedStringInterpPattern ->
+                // TODO: proper string interpolation pattern support
+                TypedWildcardPattern(MezzeType.StringType, loc)
+        }
+    }
+
+    // ========================================================================
+    // Lambda parameter building
+    // ========================================================================
+
+    private fun buildLambdaParams(
+        params: ParsedLambdaParams,
+        contextType: MezzeType,
+        loc: Loc
+    ): List<TypedParam> {
+        val resolvedContext = substitution.apply(contextType)
+        return when (params) {
+            is ParsedLambdaParams.Typed -> {
+                params.fields.map { field ->
+                    typeVarCache.clear()
+                    val type = substitution.apply(convertParsedTypeAnnotation(field.type))
+                    TypedParam(field.name, type, field.loc)
+                }
+            }
+            is ParsedLambdaParams.Untyped -> {
+                // Try to get types from context function type
+                val contextParamType = when (resolvedContext) {
+                    is MezzeType.FunctionType -> resolvedContext.paramType
+                    else -> null
+                }
+                params.names.map { name ->
+                    val type = when (contextParamType) {
+                        is MezzeType.RecordType -> contextParamType.fields[name]
+                            ?: MezzeType.VarType(TypeVar(name))
+                        else -> MezzeType.VarType(TypeVar(name))
+                    }
+                    TypedParam(name, type, loc)
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Handler ref building
+    // ========================================================================
+
+    private fun buildHandlerRef(
+        handler: ParsedPerformHandler,
+        file: String,
+        loc: Loc
+    ): TypedHandlerRef {
+        val performerName = handler.performer.localName
+
+        // Look up performer declaration for hash info
+        val implDecl = implDeclarations[performerName]
+        val performerHash = Hash.fromV1(implDecl?.contentHash)
+
+        // Resolve effect hash from performer
+        val effectName = implDecl?.effect?.localName
+            ?: performerToEffect[performerName]
+        val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
+        val effectHash = Hash.fromV1(effectDecl?.contentHash)
+
+        // Build params if present
+        val paramsExpr = handler.params?.let { buildExpr(it, file) }
+
+        return TypedHandlerRef(
+            performerHash = performerHash,
+            effectHash = effectHash,
+            performerName = performerName,
+            params = paramsExpr,
+            loc = loc
+        )
+    }
+
+    // ========================================================================
+    // Type resolution helpers
+    // ========================================================================
+
+    /**
+     * Resolve the type of an identifier.
+     *
+     * Lookup order:
+     * 1. identifierContext — types accumulated during current traversal
+     * 2. constraintResults — top-level binding types from the typechecker
+     * 3. importContext — imported bindings
+     * 4. Unknown fallback
+     */
+    private fun resolveIdentifierType(name: String, qualifier: ParsedModulePath?): MezzeType {
+        // For qualified identifiers, try to find via importContext
+        if (qualifier != null) {
+            val qualKey = BindingKey(qualifier.shortName, name)
+            val hash = identifierContentHashes[qualKey]
+            if (hash != null) {
+                // Try to look up type from import context
+                importContext?.importedBindings?.get(name)?.type?.let {
+                    return substitution.apply(it)
+                }
+            }
+            return MezzeType.VarType(TypeVar("unknown"))
+        }
+
+        // 1. Local context
+        identifierContext[name]?.let { return it }
+
+        // 2. Constraint results (top-level bindings)
+        constraintResults[name]?.let { result ->
+            return substitution.apply(result.type)
+        }
+
+        // 3. Import context
+        importContext?.importedBindings?.get(name)?.type?.let {
+            return substitution.apply(it)
+        }
+
+        // 4. Unknown
+        return MezzeType.VarType(TypeVar("unknown"))
+    }
+
+    /**
+     * Resolve the binding reference for an identifier.
+     *
+     * Lookup order:
+     * 1. identifierContentHashes → ByHash (for local top-level bindings)
+     * 2. importContext → ByHash (for imported bindings)
+     * 3. Native function name → Native
+     * 4. Fallback → Local(0, 0)
+     */
+    private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
+        // Qualified reference — try identifierContentHashes with qualifier
+        if (qualifier != null) {
+            val qualKey = BindingKey(qualifier.shortName, name)
+            val hash = identifierContentHashes[qualKey]
+            if (hash != null) return BindingRef.ByHash(Hash.fromV1(hash))
+        }
+
+        // Unqualified: check identifierContentHashes
+        val unqualKey = BindingKey.unqualified(name)
+        val localHash = identifierContentHashes[unqualKey]
+        if (localHash != null) return BindingRef.ByHash(Hash.fromV1(localHash))
+
+        // Check importContext
+        importContext?.importedBindings?.get(name)?.let { binding ->
+            return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+        }
+
+        // Check if it's a native function
+        if (name.startsWith("__native_")) {
+            return BindingRef.Native(name)
+        }
+
+        // Fallback: local binding (will be resolved by Resolver stage)
+        return BindingRef.Local(0, 0)
+    }
+
+    /**
+     * Check if a source location is a tail call site.
+     */
+    private fun isTailCallLocation(loc: Loc): Boolean {
+        // Match against v1 SourceLocation in tailCallLocations
+        // TODO: Migrate tailCallLocations to use Loc directly
+        return tailCallLocations.any { tl ->
+            tl.line == loc.startLine && tl.column == loc.startCol &&
+                (tl.file == null || tl.file == loc.file)
+        }
+    }
+
+    /**
+     * Resolve which effect declaration owns a given operation name.
+     */
+    private fun resolveEffectForOperation(
+        opName: String,
+        qualifier: ParsedModulePath?
+    ): EffectDeclaration? {
+        // If qualified, try to find by effect name
+        if (qualifier != null) {
+            val effectName = qualifier.shortName
+            effectDeclarations[effectName]?.let { decl ->
+                if (decl.operations.any { it.name == opName }) return decl
+            }
+            importContext?.importedEffects?.get(effectName)?.let { decl ->
+                if (decl.operations.any { it.name == opName }) return decl
+            }
+        }
+
+        // Unqualified: search all effect declarations for the operation
+        for ((_, decl) in effectDeclarations) {
+            if (decl.operations.any { it.name == opName }) return decl
+        }
+        for ((_, decl) in (importContext?.importedEffects ?: emptyMap())) {
+            if (decl.operations.any { it.name == opName }) return decl
+        }
+        return null
+    }
+
+    // ========================================================================
+    // Type annotation conversion — ParsedTypeAnnotation → MezzeType
+    // ========================================================================
+
+    /**
+     * Convert a ParsedTypeAnnotation to MezzeType.
+     *
+     * Note: call `typeVarCache.clear()` before top-level calls to ensure
+     * type variables in separate annotations don't alias.
+     */
+    private fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
+        return when (annotation) {
+            is ParsedNamedType -> {
+                // Primitive types first
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+
+                when (annotation.name) {
+                    "Unit" -> MezzeType.RecordType(emptyMap())
+                    else -> {
+                        // Type variable (lowercase or tick-prefixed) or type constructor
+                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                            val typeVar = typeVarCache.getOrPut(annotation.name) {
+                                TypeVar.freshWithName(annotation.name)
+                            }
+                            MezzeType.VarType(typeVar)
+                        } else {
+                            MezzeType.TypeApplication(annotation.name, emptyList())
+                        }
+                    }
+                }
+            }
+            is ParsedFunctionType -> {
+                val abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) },
+                        associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, ta) ->
+                            convertParsedTypeAnnotation(ta)
+                        }
+                    )
+                }
+                MezzeType.FunctionType(
+                    paramType = convertParsedTypeAnnotation(annotation.paramType),
+                    returnType = convertParsedTypeAnnotation(annotation.returnType),
+                    abilityConstraints = abilityConstraints
+                )
+            }
+            is ParsedRecordType -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertParsedTypeAnnotation(entry.type)
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+                )
+            }
+            is ParsedVariantType -> {
+                MezzeType.VariantType(
+                    constructors = annotation.constructors.associate { ctor ->
+                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+                )
+            }
+            is ParsedTypeApp -> {
+                MezzeType.TypeApplication(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { convertParsedTypeAnnotation(it) }
+                )
+            }
+            is ParsedSeqType -> {
+                MezzeType.SeqType(elementType = convertParsedTypeAnnotation(annotation.elementType))
+            }
+            is ParsedQualifiedType -> {
+                MezzeType.TypeApplication(
+                    constructor = annotation.modulePath.joinToString("::") + "::" + annotation.typeName,
+                    args = annotation.args.map { convertParsedTypeAnnotation(it) }
+                )
+            }
+        }
+    }
+
+    /**
+     * Convert a v1 TypeAnnotation to MezzeType.
+     * Used when the effect/ability declarations are still in v1 format.
+     */
+    private fun convertTypeAnnotationV1(annotation: TypeAnnotation): MezzeType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                PrimitiveTypes.fromName(annotation.name) ?: run {
+                    if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                        MezzeType.VarType(TypeVar(annotation.name))
+                    } else {
+                        MezzeType.TypeApplication(annotation.name, emptyList())
+                    }
+                }
+            }
+            is FunctionTypeAnnotation -> {
+                MezzeType.FunctionType(
+                    paramType = convertTypeAnnotationV1(annotation.paramType),
+                    returnType = convertTypeAnnotationV1(annotation.returnType)
+                )
+            }
+            is RecordTypeAnnotation -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { it.name to convertTypeAnnotationV1(it.type) }
+                )
+            }
+            is VariantTypeAnnotation -> {
+                MezzeType.VariantType(
+                    constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertTypeAnnotationV1(dt) } }
+                )
+            }
+            is TypeApplicationAnnotation -> {
+                MezzeType.TypeApplication(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { convertTypeAnnotationV1(it) }
+                )
+            }
+            is SeqTypeAnnotation -> {
+                MezzeType.SeqType(elementType = convertTypeAnnotationV1(annotation.elementType))
+            }
+            else -> MezzeType.VarType(TypeVar("unknown"))
+        }
+    }
+
+    // ========================================================================
+    // Import building
+    // ========================================================================
+
+    private fun buildImports(file: String): List<TypedImport> {
+        val ctx = importContext ?: return emptyList()
+        return ctx.importedBindings.map { (_, binding) ->
+            TypedImport(
+                localName = binding.name,
+                originalName = binding.originalName,
+                moduleHash = computeHash(binding.modulePath),
+                declHash = Hash.fromV1(binding.contentHash),
+                type = binding.type,
+                kind = ExportKind.FUNCTION
+            )
+        }
+    }
+
+    // ========================================================================
+    // Hashing utilities
+    // ========================================================================
+
+    private fun computeHash(input: String): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append(input)
+        return Hash.fromV1(builder.build().toFullHexString())
+    }
+
+    /**
+     * Produce a stable string representation of a type for use in content hashes.
+     * Not for display — just for hash inputs.
+     */
+    private fun typeToString(type: MezzeType): String {
+        return when (type) {
+            is MezzeType.IntType -> "Int"
+            is MezzeType.FloatType -> "Float"
+            is MezzeType.StringType -> "Str"
+            is MezzeType.BoolType -> "Bool"
+            is MezzeType.NatType -> "Nat"
+            is MezzeType.FracType -> "Frac"
+            is MezzeType.CharType -> "Char"
+            is MezzeType.BytesType -> "Bytes"
+            is MezzeType.ByteBufferType -> "ByteBuffer"
+            is MezzeType.VarType -> "'${type.variable.id}"
+            is MezzeType.FunctionType -> "(${typeToString(type.paramType)})->(${typeToString(type.returnType)})"
+            is MezzeType.RecordType -> "{${type.fields.entries.sortedBy { it.key }.joinToString(",") { "${it.key}:${typeToString(it.value)}" }}}"
+            is MezzeType.VariantType -> "|${type.constructors.keys.sorted().joinToString(",")}|"
+            is MezzeType.SeqType -> "[${typeToString(type.elementType)}]"
+            is MezzeType.TypeApplication -> "${type.constructor}<${type.args.joinToString(",") { typeToString(it) }}>"
+            else -> type.toString()
+        }
+    }
+}
