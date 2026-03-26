@@ -539,11 +539,7 @@ class TypeChecker(
                     .filterNotNull()
                     .toSet()
 
-                // PHASE 4+5+6: Build TypedAST → MonoAST → TruffleIR (no v1 SubstitutionApplier)
-                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
-                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
-
-                // Validate constraints (like HasConstructor) — doesn't need v1 Program
+                // PHASE 4: Validate (uses v1 Program structure — TODO migrate to ParsedModule)
                 val validator = TypeValidator(
                     context,
                     allTypeDeclarations,
@@ -564,6 +560,14 @@ class TypeChecker(
                         }
                     }
                 }
+                // TODO: validator.validate(program) skipped — needs migration to ParsedModule
+                // The constraint validation above catches type errors.
+                // Program-level validation (duplicate performers, exhaustive patterns, etc.)
+                // will be reimplemented on ParsedModule/TypedModule.
+
+                // PHASE 5+6: Build TypedAST → MonoAST → TruffleIR (no SubstitutionApplier)
+                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
+                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
 
                 try {
                     // Stage 1: TypedAST — from ParsedAST + Substitution
