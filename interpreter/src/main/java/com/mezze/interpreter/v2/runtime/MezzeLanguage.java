@@ -141,8 +141,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         TypeChecker typeChecker = new TypeChecker();
         var typeCheckResult = typeChecker.typeCheck(ast, projectRoot);
 
-        // Compile via v1 path (ASTToTruffleConverterV2)
-        // TODO: switch to TruffleIR path once TypedAstBuilder binding resolution is fixed
+        // Use TruffleIR path if available (produced by TypedAstEmitter → Mono → Resolve → Lower)
+        var loweredFunctions = typeCheckResult.getLoweredFunctions();
+        if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
+            return compileFunctionIR(loweredFunctions, typeCheckResult.getProgram(), projectRoot);
+        }
+
+        // Fallback: v1 path (ASTToTruffleConverterV2)
         Program typedProgram = typeCheckResult.getProgram();
         Map<String, LetBinding> instances = typeCheckResult.getMonomorphicInstances();
         Program programToCompile = prependMonomorphicInstances(typedProgram, instances);

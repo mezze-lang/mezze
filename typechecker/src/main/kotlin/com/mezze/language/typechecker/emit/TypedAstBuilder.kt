@@ -1,7 +1,9 @@
 package com.mezze.language.typechecker.emit
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.ast.hashing.MezzeHashBuilder
+import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typedast.*
@@ -184,8 +186,22 @@ class TypedAstBuilder(
         // Register binding in identifier context so later bindings can reference it
         identifierContext[name] = type
 
-        // Compute hash for this declaration
-        val hash = computeHash("let_$name:${typeToString(type)}")
+        // Compute content hash by converting to v1 LetBinding and hashing
+        // This ensures hashes match stdlib modules (which are compiled via v1)
+        val hash = try {
+            val v1Expr = ParserBridge.toV1Expr(decl.value, file)
+            val v1Pattern = ParserBridge.toV1Pattern(decl.pattern, file)
+            val v1TypeAnn = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, file) }
+            val v1Binding = LetBinding(
+                pattern = v1Pattern,
+                expression = v1Expr,
+                typeAnnotation = v1TypeAnn,
+                visibility = if (decl.visibility == ParsedVisibility.PUBLIC) com.mezze.language.ast.Visibility.PUBLIC else com.mezze.language.ast.Visibility.PRIVATE
+            )
+            Hash.fromV1(ASTHasher.hashLetBinding(v1Binding).toFullHexString())
+        } catch (_: Exception) {
+            computeHash("let_$name:${typeToString(type)}")
+        }
 
         val scheme = V2TypeScheme(emptyList(), emptyList(), type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
@@ -642,7 +658,9 @@ class TypedAstBuilder(
                             // Register binding for later references in this block
                             identifierContext[name] = resolvedType
 
-                            val contentHash = computeHash("do_let_$name:${typeToString(resolvedType)}")
+                            // Use v1 content hash if available, otherwise compute
+                            val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
+                            val contentHash = if (v1LetHash != null) Hash.fromV1(v1LetHash) else computeHash("do_let_$name:${typeToString(resolvedType)}")
                             stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                         }
                         is ParsedStatement.Expr -> {
