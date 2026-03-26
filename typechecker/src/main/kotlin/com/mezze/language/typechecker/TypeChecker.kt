@@ -264,9 +264,10 @@ class TypeChecker(
         // This must happen before constraint generation since the typechecker doesn't know about pipes.
         val desugaredProgram = desugarPipeExpressions(hashedProgram)
 
+        // Convert to ParsedModule for new pipeline stages
+        val parsedModule = MezzeParser().programToParsedModule(desugaredProgram, currentModulePath ?: "<unknown>")
+
         // PHASE 1: Build Context
-        // Pass imported impls, abilities, types, and effects to ContextBuilder
-        // so performerToEffect map includes them and ability impl validation works with qualified names
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
             program = desugaredProgram,
@@ -320,8 +321,7 @@ class TypeChecker(
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations
         )
-        val parsedModuleForConstraints = MezzeParser().programToParsedModule(desugaredProgram, currentModulePath ?: "<unknown>")
-        val programConstraintResult = constraintGenerator.generateProgram(parsedModuleForConstraints, context)
+        val programConstraintResult = constraintGenerator.generateProgram(parsedModule, context)
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -680,7 +680,7 @@ class TypeChecker(
                                         implDeclarations = buildResult.implDeclarations,
                                         tailCallLocations = tailCallLocations
                                     )
-                                    val typed = builder.build(parsedModuleForConstraints)
+                                    val typed = builder.build(parsedModule)
                                     emittedTypedModule = typed
 
                                     // Stage 1.5: Wrap top-level into entry function
