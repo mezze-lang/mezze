@@ -169,4 +169,82 @@ object V2PipelineRunner {
             IntArray(0)
         ).callTarget
     }
+
+    /**
+     * Compile pre-lowered FunctionIR list to a CallTarget.
+     * Called from MezzeLanguage when the typechecker has already produced TruffleIR.
+     */
+    @JvmStatic
+    fun compileFromIR(
+        language: MezzeLanguage,
+        functions: List<com.mezze.language.truffleir.FunctionIR>,
+        importedModulePaths: List<String>,
+        projectRoot: Path
+    ): CallTarget {
+        if (functions.isEmpty()) {
+            val fd = FrameDescriptor.newBuilder().build()
+            val body: MezzeNode = UnitLiteralNode()
+            val wrapped = MezzeLanguage.createResultCapturingNode(body)
+            return MezzeRootNode(language, fd, wrapped).callTarget
+        }
+
+        // Compile all functions
+        val compiler = TruffleCompiler(language)
+        compiler.registerFunctions(functions)
+        val compiledFunctions = mutableMapOf<String, CallTarget>()
+
+        for (fn in functions) {
+            val cached = compiledFunctionCache[fn.hash.hex]
+            if (cached != null) {
+                compiledFunctions[fn.hash.hex] = cached
+            } else {
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[fn.hash.hex] = rootNode.callTarget
+                compiledFunctionCache[fn.hash.hex] = rootNode.callTarget
+            }
+        }
+
+        // Find entry function
+        val mainFn = functions.find { it.name == "__entry__" }
+            ?: functions.find { it.name == "main" }
+            ?: functions.last()
+
+        val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
+        val bodyNode = compiler.compileNode(mainFn.body, source)
+
+        // Module loading + result capture
+        val importedModules = mutableListOf(
+            "std::int", "std::float", "std::nat", "std::frac",
+            "std::bool", "std::str", "std::char",
+            "std::option", "std::result",
+            "std::collections::seq", "std::collections::list",
+            "std::collections::map", "std::collections::set",
+            "std::collections::deque", "std::collections::sorted_map",
+            "std::collections::sorted_set", "std::collections::nonemptylist",
+            "std::collections::bytes"
+        )
+        importedModules.addAll(importedModulePaths)
+
+        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
+        val withModules = MezzeLanguage.createModuleLoadingNode(withV2Functions, importedModules, projectRoot)
+        val wrapped = MezzeLanguage.createResultCapturingNode(withModules)
+
+        val fdBuilder = FrameDescriptor.newBuilder()
+        for (i in mainFn.paramSlots.indices) {
+            fdBuilder.addSlot(FrameSlotKind.Illegal, mainFn.paramNames.getOrElse(i) { "p$i" }, null)
+        }
+        for (i in mainFn.localSlots.indices) {
+            fdBuilder.addSlot(FrameSlotKind.Illegal, mainFn.localNames.getOrElse(i) { "l$i" }, null)
+        }
+
+        return MezzeRootNode(
+            language,
+            fdBuilder.build(),
+            wrapped,
+            "main",
+            mainFn.paramSlots.size,
+            0,
+            IntArray(0)
+        ).callTarget
+    }
 }

@@ -137,15 +137,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         MezzeParser parser = new MezzeParser();
         Program ast = parser.parse(sourceCode, true, null);
 
-        // Type check
+        // Type check — produces both v1 Program and TruffleIR (loweredFunctions)
         TypeChecker typeChecker = new TypeChecker();
         var typeCheckResult = typeChecker.typeCheck(ast, projectRoot);
+
+        // Compile via v1 path (ASTToTruffleConverterV2)
+        // TODO: switch to TruffleIR path once TypedAstBuilder binding resolution is fixed
         Program typedProgram = typeCheckResult.getProgram();
-
-        // Get monomorphic instances from typechecker
         Map<String, LetBinding> instances = typeCheckResult.getMonomorphicInstances();
-
-        // Prepend monomorphic instances to the program
         Program programToCompile = prependMonomorphicInstances(typedProgram, instances);
         return compileProgram(programToCompile, projectRoot);
     }
@@ -226,6 +225,21 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      *
      * Delegates to Kotlin V2PipelineRunner to avoid inline class interop issues.
      */
+    /**
+     * Compile from pre-lowered TruffleIR (FunctionIR list).
+     * This is the new path: typechecker produces TruffleIR directly.
+     */
+    private CallTarget compileFunctionIR(
+            List<com.mezze.language.truffleir.FunctionIR> functions,
+            Program program,
+            Path projectRoot) {
+        // Extract import paths from program for module loading
+        List<String> importedModules = extractImportedModules(program);
+        return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
+            this, functions, importedModules, projectRoot
+        );
+    }
+
     private CallTarget compileProgramV2(String sourceCode, Path projectRoot) {
         return com.mezze.interpreter.v2.compiler.V2PipelineRunner.tryCompile(
             this, sourceCode, projectRoot, null

@@ -87,7 +87,8 @@ data class TypeCheckResult(
     val resolvedImports: List<ResolvedImport> = emptyList(),  // Resolved imports for IDE support (hover, go-to-definition)
     val warnings: List<TypeCheckWarning> = emptyList(),  // Warnings (not errors) like unused variables
     val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),  // Imported ability declarations for LSP hover
-    val importedEffects: Map<String, EffectDeclaration> = emptyMap()  // Imported effect declarations for LSP hover
+    val importedEffects: Map<String, EffectDeclaration> = emptyMap(),  // Imported effect declarations for LSP hover
+    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList()  // TruffleIR — ready for interpreter
 )
 
 /**

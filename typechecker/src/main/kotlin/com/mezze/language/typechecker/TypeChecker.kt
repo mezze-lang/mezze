@@ -666,43 +666,20 @@ class TypeChecker(
                                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                                 try {
-                                    // Stage 1: TypedAST — built directly from ParsedAST + Substitution
-                                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
-                                        substitution = substitution,
-                                        constraintResults = globallyResolvedConstraintResults,
-                                        abilityImpls = context.getAllAbilityImpls(),
-                                        typeDeclarations = allTypeDeclarations,
-                                        abilityDeclarations = allAbilityDeclarations,
-                                        effectDeclarations = allEffectDeclarations,
-                                        performerToEffect = buildResult.performerToEffect,
-                                        importContext = importContext,
-                                        identifierContentHashes = context.getContentHashes(),
-                                        implDeclarations = buildResult.implDeclarations,
-                                        tailCallLocations = tailCallLocations
+                                    // Stage 1: TypedAST via TypedAstEmitter (reads v1 typed Program)
+                                    // TypedAstBuilder exists but needs more work on binding resolution.
+                                    // Using TypedAstEmitter for now since it produces correct output.
+                                    val emitProgram = finalProgram
+                                    val typed = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
+                                        emitProgram,
+                                        monomorphizationResult.monomorphicInstances,
+                                        importContext,
+                                        currentModulePath ?: "<unknown>",
+                                        context.getAllAbilityImpls()
                                     )
-                                    val typed = builder.build(parsedModuleForConstraints)
                                     emittedTypedModule = typed
-
-                                    // Stage 1b: Convert dependency modules to TypedModules
-                                    val adapter = TypeCheckerV2()
-                                    val allModules = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(typed.hash to typed)
-                                    for ((path, v1Module) in loadedModules) {
-                                        val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                                        allModules[v2Module.hash] = v2Module
-                                    }
-
-                                    // Stage 2: Monomorphize
-                                    val mono = com.mezze.language.typechecker.mono.Monomorphizer()
-                                    val monoModule = mono.monomorphize(typed, allModules)
-
-                                    // Stage 3: Resolve
-                                    val resolver = com.mezze.language.typechecker.mono.Resolver()
-                                    val resolved = resolver.resolve(monoModule)
-
-                                    // Stage 4: Lower to TruffleIR
-                                    val lowerer = com.mezze.language.typechecker.mono.Lowerer()
-                                    val lowered = lowerer.lower(resolved)
-                                    loweredFns = lowered.functions
+                                    // Mono → Resolve → Lower happens in the interpreter via V2PipelineRunner
+                                    // (needs EntryFunctionBuilder which is in the interpreter module)
                                 } catch (_: Exception) {
                                     // Pipeline stages are best-effort during migration
                                 }
@@ -1834,7 +1811,8 @@ class TypeChecker(
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
-                    importedEffects = result.importContext?.importedEffects ?: emptyMap()
+                    importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                    loweredFunctions = result.loweredFunctions ?: emptyList()
                 )
             }
             is TypeCheckResult.Failure -> {
