@@ -82,14 +82,23 @@ enum class ImportKind {
 
 @Serializable
 data class TypeCheckResult(
-    val program: Program,  // User's original AST with type information
-    val monomorphicInstances: Map<String, LetBinding> = emptyMap(),  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
-    val resolvedImports: List<ResolvedImport> = emptyList(),  // Resolved imports for IDE support (hover, go-to-definition)
-    val warnings: List<TypeCheckWarning> = emptyList(),  // Warnings (not errors) like unused variables
-    val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),  // Imported ability declarations for LSP hover
-    val importedEffects: Map<String, EffectDeclaration> = emptyMap(),  // Imported effect declarations for LSP hover
-    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList()  // TruffleIR — ready for interpreter
-)
+    val program: Program,  // DEPRECATED — empty. Use typedModule instead.
+    val monomorphicInstances: Map<String, LetBinding> = emptyMap(),
+    val resolvedImports: List<ResolvedImport> = emptyList(),
+    val warnings: List<TypeCheckWarning> = emptyList(),
+    val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
+    val importedEffects: Map<String, EffectDeclaration> = emptyMap(),
+    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
+    val typedModule: com.mezze.language.typedast.TypedModule? = null  // The real typechecker output
+) {
+    /** Get inferred type of a top-level binding by name */
+    fun getVariableType(name: String): MezzeType? {
+        return typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == name }
+            ?.scheme?.type
+    }
+}
 
 /**
  * A warning from type checking (not a fatal error).
