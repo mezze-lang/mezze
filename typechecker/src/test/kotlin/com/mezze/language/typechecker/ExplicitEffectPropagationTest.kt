@@ -36,7 +36,7 @@ class ExplicitEffectPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // The useDatabase function should be at index 2
         val useDatabaseDecl = typedProgram.items[2] as LetBinding
@@ -66,7 +66,7 @@ class ExplicitEffectPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // The logSomething function should be at index 1
         val logFunctionDecl = typedProgram.items[1] as LetBinding

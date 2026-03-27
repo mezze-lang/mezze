@@ -60,7 +60,7 @@ class NewtypeDerivingTest {
 
         val ast = parser.parse(source)
         val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -72,7 +72,7 @@ class NewtypeDerivingTest {
 
         val ast = parser.parse(source)
         val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -84,6 +84,6 @@ class NewtypeDerivingTest {
 
         val ast = parser.parse(source)
         val result = typeChecker.typeCheck(ast)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 }

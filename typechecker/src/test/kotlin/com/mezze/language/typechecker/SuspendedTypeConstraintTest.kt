@@ -62,7 +62,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val getValueBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val getValueType = getValueBinding.inferredType
@@ -99,7 +99,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -124,7 +124,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -150,7 +150,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -202,7 +202,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -253,7 +253,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -287,7 +287,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -316,7 +316,7 @@ class SuspendedTypeConstraintTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType

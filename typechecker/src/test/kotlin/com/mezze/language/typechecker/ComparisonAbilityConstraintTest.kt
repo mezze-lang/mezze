@@ -22,7 +22,7 @@ class ComparisonAbilityConstraintTest {
         val code = "let eq = {x, y} -> x == y"
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -38,7 +38,7 @@ class ComparisonAbilityConstraintTest {
         val code = "let neq = {x, y} -> x != y"
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -54,7 +54,7 @@ class ComparisonAbilityConstraintTest {
         val code = "let lt = {x, y} -> x < y"
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -70,7 +70,7 @@ class ComparisonAbilityConstraintTest {
         val code = "1 == 2"
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Should succeed because Int has Eq ability
         assertNotNull(typedProgram)
@@ -81,7 +81,7 @@ class ComparisonAbilityConstraintTest {
         val code = "1 < 2"
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Should succeed because Int has Ord ability
         assertNotNull(typedProgram)

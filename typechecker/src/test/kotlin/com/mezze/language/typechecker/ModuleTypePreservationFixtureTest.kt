@@ -26,10 +26,9 @@ class ModuleTypePreservationFixtureTest {
         typeChecker = TypeChecker()
     }
 
-    /** Helper to get inferred type of a binding by name from typed program */
-    private fun getBindingType(program: Program, name: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == name }?.inferredType
+    /** Helper to get inferred type of a binding by name from typed result */
+    private fun getBindingType(program: TypeCheckResult, name: String): MezzeType? {
+        return program.getVariableType(name)
     }
 
     @Test
@@ -52,7 +51,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         // Verify test_int has type Int (not a type variable)
         val testIntType = getBindingType(typedProgram, "test_int")
@@ -98,7 +97,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         // Verify types exist
         val myNumType = getBindingType(typedProgram, "my_num")
@@ -133,7 +132,7 @@ class ModuleTypePreservationFixtureTest {
         val program = parser.parse(importingSource)
 
         // This should not throw any type errors
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         // result should be Int
         val resultType = getBindingType(typedProgram, "result")
@@ -165,7 +164,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         // Verify all have appropriate types
         val maxType = getBindingType(typedProgram, "max")

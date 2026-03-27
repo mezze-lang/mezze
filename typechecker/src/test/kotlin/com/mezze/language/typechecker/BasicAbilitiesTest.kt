@@ -30,7 +30,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify ability declaration is processed
         val abilityDecl = typedProgram.items.find { it is AbilityDeclaration } as AbilityDeclaration?
@@ -56,7 +56,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify implementation is processed  
         val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
@@ -75,7 +75,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify multi-parameter ability declaration
         val convertDecl = typedProgram.items.find {
@@ -100,7 +100,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify Ord ability has method-level constraint (not ability-level dependency)
         val ordDecl = typedProgram.items.find {
@@ -123,7 +123,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify effect declaration is processed
         val effectDecl = typedProgram.items.find { it is EffectDeclaration } as EffectDeclaration?
@@ -146,7 +146,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify implementation is processed
         val implDecl = typedProgram.items.find { it is ImplDeclaration } as ImplDeclaration?
@@ -163,7 +163,7 @@ class BasicAbilitiesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Verify let binding is processed
         val letBinding = typedProgram.items.find { it is LetBinding } as LetBinding?

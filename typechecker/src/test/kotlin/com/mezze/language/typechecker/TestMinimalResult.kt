@@ -34,7 +34,7 @@ class TestMinimalResult {
 
         try {
             val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program).program
+            val typed = typeChecker.typeCheck(program)
             assertNotNull(typed)
             println("SUCCESS: map function typechecked")
         } catch (e: Exception) {
@@ -57,7 +57,7 @@ class TestMinimalResult {
 
         try {
             val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program).program
+            val typed = typeChecker.typeCheck(program)
             assertNotNull(typed)
             println("SUCCESS: flat_map function typechecked")
         } catch (e: Exception) {

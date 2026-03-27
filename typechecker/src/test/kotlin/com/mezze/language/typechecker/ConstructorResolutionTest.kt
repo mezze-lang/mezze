@@ -106,7 +106,7 @@ class ConstructorResolutionTest {
         }
     }
 
-    private fun findResolution(program: Program, constructorName: String): ConstructorResolution? {
+    private fun findResolution(program: TypeCheckResult, constructorName: String): ConstructorResolution? {
         for (item in program.items) {
             if (item is LetBinding) {
                 val constructions = findVariantConstructions(item.expression)
@@ -117,9 +117,9 @@ class ConstructorResolutionTest {
         return null
     }
 
-    private fun typeCheckAndGetProgram(source: String): Program {
+    private fun typeCheckAndGetProgram(source: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ============================================================================

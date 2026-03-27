@@ -27,14 +27,12 @@ class EffectPolymorphismTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getBinding(program: Program, name: String): LetBinding {
-        return program.items.filterIsInstance<LetBinding>().first { it.variableName == name }
-    }
+    // getBinding is only used for .inferredType access — use getVariableType instead
 
     @Test
     fun `test parser handles purely polymorphic effect row`() {
@@ -253,15 +251,14 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val program = typeCheck(code)
-        val addBinding = getBinding(program, "add")
-        val resultBinding = getBinding(program, "result")
+        val addType = program.getVariableType("add") as MezzeType.FunctionType
+        val resultType = program.getVariableType("result")
 
         // Pure functions should have no effects
-        val addType = addBinding.inferredType as MezzeType.FunctionType
         assertNull(addType.effects, "Pure function should have no effects")
 
         // Result should be Int
-        assertTrue(resultBinding.inferredType is MezzeType.IntType)
+        assertTrue(resultType is MezzeType.IntType)
     }
 
     @Test
@@ -284,11 +281,11 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val program = typeCheck(code)
-        val binding = getBinding(program, "getResult")
+        val getResultType = program.getVariableType("getResult")
 
         // getResult should be a function returning Int <*>
-        assertTrue(binding.inferredType is MezzeType.FunctionType)
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        assertTrue(getResultType is MezzeType.FunctionType)
+        val funcType = getResultType as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -301,7 +298,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
     }
 
@@ -320,7 +317,7 @@ class EffectPolymorphismTest {
 
         // This should pass - effect widening is allowed (pure is a subtype of effectful)
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
     }
 
@@ -334,7 +331,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
     }
 
@@ -348,7 +345,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
     }
 
@@ -376,10 +373,10 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
 
-        val resultBinding = getBinding(typedProgram, "result")
-        assertTrue(resultBinding.inferredType is MezzeType.IntType)
+        val resultType = typedProgram.getVariableType("result")
+        assertTrue(resultType is MezzeType.IntType)
     }
 }

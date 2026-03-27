@@ -33,12 +33,12 @@ class MatchEffectUnificationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getBinding(program: Program, name: String): LetBinding {
+    private fun getBinding(program: TypeCheckResult, name: String): LetBinding {
         return program.items.filterIsInstance<LetBinding>().first { it.variableName == name }
     }
 

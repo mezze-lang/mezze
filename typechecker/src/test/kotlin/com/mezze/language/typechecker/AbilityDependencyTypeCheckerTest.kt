@@ -54,7 +54,7 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertContains(error.message!!, "ability-level constraints")
@@ -80,7 +80,7 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertContains(error.message!!, "ability-level constraints")
@@ -102,7 +102,7 @@ class AbilityDependencyTypeCheckerTest {
 
         // Both abilities have ability-level constraints, so the first one should fail
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -117,7 +117,7 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
 
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -138,7 +138,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, typedProgram.items.size)
 
@@ -171,7 +171,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, typedProgram.items.size)
 
@@ -190,7 +190,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(1, typedProgram.items.size)
 
@@ -223,7 +223,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Should type check without errors
         assertTrue(typedProgram.items.isNotEmpty())
@@ -255,7 +255,7 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertContains(error.message!!, "Show")
@@ -283,7 +283,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(4, typedProgram.items.size)
 
@@ -316,7 +316,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val collection = typedProgram.items[2] as AbilityDeclaration
         assertNotNull(collection.inferredType)

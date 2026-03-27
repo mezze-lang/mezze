@@ -29,7 +29,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(1, checkedProgram.items.size)
         val effectDecl = checkedProgram.items[0] as EffectDeclaration
@@ -64,7 +64,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, checkedProgram.items.size)
 
@@ -99,7 +99,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, checkedProgram.items.size)
 
@@ -129,7 +129,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, checkedProgram.items.size)
 
@@ -191,7 +191,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(6, checkedProgram.items.size)
 
@@ -248,7 +248,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(5, checkedProgram.items.size)
 
@@ -286,7 +286,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, checkedProgram.items.size)
 
@@ -325,7 +325,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(4, checkedProgram.items.size)
 
@@ -366,7 +366,7 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program).program
+        val checkedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, checkedProgram.items.size)
 

@@ -44,7 +44,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -69,7 +69,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -92,7 +92,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -113,7 +113,7 @@ class EffectHandlerUsageValidationTest {
         val program = parser.parse(source)
 
         // This should succeed because perform is wrapped in a function
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -138,7 +138,7 @@ class EffectHandlerUsageValidationTest {
         val program = parser.parse(source)
         
         // This should succeed because BasicLogger.info is called inside another Log impl
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -169,12 +169,12 @@ class EffectHandlerUsageValidationTest {
         
         // TODO: Fix cross-effect handler validation - currently allows cross-effect calls
         // The type checker should reject direct effect handler calls, but currently allows them
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         
         // This test should be updated once cross-effect validation is properly implemented
         // assertFailsWith<TypeCheckError> {
-        //     typeChecker.typeCheck(program).program
+        //     typeChecker.typeCheck(program)
         // }
     }
 
@@ -202,7 +202,7 @@ class EffectHandlerUsageValidationTest {
         
         // This should succeed because Console.print is an abstract effect call,
         // not a direct handler call
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -226,7 +226,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -250,7 +250,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -277,7 +277,7 @@ class EffectHandlerUsageValidationTest {
         // TODO: Implement effect handler usage validation
         // Effect handler calls in match expressions should be rejected, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -307,7 +307,7 @@ class EffectHandlerUsageValidationTest {
         
         // This should succeed because BasicLogger.info and FileLogger.info
         // are called inside another Log impl (CompositeLogger)
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -333,7 +333,7 @@ class EffectHandlerUsageValidationTest {
         val program = parser.parse(source)
 
         // This should succeed because Log.info is called with proper perform syntax
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -366,6 +366,6 @@ class EffectHandlerUsageValidationTest {
         val program = parser.parse(source)
 
         // This should succeed because all effect calls use proper perform syntax
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 }

@@ -62,7 +62,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -81,7 +81,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -96,7 +96,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -132,7 +132,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -145,7 +145,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -166,7 +166,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -183,7 +183,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -202,7 +202,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -221,7 +221,7 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -239,6 +239,6 @@ class QualifiedEffectImportTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 }

@@ -35,15 +35,15 @@ class TypeApplicationExpansionTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): com.mezze.language.ast.Program {
+    private fun parseAndTypeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)

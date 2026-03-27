@@ -27,7 +27,7 @@ class AbilityTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         assertEquals(1, typedProgram.items.size)
         val ability = typedProgram.items[0] as AbilityDeclaration
@@ -54,7 +54,7 @@ class AbilityTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, typedProgram.items.size) // use statement + ability + impl
 
@@ -84,7 +84,7 @@ class AbilityTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         assertEquals(2, typedProgram.items.size)
         
@@ -111,7 +111,7 @@ class AbilityTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val ability = typedProgram.items[0] as AbilityDeclaration
         val abilityType = ability.inferredType as MezzeType.RecordType
@@ -145,7 +145,7 @@ class AbilityTypeCheckerTest {
         
         // Should not throw any exceptions
         assertDoesNotThrow {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

@@ -26,10 +26,9 @@ class ModuleTypePreservationComprehensiveTest {
         typeChecker = TypeChecker()
     }
 
-    /** Helper to get inferred type of a binding by name from typed program */
-    private fun getBindingType(program: Program, name: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == name }?.inferredType
+    /** Helper to get inferred type of a binding by name from typed result */
+    private fun getBindingType(program: TypeCheckResult, name: String): MezzeType? {
+        return program.getVariableType(name)
     }
 
     @Test
@@ -72,7 +71,7 @@ class ModuleTypePreservationComprehensiveTest {
 
         println("\n📝 Testing module imports...")
         val program = parser.parse(mainSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         println("\n📊 Type Check Results:")
         println("-".repeat(70))
@@ -159,7 +158,7 @@ class ModuleTypePreservationComprehensiveTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program, tempDir).program
+        val typedProgram = typeChecker.typeCheck(program, tempDir)
 
         val myValueType = getBindingType(typedProgram, "my_value")
 

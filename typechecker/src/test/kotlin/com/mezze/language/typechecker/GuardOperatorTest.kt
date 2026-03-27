@@ -24,7 +24,7 @@ class GuardOperatorTest {
     private fun typeCheck(code: String) {
         val program = parser.parse(code)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test

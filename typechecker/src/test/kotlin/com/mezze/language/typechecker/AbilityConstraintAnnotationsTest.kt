@@ -31,9 +31,9 @@ class AbilityConstraintAnnotationsTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========================================================================
@@ -323,7 +323,7 @@ class AbilityConstraintAnnotationsTest {
 
         val program = parser.parse(code)
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -368,7 +368,7 @@ class AbilityConstraintAnnotationsTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error message should mention the type mismatch
@@ -396,7 +396,7 @@ class AbilityConstraintAnnotationsTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error should indicate type mismatch
@@ -426,7 +426,7 @@ class AbilityConstraintAnnotationsTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error should indicate type mismatch

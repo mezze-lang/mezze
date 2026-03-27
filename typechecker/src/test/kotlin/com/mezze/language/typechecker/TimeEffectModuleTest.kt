@@ -23,10 +23,10 @@ class TimeEffectModuleTest {
         TestUtils.setupProjectRoot()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {
+    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        return result.program
+        return result
     }
 
     @Test

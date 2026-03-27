@@ -35,7 +35,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Find the let binding
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
@@ -62,7 +62,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -82,7 +82,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -110,7 +110,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showResult" } as LetBinding?
         assertNotNull(letBinding)
@@ -146,7 +146,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val test1 = typedProgram.items.find { it is LetBinding && it.variableName == "test1" } as LetBinding?
         val test2 = typedProgram.items.find { it is LetBinding && it.variableName == "test2" } as LetBinding?
@@ -171,7 +171,7 @@ class AbilityMethodCallTest {
 
         // Abilities cannot be used as values - should throw TypeCheckError
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -189,7 +189,7 @@ class AbilityMethodCallTest {
 
         val program = parser.parse(source)
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(error.message?.contains("Direct ability access") == true,
@@ -217,7 +217,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -245,7 +245,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -269,7 +269,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -296,7 +296,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -331,7 +331,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showIfEqual" } as LetBinding?
         assertNotNull(letBinding)
@@ -364,7 +364,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -392,7 +392,7 @@ class AbilityMethodCallTest {
 
         // Direct ability access 'Parse.decode' is now blocked
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -408,7 +408,7 @@ class AbilityMethodCallTest {
 
         val program = parser.parse(source)
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(error.message?.contains("Direct ability access") == true,
@@ -433,7 +433,7 @@ class AbilityMethodCallTest {
 
         val program = parser.parse(source)
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -455,7 +455,7 @@ class AbilityMethodCallTest {
         // String doesn't have Printable impl — should fail at some point
         // (either typecheck error or unresolved constraint)
         try {
-            val result = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
             // If it passes typechecking, it means the constraint is deferred — that's OK
             // as long as it doesn't silently succeed with wrong behavior
         } catch (_: TypeCheckError) {
@@ -475,7 +475,7 @@ class AbilityMethodCallTest {
 
         val program = parser.parse(source)
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error should suggest method-call and direct call syntax

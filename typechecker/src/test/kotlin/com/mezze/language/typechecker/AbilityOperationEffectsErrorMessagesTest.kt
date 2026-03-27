@@ -32,7 +32,7 @@ class AbilityOperationEffectsErrorMessagesTest {
 
         val program = parser.parse(source)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("Polymorphic effects error: ${error.message}")
@@ -58,7 +58,7 @@ class AbilityOperationEffectsErrorMessagesTest {
 
         val program = parser.parse(source)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("Performed marker error: ${error.message}")
@@ -88,7 +88,7 @@ class AbilityOperationEffectsErrorMessagesTest {
 
         val program = parser.parse(source)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("Polymorphic tail error: ${error.message}")
@@ -115,7 +115,7 @@ class AbilityOperationEffectsErrorMessagesTest {
 
         val program = parser.parse(source)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("Effect with performed error: ${error.message}")
@@ -145,7 +145,7 @@ class AbilityOperationEffectsErrorMessagesTest {
 
         val program = parser.parse(source)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("Multi-op error: ${error.message}")
@@ -183,7 +183,7 @@ class AbilityOperationEffectsErrorMessagesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Impl without explicit type should inherit ability's effect signature")
     }
@@ -208,7 +208,7 @@ class AbilityOperationEffectsErrorMessagesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Impl with matching explicit effect signature should pass")
     }
@@ -243,7 +243,7 @@ class AbilityOperationEffectsErrorMessagesTest {
         // If this test passes (no error thrown), that means effect validation for impls
         // needs to be implemented as future work
         try {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             println("WARNING: Impl with wrong effect did not fail - effect matching in impls not yet validated")
             // Don't fail the test - document this as known limitation
         } catch (e: TypeCheckError) {
@@ -274,7 +274,7 @@ class AbilityOperationEffectsErrorMessagesTest {
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             println("WARNING: Impl with pure signature (ability has effect) did not fail - effect matching not yet validated")
         } catch (e: TypeCheckError) {
             println("Good: Impl with pure signature correctly failed: ${e.message}")
@@ -301,7 +301,7 @@ class AbilityOperationEffectsErrorMessagesTest {
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             println("WARNING: Impl with extra effect (ability is pure) did not fail - effect matching not yet validated")
         } catch (e: TypeCheckError) {
             println("Good: Impl with extra effect correctly failed: ${e.message}")

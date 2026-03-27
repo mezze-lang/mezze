@@ -35,7 +35,7 @@ class OpenRecordDebugTest {
         println()
 
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             println("Type checking succeeded!")
         } catch (e: Exception) {
             println("Type checking failed: ${e.message}")

@@ -28,7 +28,7 @@ class TestResultImport {
 
         try {
             val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program).program
+            val typed = typeChecker.typeCheck(program)
             assertNotNull(typed)
             println("SUCCESS: Import succeeded")
         } catch (e: Exception) {

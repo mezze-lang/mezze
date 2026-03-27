@@ -31,7 +31,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(1, typedProgram.items.size)
         val ability = typedProgram.items[0] as AbilityDeclaration
@@ -63,7 +63,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, typedProgram.items.size)
 
@@ -87,7 +87,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
@@ -113,7 +113,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
@@ -146,7 +146,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(3, typedProgram.items.size)
 
@@ -170,7 +170,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'product", ability.associatedType)
@@ -191,7 +191,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
@@ -212,7 +212,7 @@ class AbilityAssociatedTypesTest {
         // Parser should reject this
         assertThrows<Exception> {
             val program = parser.parse(source)
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -227,7 +227,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'key", ability.associatedType)
@@ -248,7 +248,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Should have 2 items: ability and impl
         assertEquals(2, typedProgram.items.size)
@@ -278,7 +278,7 @@ class AbilityAssociatedTypesTest {
 
         // Should type check without errors
         assertDoesNotThrow {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -293,7 +293,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'elem", ability.associatedType)
@@ -315,7 +315,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
@@ -336,7 +336,7 @@ class AbilityAssociatedTypesTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("provides associated type bindings") == true)
@@ -355,7 +355,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(1, typedProgram.items.size)
         val ability = typedProgram.items[0] as AbilityDeclaration
@@ -377,7 +377,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals(3, ability.associatedTypes.size)
@@ -401,7 +401,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, typedProgram.items.size)
         val impl = typedProgram.items[1] as ImplAbilityDeclaration
@@ -425,7 +425,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(2, typedProgram.items.size)
         val impl = typedProgram.items[1] as ImplAbilityDeclaration
@@ -447,7 +447,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Just verify the program type checks successfully
         assertEquals(2, typedProgram.items.size)
@@ -468,7 +468,7 @@ class AbilityAssociatedTypesTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("missing bindings for") == true)
@@ -494,7 +494,7 @@ class AbilityAssociatedTypesTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("missing bindings for") == true)
@@ -517,7 +517,7 @@ class AbilityAssociatedTypesTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Should catch that 'wrong is not declared and 'error is missing
@@ -539,7 +539,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Just verify the program type checks successfully
         assertEquals(2, typedProgram.items.size)
@@ -568,7 +568,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(4, typedProgram.items.size)
 
@@ -589,7 +589,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val ability = typedProgram.items[0] as AbilityDeclaration
         assertEquals(2, ability.associatedTypes.size)
@@ -621,7 +621,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertEquals(4, typedProgram.items.size)
 
@@ -655,7 +655,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Find the 'result' binding
         val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
@@ -691,7 +691,7 @@ class AbilityAssociatedTypesTest {
 
         // Should type check without errors - element = 42 should unify with Int (the bound 'item)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -714,7 +714,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Find the 'key' binding - should be Int
         val keyBinding = typedProgram.items.filterIsInstance<LetBinding>()
@@ -745,7 +745,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Find the 'result' binding - should be [Int]
         val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
@@ -772,7 +772,7 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Find the 'result' binding - should be Option [Int]
         val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
@@ -805,7 +805,7 @@ class AbilityAssociatedTypesTest {
 
         // Should fail because "wrong" is String but 'item = Int
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

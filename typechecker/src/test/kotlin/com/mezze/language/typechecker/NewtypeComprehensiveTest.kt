@@ -53,7 +53,7 @@ class NewtypeComprehensiveTest {
                 let uid = UserId {value = 42}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -63,7 +63,7 @@ class NewtypeComprehensiveTest {
                 let email = Email {value = "test@example.com"}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -73,7 +73,7 @@ class NewtypeComprehensiveTest {
                 let p = Point { x = 3.0, y = 4.0 }
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -85,7 +85,7 @@ class NewtypeComprehensiveTest {
                 let age = Age {value = 25}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -105,7 +105,7 @@ class NewtypeComprehensiveTest {
                     UserId {value} -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -117,7 +117,7 @@ class NewtypeComprehensiveTest {
                     Point { x, y } -> x
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -129,7 +129,7 @@ class NewtypeComprehensiveTest {
                 let result = unwrap {e = Email {value = "test"}}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -169,7 +169,7 @@ class NewtypeComprehensiveTest {
                 let dbg = {e: Email} -> e.to_dbg_str {}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -191,7 +191,7 @@ class NewtypeComprehensiveTest {
                 let same = {a: UserId, b: UserId} -> a.eq {r = b}
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -201,7 +201,7 @@ class NewtypeComprehensiveTest {
                 let same = {a: Color, b: Color} -> a == b
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -211,7 +211,7 @@ class NewtypeComprehensiveTest {
                 let same = {a: Wrapper, b: Wrapper} -> a == b
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -221,7 +221,7 @@ class NewtypeComprehensiveTest {
                 let same = {a: Point, b: Point} -> a == b
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -267,7 +267,7 @@ class NewtypeComprehensiveTest {
                     UserId {value} -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -287,7 +287,7 @@ class NewtypeComprehensiveTest {
                 let user = User { id = uid, name = "Alice" }
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -302,7 +302,7 @@ class NewtypeComprehensiveTest {
                         UserId {value} -> value
             """.trimIndent()
             val result = typeChecker.typeCheck(parser.parse(source))
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -357,7 +357,7 @@ class NewtypeComprehensiveTest {
                 java.nio.file.Files.readString(tempDir.resolve("user.mz"))
             )
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 }

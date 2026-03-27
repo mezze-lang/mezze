@@ -36,7 +36,7 @@ class SeqVsListTypeDistinctionTest {
     fun `test array literal has Seq type`() {
         val source = "let arr = [1, 2, 3]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
@@ -55,7 +55,7 @@ class SeqVsListTypeDistinctionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val lstBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "lst"
@@ -176,7 +176,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - Seq matches Seq
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"
@@ -202,7 +202,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - List matches List
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"
@@ -282,7 +282,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - polymorphic function works with arrays
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val firstBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "first"
@@ -312,7 +312,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - function works with List Int
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"
@@ -411,7 +411,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - Seq can contain List elements
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val arrBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "arr_of_lists"
@@ -444,7 +444,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - List can contain Seq elements
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val lstBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "list_of_arrs"
@@ -479,7 +479,7 @@ class SeqVsListTypeDistinctionTest {
         // This test may fail if std::list is not available,
         // which is acceptable - we're testing the type distinction
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
 
             val combinedBinding = typedProgram.items.find {
                 it is LetBinding && it.variableName == "combined"
@@ -518,7 +518,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
 
         // Should succeed - seq operations with arrays
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultBinding = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"

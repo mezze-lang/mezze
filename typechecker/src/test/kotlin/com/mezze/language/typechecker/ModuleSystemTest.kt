@@ -62,7 +62,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
+            val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
             assertNotNull(typedProgram)
             
             // Verify that the result variable has the correct type
@@ -92,7 +92,7 @@ class ModuleSystemTest {
         val program = parser.parse(source)
         
         val exception = assertThrows(ModuleError.ModuleNotFound::class.java) {
-            typeChecker.typeCheck(program, tempDir).program
+            typeChecker.typeCheck(program, tempDir)
         }
         
         assertTrue(exception.message!!.contains("non_existent::module"))
@@ -122,7 +122,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
 
         val exception = assertThrows(ModuleError.PrivateExport::class.java) {
-            typeChecker.typeCheck(program, srcDir).program
+            typeChecker.typeCheck(program, srcDir)
         }
 
         // Verify the error contains useful info
@@ -154,7 +154,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
 
         val exception = assertThrows(ModuleError.ExportNotFound::class.java) {
-            typeChecker.typeCheck(program, srcDir).program
+            typeChecker.typeCheck(program, srcDir)
         }
 
         // Verify the error contains useful info
@@ -187,7 +187,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
         
         val exception = assertThrows(ModuleError.InternalModuleAccess::class.java) {
-            typeChecker.typeCheck(program, srcDir).program
+            typeChecker.typeCheck(program, srcDir)
         }
         
         assertTrue(exception.message!!.contains("internal"))
@@ -224,7 +224,7 @@ class ModuleSystemTest {
         // When importing a variant type, its constructors should also become available
         // This is a known limitation - constructor import from modules needs implementation
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir).program
+            val typedProgram = typeChecker.typeCheck(program, srcDir)
             assertNotNull(typedProgram)
             println("SUCCESS: Type constructor import worked!")
         } catch (e: Exception) {
@@ -265,7 +265,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val typedProgram = typeChecker.typeCheck(program, tempDir)
             assertNotNull(typedProgram)
             println("SUCCESS: Module alias worked!")
         } catch (e: Exception) {
@@ -302,7 +302,7 @@ class ModuleSystemTest {
         // Should throw CircularDependency since A -> B -> A forms a cycle
         // Note: The exception comes from the top-level ModuleError (typechecker package)
         val exception = assertThrows(com.mezze.language.typechecker.ModuleError.CircularDependency::class.java) {
-            typeChecker.typeCheck(program, tempDir).program
+            typeChecker.typeCheck(program, tempDir)
         }
         assertNotNull(exception.message)
         assertTrue(exception.message!!.contains("Circular"))
@@ -329,7 +329,7 @@ class ModuleSystemTest {
 
         // Should throw ModuleNotFound since module B doesn't exist
         assertThrows(ModuleError.ModuleNotFound::class.java) {
-            typeChecker.typeCheck(program, tempDir).program
+            typeChecker.typeCheck(program, tempDir)
         }
     }
     
@@ -363,7 +363,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val typedProgram = typeChecker.typeCheck(program, tempDir)
             assertNotNull(typedProgram)
             
             // Verify that constructors are available
@@ -410,7 +410,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val typedProgram = typeChecker.typeCheck(program, tempDir)
             assertNotNull(typedProgram)
             
             println("SUCCESS: Selective imports with aliases work!")
@@ -447,7 +447,7 @@ class ModuleSystemTest {
 
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val typedProgram = typeChecker.typeCheck(program, tempDir)
             assertNotNull(typedProgram)
 
             println("SUCCESS: Nested module paths work!")
@@ -488,7 +488,7 @@ class ModuleSystemTest {
 
         // Type-check the program (this should cache the effects module)
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir).program
+            val typedProgram = typeChecker.typeCheck(program, srcDir)
             assertNotNull(typedProgram)
 
             // Verify the effects module was cached
@@ -599,7 +599,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
 
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir).program
+            val typedProgram = typeChecker.typeCheck(program, srcDir)
             assertNotNull(typedProgram)
 
             // Verify the cached module has handler mappings
@@ -663,7 +663,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
 
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir).program
+            val typedProgram = typeChecker.typeCheck(program, srcDir)
             assertNotNull(typedProgram)
 
             // Verify both modules are cached

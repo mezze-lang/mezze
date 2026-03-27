@@ -24,10 +24,9 @@ class StringConstraintPropagationTest {
     fun `test string interpolation constraint propagation`() {
         val code = "let test = {a, b} -> \"$(a)$(b)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { a: Str, b: Str } -> Str
@@ -40,10 +39,9 @@ class StringConstraintPropagationTest {
     fun `test string with literal constraint propagation`() {
         val code = "let test = {value} -> \"$(value)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { value: Str } -> Str
@@ -55,10 +53,9 @@ class StringConstraintPropagationTest {
     fun `test string prefix constraint propagation`() {
         val code = "let test = {value} -> \"prefix: $(value)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { value: Str } -> Str
@@ -70,10 +67,9 @@ class StringConstraintPropagationTest {
     fun `test string suffix constraint propagation`() {
         val code = "let test = {value} -> \"$(value) suffix\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { value: Str } -> Str
@@ -85,10 +81,9 @@ class StringConstraintPropagationTest {
     fun `test string multiple interpolation constraint propagation`() {
         val code = "let test = {a, b, c} -> \"$(a)$(b)$(c)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { a: Str, b: Str, c: Str } -> Str
@@ -102,10 +97,9 @@ class StringConstraintPropagationTest {
     fun `test string with literal comparison constraint propagation`() {
         val code = "let test = {value} -> \"$(value)test\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { value: Str } -> Str
@@ -117,10 +111,9 @@ class StringConstraintPropagationTest {
     fun `test nested string interpolation constraint propagation`() {
         val code = "let test = {x, y} -> \"$(x)$(y)end\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
+        val result = typeChecker.typeCheck(program, Paths.get("."))
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val functionType = letBinding.inferredType as MezzeType.FunctionType
+        val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
 
         // Should infer { x: Str, y: Str } -> Str

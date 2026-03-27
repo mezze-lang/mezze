@@ -22,7 +22,7 @@ class InvalidConstructorInMatchTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
 
     // ========== CLOSED VARIANT - INVALID CONSTRUCTOR TESTS ==========
 

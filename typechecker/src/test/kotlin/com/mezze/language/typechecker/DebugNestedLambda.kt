@@ -27,11 +27,7 @@ class DebugNestedLambda {
 
             val result = typeChecker.typeCheck(program)
             println("=== SUCCESS ===")
-            println("Type of f: ${result.program.items.find {
-                it is com.mezze.language.ast.LetBinding && it.variableName == "f"
-            }?.let {
-                (it as com.mezze.language.ast.LetBinding).inferredType
-            }}")
+            println("Type of f: ${result.getVariableType("f")}")
         } catch (e: Exception) {
             println("=== ERROR ===")
             println(e.message)

@@ -46,7 +46,7 @@ class DebugIncrementalResultTest {
 
             try {
                 val program = parser.parse(accumulated)
-                val typed = typeChecker.typeCheck(program).program
+                val typed = typeChecker.typeCheck(program)
                 assertNotNull(typed)
                 println("  ✓ SUCCESS with $funcName")
             } catch (e: Exception) {

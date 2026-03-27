@@ -2,6 +2,7 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.prettyPrintTypeWithAliases
+import com.mezze.language.ast.TypeDeclaration
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -25,25 +26,24 @@ class NamedTypePrintingTest {
     fun `test Tree type prints with name in function signature`() {
         val source = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            
+
             let fold = {tree, acc, f} -> match tree is
               Leaf -> acc
               Node {value, left, right} -> fold {tree = right, acc = f {acc = fold {tree = left, acc, f}, val = value}, f}
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val foldBinding = letBindings.find { it.variableName == "fold" }!!
+        // Get type declarations from the parsed (v1) program for prettyPrintTypeWithAliases
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
 
-        // Get the type scheme
-        val scheme = foldBinding.typeScheme!!
-        
+        val foldType = result.getVariableType("fold")
+        assertNotNull(foldType, "fold type should not be null")
+
         // Print the type with type declarations
         val typeStr = prettyPrintTypeWithAliases(
-            scheme.type,
+            foldType!!,
             typeDeclarations = typeDecls
         )
 
@@ -64,15 +64,15 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val mapBinding = letBindings.find { it.variableName == "map_maybe" }!!
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
 
-        val scheme = mapBinding.typeScheme!!
+        val mapType = result.getVariableType("map_maybe")
+        assertNotNull(mapType, "map_maybe type should not be null")
+
         val typeStr = prettyPrintTypeWithAliases(
-            scheme.type,
+            mapType!!,
             typeDeclarations = typeDecls
         )
 
@@ -91,15 +91,15 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val mapBinding = letBindings.find { it.variableName == "map_left" }!!
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
 
-        val scheme = mapBinding.typeScheme!!
+        val mapType = result.getVariableType("map_left")
+        assertNotNull(mapType, "map_left type should not be null")
+
         val typeStr = prettyPrintTypeWithAliases(
-            scheme.type,
+            mapType!!,
             typeDeclarations = typeDecls
         )
 
@@ -113,21 +113,21 @@ class NamedTypePrintingTest {
     fun `test nested Tree types print with names`() {
         val source = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            
+
             let make_leaf = {} -> Leaf
             let make_node = {v, l, r} -> Node { value = v, left = l, right = r }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val nodeBinding = letBindings.find { it.variableName == "make_node" }!!
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
 
-        val scheme = nodeBinding.typeScheme!!
+        val nodeType = result.getVariableType("make_node")
+        assertNotNull(nodeType, "make_node type should not be null")
+
         val typeStr = prettyPrintTypeWithAliases(
-            scheme.type,
+            nodeType!!,
             typeDeclarations = typeDecls
         )
 
@@ -139,25 +139,25 @@ class NamedTypePrintingTest {
     fun `test List type is not affected by named type printing`() {
         val source = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
-            
+
             let list_test = {x} -> [x, x, x]
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val listBinding = letBindings.find { it.variableName == "list_test" }!!
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
 
-        val inferredType = listBinding.inferredType!!
+        val listType = result.getVariableType("list_test")
+        assertNotNull(listType, "list_test type should not be null")
+
         val typeStr = prettyPrintTypeWithAliases(
-            inferredType,
+            listType!!,
             typeDeclarations = typeDecls
         )
 
         // List should still be printed as List
-        assertTrue(typeStr.contains("[") || typeStr.contains("List"), 
+        assertTrue(typeStr.contains("[") || typeStr.contains("List"),
             "List types should still print correctly")
     }
 
@@ -173,22 +173,21 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
+        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
         assertEquals(2, typeDecls.size)
-        
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        val testBinding = letBindings.find { it.variableName == "test" }!!
 
-        val scheme = testBinding.typeScheme!!
+        val testType = result.getVariableType("test")
+        assertNotNull(testType, "test type should not be null")
+
         val typeStr = prettyPrintTypeWithAliases(
-            scheme.type,
+            testType!!,
             typeDeclarations = typeDecls
         )
 
         // Should contain both type names
-        assertTrue(typeStr.contains("Maybe") || typeStr.contains("Either"), 
+        assertTrue(typeStr.contains("Maybe") || typeStr.contains("Either"),
             "Should reference at least one of the custom types")
     }
 
@@ -202,14 +201,12 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
-
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
+        val result = typeChecker.typeCheck(program)
 
         // Both bindings should typecheck successfully
-        assertEquals(2, letBindings.size)
-        assertNotNull(letBindings[0].inferredType)
-        assertNotNull(letBindings[1].inferredType)
+        val noneType = result.getVariableType("none_value")
+        val someType = result.getVariableType("some_value")
+        assertNotNull(noneType, "none_value type should not be null")
+        assertNotNull(someType, "some_value type should not be null")
     }
 }

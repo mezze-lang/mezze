@@ -32,7 +32,7 @@ class DebugResultExhaustivenessTest {
         val program = parser.parse(code)
         println("Parsed successfully")
 
-        val typed = typeChecker.typeCheck(program).program
+        val typed = typeChecker.typeCheck(program)
         assertNotNull(typed)
         println("Type checked successfully!")
     }
@@ -63,7 +63,7 @@ class DebugResultExhaustivenessTest {
         val program = parser.parse(code)
         println("Parsed successfully")
 
-        val typed = typeChecker.typeCheck(program).program
+        val typed = typeChecker.typeCheck(program)
         assertNotNull(typed)
         println("Type checked successfully!")
     }

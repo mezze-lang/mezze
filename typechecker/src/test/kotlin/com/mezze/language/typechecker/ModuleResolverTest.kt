@@ -76,7 +76,7 @@ class ModuleResolverTest {
             val program = parser.parse("let x = Some { val = 42 }")
             
             // This should not cause a stack overflow
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

@@ -48,7 +48,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability operation with no effects should pass")
     }
@@ -68,7 +68,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability operation with explicit empty effects should pass")
     }
@@ -92,7 +92,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability operation with single effect should pass")
     }
@@ -120,7 +120,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability operation with multiple effects should pass")
     }
@@ -149,7 +149,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability with mixed pure and effectful operations should pass")
     }
@@ -167,7 +167,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: polymorphic effects not allowed") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assert(error.message?.contains("polymorphic") == true || error.message?.contains("<...>") == true) {
@@ -190,7 +190,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: polymorphic tail not allowed") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assert(error.message?.contains("polymorphic") == true) {
@@ -211,7 +211,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: performed marker not allowed") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assert(error.message?.contains("performed") == true || error.message?.contains("<*>") == true) {
@@ -234,7 +234,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: performed marker not allowed") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assert(error.message?.contains("performed") == true) {
@@ -255,7 +255,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: <...> alone not allowed") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -279,7 +279,7 @@ class AbilityOperationEffectsTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: one operation has invalid effects") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assert(error.message?.contains("bad_op") == true || error.message?.contains("polymorphic") == true) {
@@ -316,7 +316,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability with effect should compile")
     }
@@ -339,7 +339,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Pure ability operation should not add effects")
     }
@@ -366,7 +366,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Impl with matching effects should pass")
     }
@@ -397,7 +397,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability with associated types and effects should work")
     }
@@ -424,7 +424,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Ability operation returning function with effects should work")
     }
@@ -450,7 +450,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Complex effect signatures should work")
     }
@@ -489,7 +489,7 @@ class AbilityOperationEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Multiple abilities with different effects should work")
     }

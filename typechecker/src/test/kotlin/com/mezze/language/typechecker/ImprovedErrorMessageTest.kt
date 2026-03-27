@@ -30,7 +30,7 @@ class ImprovedErrorMessageTest {
     private fun getErrorMessage(source: String): String? {
         return try {
             val program = parser.parse(source)
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             null  // No error
         } catch (e: TypeCheckError) {
             e.message

@@ -98,6 +98,13 @@ data class TypeCheckResult(
             ?.find { it.name == name }
             ?.scheme?.type
     }
+
+    /**
+     * DEPRECATED bridge: returns the v1 program items (empty — use typedModule instead).
+     * Kept only to allow gradual migration of test files.
+     */
+    @Deprecated("v1 Program is empty — use getVariableType() or typedModule instead")
+    val items: List<ProgramItem> get() = program.items
 }
 
 /**

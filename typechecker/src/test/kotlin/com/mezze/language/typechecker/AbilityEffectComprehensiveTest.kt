@@ -64,7 +64,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -79,7 +79,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -95,7 +95,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -111,7 +111,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -127,7 +127,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -152,7 +152,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -169,7 +169,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -185,7 +185,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -203,7 +203,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -230,7 +230,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -249,7 +249,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -271,7 +271,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -290,7 +290,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -316,7 +316,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -340,7 +340,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -362,7 +362,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -381,7 +381,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -403,7 +403,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -435,7 +435,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -463,7 +463,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -490,7 +490,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -513,7 +513,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -532,7 +532,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -553,7 +553,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -572,7 +572,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -595,7 +595,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -630,7 +630,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -657,7 +657,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -689,7 +689,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -720,7 +720,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -747,7 +747,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -775,7 +775,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -802,7 +802,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -828,7 +828,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -856,7 +856,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -881,7 +881,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -908,7 +908,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -932,7 +932,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1038,7 +1038,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1071,7 +1071,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1097,7 +1097,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -1270,7 +1270,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1294,7 +1294,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1317,7 +1317,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -1344,7 +1344,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1363,7 +1363,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1428,7 +1428,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1455,7 +1455,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 
@@ -1607,7 +1607,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1688,7 +1688,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1708,7 +1708,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1736,7 +1736,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1849,7 +1849,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1877,7 +1877,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1905,7 +1905,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1932,7 +1932,7 @@ class AbilityEffectComprehensiveTest {
 
             val program = parser.parse(source)
             val result = typeChecker.typeCheck(program)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -1981,7 +1981,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
 
         @Test
@@ -2014,7 +2014,7 @@ class AbilityEffectComprehensiveTest {
 
             val userProgram = parser.parse(Files.readString(userMod))
             val result = typeChecker.typeCheck(userProgram, tempDir)
-            assertNotNull(result.program)
+            assertNotNull(result)
         }
     }
 }

@@ -35,7 +35,7 @@ class DebugIncompleteGetOrElseTest {
         val exception = assertThrows<Exception> {
             val program = parser.parse(code)
             println("Parsed successfully")
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         println("CORRECTLY FAILED with: ${exception.message}")

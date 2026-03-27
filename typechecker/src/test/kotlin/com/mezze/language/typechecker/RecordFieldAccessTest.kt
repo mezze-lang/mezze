@@ -35,7 +35,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing existing field 'x' on closed record")
     }
@@ -48,7 +48,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing multiple existing fields on closed record")
     }
@@ -63,7 +63,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' does not exist on closed record") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -81,7 +81,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: 'substract' is a typo") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'substract' not found") == true, "Error should mention missing field")
         assertTrue(error.message?.contains("Did you mean 'subtract'?") == true, "Error should suggest similar field name")
@@ -96,7 +96,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing existing field on typed closed record")
     }
@@ -112,7 +112,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not in Point type") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -127,7 +127,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing function field and calling it")
     }
@@ -144,7 +144,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: 'multiply' does not exist") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'multiply' not found") == true, "Error should mention missing field")
     }
@@ -159,7 +159,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing existing field 'x' on open record")
     }
@@ -172,7 +172,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing multiple existing fields on open record")
     }
@@ -187,7 +187,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not explicitly declared in open record") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -201,7 +201,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing existing field on typed open record")
     }
@@ -217,7 +217,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not in OpenPoint type") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -230,7 +230,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: open record function can access declared fields")
     }
@@ -244,7 +244,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: 'z' is not declared in the open record parameter") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -261,7 +261,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing nested field on closed records")
     }
@@ -279,7 +279,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' does not exist") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true, "Error should mention missing field 'z', got: ${error.message}")
     }
@@ -296,7 +296,7 @@ class RecordFieldAccessTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Should pass: accessing nested field on open records")
     }
@@ -315,7 +315,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' not declared in open record") {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true,
             "Error should mention missing field 'z', got: ${error.message}")
@@ -333,7 +333,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         // The error context should include available fields
         assertTrue(error.metadata["availableFields"] != null, "Error should include available fields in metadata")
@@ -349,7 +349,7 @@ class RecordFieldAccessTest {
         val program = parser.parse(source)
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertTrue(error.metadata["field"] == "nonexistent", "Error should include the attempted field name")
     }

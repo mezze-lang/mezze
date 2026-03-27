@@ -40,7 +40,7 @@ class PerformerConflictTest {
 
         // This should now correctly fail: we can't apply two handlers to the same single effect usage
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -72,7 +72,7 @@ class PerformerConflictTest {
         val program = parser.parse(source)
 
         // This should succeed - different effects, no conflict
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -93,7 +93,7 @@ class PerformerConflictTest {
         val program = parser.parse(source)
 
         // This should succeed
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 
     @Test
@@ -124,6 +124,6 @@ class PerformerConflictTest {
         val program = parser.parse(source)
 
         // This should succeed - different effects, no conflict
-        typeChecker.typeCheck(program).program
+        typeChecker.typeCheck(program)
     }
 }

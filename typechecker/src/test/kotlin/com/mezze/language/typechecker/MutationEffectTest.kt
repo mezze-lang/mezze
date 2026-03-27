@@ -51,7 +51,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -66,7 +66,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -87,7 +87,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -106,7 +106,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -128,7 +128,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -145,7 +145,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -164,7 +164,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -180,7 +180,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -196,7 +196,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -211,7 +211,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -229,7 +229,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -244,7 +244,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -262,7 +262,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -277,7 +277,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -295,7 +295,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -310,7 +310,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -328,7 +328,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -343,7 +343,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -361,7 +361,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -376,7 +376,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -390,7 +390,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -405,7 +405,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -419,7 +419,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -434,7 +434,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -454,7 +454,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -470,7 +470,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -486,7 +486,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -502,7 +502,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -518,7 +518,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -537,7 +537,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -553,7 +553,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -569,7 +569,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -585,7 +585,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -609,7 +609,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -628,7 +628,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -648,7 +648,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -666,7 +666,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -680,7 +680,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -694,7 +694,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -714,7 +714,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -737,7 +737,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -759,7 +759,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -775,7 +775,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -930,7 +930,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -962,7 +962,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -981,7 +981,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -997,7 +997,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1017,7 +1017,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1036,7 +1036,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1052,7 +1052,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1068,7 +1068,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1083,7 +1083,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1099,7 +1099,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1115,7 +1115,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1131,7 +1131,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -1166,7 +1166,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1194,7 +1194,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1217,7 +1217,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1239,7 +1239,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1266,7 +1266,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -1300,7 +1300,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1325,7 +1325,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1345,7 +1345,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -1371,7 +1371,7 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -1406,6 +1406,6 @@ class MutationEffectTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 }

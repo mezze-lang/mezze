@@ -27,7 +27,7 @@ class DebugTest {
         
         try {
             val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             println("SUCCESS: Type checking passed")
             
             // Add the same assertions as the real test

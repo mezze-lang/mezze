@@ -23,9 +23,9 @@ class ResultModuleTest {
         TestUtils.setupProjectRoot()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {
+    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     @Test

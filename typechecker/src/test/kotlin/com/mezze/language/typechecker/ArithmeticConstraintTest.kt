@@ -23,7 +23,7 @@ class ArithmeticConstraintTest {
         
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             
             // The function should type check successfully
             assertNotNull(typedProgram)
@@ -64,7 +64,7 @@ class ArithmeticConstraintTest {
         
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             
             // The function should type check successfully
             assertNotNull(typedProgram)
@@ -100,7 +100,7 @@ class ArithmeticConstraintTest {
             // This should fail because String doesn't have NumAdd ability
             assertThrows(TypeCheckError::class.java) {
                 val program = parser.parse(code)
-                typeChecker.typeCheck(program).program
+                typeChecker.typeCheck(program)
             }
         } finally {
             // Reset the property
@@ -117,7 +117,7 @@ class ArithmeticConstraintTest {
         
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             
             // Should succeed because Int has NumAdd ability
             assertNotNull(typedProgram)
@@ -153,7 +153,7 @@ class ArithmeticConstraintTest {
         // but we're passing Int (5) and Float (8.6)
         assertThrows(TypeCheckError::class.java) {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

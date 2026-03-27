@@ -55,7 +55,7 @@ class FixtureBasedTypeCheckerTest {
     }
 
     private fun getActualTypes(program: Program, typeChecker: TypeChecker): Map<String, String> {
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         val typeAliases = typeChecker.getTypeAliases()
 
         // Collect type declarations for pretty printing

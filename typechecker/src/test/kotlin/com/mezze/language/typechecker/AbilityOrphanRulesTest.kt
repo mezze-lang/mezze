@@ -56,7 +56,7 @@ class AbilityOrphanRulesTest {
         val result = typeChecker.typeCheck(program)
 
         // Should succeed
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -88,7 +88,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -119,7 +119,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -147,7 +147,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -178,7 +178,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -360,7 +360,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -393,7 +393,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -427,7 +427,7 @@ class AbilityOrphanRulesTest {
         val userProgram = parser.parse(Files.readString(userMod))
         val result = typeChecker.typeCheck(userProgram, tempDir)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -470,7 +470,7 @@ class AbilityOrphanRulesTest {
         val userProgram = parser.parse(Files.readString(userMod))
         val result = typeChecker.typeCheck(userProgram, tempDir)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -532,7 +532,7 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -552,6 +552,6 @@ class AbilityOrphanRulesTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 }

@@ -46,7 +46,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should type check successfully")
 
@@ -66,7 +66,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should type check successfully with polymorphic payloads")
     }
@@ -81,7 +81,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle variants with and without payloads")
     }
@@ -99,7 +99,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should infer p as Bool from true/false patterns")
 
@@ -121,7 +121,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle nested boolean matches")
     }
@@ -138,7 +138,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should create variant union with nested boolean match")
     }
@@ -154,7 +154,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "If-else should create variant union")
 
@@ -173,7 +173,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Top-level if-else should create variant union")
     }
@@ -188,7 +188,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Multiple nested if-else should create unified variant union")
     }
@@ -207,7 +207,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should combine match and if-else variant unions")
     }
@@ -223,7 +223,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle three levels of nesting")
     }
@@ -240,7 +240,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle match inside if-else")
     }
@@ -255,7 +255,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Single variant should type check")
     }
@@ -269,7 +269,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Two variants should create minimal union")
     }
@@ -287,7 +287,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle large variant unions")
     }
@@ -302,7 +302,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Should handle complex nested record payloads")
     }
@@ -314,7 +314,7 @@ class VariantUnionTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         assertNotNull(result, "Same variant in both branches should unify")
     }
@@ -332,7 +332,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -345,7 +345,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -361,7 +361,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -378,7 +378,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -391,7 +391,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -404,7 +404,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -420,7 +420,7 @@ class VariantUnionTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

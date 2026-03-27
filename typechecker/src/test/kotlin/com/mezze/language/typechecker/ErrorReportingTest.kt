@@ -39,8 +39,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles type mismatches gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -59,8 +59,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles closed record constraints gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -78,8 +78,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles function call type mismatches gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -97,8 +97,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles unknown constructors gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -116,8 +116,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles missing record fields gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -136,8 +136,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles pattern match exhaustiveness gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -159,14 +159,14 @@ class ErrorReportingTest {
 
         // Effects without handlers should be valid at type checking level
         // Runtime will handle missing handlers with appropriate errors
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
 
         // The test variable should have the Log effect in its type
-        val testBinding = result.items.find { it is LetBinding && it.variableName == "test" } as? LetBinding
-        assertNotNull(testBinding)
+        val testType = result.getVariableType("test")
+        assertNotNull(testType)
         // The type should indicate it has the Log effect
-        assertTrue(testBinding!!.inferredType.toString().contains("Log"))
+        assertTrue(testType.toString().contains("Log"))
     }
 
     @Test
@@ -179,8 +179,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles circular references gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -198,7 +198,7 @@ class ErrorReportingTest {
 
         // This should actually succeed (partial application) but may fail due to type system limitations
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
             // If it succeeds, that's good
         } catch (e: TypeCheckError) {
             // If it fails, that's also acceptable for this test
@@ -213,8 +213,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles arity mismatches gracefully
         try {
-            val typedProgram2 = typeChecker.typeCheck(program2).program
-            assertNotNull(typedProgram2)
+            val result2 = typeChecker.typeCheck(program2)
+            assertNotNull(result2)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -231,8 +231,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles type annotation mismatches gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -251,9 +251,9 @@ class ErrorReportingTest {
         // For now, just verify that the type checker doesn't crash on this code
         // The specific error detection can be improved later
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
             // If it succeeds, that's fine - the type checker is being permissive
-            assertNotNull(typedProgram)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // If it fails with a type error, that's also fine - it detected the issue
             assertTrue(true)
@@ -271,8 +271,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles multiple errors gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -297,8 +297,8 @@ class ErrorReportingTest {
 
             // Should not throw any exceptions
             assertDoesNotThrow {
-                val typedProgram = typeChecker.typeCheck(program).program
-                assertNotNull(typedProgram)
+                val result = typeChecker.typeCheck(program)
+                assertNotNull(result)
             }
         } finally {
             // Restore original strict mode setting
@@ -323,8 +323,8 @@ class ErrorReportingTest {
 
         // Our permissive type checker handles detailed type mismatches gracefully
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
-            assertNotNull(typedProgram)
+            val result = typeChecker.typeCheck(program)
+            assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
             assertTrue(true)
@@ -345,10 +345,10 @@ class ErrorReportingTest {
         val program = parser.parse(source)
 
         try {
-            val result = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
             println("DEBUG: Wildcard variant test succeeded")
-            val processColorBinding = result.items.find { it is LetBinding && it.variableName == "processColor" } as LetBinding?
-            println("DEBUG: processColor type = ${processColorBinding?.inferredType}")
+            val processColorType = result.getVariableType("processColor")
+            println("DEBUG: processColor type = $processColorType")
         } catch (e: Exception) {
             println("DEBUG: Wildcard variant test failed: ${e.message}")
             fail("Wildcard variant test should succeed: ${e.message}")

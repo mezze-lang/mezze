@@ -14,12 +14,6 @@ import kotlin.io.path.writeText
  */
 class ModuleTypePreservationTest {
 
-    /** Helper to get inferred type of a binding by name from typed program */
-    private fun getBindingType(program: Program, name: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == name }?.inferredType
-    }
-
     @Test
     fun `test module with explicit type annotations exports correctly`(@TempDir tempDir: Path) {
         println("\n========================================")
@@ -51,15 +45,15 @@ class ModuleTypePreservationTest {
 
         try {
             val program = parser.parse(mainSource)
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val result = typeChecker.typeCheck(program, tempDir)
 
             println("\n========================================")
             println("RESULTS:")
             println("========================================\n")
 
-            // Get types from the typed program
-            val simpleIntType = getBindingType(typedProgram, "test_int")
-            val simpleFuncType = getBindingType(typedProgram, "test_func")
+            // Get types from the typed result
+            val simpleIntType = result.getVariableType("test_int")
+            val simpleFuncType = result.getVariableType("test_func")
 
             println("test_int type: ${simpleIntType?.let { prettyPrintType(it) } ?: "null"}")
             println("test_func type: ${simpleFuncType?.let { prettyPrintType(it) } ?: "null"}")
@@ -116,11 +110,11 @@ class ModuleTypePreservationTest {
 
         try {
             val program = parser.parse(mainSource)
-            val typedProgram = typeChecker.typeCheck(program, tempDir).program
+            val result = typeChecker.typeCheck(program, tempDir)
 
-            // Get types from the typed program
-            val testIntType = getBindingType(typedProgram, "test_int")
-            val testFuncType = getBindingType(typedProgram, "test_func")
+            // Get types from the typed result
+            val testIntType = result.getVariableType("test_int")
+            val testFuncType = result.getVariableType("test_func")
 
             println("test_int type: ${testIntType?.let { prettyPrintType(it) } ?: "null"}")
             println("test_func type: ${testFuncType?.let { prettyPrintType(it) } ?: "null"}")
@@ -142,8 +136,8 @@ class ModuleTypePreservationTest {
             assertTrue(testIntType is MezzeType.IntType,
                 "test_int should be Int, got: $typeStr")
 
-            println("✅ VERIFIED: Import is NOT a fresh type variable!")
-            println("✅ Type is correctly preserved as: $typeStr")
+            println("VERIFIED: Import is NOT a fresh type variable!")
+            println("Type is correctly preserved as: $typeStr")
 
         } catch (e: Exception) {
             println("\n========================================")

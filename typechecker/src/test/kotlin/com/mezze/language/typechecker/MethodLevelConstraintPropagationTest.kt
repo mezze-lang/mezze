@@ -41,9 +41,9 @@ class MethodLevelConstraintPropagationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========================================================================

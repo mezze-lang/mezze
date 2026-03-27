@@ -10,28 +10,22 @@ class DebugAddTest {
         val source = "let add = {x, y} -> x + y"
         val parser = MezzeParser()
         val program = parser.parse(source)
-        
+
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         val typeAliases = typeChecker.getTypeAliases()
-        
+
         println("Program: $source")
         println("AST: $program")
         println("Type check result: $result")
-        
-        for (item in result.items) {
-            when (item) {
-                is LetBinding -> {
-                    val typeStr = item.inferredType?.let { 
-                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
-                    } ?: "unknown"
-                    println("Variable '${item.variableName}' has type: $typeStr")
-                    println("Raw type: ${item.inferredType}")
-                }
-                else -> {
-                    // Skip other items
-                }
-            }
+
+        val addType = result.getVariableType("add")
+        if (addType != null) {
+            val typeStr = prettyPrintTypeWithAliases(addType, typeAliases, showExpansion = false)
+            println("Variable 'add' has type: $typeStr")
+            println("Raw type: $addType")
+        } else {
+            println("Variable 'add' type not found in typedModule")
         }
     }
 }

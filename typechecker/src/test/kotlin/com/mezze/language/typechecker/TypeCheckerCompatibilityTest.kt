@@ -34,7 +34,7 @@ class TypeCheckerCompatibilityTest {
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
-        assertNotNull(result.program)
+        assertNotNull(result)
         assertEquals(0, result.monomorphicInstances.size)
     }
 
@@ -51,7 +51,7 @@ class TypeCheckerCompatibilityTest {
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -104,7 +104,7 @@ class TypeCheckerCompatibilityTest {
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -128,7 +128,7 @@ class TypeCheckerCompatibilityTest {
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test

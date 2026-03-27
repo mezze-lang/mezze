@@ -28,7 +28,7 @@ class SimpleEffectPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Just check that it parses and type checks successfully
         assertNotNull(typedProgram)
@@ -48,7 +48,7 @@ class SimpleEffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check that both effects are declared
         assertNotNull(typedProgram)
@@ -76,7 +76,7 @@ class SimpleEffectPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         println("Program items:")
         typedProgram.items.forEachIndexed { index, item ->

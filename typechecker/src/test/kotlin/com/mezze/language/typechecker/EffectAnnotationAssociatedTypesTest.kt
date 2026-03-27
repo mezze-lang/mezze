@@ -30,9 +30,9 @@ class EffectAnnotationAssociatedTypesTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     @Test
@@ -365,7 +365,7 @@ class EffectAnnotationAssociatedTypesTest {
 
         val program = parser.parse(code)
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -385,7 +385,7 @@ class EffectAnnotationAssociatedTypesTest {
 
         val program = parser.parse(code)
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -440,7 +440,7 @@ class EffectAnnotationAssociatedTypesTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error message should mention the type mismatch (Int vs Str)
@@ -464,7 +464,7 @@ class EffectAnnotationAssociatedTypesTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error should indicate type mismatch
@@ -489,7 +489,7 @@ class EffectAnnotationAssociatedTypesTest {
 
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         // Error should indicate type mismatch

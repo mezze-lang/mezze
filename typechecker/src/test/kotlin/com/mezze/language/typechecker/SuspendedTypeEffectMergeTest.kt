@@ -59,7 +59,7 @@ class SuspendedTypeEffectMergeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -99,7 +99,7 @@ class SuspendedTypeEffectMergeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -130,7 +130,7 @@ class SuspendedTypeEffectMergeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -182,7 +182,7 @@ class SuspendedTypeEffectMergeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType
@@ -227,7 +227,7 @@ class SuspendedTypeEffectMergeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
         val fnType = binding.inferredType as MezzeType.FunctionType

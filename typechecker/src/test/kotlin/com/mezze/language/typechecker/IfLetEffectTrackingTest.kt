@@ -28,7 +28,7 @@ class IfLetEffectTrackingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
 
     // ========== BASIC IF-LET TESTS ==========
 

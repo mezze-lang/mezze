@@ -30,7 +30,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val programBinding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -56,7 +56,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val programBinding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -88,7 +88,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val programBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -121,7 +121,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check nested program - should accumulate both Log and Error effects
         val nestedBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
@@ -154,7 +154,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check program has effectful type (SuspendedType)
         val programBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
@@ -202,7 +202,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check program has both effects
         val programBinding = typedProgram.items[3] as com.mezze.language.ast.LetBinding
@@ -252,7 +252,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check program has both effects
         val programBinding = typedProgram.items[4] as com.mezze.language.ast.LetBinding
@@ -301,7 +301,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // Check program has Log effect (SuspendedType)
         val programBinding = typedProgram.items[3] as com.mezze.language.ast.LetBinding
@@ -355,7 +355,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Debug output
         println("DEBUG: typedProgram.items.size = ${typedProgram.items.size}")
@@ -397,7 +397,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val binding = typedProgram.items[0] as com.mezze.language.ast.LetBinding
         val inferredType = binding.inferredType
@@ -421,7 +421,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val binding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
         val inferredType = binding.inferredType

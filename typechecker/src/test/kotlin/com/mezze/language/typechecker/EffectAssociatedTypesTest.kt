@@ -26,9 +26,9 @@ class EffectAssociatedTypesTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): Program {
+    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     @Test
@@ -905,7 +905,7 @@ class EffectAssociatedTypesTest {
 
         val program = parser.parse(code)
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -951,7 +951,7 @@ class EffectAssociatedTypesTest {
 
         val program = parser.parse(code)
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 }

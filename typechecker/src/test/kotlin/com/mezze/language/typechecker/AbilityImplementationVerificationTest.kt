@@ -35,7 +35,7 @@ class AbilityImplementationVerificationTest {
 
         // Should fail because (x + y) > (x - y) is Bool but there's no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("Show") == true, "Error should mention Show ability")
@@ -61,7 +61,7 @@ class AbilityImplementationVerificationTest {
         val program = parser.parse(source)
 
         // Should succeed because impl Show for Bool exists
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         // Just verify it doesn't throw
         assertTrue(typedProgram.items.isNotEmpty())
     }
@@ -81,7 +81,7 @@ class AbilityImplementationVerificationTest {
         val program = parser.parse(source)
 
         // Should succeed because x is polymorphic, not a concrete type
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         assertTrue(typedProgram.items.isNotEmpty())
     }
 
@@ -101,7 +101,7 @@ class AbilityImplementationVerificationTest {
 
         // Should fail because 42 is Int but there's no impl Show for Int
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("Show") == true)
@@ -124,7 +124,7 @@ class AbilityImplementationVerificationTest {
 
         // Should fail because "hello" is String but there's no impl Show for Str
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("Show") == true)
@@ -151,7 +151,7 @@ class AbilityImplementationVerificationTest {
 
         // Inner call true.show {} should fail - no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
 
         assertTrue(exception.message?.contains("Show") == true)

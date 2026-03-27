@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.ast.LetBinding
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -54,11 +53,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -79,11 +75,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -103,11 +96,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.IntType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.IntType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -150,11 +140,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -178,11 +165,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -209,11 +193,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -236,11 +217,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -291,11 +269,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -315,11 +290,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.IntType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.IntType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -343,11 +315,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -359,11 +328,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val resultBinding = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        assertEquals(MezzeType.BoolType, resultBinding!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.BoolType, result.getVariableType("result"))
     }
 
     @Test
@@ -386,14 +352,8 @@ class MethodCallSyntaxTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        assertNotNull(result.program)
-        val r1 = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "r1" }
-        val r2 = result.program!!.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "r2" }
-        assertNotNull(r1)
-        assertNotNull(r2)
-        assertEquals(MezzeType.StringType, r1!!.inferredType)
-        assertEquals(MezzeType.StringType, r2!!.inferredType)
+        assertNotNull(result)
+        assertEquals(MezzeType.StringType, result.getVariableType("r1"))
+        assertEquals(MezzeType.StringType, result.getVariableType("r2"))
     }
 }

@@ -34,9 +34,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Int]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("copy")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
@@ -54,9 +52,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Int]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("extended")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
@@ -75,9 +71,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Int]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("combined")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
@@ -95,9 +89,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Str]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("extended")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.StringType)
     }
@@ -162,9 +154,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Int]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("result")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
@@ -182,9 +172,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [Int]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("nums")
         assertTrue(resultType is MezzeType.SeqType)
         assertTrue((resultType as MezzeType.SeqType).elementType is MezzeType.IntType)
     }
@@ -204,9 +192,7 @@ class SeqSpreadTypeCheckTest {
         assertNotNull(result)
 
         // Result should be [[Int]]
-        val resultType = result.program.items.last().let {
-            (it as com.mezze.language.ast.TopLevelExpression).expression.inferredType
-        }
+        val resultType = result.getVariableType("extended")
         assertTrue(resultType is MezzeType.SeqType)
         val innerType = (resultType as MezzeType.SeqType).elementType
         assertTrue(innerType is MezzeType.SeqType)

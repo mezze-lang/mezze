@@ -33,7 +33,7 @@ x + 10
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -56,7 +56,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -75,7 +75,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -96,7 +96,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -119,7 +119,7 @@ result
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -155,7 +155,7 @@ half
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -188,7 +188,7 @@ intDefault
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -221,7 +221,7 @@ count
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -240,7 +240,7 @@ result
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -262,7 +262,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -294,7 +294,7 @@ let updatedConfig = {...configRecord, timeout = 60, debug = True}
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -317,7 +317,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -339,7 +339,7 @@ result1
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -365,7 +365,7 @@ let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -395,7 +395,7 @@ intResult
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -417,7 +417,7 @@ let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -436,7 +436,7 @@ result1 + 100
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -458,7 +458,7 @@ result
 
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
         assertNotNull(result)
         assertTrue(result.items.isNotEmpty())
     }
@@ -481,7 +481,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -506,7 +506,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -529,7 +529,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -554,7 +554,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -582,7 +582,7 @@ mixedSum1
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -615,7 +615,7 @@ validInt
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -642,7 +642,7 @@ processColor
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -668,7 +668,7 @@ processColor
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -701,7 +701,7 @@ let invalidBase = {...notRecord, x = 10}
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -729,7 +729,7 @@ let invalidBase = {...notRecord, x = 10}
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -753,7 +753,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -775,7 +775,7 @@ y
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -801,7 +801,7 @@ result
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -827,7 +827,7 @@ processColor
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {

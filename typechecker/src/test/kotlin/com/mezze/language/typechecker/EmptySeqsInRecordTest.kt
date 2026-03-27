@@ -30,14 +30,8 @@ class EmptySeqsInRecordTest {
 
         val result = typeChecker.typeCheck(ast)
 
-        // Extract the type of the 'test' expression (last item in the program)
-        val testType = result.program.items.lastOrNull()?.let { item ->
-            when (item) {
-                is com.mezze.language.ast.TopLevelExpression -> item.expression.inferredType
-                is com.mezze.language.ast.LetBinding -> item.inferredType
-                else -> null
-            }
-        }
+        // Extract the type of the 'test' binding
+        val testType = result.getVariableType("test")
 
         val typeInfo = when (testType) {
             is com.mezze.language.ast.MezzeType.RecordType -> {

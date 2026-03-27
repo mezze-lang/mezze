@@ -28,7 +28,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // Extract the type declaration
         val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
@@ -50,7 +50,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // Extract the type declaration
         val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
@@ -88,7 +88,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // This test just verifies typechecking succeeds
         // The actual printing is verified manually

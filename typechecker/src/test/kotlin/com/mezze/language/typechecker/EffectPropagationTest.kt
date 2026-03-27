@@ -46,7 +46,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         // The useDatabase function should be the last item (index 4: Log, Database, Console impl, Postgres impl, useDatabase)
         val useDatabaseDecl = typedProgram.items[4] as LetBinding
@@ -101,7 +101,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val secureQueryDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "secureQuery"
@@ -148,7 +148,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val complexFunctionDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "complexFunction"
@@ -211,7 +211,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val copyFileDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "copyFile"
@@ -260,7 +260,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val partiallyHandledDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "partiallyHandledQuery"
@@ -299,7 +299,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val pureCalculationDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "pureCalculation"
@@ -328,7 +328,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val twiceDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "twice"
@@ -381,7 +381,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"
@@ -432,7 +432,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"
@@ -462,7 +462,7 @@ class EffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val resultDecl = typedProgram.items.find {
             it is LetBinding && it.variableName == "result"

@@ -5,7 +5,7 @@ import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 
 class PolymorphicDebugTest {
-    
+
     @Test
     fun testPolymorphicArithmetic() {
         val testCases = listOf(
@@ -13,7 +13,7 @@ class PolymorphicDebugTest {
             "let addTwo = { x } -> x + x" to "{ x: 'a } with NumAdd 'a -> 'a",
             "let square = { x } -> x * x" to "{ x: 'a } with NumMul 'a -> 'a"
         )
-        
+
         // Test bidirectional detection
         testCases.forEach { (code, _) ->
             val parser = MezzeParser()
@@ -27,35 +27,42 @@ class PolymorphicDebugTest {
                 }
             }
         }
-        
+
         testCases.forEach { (code, expected) ->
             println("=== Testing: $code ===")
             println("Expected: $expected")
-            
+
             val parser = MezzeParser()
             val ast = parser.parse(code)
-            
+
             val typeChecker = TypeChecker()
-            val result = typeChecker.typeCheck(ast).program
+            val result = typeChecker.typeCheck(ast)
             val typeAliases = typeChecker.getTypeAliases()
-            
-            for (item in result.items) {
-                if (item is LetBinding) {
-                    val typeStr = item.inferredType?.let { 
-                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
-                    } ?: "unknown"
-                    println("Actual  : $typeStr")
-                    
-                    // Check if it has the right structure
-                    val hasCorrectStructure = when (item.variableName) {
-                        "complex" -> typeStr.contains("x: 'a, y: 'a") && typeStr.contains("z: ") && typeStr.contains("NumAdd")
-                        "addTwo" -> typeStr.contains("x: 'a") && typeStr.contains("NumAdd") && typeStr.contains("-> 'a")
-                        "square" -> typeStr.contains("x: 'a") && typeStr.contains("NumMul") && typeStr.contains("-> 'a")
-                        else -> false
-                    }
-                    
-                    println("Structure OK: $hasCorrectStructure")
+
+            // Extract the variable name from the code (e.g. "complex", "addTwo", "square")
+            val varName = when {
+                code.contains("complex") -> "complex"
+                code.contains("addTwo") -> "addTwo"
+                code.contains("square") -> "square"
+                else -> null
+            }
+
+            if (varName != null) {
+                val varType = result.getVariableType(varName)
+                val typeStr = varType?.let {
+                    prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false)
+                } ?: "unknown"
+                println("Actual  : $typeStr")
+
+                // Check if it has the right structure
+                val hasCorrectStructure = when (varName) {
+                    "complex" -> typeStr.contains("x: 'a, y: 'a") && typeStr.contains("z: ") && typeStr.contains("NumAdd")
+                    "addTwo" -> typeStr.contains("x: 'a") && typeStr.contains("NumAdd") && typeStr.contains("-> 'a")
+                    "square" -> typeStr.contains("x: 'a") && typeStr.contains("NumMul") && typeStr.contains("-> 'a")
+                    else -> false
                 }
+
+                println("Structure OK: $hasCorrectStructure")
             }
             println()
         }

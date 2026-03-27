@@ -21,7 +21,7 @@ class SeqTypeCheckerTest {
     fun `test empty Seq type inference`() {
         val source = "let empty = []"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -34,7 +34,7 @@ class SeqTypeCheckerTest {
     fun `test integer Seq type inference`() {
         val source = "let numbers = [1, 2, 3, 4, 5]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -47,7 +47,7 @@ class SeqTypeCheckerTest {
     fun `test string Seq type inference`() {
         val source = """let names = ["Alice", "Bob", "Charlie"]"""
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -60,7 +60,7 @@ class SeqTypeCheckerTest {
     fun `test boolean Seq type inference`() {
         val source = "let flags = [True, False, True]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -77,7 +77,7 @@ class SeqTypeCheckerTest {
     fun `test nested Seq type inference`() {
         val source = "let matrix = [[1, 2], [3, 4]]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -93,7 +93,7 @@ class SeqTypeCheckerTest {
         // Let's test basic inference instead
         val source = "let numbers = [1, 2, 3]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
@@ -110,7 +110,7 @@ class SeqTypeCheckerTest {
         // Test basic nested inference instead of explicit annotations
         val source = "let matrix = [[1, 2], [3, 4]]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
@@ -131,7 +131,7 @@ class SeqTypeCheckerTest {
 
         // Arrays must have homogeneous element types - this should fail
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
     
@@ -139,7 +139,7 @@ class SeqTypeCheckerTest {
     fun `test Seq with expression elements`() {
         val source = "let computed = [1 + 2, 3 * 4, 5 - 1]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as MezzeType.SeqType
@@ -157,7 +157,7 @@ class SeqTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         // Check that array literals have proper types
         val bindings = typedProgram.items.filterIsInstance<LetBinding>()
@@ -190,7 +190,7 @@ class SeqTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
         
         val bindings = typedProgram.items.filterIsInstance<LetBinding>()
         
@@ -224,7 +224,7 @@ class SeqTypeCheckerTest {
         // This should either type check successfully or fail with a reasonable error
         // The test verifies that the basic structure is sound
         try {
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             // If it doesn't throw, the basic structure is working
             assertTrue(true)
         } catch (e: TypeCheckError) {

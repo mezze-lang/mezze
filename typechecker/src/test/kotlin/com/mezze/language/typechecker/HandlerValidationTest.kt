@@ -222,7 +222,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram, "Handler order should work correctly")
     }
@@ -248,7 +248,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram)
     }
@@ -318,7 +318,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram)
     }
@@ -367,7 +367,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val typedProgram = typeChecker.typeCheck(program)
 
         assertNotNull(typedProgram)
     }

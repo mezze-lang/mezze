@@ -99,7 +99,7 @@ class QualifiedAbilityImplTest {
 
         // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
-        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
+        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
         assertNotNull(typedProgram)
 
         // After type checking, the impl should have been resolved as an ability impl
@@ -153,7 +153,7 @@ class QualifiedAbilityImplTest {
 
         // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
-        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
+        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
         assertNotNull(typedProgram)
 
         // After type checking, the impl should have been resolved

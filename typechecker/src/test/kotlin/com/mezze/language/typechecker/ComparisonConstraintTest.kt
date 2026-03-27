@@ -50,7 +50,7 @@ class ComparisonConstraintTest {
             println("Parsed program: $program")
             
             println("Type checking...")
-            val typedProgram = typeChecker.typeCheck(program).program
+            val typedProgram = typeChecker.typeCheck(program)
             println("Type checked successfully: $typedProgram")
             
         } catch (e: Exception) {
