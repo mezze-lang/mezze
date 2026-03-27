@@ -35,15 +35,13 @@ class BasicEffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        // The useDatabase function should be the last item (index 2: Log, Database, useDatabase)
-        val useDatabaseDecl = typedProgram.items[2] as LetBinding
+        val useDatabaseType = result.getVariableType("useDatabase")
+        assertNotNull(useDatabaseType)
+        assertTrue(useDatabaseType is MezzeType.FunctionType)
 
-        assertNotNull(useDatabaseDecl.inferredType)
-        assertTrue(useDatabaseDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = useDatabaseDecl.inferredType as MezzeType.FunctionType
+        val functionType = useDatabaseType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         // Should have only Database effect
@@ -64,15 +62,13 @@ class BasicEffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        // The logSomething function should be at index 1
-        val logFunctionDecl = typedProgram.items[1] as LetBinding
+        val logFunctionType = result.getVariableType("logSomething")
+        assertNotNull(logFunctionType)
+        assertTrue(logFunctionType is MezzeType.FunctionType)
 
-        assertNotNull(logFunctionDecl.inferredType)
-        assertTrue(logFunctionDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = logFunctionDecl.inferredType as MezzeType.FunctionType
+        val functionType = logFunctionType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         // Should have Log effect

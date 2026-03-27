@@ -26,24 +26,19 @@ class DoExpressionArithmeticTest {
               let sum = x + y
               sum
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Find the withDo binding
-        val withDoBinding = typedProgram.items.find { 
-            it is com.mezze.language.ast.LetBinding && it.variableName == "withDo" 
-        } as com.mezze.language.ast.LetBinding
-        
-        val functionType = withDoBinding.inferredType as com.mezze.language.ast.MezzeType.FunctionType
+        val result = typeChecker.typeCheck(program)
+
+        val functionType = result.getVariableType("withDo") as com.mezze.language.ast.MezzeType.FunctionType
         val paramType = functionType.paramType as com.mezze.language.ast.MezzeType.RecordType
-        
+
         // Check that x and y have types (could be concrete or type variables)
         val xType = paramType.fields["x"]
         val yType = paramType.fields["y"]
         println("DEBUG: x type: ${com.mezze.language.ast.prettyPrintType(xType!!)}")
         println("DEBUG: y type: ${com.mezze.language.ast.prettyPrintType(yType!!)}")
-        
+
         assertNotNull(xType, "x should have a type")
         assertNotNull(yType, "y should have a type")
     }

@@ -49,14 +49,13 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
-            assertNotNull(typedProgram)
+            assertNotNull(result)
 
-            val ansBinding = typedProgram.items.filterIsInstance<LetBinding>()
-                .find { it.variableName == "ans" }
-            assertNotNull(ansBinding)
-            assertEquals(MezzeType.IntType, ansBinding?.inferredType)
+            val ansType = result.getVariableType("ans")
+            assertNotNull(ansType)
+            assertEquals(MezzeType.IntType, ansType)
 
         } catch (e: Exception) {
             fail("Case 1 should type check successfully: ${e.message}")
@@ -83,7 +82,7 @@ class BidirectionalAbilityInferenceTest {
         // This should fail because y is Int but 10.5 + y requires Float
         assertThrows<TypeCheckError> {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -113,7 +112,7 @@ class BidirectionalAbilityInferenceTest {
         // y is Int (receiver x is Int, so 'a = Int). 10.4 + y fails.
         assertThrows<TypeCheckError> {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
     }
 
@@ -141,9 +140,9 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
-            assertNotNull(typedProgram)
+            assertNotNull(result)
 
         } catch (e: Exception) {
             fail("Multiple Int usages should succeed: ${e.message}")
@@ -169,9 +168,9 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
-            assertNotNull(typedProgram)
+            assertNotNull(result)
 
         } catch (e: Exception) {
             fail("Float usage with Float impl should succeed: ${e.message}")
@@ -197,16 +196,15 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
-            assertNotNull(typedProgram)
+            assertNotNull(result)
 
-            val yBinding = typedProgram.items.filterIsInstance<LetBinding>()
-                .find { it.variableName == "y" }
-            assertNotNull(yBinding)
+            val yType = result.getVariableType("y")
+            assertNotNull(yType)
 
             // y should be Int because receiver x is Int
-            assertEquals(MezzeType.IntType, yBinding?.inferredType,
+            assertEquals(MezzeType.IntType, yType,
                 "y should be Int because receiver x is Int")
 
         } catch (e: Exception) {

@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.typedast.TypedTypeDecl
+import com.mezze.language.typedast.TypedVariantDef
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -28,9 +30,14 @@ class CompleteTypeInferenceTest {
         return result.getVariableType(varName)
     }
 
-    private fun getTypeDeclaration(result: TypeCheckResult, typeName: String): TypeDeclaration? {
-        return result.program.items.filterIsInstance<TypeDeclaration>()
-            .find { it.name == typeName }
+    /**
+     * Helper to retrieve a type declaration by name from the TypedModule.
+     * Returns a helper object that mimics the old TypeDeclaration.inferredType API.
+     */
+    private fun getTypeDeclaration(result: TypeCheckResult, typeName: String): TypedTypeDecl? {
+        return result.typedModule?.decls
+            ?.filterIsInstance<TypedTypeDecl>()
+            ?.find { it.name == typeName }
     }
 
     @Test
@@ -61,12 +68,12 @@ class CompleteTypeInferenceTest {
         // Verify Shape type definition has all constructors
         val shapeTypeDecl = getTypeDeclaration(result,"Shape")
         assertNotNull(shapeTypeDecl)
-        assertTrue(shapeTypeDecl.inferredType is MezzeType.VariantType)
-        val shapeVariantType = shapeTypeDecl.inferredType as MezzeType.VariantType
-        assertEquals(3, shapeVariantType.constructors.size)
-        assertTrue(shapeVariantType.constructors.containsKey("Circle"))
-        assertTrue(shapeVariantType.constructors.containsKey("Rectangle"))
-        assertTrue(shapeVariantType.constructors.containsKey("Triangle"))
+        assertTrue(shapeTypeDecl.definition is TypedVariantDef)
+        val shapeVariantDef = shapeTypeDecl.definition as TypedVariantDef
+        assertEquals(3, shapeVariantDef.constructors.size)
+        assertTrue(shapeVariantDef.constructors.containsKey("Circle"))
+        assertTrue(shapeVariantDef.constructors.containsKey("Rectangle"))
+        assertTrue(shapeVariantDef.constructors.containsKey("Triangle"))
 
         // Verify calculateArea function type
         val calculateAreaType = getVariableType(result,"calculateArea")

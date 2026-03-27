@@ -55,10 +55,9 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val testFnBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val testFnType = testFnBinding.inferredType
+        val testFnType = result.getVariableType("testFn")
 
         // Should be a FunctionType with FileSystem effect and performed marker
         assertTrue(testFnType is MezzeType.FunctionType, "Expected FunctionType but got ${testFnType!!::class.simpleName}")
@@ -94,10 +93,9 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val getResultBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val getResultType = getResultBinding.inferredType
+        val getResultType = result.getVariableType("getResult")
 
         // Should be a FunctionType with performed marker (<*>)
         // Note: Lambda unwraps SuspendedType into the function's effect row
@@ -143,19 +141,17 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // step1 should be a function with FileSystem remaining + <*>
-        val step1Binding = typedProgram.items[typedProgram.items.size - 2] as com.mezze.language.ast.LetBinding
-        val step1Type = step1Binding.inferredType
+        val step1Type = result.getVariableType("step1")
         assertTrue(step1Type is MezzeType.FunctionType)
         val step1FnType = step1Type as MezzeType.FunctionType
         assertEquals(setOf("FileSystem"), step1FnType.effects!!.effects)
         assertTrue(step1FnType.effects!!.performed)
 
         // step2 should be a function with all effects handled + <*>
-        val step2Binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val step2Type = step2Binding.inferredType
+        val step2Type = result.getVariableType("step2")
         assertTrue(step2Type is MezzeType.FunctionType)
         val step2FnType = step2Type as MezzeType.FunctionType
         assertTrue(step2FnType.effects!!.effects.isEmpty())
@@ -183,10 +179,9 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
-        val resultBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val resultType = resultBinding.inferredType
+        val resultType = result.getVariableType("result")
 
         // Should be FunctionType with no effects
         assertTrue(resultType is MezzeType.FunctionType)
@@ -218,11 +213,10 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // funcRef should be FunctionType with FileSystem effect and performed marker
-        val funcRefBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val funcRefType = funcRefBinding.inferredType
+        val funcRefType = result.getVariableType("funcRef")
         assertTrue(funcRefType is MezzeType.FunctionType)
         assertNotNull((funcRefType as MezzeType.FunctionType).effects)
         assertEquals(setOf("FileSystem"), funcRefType.effects!!.effects)
@@ -253,22 +247,22 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program).program
+        val result = typeChecker.typeCheck(program)
 
         // step1: B, C remain
-        val step1Type = (typedProgram.items[typedProgram.items.size - 3] as com.mezze.language.ast.LetBinding).inferredType
+        val step1Type = result.getVariableType("step1")
         assertTrue(step1Type is MezzeType.FunctionType)
         assertEquals(setOf("B", "C"), (step1Type as MezzeType.FunctionType).effects!!.effects)
         assertTrue(step1Type.effects!!.performed)
 
         // step2: C remains
-        val step2Type = (typedProgram.items[typedProgram.items.size - 2] as com.mezze.language.ast.LetBinding).inferredType
+        val step2Type = result.getVariableType("step2")
         assertTrue(step2Type is MezzeType.FunctionType)
         assertEquals(setOf("C"), (step2Type as MezzeType.FunctionType).effects!!.effects)
         assertTrue(step2Type.effects!!.performed)
 
         // step3: all handled
-        val step3Type = (typedProgram.items.last() as com.mezze.language.ast.LetBinding).inferredType
+        val step3Type = result.getVariableType("step3")
         assertTrue(step3Type is MezzeType.FunctionType)
         assertTrue((step3Type as MezzeType.FunctionType).effects!!.effects.isEmpty())
         assertTrue(step3Type.effects!!.performed)

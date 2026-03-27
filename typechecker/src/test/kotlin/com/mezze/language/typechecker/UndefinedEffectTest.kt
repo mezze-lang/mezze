@@ -22,12 +22,6 @@ class UndefinedEffectTest {
         typeChecker = TypeChecker()
     }
 
-    /** Helper to get inferred type of a binding by name from typed program */
-    private fun getBindingType(program: Program, name: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == name }?.inferredType
-    }
-
     @Test
     fun `test using undefined effect should error`() {
         val source = """
@@ -36,7 +30,7 @@ class UndefinedEffectTest {
 
         try {
             val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
             // If we get here, the typechecker is being too permissive
             println("⚠️  WARNING: TypeChecker allowed undefined effect 'UndefinedEffect'")
@@ -65,9 +59,9 @@ class UndefinedEffectTest {
 
         try {
             val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program).program
+            val result = typeChecker.typeCheck(program)
 
-            val noiseAddType = getBindingType(typedProgram, "noise_add")
+            val noiseAddType = result.getVariableType("noise_add")
 
             println("noise_add type: ${noiseAddType?.let { prettyPrintType(it) } ?: "null"}")
 
