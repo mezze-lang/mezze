@@ -18,9 +18,9 @@ class LetDestructuringTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========== TOP-LEVEL RECORD DESTRUCTURING ==========
@@ -33,8 +33,8 @@ class LetDestructuringTest {
             let sum = x + y
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -45,8 +45,8 @@ class LetDestructuringTest {
             let result = a + b + c
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -57,8 +57,8 @@ class LetDestructuringTest {
             let sum = x + y
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== DO-BLOCK RECORD DESTRUCTURING ==========
@@ -74,8 +74,8 @@ class LetDestructuringTest {
                 x + y
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -90,8 +90,8 @@ class LetDestructuringTest {
                 a + b + c + d
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== VARIANT DESTRUCTURING ==========
@@ -109,8 +109,8 @@ class LetDestructuringTest {
             let result = value
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -121,8 +121,8 @@ class LetDestructuringTest {
             let result = c
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== DESTRUCTURING WITH RENAMED BINDINGS ==========
@@ -135,8 +135,8 @@ class LetDestructuringTest {
             let sum = myX + myY
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== TYPE INFERENCE ==========
@@ -151,8 +151,8 @@ class LetDestructuringTest {
             let notActive = if active then False else True
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== ERROR CASES ==========
@@ -197,8 +197,8 @@ class LetDestructuringTest {
         """.trimIndent()
 
         // Should pass because ... explicitly ignores extra fields
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -210,8 +210,8 @@ class LetDestructuringTest {
         """.trimIndent()
 
         // Should pass because all fields are destructured
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -240,8 +240,8 @@ class LetDestructuringTest {
         """.trimIndent()
 
         // Should pass because ... ignores b and c
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -272,8 +272,8 @@ class LetDestructuringTest {
             let result = int::to_str { n = x + y }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -286,8 +286,8 @@ class LetDestructuringTest {
             let result = processPoint { point = { x = 3, y = 4 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -303,7 +303,7 @@ class LetDestructuringTest {
             let test = handleResult { r = ok }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 }

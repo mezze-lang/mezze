@@ -35,15 +35,15 @@ class ComprehensivePatternMatchingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
@@ -66,8 +66,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe { n = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -80,8 +80,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_small { n = 2 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -95,8 +95,8 @@ class ComprehensivePatternMatchingTest {
             let result = classify { n = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -113,8 +113,8 @@ class ComprehensivePatternMatchingTest {
             let result = http_status { code = 404 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -132,8 +132,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe_float { x = 0.0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -148,8 +148,8 @@ class ComprehensivePatternMatchingTest {
             let result = identify_constant { x = 3.14159 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -162,8 +162,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_special { x = 1.0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -181,8 +181,8 @@ class ComprehensivePatternMatchingTest {
             let result = greet { name = "Alice" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -195,8 +195,8 @@ class ComprehensivePatternMatchingTest {
             let result = check_empty { s = "" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -211,8 +211,8 @@ class ComprehensivePatternMatchingTest {
             let result = parse_command { cmd = "help" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -226,8 +226,8 @@ class ComprehensivePatternMatchingTest {
             let result = parse_yes_no { input = "yes" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -244,8 +244,8 @@ class ComprehensivePatternMatchingTest {
             let result = bool_to_str { b = True }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -258,8 +258,8 @@ class ComprehensivePatternMatchingTest {
             let result = negate_string { b = False }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -273,8 +273,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe { flag = True, verbose = True }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -294,8 +294,8 @@ class ComprehensivePatternMatchingTest {
             let result = unwrap_or { opt = Some { val = 42 }, default = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -309,8 +309,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_ok { result = Ok { val = 42 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -326,8 +326,8 @@ class ComprehensivePatternMatchingTest {
             let result = opposite { dir = North }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -344,8 +344,8 @@ class ComprehensivePatternMatchingTest {
             let result = handle_nested { opt = Some { val = Some { val = 42 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -362,8 +362,8 @@ class ComprehensivePatternMatchingTest {
             let result = get_name { person = { name = "Alice" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -376,8 +376,8 @@ class ComprehensivePatternMatchingTest {
             let result = get_sum { point = { x = 3, y = 4 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -390,8 +390,8 @@ class ComprehensivePatternMatchingTest {
             let result = swap { point = { x = 1, y = 2 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -404,8 +404,8 @@ class ComprehensivePatternMatchingTest {
             let result = get_name_open { data = { name = "Alice", age = 30, city = "NYC" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -421,8 +421,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe_status { response = { status = 200 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -439,8 +439,8 @@ class ComprehensivePatternMatchingTest {
             let result = safe_divide { a = 10, b = 2 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -452,8 +452,8 @@ class ComprehensivePatternMatchingTest {
             let result = identity { x = 42 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -466,8 +466,8 @@ class ComprehensivePatternMatchingTest {
             let result = double_unless_zero { x = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -485,8 +485,8 @@ class ComprehensivePatternMatchingTest {
             let result = sign { n = -5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -502,8 +502,8 @@ class ComprehensivePatternMatchingTest {
             let result = classify_point { point = { x = 1, y = 1 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -518,8 +518,8 @@ class ComprehensivePatternMatchingTest {
             let result = special_case { n = 0, debug = True }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -537,8 +537,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_vowel { c = "e" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -552,8 +552,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_primary { color = Red }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -574,8 +574,8 @@ class ComprehensivePatternMatchingTest {
             let result = classify { x = 0, y = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -595,8 +595,8 @@ class ComprehensivePatternMatchingTest {
             let result = json_type_name { json = JString { value = "hello" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -612,8 +612,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_zero { expr = Num { value = 0 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -629,8 +629,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe_state { state = Loading }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -691,8 +691,8 @@ class ComprehensivePatternMatchingTest {
         """.trimIndent()
 
         // This should pass - has wildcard as catch-all
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -712,8 +712,8 @@ class ComprehensivePatternMatchingTest {
         """.trimIndent()
 
         // This should pass - has wildcard
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -735,8 +735,8 @@ class ComprehensivePatternMatchingTest {
             let result = always_zero { n = 42 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -748,8 +748,8 @@ class ComprehensivePatternMatchingTest {
             let result = identity { n = 42 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -783,8 +783,8 @@ class ComprehensivePatternMatchingTest {
             let result: Str = classify { n = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -798,8 +798,8 @@ class ComprehensivePatternMatchingTest {
             let result: Int = fibonacci_base { n = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -817,8 +817,8 @@ class ComprehensivePatternMatchingTest {
             let result = classify_age { person = { age = 25 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -831,8 +831,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_valid_rectangle { rect = { width = 10, height = 20 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -845,8 +845,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_square { rect = { width = 10, height = 10 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -859,8 +859,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_admin { user = { name = "Alice", role = "admin", id = 1 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -878,8 +878,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_positive_some { opt = Some { val = 42 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -893,8 +893,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_valid_range { range = Range { min = 1, max = 10 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -907,8 +907,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_above_threshold { opt = Some { val = 100 }, threshold = 50 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -925,8 +925,8 @@ class ComprehensivePatternMatchingTest {
             let result = get_x_or_zero { opt = Some { val = { x = 10, y = 20 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -940,8 +940,8 @@ class ComprehensivePatternMatchingTest {
             let result = get_if_positive { opt = Some { val = { x = 5, y = 10 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -956,8 +956,8 @@ class ComprehensivePatternMatchingTest {
             let result = describe_shape { shape = Circle { radius = 5 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -971,8 +971,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_origin_point { opt = Some { val = { x = 0, y = 0 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -988,8 +988,8 @@ class ComprehensivePatternMatchingTest {
             let result = handle_result { res = Ok { val = Some { val = 42 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -1008,8 +1008,8 @@ class ComprehensivePatternMatchingTest {
             let result = classify { point = { x = 0, y = 0 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -1022,8 +1022,8 @@ class ComprehensivePatternMatchingTest {
             let result = is_pythagorean { triple = { a = 3, b = 4, c = 5 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -1044,8 +1044,8 @@ class ComprehensivePatternMatchingTest {
             let result = deep_unwrap { opt = Some { val = Some { val = 99 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -1060,8 +1060,8 @@ class ComprehensivePatternMatchingTest {
             let result = handle { data = Ok { val = { status = 200 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test

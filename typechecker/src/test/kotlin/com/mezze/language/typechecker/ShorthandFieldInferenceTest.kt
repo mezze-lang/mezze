@@ -17,28 +17,27 @@ import kotlin.test.assertTrue
  */
 class ShorthandFieldInferenceTest {
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast).program
+        return typeChecker.typeCheck(ast)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     private fun assertTypeChecks(code: String, variableName: String, expectedType: String) {
-        val program = parseAndTypeCheck(code)
-        val actualType = getVariableType(program, variableName)
+        val result = parseAndTypeCheck(code)
+        val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
         assertEquals(expectedType, prettyPrintType(actualType))
     }
 
     private fun assertTypeContains(code: String, variableName: String, expectedSubstring: String) {
-        val program = parseAndTypeCheck(code)
-        val actualType = getVariableType(program, variableName)
+        val result = parseAndTypeCheck(code)
+        val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
         val typeStr = prettyPrintType(actualType)
         assertTrue(typeStr.contains(expectedSubstring), "Expected type to contain '$expectedSubstring' but got: $typeStr")
@@ -204,8 +203,8 @@ class ShorthandFieldInferenceTest {
             tree_map
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val actualType = getVariableType(program, "tree_map")
+        val result = parseAndTypeCheck(code)
+        val actualType = getVariableType(result, "tree_map")
         assertNotNull(actualType, "Variable 'tree_map' not found")
         val typeStr = prettyPrintType(actualType)
 

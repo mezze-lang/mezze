@@ -36,15 +36,15 @@ class DestructuringRenameTypeCheckerTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
@@ -67,8 +67,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = myX + y
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -80,8 +80,8 @@ class DestructuringRenameTypeCheckerTest {
                 let isAdult = personAge > 18
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -92,8 +92,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum: Int = a + b
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -104,8 +104,8 @@ class DestructuringRenameTypeCheckerTest {
                 let uppercased = msg
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -116,8 +116,8 @@ class DestructuringRenameTypeCheckerTest {
                 let bothActive = if isEnabled then isVerbose else False
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -136,8 +136,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum = a + b + c
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -148,8 +148,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = first + middle + third
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -160,8 +160,8 @@ class DestructuringRenameTypeCheckerTest {
                 let canVote = years >= 18
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -172,8 +172,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum = first + second
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -193,8 +193,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = process { data = { value = 21 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -206,8 +206,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = swap { point = { x = 1, y = 2 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -220,8 +220,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = describe { data = { status = 200, body = "ok" } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -234,8 +234,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = handle { response = { status = 200, data = 42 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -249,8 +249,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = categorize { item = { category = "food", price = 10 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -271,8 +271,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = classify { person = { age = 25 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -285,8 +285,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = isValidRect { rect = { width = 10, height = 20 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -299,8 +299,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = isSquare { rect = { width = 5, height = 5 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -313,8 +313,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = isPythagorean { triple = { a = 3, b = 4, c = 5 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -329,8 +329,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = classifyAge { person = { age = 70 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -349,8 +349,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum = v + e
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -361,8 +361,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = deepValue * 2
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -373,8 +373,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum = px + y
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -386,8 +386,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = process { data = { config = { port = 3000, host = "localhost" } } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -408,8 +408,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = unwrap { opt = Some { val = 42 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -422,8 +422,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = process { result = Ok { val = 100 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -436,8 +436,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = getX { opt = Some { val = { x = 10, y = 20 } } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -451,8 +451,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = getIfPositive { opt = Some { val = 42 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -466,8 +466,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = isValidRange { range = Range { min = 1, max = 10 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -488,8 +488,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = compute {}
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -504,8 +504,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = process {}
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -518,8 +518,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = transform {}
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -539,8 +539,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = processPoint { point = { x = 6, y = 7 } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -553,8 +553,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = v1 + v2
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -569,8 +569,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = process { flag = True }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -583,8 +583,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = newX
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -598,8 +598,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = handleResponse { response = Ok { val = { status = 200, data = 42 } } }
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 
@@ -676,8 +676,8 @@ class DestructuringRenameTypeCheckerTest {
                 let sum = x + y
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -688,8 +688,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = theValue * 2
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -700,8 +700,8 @@ class DestructuringRenameTypeCheckerTest {
                 let fullName = thePersonsFirstName
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
 
         @Test
@@ -713,8 +713,8 @@ class DestructuringRenameTypeCheckerTest {
                 let result = k
             """.trimIndent()
 
-            val program = parseAndTypeCheck(code)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(code)
+            assertNotNull(result)
         }
     }
 }

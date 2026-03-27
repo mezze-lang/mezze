@@ -41,11 +41,8 @@ class ScopedEffectsComprehensiveTest {
         }
     }
 
-    private fun getVariableType(program: Program, variableName: String): MezzeType? {
-        return program.items
-            .filterIsInstance<LetBinding>()
-            .find { it.variableName == variableName }
-            ?.inferredType
+    private fun getVariableType(result: TypeCheckResult, variableName: String): MezzeType? {
+        return result.getVariableType(variableName)
     }
 
     private fun getFunctionEffects(type: MezzeType?): Set<String>? {
@@ -93,15 +90,14 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // x should have DB effect
-        val xType = getVariableType(program, "x") as MezzeType.FunctionType
+        val xType = getVariableType(result,"x") as MezzeType.FunctionType
         assertNotNull(xType.effects)
         assertTrue(xType.effects!!.effects.contains("DB"), "x should have DB effect")
 
         // y should have IO effect (from initialize_scope) but NOT DB (handled)
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         assertTrue(yType.effects!!.effects.contains("IO"), "y should have IO effect from initialize_scope")
         assertFalse(yType.effects!!.effects.contains("DB"), "y should NOT have DB effect (handled)")
@@ -136,10 +132,9 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // y should have IO effect (from finalize_scope) but NOT DB (handled)
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         assertTrue(yType.effects!!.effects.contains("IO"), "y should have IO effect from finalize_scope")
         assertFalse(yType.effects!!.effects.contains("DB"), "y should NOT have DB effect (handled)")
@@ -185,10 +180,9 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // y should have both Log (from initialize_scope) and Metrics (from finalize_scope)
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         assertTrue(yType.effects!!.effects.contains("Log"), "y should have Log effect from initialize_scope")
         assertTrue(yType.effects!!.effects.contains("Metrics"), "y should have Metrics effect from finalize_scope")
@@ -224,10 +218,9 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // y should have IO effect (from query operation)
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         assertTrue(yType.effects!!.effects.contains("IO"), "y should have IO effect from query operation")
     }
@@ -283,10 +276,9 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // y should have Log, Metrics, and IO - but NOT DB
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         val effects = yType.effects!!.effects
         assertTrue(effects.contains("Log"), "y should have Log effect from initialize_scope")
@@ -315,7 +307,7 @@ class ScopedEffectsComprehensiveTest {
 
         // Should not throw - scope.connection_id is accessible
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -337,7 +329,7 @@ class ScopedEffectsComprehensiveTest {
 
         // Should not throw - scope.connection_id is accessible in finalize_scope
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -407,7 +399,7 @@ class ScopedEffectsComprehensiveTest {
 
         // Should not throw - scope.id is Int, scope.name is String
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -578,15 +570,14 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        val program = result.program
 
         // x should have DB effect
-        val xType = getVariableType(program, "x") as MezzeType.FunctionType
+        val xType = getVariableType(result,"x") as MezzeType.FunctionType
         assertNotNull(xType.effects)
         assertTrue(xType.effects!!.effects.contains("DB"), "x should have DB effect")
 
         // y should have IO effect (from scoped lifecycle) but NOT DB (handled)
-        val yType = getVariableType(program, "y") as MezzeType.FunctionType
+        val yType = getVariableType(result,"y") as MezzeType.FunctionType
         assertNotNull(yType.effects)
         assertTrue(yType.effects!!.effects.contains("IO"), "y should have IO effect from lifecycle")
         assertFalse(yType.effects!!.effects.contains("DB"), "y should NOT have DB effect (handled)")
@@ -610,7 +601,7 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -628,7 +619,7 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     @Test
@@ -657,7 +648,7 @@ class ScopedEffectsComprehensiveTest {
         """.trimIndent()
 
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -796,6 +787,6 @@ class ScopedEffectsComprehensiveTest {
 
         // Should NOT throw - scope.pool and scope.connection are valid
         val result = typeCheck(source)
-        assertNotNull(result.program)
+        assertNotNull(result)
     }
 }

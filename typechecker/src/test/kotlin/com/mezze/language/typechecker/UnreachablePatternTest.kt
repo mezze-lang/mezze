@@ -30,15 +30,15 @@ class UnreachablePatternTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
         return error

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class RestrictiveSpreadTest {
@@ -21,9 +22,9 @@ class RestrictiveSpreadTest {
         typeChecker = TypeChecker()
     }
     
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
     
     @Test
@@ -35,7 +36,7 @@ class RestrictiveSpreadTest {
         
         // This should type check successfully
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
     
     @Test
@@ -74,7 +75,7 @@ class RestrictiveSpreadTest {
         
         // This should type check successfully
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
     
     @Test
@@ -100,7 +101,7 @@ class RestrictiveSpreadTest {
         
         // This should type check successfully
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
     
     @Test
@@ -113,7 +114,7 @@ class RestrictiveSpreadTest {
 
         // This should type check successfully
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     // =========================================================================
@@ -129,7 +130,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -141,7 +142,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -153,7 +154,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -179,7 +180,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -192,7 +193,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -206,7 +207,7 @@ class RestrictiveSpreadTest {
 
         // Should type check - custom should have retries field from spread
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -219,7 +220,7 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -230,6 +231,6 @@ class RestrictiveSpreadTest {
         """.trimIndent()
 
         val result = parseAndTypeCheck(code)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result)
     }
 }

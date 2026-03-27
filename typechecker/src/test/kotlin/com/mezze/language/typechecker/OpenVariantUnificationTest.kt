@@ -27,16 +27,15 @@ class OpenVariantUnificationTest {
         TypeChecker.clearCache()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast).program
+        return typeChecker.typeCheck(ast)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     private fun assertTypeChecks(code: String) {
@@ -56,11 +55,11 @@ class OpenVariantUnificationTest {
     @Test
     fun `bare variant constructor should be inferred as closed variant`() {
         // When you write just `Info`, it should be `| Info |` not `| Info, ... |`
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             let x = Info
         """.trimIndent())
 
-        val xType = getVariableType(program, "x")
+        val xType = getVariableType(result, "x")
         assertNotNull(xType, "x should have a type")
 
         // The type should be a closed variant containing just Info
@@ -74,11 +73,11 @@ class OpenVariantUnificationTest {
     @Test
     fun `bare variant with payload should be inferred as closed variant`() {
         // Note: Using MyVariant instead of Some because Some is a built-in for Option
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             let x = MyVariant { val = 42 }
         """.trimIndent())
 
-        val xType = getVariableType(program, "x")
+        val xType = getVariableType(result, "x")
         assertNotNull(xType, "x should have a type")
 
         assertTrue(xType is MezzeType.VariantType, "x should be a variant type, but got: ${xType?.javaClass?.simpleName}")
@@ -235,13 +234,13 @@ class OpenVariantUnificationTest {
 
     @Test
     fun `match expression result with multiple variants should be closed`() {
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             let x = match True is
                 True -> Left { val = 1 }
                 False -> Right { val = "hello" }
         """.trimIndent())
 
-        val xType = getVariableType(program, "x")
+        val xType = getVariableType(result, "x")
         assertNotNull(xType, "x should have a type")
         assertTrue(xType is MezzeType.VariantType, "x should be a variant type")
         val variantType = xType as MezzeType.VariantType
@@ -324,7 +323,7 @@ class OpenVariantUnificationTest {
 
     @Test
     fun `if-then-else with different variant constructors should merge`() {
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             type MyResult = | Success { value: Int }, Failure { error: Str } |
 
             let createResult = { success: Bool, value: Int, error: Str } ->
@@ -334,10 +333,9 @@ class OpenVariantUnificationTest {
         """.trimIndent())
 
         // The function should have the merged variant type
-        val fn = program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "createResult" }
-        assertNotNull(fn, "createResult should exist")
-        assertTrue(fn.inferredType is MezzeType.FunctionType)
+        val fnType = result.getVariableType("createResult")
+        assertNotNull(fnType, "createResult should exist")
+        assertTrue(fnType is MezzeType.FunctionType)
     }
 
     @Test
@@ -700,11 +698,11 @@ class OpenVariantUnificationTest {
 
     @Test
     fun `anonymous constructor creates open variant`() {
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             let x = CustomStatus
         """.trimIndent())
 
-        val xType = getVariableType(program, "x")
+        val xType = getVariableType(result, "x")
         assertNotNull(xType)
         assertTrue(xType is MezzeType.VariantType)
         val variantType = xType as MezzeType.VariantType
@@ -713,11 +711,11 @@ class OpenVariantUnificationTest {
 
     @Test
     fun `anonymous constructor with payload works`() {
-        val program = parseAndTypeCheck("""
+        val result = parseAndTypeCheck("""
             let x = CustomData { value = 42, name = "test" }
         """.trimIndent())
 
-        val xType = getVariableType(program, "x")
+        val xType = getVariableType(result, "x")
         assertNotNull(xType)
         assertTrue(xType is MezzeType.VariantType)
     }

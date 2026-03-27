@@ -15,9 +15,8 @@ class FractionDebugTest {
         parser = MezzeParser()
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     @Test
@@ -27,9 +26,9 @@ class FractionDebugTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedResult = typeChecker.typeCheck(ast)
 
-        val thirdType = getVariableType(typedProgram, "third")
+        val thirdType = getVariableType(typedResult, "third")
         println("third type: $thirdType")
         
         // Should be FracType

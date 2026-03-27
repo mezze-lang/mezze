@@ -17,21 +17,20 @@ import kotlin.test.assertNotNull
  */
 class OpenVariantTypeAliasTest {
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast).program
+        return typeChecker.typeCheck(ast)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     private fun assertTypeChecks(code: String, variableName: String, expectedType: String) {
-        val program = parseAndTypeCheck(code)
-        val actualType = getVariableType(program, variableName)
+        val result = parseAndTypeCheck(code)
+        val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
         assertEquals(expectedType, prettyPrintType(actualType))
     }
@@ -55,8 +54,8 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val colorType = program.items.filterIsInstance<TypeDeclaration>()
+        val result = parseAndTypeCheck(code)
+        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
             .find { it.name == "Color" }?.inferredType
 
         assertNotNull(colorType)
@@ -71,8 +70,8 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val colorType = program.items.filterIsInstance<TypeDeclaration>()
+        val result = parseAndTypeCheck(code)
+        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
             .find { it.name == "Color" }?.inferredType
 
         assertNotNull(colorType)
@@ -89,8 +88,8 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val colorType = program.items.filterIsInstance<TypeDeclaration>()
+        val result = parseAndTypeCheck(code)
+        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
             .find { it.name == "Color" }?.inferredType as? MezzeType.VariantType
 
         assertNotNull(colorType)
@@ -104,8 +103,8 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val colorType = program.items.filterIsInstance<TypeDeclaration>()
+        val result = parseAndTypeCheck(code)
+        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
             .find { it.name == "Color" }?.inferredType as? MezzeType.VariantType
 
         assertNotNull(colorType)

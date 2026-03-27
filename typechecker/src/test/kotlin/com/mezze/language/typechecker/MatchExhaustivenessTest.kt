@@ -17,9 +17,9 @@ class MatchExhaustivenessTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========== EXHAUSTIVE CASES (SHOULD PASS) ==========
@@ -36,8 +36,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - all constructors covered
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -51,8 +51,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - all constructors covered via multiple patterns
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -67,8 +67,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers remaining cases
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -83,8 +83,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers all conditional cases
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -99,8 +99,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - all cases covered (conditional + fallback + separate)
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== NON-EXHAUSTIVE CASES (SHOULD FAIL) ==========
@@ -205,8 +205,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers remaining cases (treating as closed variant for now)
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -243,8 +243,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - all Active cases covered by guards, others explicit
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -260,8 +260,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - all Click/Hover ranges covered, Scroll explicit
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -298,8 +298,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers edge cases
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -315,8 +315,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - Success fully covered by guards, others explicit
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== EDGE CASES ==========
@@ -333,8 +333,8 @@ class MatchExhaustivenessTest {
         """.trimIndent()
 
         // Should not throw - single constructor fully covered
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test

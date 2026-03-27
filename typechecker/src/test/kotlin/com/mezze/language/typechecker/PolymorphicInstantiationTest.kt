@@ -33,16 +33,13 @@ class PolymorphicInstantiationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {
+    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getBindingType(program: com.mezze.language.ast.Program, name: String): MezzeType? {
-        val binding = program.items.filterIsInstance<LetBinding>().find {
-            it.variableName == name
-        }
-        return binding?.inferredType
+    private fun getBindingType(result: com.mezze.language.ast.TypeCheckResult, name: String): MezzeType? {
+        return result.getVariableType(name)
     }
 
     private fun getAbilityConstraintCount(type: MezzeType?): Int {
@@ -70,10 +67,10 @@ class PolymorphicInstantiationTest {
             let x = sum
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val sumType = getBindingType(program, "sum")
-        val xType = getBindingType(program, "x")
+        val sumType = getBindingType(result, "sum")
+        val xType = getBindingType(result, "x")
 
         // Both should have exactly one NumAdd constraint
         assertEquals(1, getAbilityConstraintCount(sumType),
@@ -95,11 +92,11 @@ class PolymorphicInstantiationTest {
             let z = y
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
         // All should have exactly one NumAdd constraint
         for (name in listOf("sum", "x", "y", "z")) {
-            val type = getBindingType(program, name)
+            val type = getBindingType(result, name)
             assertEquals(1, getAbilityConstraintCount(type),
                 "$name should have exactly 1 ability constraint")
             assertEquals(listOf("NumAdd"), getAbilityConstraintNames(type),
@@ -114,10 +111,10 @@ class PolymorphicInstantiationTest {
             let x = compare
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val compareType = getBindingType(program, "compare")
-        val xType = getBindingType(program, "x")
+        val compareType = getBindingType(result, "compare")
+        val xType = getBindingType(result, "x")
 
         // Both should have Ord constraint
         assertEquals(1, getAbilityConstraintCount(compareType))
@@ -132,9 +129,9 @@ class PolymorphicInstantiationTest {
             let x = equal
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val xType = getBindingType(program, "x")
+        val xType = getBindingType(result, "x")
         assertEquals(1, getAbilityConstraintCount(xType))
         assertEquals(listOf("Eq"), getAbilityConstraintNames(xType))
     }
@@ -150,10 +147,10 @@ class PolymorphicInstantiationTest {
             let x = compute
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val computeType = getBindingType(program, "compute")
-        val xType = getBindingType(program, "x")
+        val computeType = getBindingType(result, "compute")
+        val xType = getBindingType(result, "x")
 
         // Should have Ord and NumAdd/NumSub constraints
         val computeConstraints = getAbilityConstraintNames(computeType)
@@ -170,9 +167,9 @@ class PolymorphicInstantiationTest {
             let f = process
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val fType = getBindingType(program, "f")
+        val fType = getBindingType(result, "f")
 
         // Should have exactly one NumAdd constraint (x and y share the same type variable)
         assertEquals(1, getAbilityConstraintCount(fType),
@@ -190,10 +187,10 @@ class PolymorphicInstantiationTest {
             let x = sum {}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val sumType = getBindingType(program, "sum")
-        val xType = getBindingType(program, "x")
+        val sumType = getBindingType(result, "sum")
+        val xType = getBindingType(result, "x")
 
         assertEquals(getAbilityConstraintCount(sumType), getAbilityConstraintCount(xType),
             "Empty partial application should preserve constraint count")
@@ -206,9 +203,9 @@ class PolymorphicInstantiationTest {
             let addFive = sum {a = 5}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val addFiveType = getBindingType(program, "addFive")
+        val addFiveType = getBindingType(result, "addFive")
 
         // Partial application still returns a function, which may have constraint
         // The constraint is on the remaining parameter type
@@ -223,9 +220,9 @@ class PolymorphicInstantiationTest {
             let result = sum {a = 5, b = 3}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val resultType = getBindingType(program, "result")
+        val resultType = getBindingType(result, "result")
 
         assertTrue(resultType is MezzeType.IntType,
             "Full application with Int args should return Int")
@@ -257,9 +254,9 @@ class PolymorphicInstantiationTest {
             let op = getOp {which = 1}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val opType = getBindingType(program, "op")
+        val opType = getBindingType(result, "op")
         assertEquals(1, getAbilityConstraintCount(opType),
             "Returned function should preserve NumAdd constraint")
     }
@@ -291,10 +288,10 @@ class PolymorphicInstantiationTest {
             let getSumFn = {} -> sum
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
         // getSumFn is a function that returns sum
-        val getSumFnType = getBindingType(program, "getSumFn")
+        val getSumFnType = getBindingType(result, "getSumFn")
         assertTrue(getSumFnType is MezzeType.FunctionType,
             "getSumFn should be a function")
     }
@@ -310,9 +307,9 @@ class PolymorphicInstantiationTest {
             let copy = id
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val copyType = getBindingType(program, "copy")
+        val copyType = getBindingType(result, "copy")
         assertEquals(0, getAbilityConstraintCount(copyType),
             "Identity function should have no ability constraints")
     }
@@ -324,9 +321,9 @@ class PolymorphicInstantiationTest {
             let copy = const
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val copyType = getBindingType(program, "copy")
+        val copyType = getBindingType(result, "copy")
         assertEquals(0, getAbilityConstraintCount(copyType),
             "Const function should have no ability constraints")
     }
@@ -339,9 +336,9 @@ class PolymorphicInstantiationTest {
             let copy = flipped
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val copyType = getBindingType(program, "copy")
+        val copyType = getBindingType(result, "copy")
         // flipped should have NumSub constraint
         assertTrue(getAbilityConstraintNames(copyType).contains("NumSub"),
             "Flipped function should preserve NumSub constraint")
@@ -362,10 +359,10 @@ class PolymorphicInstantiationTest {
             let z = sum
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
         for (name in listOf("x", "y", "z")) {
-            val type = getBindingType(program, name)
+            val type = getBindingType(result, name)
             val constraints = getAbilityConstraintNames(type)
 
             assertEquals(1, constraints.size,
@@ -382,9 +379,9 @@ class PolymorphicInstantiationTest {
             let x = sum
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
-        val xType = getBindingType(program, "x") as MezzeType.FunctionType
+        val xType = getBindingType(result, "x") as MezzeType.FunctionType
         val paramType = xType.paramType as MezzeType.RecordType
 
         // Get the type variable names from the parameter type
@@ -413,12 +410,12 @@ class PolymorphicInstantiationTest {
             let j = i
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
+        val result = parseAndTypeCheck(source)
 
         // Each assignment should have exactly 1 constraint, not accumulating
         var prevCount = -1
         for (name in listOf("f", "g", "h", "i", "j")) {
-            val count = getAbilityConstraintCount(getBindingType(program, name))
+            val count = getAbilityConstraintCount(getBindingType(result, name))
             if (prevCount >= 0) {
                 assertEquals(prevCount, count,
                     "Constraint count should not change through assignments")

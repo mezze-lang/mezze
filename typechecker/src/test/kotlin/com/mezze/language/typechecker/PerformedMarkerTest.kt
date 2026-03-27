@@ -30,10 +30,8 @@ class PerformedMarkerTest {
         typeChecker = TypeChecker()
     }
 
-    private fun getVariableType(program: Program, name: String): MezzeType? {
-        val binding = program.items.filterIsInstance<LetBinding>()
-            .find { (it.pattern as? VariablePattern)?.name == name }
-        return binding?.inferredType
+    private fun getVariableType(result: TypeCheckResult, name: String): MezzeType? {
+        return result.getVariableType(name)
     }
 
     // ========================================================================
@@ -55,7 +53,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val resultType = getVariableType(typedProgram, "result") as MezzeType.FunctionType
         assertNotNull(resultType.effects)
@@ -70,7 +68,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "pureFunc") as MezzeType.FunctionType
         assertNull(funcType.effects, "Pure function should have null effects")
@@ -87,7 +85,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "effectfulFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -116,7 +114,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "partialHandle") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -145,7 +143,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val outerType = getVariableType(typedProgram, "outer") as MezzeType.FunctionType
         assertNotNull(outerType.effects)
@@ -167,7 +165,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "conditional") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -191,7 +189,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "matchExpr") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -215,7 +213,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "doBlock") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -298,7 +296,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "multiPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -336,7 +334,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "seqPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -375,7 +373,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "combined") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -465,7 +463,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "stepByStep") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -506,7 +504,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "branchPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -545,7 +543,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "matchPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -578,7 +576,7 @@ class PerformedMarkerTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "partial") as MezzeType.FunctionType
         assertNotNull(funcType.effects)

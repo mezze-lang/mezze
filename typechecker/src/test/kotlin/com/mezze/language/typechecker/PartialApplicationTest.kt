@@ -18,9 +18,9 @@ class PartialApplicationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {
+    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     @Test
@@ -33,8 +33,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -47,13 +47,12 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // The type of 'double' should be a function type
-            val doubleBinding = program.items[1] as com.mezze.language.ast.LetBinding
-            val inferredType = doubleBinding.inferredType
-            assertTrue(inferredType is com.mezze.language.ast.MezzeType.FunctionType,
+            val doubleType = result.getVariableType("double")
+            assertTrue(doubleType is com.mezze.language.ast.MezzeType.FunctionType,
                 "Partial application should return a function type")
         }
     }
@@ -69,8 +68,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -84,8 +83,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -100,8 +99,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -115,8 +114,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -145,8 +144,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -160,8 +159,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -177,8 +176,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -192,8 +191,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 
@@ -208,8 +207,8 @@ class PartialApplicationTest {
         """.trimIndent()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
         }
     }
 }

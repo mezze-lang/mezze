@@ -33,16 +33,13 @@ class VariantMergingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getBindingType(program: Program, name: String): String {
-        val binding = program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == name }
-        assertNotNull(binding, "Binding '$name' not found")
-        val inferredType = binding!!.inferredType
+    private fun getBindingType(result: TypeCheckResult, name: String): String {
+        val inferredType = result.getVariableType(name)
         assertNotNull(inferredType, "Binding '$name' has no inferred type")
         return prettyPrintType(inferredType!!)
     }
@@ -59,8 +56,8 @@ class VariantMergingTest {
                 _ -> Blue
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue"),
             "Type should contain both variants: $typeStr")
@@ -75,8 +72,8 @@ class VariantMergingTest {
                 _ -> Green
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
             "Type should contain all three variants: $typeStr")
@@ -90,8 +87,8 @@ class VariantMergingTest {
                 _ -> Failure {msg = "error"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Success") && typeStr.contains("Failure"),
             "Type should contain both variants: $typeStr")
@@ -103,8 +100,8 @@ class VariantMergingTest {
             let x = {flag} -> if flag then Red else Blue
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue"),
             "Type should contain both variants: $typeStr")
@@ -119,8 +116,8 @@ class VariantMergingTest {
                 else Green
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
             "Type should contain all three variants: $typeStr")
@@ -144,8 +141,8 @@ class VariantMergingTest {
                 _ -> Blue
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         // The variants should all be present (merged from the type alias)
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
@@ -163,8 +160,8 @@ class VariantMergingTest {
                 _ -> Green
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
             "Type should contain all Color constructors: $typeStr")
@@ -200,8 +197,8 @@ class VariantMergingTest {
                 _ -> Pink
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         // All constructors should be present in the merged anonymous variant
         assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Pink"),
@@ -222,8 +219,8 @@ class VariantMergingTest {
                 else Exception.throw {error = NetworkError {url = "http://example.com"}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("MathError") && typeStr.contains("NetworkError"),
             "Type should contain both error types: $typeStr")
@@ -242,8 +239,8 @@ class VariantMergingTest {
             let x = {flag} -> if flag then throw_math {} else throw_network {}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("MathError") && typeStr.contains("NetworkError"),
             "Type should contain both error types: $typeStr")
@@ -263,8 +260,8 @@ class VariantMergingTest {
                 else Exception.throw {error = NetworkError {url = "http://x"}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("MathError") && typeStr.contains("NetworkError"),
             "Type should contain both error types: $typeStr")
@@ -281,8 +278,8 @@ class VariantMergingTest {
                 _ -> Exception.throw {error = Error3 {c = True}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Error1") && typeStr.contains("Error2") && typeStr.contains("Error3"),
             "Type should contain all three error types: $typeStr")
@@ -303,8 +300,8 @@ class VariantMergingTest {
                 _ -> f3 {}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("E1") && typeStr.contains("E2") && typeStr.contains("E3"),
             "Type should contain all three error types: $typeStr")
@@ -322,8 +319,8 @@ class VariantMergingTest {
                 else Data {val = 100}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("Data"),
             "Type should contain Data variant: $typeStr")
@@ -339,8 +336,8 @@ class VariantMergingTest {
                 else Exception.throw {error = AppError {code = 2}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "x")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "x")
 
         assertTrue(typeStr.contains("AppError"),
             "Type should contain AppError: $typeStr")
@@ -360,8 +357,8 @@ class VariantMergingTest {
             let outer = {flag} -> Outer {nested = inner {flag = flag}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "outer")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "outer")
 
         assertTrue(typeStr.contains("Outer") && typeStr.contains("InnerA") && typeStr.contains("InnerB"),
             "Type should contain Outer with nested InnerA/InnerB: $typeStr")
@@ -381,8 +378,8 @@ class VariantMergingTest {
                 else Exception.throw {error = NegativeError {val = n}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "safe_op")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "safe_op")
 
         assertTrue(typeStr.contains("Int") && typeStr.contains("NegativeError") && typeStr.contains("Exception"),
             "Type should show Int return with NegativeError in Exception effect: $typeStr")
@@ -406,8 +403,8 @@ class VariantMergingTest {
                 check_even {n = pos}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(source)
-        val typeStr = getBindingType(program, "validate")
+        val result = parseAndTypeCheck(source)
+        val typeStr = getBindingType(result, "validate")
 
         assertTrue(typeStr.contains("NotPositive") && typeStr.contains("NotEven"),
             "Type should contain both error types: $typeStr")

@@ -35,15 +35,15 @@ class SeqPatternTypeCheckTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
@@ -65,8 +65,8 @@ class SeqPatternTypeCheckTest {
             let result = is_empty { xs = [] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -79,8 +79,8 @@ class SeqPatternTypeCheckTest {
             let result = describe { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -97,8 +97,8 @@ class SeqPatternTypeCheckTest {
             let result = get_only { xs = [42] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -111,8 +111,8 @@ class SeqPatternTypeCheckTest {
             let result = add_pair { xs = [1, 2] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -125,8 +125,8 @@ class SeqPatternTypeCheckTest {
             let result = add_triple { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -141,8 +141,8 @@ class SeqPatternTypeCheckTest {
             let result = count_elements { xs = [1, 2] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -159,8 +159,8 @@ class SeqPatternTypeCheckTest {
             let result = get_head { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -173,8 +173,8 @@ class SeqPatternTypeCheckTest {
             let result = get_sum_first_two { xs = [1, 2, 3, 4] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -186,8 +186,8 @@ class SeqPatternTypeCheckTest {
             let result = identity { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -204,8 +204,8 @@ class SeqPatternTypeCheckTest {
             let result = length {xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -218,8 +218,8 @@ class SeqPatternTypeCheckTest {
             let result = sum {xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -236,8 +236,8 @@ class SeqPatternTypeCheckTest {
             let result = map {f = double, xs = [1, 2, 3]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -257,8 +257,8 @@ class SeqPatternTypeCheckTest {
             let result = filter {pred = is_positive, xs = [-1, 2, -3, 4]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -273,8 +273,8 @@ class SeqPatternTypeCheckTest {
             let result = foldl {f = add, init = 0, xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -291,8 +291,8 @@ class SeqPatternTypeCheckTest {
             let result = get_inner_first {xs = [[42]]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -305,8 +305,8 @@ class SeqPatternTypeCheckTest {
             let result = get_top_left {matrix = [[1, 2], [3, 4]]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -320,8 +320,8 @@ class SeqPatternTypeCheckTest {
             let result = sum_pairs {pairs = [[1, 2], [3, 4], [5, 6]]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -338,8 +338,8 @@ class SeqPatternTypeCheckTest {
             let result = get_second {xs = [1, 2]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -352,8 +352,8 @@ class SeqPatternTypeCheckTest {
             let result = get_first_and_last {xs = [1, 2, 3, 4]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -366,8 +366,8 @@ class SeqPatternTypeCheckTest {
             let result = skip_first {xs = [1, 2, 3, 4]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -384,8 +384,8 @@ class SeqPatternTypeCheckTest {
             let result = is_one_two {xs = [1, 2]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -398,8 +398,8 @@ class SeqPatternTypeCheckTest {
             let result = starts_with_zero {xs = [0, 42]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -413,8 +413,8 @@ class SeqPatternTypeCheckTest {
             let result = check_pattern {xs = [True, False]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -431,8 +431,8 @@ class SeqPatternTypeCheckTest {
             let result = unwrap_first_some {xs = [Some {val = 42}, None, Some {val = 10}]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -448,8 +448,8 @@ class SeqPatternTypeCheckTest {
             let result = get_all_somes {xs = [Some {val = 1}, None, Some {val = 2}]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -466,8 +466,8 @@ class SeqPatternTypeCheckTest {
             let result = is_small {xs = [1]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -481,8 +481,8 @@ class SeqPatternTypeCheckTest {
             let result = classify_size {xs = [1, 2]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -499,8 +499,8 @@ class SeqPatternTypeCheckTest {
             let result = starts_with_positive {xs = [5, -1, -2]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -513,8 +513,8 @@ class SeqPatternTypeCheckTest {
             let result = both_positive {xs = [5, 10]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -527,8 +527,8 @@ class SeqPatternTypeCheckTest {
             let result = is_sorted_pair {xs = [1, 2]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -545,8 +545,8 @@ class SeqPatternTypeCheckTest {
             let result: Int = get_head {xs = [1, 2, 3]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -559,8 +559,8 @@ class SeqPatternTypeCheckTest {
             let result: Str = check {xs = [1, 2, 3]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -578,8 +578,8 @@ class SeqPatternTypeCheckTest {
             let result = get_greeting {names = ["Alice", "Bob"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -592,8 +592,8 @@ class SeqPatternTypeCheckTest {
             let result = is_help_command {args = ["help"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -616,8 +616,8 @@ class SeqPatternTypeCheckTest {
             let result2 = reverse {xs = ["a", "b", "c"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -638,8 +638,8 @@ class SeqPatternTypeCheckTest {
             let result = take {n = 2, xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -655,8 +655,8 @@ class SeqPatternTypeCheckTest {
             let result = always_empty {xs = [1, 2, 3]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -669,8 +669,8 @@ class SeqPatternTypeCheckTest {
             let result = get_deep {xs = [[[42]]]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -683,8 +683,8 @@ class SeqPatternTypeCheckTest {
             let result = get_all {xs = [1, 2, 3]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -703,8 +703,8 @@ class SeqPatternTypeCheckTest {
             let result = parse_args {args = ["build", "--verbose"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -725,8 +725,8 @@ class SeqPatternTypeCheckTest {
             let result = partition {pred = is_even, xs = [1, 2, 3, 4, 5]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -745,7 +745,7 @@ class SeqPatternTypeCheckTest {
             let result = zip {xs = [1, 2, 3], ys = ["a", "b", "c"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 }

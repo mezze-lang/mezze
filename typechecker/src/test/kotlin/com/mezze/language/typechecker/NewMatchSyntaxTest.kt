@@ -20,14 +20,13 @@ class NewMatchSyntaxTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     @Test
@@ -40,8 +39,8 @@ class NewMatchSyntaxTest {
               Blue -> "blue"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val testType = getVariableType(program, "test")
+        val result = parseAndTypeCheck(code)
+        val testType = getVariableType(result, "test")
 
         assertNotNull(testType)
         assertTrue(testType is MezzeType.FunctionType)
@@ -58,8 +57,8 @@ class NewMatchSyntaxTest {
               Green -> "secondary"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val classifyType = getVariableType(program, "classify")
+        val result = parseAndTypeCheck(code)
+        val classifyType = getVariableType(result, "classify")
 
         assertNotNull(classifyType)
         assertTrue(classifyType is MezzeType.FunctionType)
@@ -76,8 +75,8 @@ class NewMatchSyntaxTest {
               Hot { degrees } -> "hot"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val classifyType = getVariableType(program, "classify")
+        val result = parseAndTypeCheck(code)
+        val classifyType = getVariableType(result, "classify")
 
         assertNotNull(classifyType)
         assertTrue(classifyType is MezzeType.FunctionType)
@@ -96,8 +95,8 @@ class NewMatchSyntaxTest {
               Cold { degrees } -> "cold"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val classifyType = getVariableType(program, "classify")
+        val result = parseAndTypeCheck(code)
+        val classifyType = getVariableType(result, "classify")
 
         assertNotNull(classifyType)
         assertTrue(classifyType is MezzeType.FunctionType)
@@ -116,8 +115,8 @@ class NewMatchSyntaxTest {
               Mild -> "mild"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        val classifyType = getVariableType(program, "classify")
+        val result = parseAndTypeCheck(code)
+        val classifyType = getVariableType(result, "classify")
 
         assertNotNull(classifyType)
         assertTrue(classifyType is MezzeType.FunctionType)
@@ -135,8 +134,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - this is exhaustive
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -167,8 +166,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers remaining cases
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -198,8 +197,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - wildcard covers conditional cases
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -214,8 +213,8 @@ class NewMatchSyntaxTest {
 
         // Currently the type checker doesn't enforce guard condition types strictly
         // TODO: Future enhancement - validate guard conditions are Bool
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -229,8 +228,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - age is correctly typed as Int
-        val program = parseAndTypeCheck(code)
-        val canVoteType = getVariableType(program, "canVote")
+        val result = parseAndTypeCheck(code)
+        val canVoteType = getVariableType(result,"canVote")
 
         assertNotNull(canVoteType)
         assertTrue(canVoteType is MezzeType.FunctionType)
@@ -251,8 +250,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - both patterns bind 'degrees' as Int
-        val program = parseAndTypeCheck(code)
-        val isExtremeType = getVariableType(program, "isExtreme")
+        val result = parseAndTypeCheck(code)
+        val isExtremeType = getVariableType(result,"isExtreme")
 
         assertNotNull(isExtremeType)
         assertTrue(isExtremeType is MezzeType.FunctionType)
@@ -274,8 +273,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - open variant allows wildcard
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -292,8 +291,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - all logical operators work correctly
-        val program = parseAndTypeCheck(code)
-        val letterGradeType = getVariableType(program, "letterGrade")
+        val result = parseAndTypeCheck(code)
+        val letterGradeType = getVariableType(result,"letterGrade")
 
         assertNotNull(letterGradeType)
         assertTrue(letterGradeType is MezzeType.FunctionType)
@@ -312,8 +311,8 @@ class NewMatchSyntaxTest {
         """.trimIndent()
 
         // Should not throw - nested pattern access in guards
-        val program = parseAndTypeCheck(code)
-        val canAccessType = getVariableType(program, "canAccess")
+        val result = parseAndTypeCheck(code)
+        val canAccessType = getVariableType(result,"canAccess")
 
         assertNotNull(canAccessType)
         assertTrue(canAccessType is MezzeType.FunctionType)

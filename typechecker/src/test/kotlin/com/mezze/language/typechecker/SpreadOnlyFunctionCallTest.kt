@@ -33,9 +33,9 @@ class SpreadOnlyFunctionCallTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========== INVALID: Spread-only in function calls ==========
@@ -180,8 +180,8 @@ class SpreadOnlyFunctionCallTest {
             let result = my_func { x = 5, y = 7 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -192,8 +192,8 @@ class SpreadOnlyFunctionCallTest {
             let result = my_func { x = k.x, y = k.y }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -204,8 +204,8 @@ class SpreadOnlyFunctionCallTest {
             let result = my_func { x = k.x, y = 10 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -216,8 +216,8 @@ class SpreadOnlyFunctionCallTest {
             let result = add { x = double { x = 5 }, y = 10 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -227,8 +227,8 @@ class SpreadOnlyFunctionCallTest {
             let result = getFortyTwo {}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -239,8 +239,8 @@ class SpreadOnlyFunctionCallTest {
             let result = partial { y = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -250,8 +250,8 @@ class SpreadOnlyFunctionCallTest {
             let result = if isPositive { x = 5 } then 1 else 0
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -263,8 +263,8 @@ class SpreadOnlyFunctionCallTest {
             let result = add { x = a * 2, y = b + 3 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== VALID: Spread for record operations (not function calls) ==========
@@ -276,8 +276,8 @@ class SpreadOnlyFunctionCallTest {
             let copy = { ...original }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -287,8 +287,8 @@ class SpreadOnlyFunctionCallTest {
             let updated = { ...original, x = 10 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -298,8 +298,8 @@ class SpreadOnlyFunctionCallTest {
             let updated = { ...original, a = 10, c = 30 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -311,8 +311,8 @@ class SpreadOnlyFunctionCallTest {
             let result = my_func { x = updated.x, y = updated.y }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -324,8 +324,8 @@ class SpreadOnlyFunctionCallTest {
             let updatedOuter = { ...outer, inner = updatedInner }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== EDGE CASES ==========
@@ -339,8 +339,8 @@ class SpreadOnlyFunctionCallTest {
             let result = takeRecord { r = { ...base, x = 10 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -366,8 +366,8 @@ class SpreadOnlyFunctionCallTest {
             let result = add { x = mul { x = 2, y = 3 }, y = 4 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test

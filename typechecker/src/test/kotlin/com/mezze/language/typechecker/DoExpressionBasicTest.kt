@@ -16,14 +16,13 @@ class DoExpressionBasicTest {
         parser = MezzeParser()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
-    
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     @Test
@@ -36,9 +35,9 @@ class DoExpressionBasicTest {
             let result = x
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val xType = getVariableType(program, "x")
-        val resultType = getVariableType(program, "result")
+        val result = parseAndTypeCheck(code)
+        val xType = getVariableType(result, "x")
+        val resultType = getVariableType(result, "result")
         
         assertNotNull(xType)
         assertNotNull(resultType)
@@ -57,9 +56,9 @@ class DoExpressionBasicTest {
             let result = computation
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val computationType = getVariableType(program, "computation")
-        val resultType = getVariableType(program, "result")
+        val result = parseAndTypeCheck(code)
+        val computationType = getVariableType(result, "computation")
+        val resultType = getVariableType(result, "result")
         
         assertNotNull(computationType)
         assertNotNull(resultType)
@@ -79,9 +78,9 @@ class DoExpressionBasicTest {
             let final = complexComputation
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val complexType = getVariableType(program, "complexComputation")
-        val finalType = getVariableType(program, "final")
+        val result = parseAndTypeCheck(code)
+        val complexType = getVariableType(result, "complexComputation")
+        val finalType = getVariableType(result, "final")
         
         assertNotNull(complexType)
         assertNotNull(finalType)
@@ -100,20 +99,13 @@ class DoExpressionBasicTest {
             let message = stringOp
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val stringOpType = getVariableType(program, "stringOp")
-        val messageType = getVariableType(program, "message")
-        
+        val result = parseAndTypeCheck(code)
+        val stringOpType = getVariableType(result, "stringOp")
+        val messageType = getVariableType(result, "message")
+
         // Debug: print actual types (even if null)
         println("stringOpType: $stringOpType")
         println("messageType: $messageType")
-        
-        // Also check if we can find the variables in the program
-        val allBindings = program.items.filterIsInstance<LetBinding>()
-        println("All bindings:")
-        allBindings.forEach { binding ->
-            println("  ${binding.variableName}: ${binding.inferredType}")
-        }
         
         assertNotNull(stringOpType)
         assertNotNull(messageType)
@@ -134,9 +126,9 @@ class DoExpressionBasicTest {
             let result = nested
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val nestedType = getVariableType(program, "nested")
-        val resultType = getVariableType(program, "result")
+        val result = parseAndTypeCheck(code)
+        val nestedType = getVariableType(result, "nested")
+        val resultType = getVariableType(result, "result")
         
         assertNotNull(nestedType)
         assertNotNull(resultType)
@@ -157,10 +149,10 @@ class DoExpressionBasicTest {
             let outer = x  # This should use the outer x
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val xType = getVariableType(program, "x")
-        val scopedType = getVariableType(program, "scoped")
-        val outerType = getVariableType(program, "outer")
+        val result = parseAndTypeCheck(code)
+        val xType = getVariableType(result, "x")
+        val scopedType = getVariableType(result, "scoped")
+        val outerType = getVariableType(result, "outer")
         
         assertNotNull(xType)
         assertNotNull(scopedType)
@@ -181,9 +173,9 @@ class DoExpressionBasicTest {
             let func = processData
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val processDataType = getVariableType(program, "processData")
-        val funcType = getVariableType(program, "func")
+        val result = parseAndTypeCheck(code)
+        val processDataType = getVariableType(result, "processData")
+        val funcType = getVariableType(result, "func")
         
         assertNotNull(processDataType)
         assertNotNull(funcType)
@@ -212,11 +204,11 @@ class DoExpressionBasicTest {
             let result = third
         """.trimIndent()
         
-        val program = parseAndTypeCheck(code)
-        val firstType = getVariableType(program, "first")
-        val secondType = getVariableType(program, "second")
-        val thirdType = getVariableType(program, "third")
-        val resultType = getVariableType(program, "result")
+        val result = parseAndTypeCheck(code)
+        val firstType = getVariableType(result, "first")
+        val secondType = getVariableType(result, "second")
+        val thirdType = getVariableType(result, "third")
+        val resultType = getVariableType(result, "result")
         
         assertNotNull(firstType)
         assertNotNull(secondType)

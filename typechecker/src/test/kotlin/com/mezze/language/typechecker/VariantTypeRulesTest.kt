@@ -1,6 +1,6 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.Program
+import com.mezze.language.ast.TypeCheckResult
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -38,15 +38,15 @@ class VariantTypeRulesTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
@@ -54,10 +54,10 @@ class VariantTypeRulesTest {
         return error
     }
 
-    private fun assertTypeCheckPasses(code: String): Program {
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
-        return program
+    private fun assertTypeCheckPasses(code: String): TypeCheckResult {
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
+        return result
     }
 
     // ========================================================================

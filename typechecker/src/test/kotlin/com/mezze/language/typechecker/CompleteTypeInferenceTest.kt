@@ -19,18 +19,17 @@ class CompleteTypeInferenceTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
-    private fun getTypeDeclaration(program: Program, typeName: String): TypeDeclaration? {
-        return program.items.filterIsInstance<TypeDeclaration>()
+    private fun getTypeDeclaration(result: TypeCheckResult, typeName: String): TypeDeclaration? {
+        return result.program.items.filterIsInstance<TypeDeclaration>()
             .find { it.name == typeName }
     }
 
@@ -57,10 +56,10 @@ class CompleteTypeInferenceTest {
             "Circle: $(int::to_str { n = circleArea }), Rectangle: $(int::to_str { n = rectangleArea }), Triangle: $(int::to_str { n = triangleArea })"
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
 
         // Verify Shape type definition has all constructors
-        val shapeTypeDecl = getTypeDeclaration(program, "Shape")
+        val shapeTypeDecl = getTypeDeclaration(result,"Shape")
         assertNotNull(shapeTypeDecl)
         assertTrue(shapeTypeDecl.inferredType is MezzeType.VariantType)
         val shapeVariantType = shapeTypeDecl.inferredType as MezzeType.VariantType
@@ -70,7 +69,7 @@ class CompleteTypeInferenceTest {
         assertTrue(shapeVariantType.constructors.containsKey("Triangle"))
 
         // Verify calculateArea function type
-        val calculateAreaType = getVariableType(program, "calculateArea")
+        val calculateAreaType = getVariableType(result,"calculateArea")
         assertNotNull(calculateAreaType)
         assertTrue(calculateAreaType is MezzeType.FunctionType)
         val funcType = calculateAreaType as MezzeType.FunctionType
@@ -79,15 +78,15 @@ class CompleteTypeInferenceTest {
         assertTrue(funcType.returnType is MezzeType.IntType)
 
         // Verify that all area calculations result in Int
-        assertEquals(MezzeType.IntType, getVariableType(program, "circleArea"))
-        assertEquals(MezzeType.IntType, getVariableType(program, "rectangleArea"))
-        assertEquals(MezzeType.IntType, getVariableType(program, "triangleArea"))
+        assertEquals(MezzeType.IntType, getVariableType(result,"circleArea"))
+        assertEquals(MezzeType.IntType, getVariableType(result,"rectangleArea"))
+        assertEquals(MezzeType.IntType, getVariableType(result,"triangleArea"))
         
         // The individual shape instances may have more specific variant types (just the constructor they use)
         // but they should still be variant types that are assignable to Shape
-        val circleType = getVariableType(program, "circle")
-        val rectangleType = getVariableType(program, "rectangle") 
-        val triangleType = getVariableType(program, "triangle")
+        val circleType = getVariableType(result,"circle")
+        val rectangleType = getVariableType(result,"rectangle") 
+        val triangleType = getVariableType(result,"triangle")
         
         assertTrue(circleType is MezzeType.VariantType)
         assertTrue(rectangleType is MezzeType.VariantType)
@@ -105,13 +104,13 @@ class CompleteTypeInferenceTest {
             let result = test { color = Red { value = 5 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val testType = getVariableType(program, "test")
+        val testType = getVariableType(result,"test")
         assertNotNull(testType)
         assertTrue(testType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 
@@ -126,13 +125,13 @@ class CompleteTypeInferenceTest {
             let result = distance { point = Point2D { x = 3, y = 4 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val distanceType = getVariableType(program, "distance")
+        val distanceType = getVariableType(result,"distance")
         assertNotNull(distanceType)
         assertTrue(distanceType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 
@@ -149,13 +148,13 @@ class CompleteTypeInferenceTest {
             let result = extract { outer = Outer { inner = Inner { value = 42 } } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val extractType = getVariableType(program, "extract")
+        val extractType = getVariableType(result,"extract")
         assertNotNull(extractType)
         assertTrue(extractType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 
@@ -171,13 +170,13 @@ class CompleteTypeInferenceTest {
             let result = classify { score = Score { points = 95 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val classifyType = getVariableType(program, "classify")
+        val classifyType = getVariableType(result,"classify")
         assertNotNull(classifyType)
         assertTrue(classifyType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.StringType, resultType)
     }
 
@@ -194,13 +193,13 @@ class CompleteTypeInferenceTest {
             let result = describe { temp = Hot { degrees = 80 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val describeType = getVariableType(program, "describe")
+        val describeType = getVariableType(result,"describe")
         assertNotNull(describeType)
         assertTrue(describeType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.StringType, resultType)
     }
 
@@ -216,13 +215,13 @@ class CompleteTypeInferenceTest {
             let result = evaluate { expr = Add { left = 5, right = 3 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val evaluateType = getVariableType(program, "evaluate")
+        val evaluateType = getVariableType(result,"evaluate")
         assertNotNull(evaluateType)
         assertTrue(evaluateType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 
@@ -238,13 +237,13 @@ class CompleteTypeInferenceTest {
             let result = isValid { range = Range { min = 10, max = 90 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val isValidType = getVariableType(program, "isValid")
+        val isValidType = getVariableType(result,"isValid")
         assertNotNull(isValidType)
         assertTrue(isValidType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         // Bool can be BoolType or VariantType with True/False constructors
         assertTrue(resultType is MezzeType.BoolType ||
                    (resultType is MezzeType.VariantType && resultType.constructors.keys == setOf("True", "False")))
@@ -265,13 +264,13 @@ class CompleteTypeInferenceTest {
             let result = process { box = Box { content = 21 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val processType = getVariableType(program, "process")
+        val processType = getVariableType(result,"process")
         assertNotNull(processType)
         assertTrue(processType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 
@@ -288,13 +287,13 @@ class CompleteTypeInferenceTest {
             let result = getCode { status = myStatus }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
+        val result = parseAndTypeCheck(code)
         
-        val getCodeType = getVariableType(program, "getCode")
+        val getCodeType = getVariableType(result,"getCode")
         assertNotNull(getCodeType)
         assertTrue(getCodeType is MezzeType.FunctionType)
         
-        val resultType = getVariableType(program, "result")
+        val resultType = getVariableType(result,"result")
         assertEquals(MezzeType.IntType, resultType)
     }
 }

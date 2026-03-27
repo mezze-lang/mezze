@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.Program
-import com.mezze.language.ast.TypeCheckResult as AstTypeCheckResult
+import com.mezze.language.ast.TypeCheckResult
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -23,18 +22,12 @@ class PatternValidationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program =
-        typeChecker.typeCheck(parser.parse(code)).program
+    private fun parseAndTypeCheck(code: String): TypeCheckResult =
+        typeChecker.typeCheck(parser.parse(code))
 
-    private fun parseAndTypeCheckWithWarnings(code: String): Pair<Program, List<String>> {
-        // Use checkProgram which returns the internal TypeCheckResult with warnings
-        val result = typeChecker.checkProgram(parser.parse(code))
-        return when (result) {
-            is TypeChecker.TypeCheckResult.Success -> Pair(result.program, result.warnings.map { it.message })
-            is TypeChecker.TypeCheckResult.Failure -> throw result.errors.first().let {
-                TypeCheckError(it.message, it.sourceLocation)
-            }
-        }
+    private fun parseAndTypeCheckWithWarnings(code: String): Pair<TypeCheckResult, List<String>> {
+        val result = typeChecker.typeCheck(parser.parse(code))
+        return Pair(result, result.warnings.map { it.message })
     }
 
     // ========== UNIT VARIANT PAYLOAD DESTRUCTURING (BUG FIX) ==========
@@ -74,8 +67,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - all patterns match unit variants correctly
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -91,8 +84,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - Blue has payload and pattern destructures it correctly
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -126,8 +119,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - Ok and Err have payloads, Loading is unit
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -142,8 +135,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - Some has payload and pattern destructures it
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== PAYLOAD VARIANT WITHOUT DESTRUCTURING (BUG FIX) ==========
@@ -183,8 +176,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - Blue has payload and pattern destructures it
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -252,8 +245,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== UNKNOWN CONSTRUCTOR IN PATTERN (NEW FIX) ==========
@@ -353,7 +346,7 @@ class PatternValidationTest {
         """.trimIndent()
 
         val result = typeChecker.typeCheck(parser.parse(code))
-        assertNotNull(result.program, "Valid patterns should type check successfully")
+        assertNotNull(result, "Valid patterns should type check successfully")
     }
 
     // ========== UNUSED VARIABLE WARNINGS ==========
@@ -369,8 +362,8 @@ class PatternValidationTest {
                     None -> 0
         """.trimIndent()
 
-        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
-        assertNotNull(program)
+        val (result, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(result)
         // Check warnings contain unused variable
         assertTrue(warnings.any { it.contains("Unused variable") && it.contains("val") },
             "Should warn about unused variable 'val'. Warnings: $warnings")
@@ -387,8 +380,8 @@ class PatternValidationTest {
                     None -> 0
         """.trimIndent()
 
-        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
-        assertNotNull(program)
+        val (result, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(result)
         // Should not warn since 'val' is used
         assertTrue(warnings.none { it.contains("Unused variable") && it.contains("val") },
             "Should not warn about 'val' since it's used. Warnings: $warnings")
@@ -405,8 +398,8 @@ class PatternValidationTest {
                     None -> 0
         """.trimIndent()
 
-        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
-        assertNotNull(program)
+        val (result, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(result)
         // Variables starting with _ should not produce warnings
         assertTrue(warnings.none { it.contains("_unused") },
             "Should not warn about '_unused'. Warnings: $warnings")
@@ -423,8 +416,8 @@ class PatternValidationTest {
                     _ -> "other"
         """.trimIndent()
 
-        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
-        assertNotNull(program)
+        val (result, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(result)
         assertTrue(warnings.any { it.contains("Float literal pattern") || it.contains("floating-point") },
             "Should warn about float literal pattern. Warnings: $warnings")
     }
@@ -455,8 +448,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - 'a is declared as a type parameter
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -512,8 +505,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - 'a is declared
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -539,8 +532,8 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - 'a is declared
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test

@@ -9,10 +9,10 @@ class PipeOperatorTypeCheckerTest {
 
     private val parser = MezzeParser()
 
-    private fun parseAndTypeCheck(source: String): Program {
+    private fun parseAndTypeCheck(source: String): TypeCheckResult {
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     @Test
@@ -24,12 +24,12 @@ result
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Result should have Int type
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding, "Second statement should be let binding")
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType, "result binding should exist")
         }
     }
 
@@ -42,12 +42,12 @@ let result = 5 |> add {x = 10, y = @} |> multiply {x = @, y = 2}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // result should have Int type from chained operations
-            val resultBinding = program.items[2] as? LetBinding
-            assertNotNull(resultBinding, "Should have result binding")
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType, "Should have result binding")
 
         }
     }
@@ -60,12 +60,12 @@ let result = 42 |> toString {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Result should have String type
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -78,12 +78,12 @@ let result = 5 |> identity {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Type should be unified correctly
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -97,15 +97,15 @@ let result2 = 10 |> double {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Should work with different numeric values (polymorphic over NumAdd)
-            val result1Binding = program.items[1] as? LetBinding
-            val result2Binding = program.items[2] as? LetBinding
+            val result1Type = result.getVariableType("result1")
+            val result2Type = result.getVariableType("result2")
 
-            assertNotNull(result1Binding)
-            assertNotNull(result2Binding)
+            assertNotNull(result1Type)
+            assertNotNull(result2Type)
 
         }
     }
@@ -118,11 +118,11 @@ let result = 5 |> combine {x = @, y = 10, z = 15}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -136,8 +136,8 @@ let result = 5 |> process {data = @} |> nested {inner = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -150,8 +150,8 @@ let result = 5 |> add {x = @, y = 3}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Should preserve NumAdd ability constraint
         }
@@ -181,12 +181,12 @@ let result = 5 |> isPositive {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Result should have Bool type
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -200,11 +200,11 @@ let result = (5 |> square {x = @}) + (3 |> square {x = @})
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
-            val resultBinding = program.items[2] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -217,8 +217,8 @@ let result = 5 |> process {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -232,12 +232,12 @@ let result = adder {y = 3}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // adder should be a function
-            val adderBinding = program.items[1] as? LetBinding
-            assertNotNull(adderBinding)
+            val adderType = result.getVariableType("adder")
+            assertNotNull(adderType)
 
         }
     }
@@ -250,8 +250,8 @@ let result = {x = 5, y = 10} |> getField {rec = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -264,8 +264,8 @@ let result = [1, 2, 3] |> head {arr = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -280,11 +280,11 @@ let result = 5 |> f {x = @} |> g {x = @} |> h {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
-            val resultBinding = program.items[3] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -297,8 +297,8 @@ let result = "World" |> greet {name = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -311,8 +311,8 @@ let result = True |> negate {b = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
         }
     }
@@ -325,12 +325,12 @@ let result = 2 + 3 |> square {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
             // Should evaluate as (2 + 3) |> square
-            val resultBinding = program.items[1] as? LetBinding
-            assertNotNull(resultBinding)
+            val resultType = result.getVariableType("result")
+            assertNotNull(resultType)
 
         }
     }
@@ -344,11 +344,11 @@ let composition = 5 |> square {x = @} |> triple {x = @}
 """.trim()
 
         assertDoesNotThrow {
-            val program = parseAndTypeCheck(source)
-            assertNotNull(program)
+            val result = parseAndTypeCheck(source)
+            assertNotNull(result)
 
-            val compositionBinding = program.items[2] as? LetBinding
-            assertNotNull(compositionBinding)
+            val compositionType = result.getVariableType("composition")
+            assertNotNull(compositionType)
 
         }
     }

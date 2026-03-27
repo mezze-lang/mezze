@@ -9,21 +9,20 @@ import kotlin.test.assertNotNull
 
 class AnnotationTypeCheckingTest {
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast).program
+        return typeChecker.typeCheck(ast)
     }
 
-    private fun getVariableType(program: Program, varName: String): MezzeType? {
-        return program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == varName }?.inferredType
+    private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
+        return result.getVariableType(varName)
     }
 
     private fun assertTypeChecks(code: String, variableName: String, expectedType: String) {
-        val program = parseAndTypeCheck(code)
-        val actualType = getVariableType(program, variableName)
+        val result = parseAndTypeCheck(code)
+        val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
         assertEquals(normalizeVariantOrder(expectedType), normalizeVariantOrder(prettyPrintType(actualType)))
     }
@@ -559,7 +558,7 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test multiple variables with annotations in sequence`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let x: Int = 42
             let y: Str = "hello"
@@ -567,9 +566,9 @@ class AnnotationTypeCheckingTest {
             z
             """.trimIndent()
         )
-        val xType = getVariableType(program, "x")
-        val yType = getVariableType(program, "y")
-        val zType = getVariableType(program, "z")
+        val xType = getVariableType(result, "x")
+        val yType = getVariableType(result, "y")
+        val zType = getVariableType(result, "z")
         assertNotNull(xType)
         assertNotNull(yType)
         assertNotNull(zType)
@@ -731,13 +730,13 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic identity function with type variable annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let id: { x: 'a } -> 'a = {x} -> x
             id {x = 42}
             """.trimIndent()
         )
-        val idType = getVariableType(program, "id")
+        val idType = getVariableType(result, "id")
         assertNotNull(idType, "Variable 'id' not found")
         // Type should be generalized/polymorphic
     }
@@ -755,25 +754,25 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic function with same type variable used multiple times`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let first: { a: 'a, b: 'a } -> 'a = {a, b} -> a
             first {a = 1, b = 2}
             """.trimIndent()
         )
-        val firstType = getVariableType(program, "first")
+        val firstType = getVariableType(result, "first")
         assertNotNull(firstType, "Variable 'first' not found")
     }
 
     @Test
     fun `test polymorphic function with different type variables`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let fst: { a: 'a, b: 'b } -> 'a = {a, b} -> a
             fst {a = 1, b = "hello"}
             """.trimIndent()
         )
-        val fstType = getVariableType(program, "fst")
+        val fstType = getVariableType(result, "fst")
         assertNotNull(fstType, "Variable 'fst' not found")
     }
 
@@ -791,13 +790,13 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic list annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let singleton: { x: 'a } -> ['a] = {x} -> [x]
             singleton {x = 42}
             """.trimIndent()
         )
-        val singletonType = getVariableType(program, "singleton")
+        val singletonType = getVariableType(result, "singleton")
         assertNotNull(singletonType, "Variable 'singleton' not found")
     }
 
@@ -831,13 +830,13 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic function returning function`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let const: { a: 'a } -> { b: 'b } -> 'a = {a} -> {b} -> a
             const {a = 42}
             """.trimIndent()
         )
-        val constType = getVariableType(program, "const")
+        val constType = getVariableType(result, "const")
         assertNotNull(constType, "Variable 'const' not found")
     }
 
@@ -962,26 +961,26 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function with single ability constraint annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let show: { x: 'a } with Inspect 'a -> Str = {x} -> x.to_dbg_str {}
             show {x = 42}
             """.trimIndent()
         )
-        val showType = getVariableType(program, "show")
+        val showType = getVariableType(result, "show")
         assertNotNull(showType, "Variable 'show' not found")
     }
 
     @Test
     fun `test function with multiple ability constraints annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let showSum: { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> Str =
               {x, y} -> (x + y).to_dbg_str {}
             showSum {x = 1, y = 2}
             """.trimIndent()
         )
-        val showSumType = getVariableType(program, "showSum")
+        val showSumType = getVariableType(result, "showSum")
         assertNotNull(showSumType, "Variable 'showSum' not found")
     }
 
@@ -1010,7 +1009,7 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function with ability on correct type variable`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let fst: { a: 'a, b: 'b } with Inspect 'a -> 'a = {a, b} -> do
               a.to_dbg_str {}
@@ -1018,7 +1017,7 @@ class AnnotationTypeCheckingTest {
             fst {a = 1, b = "hello"}
             """.trimIndent()
         )
-        val fstType = getVariableType(program, "fst")
+        val fstType = getVariableType(result, "fst")
         assertNotNull(fstType, "Variable 'fst' not found")
     }
 
@@ -1047,13 +1046,13 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test ability annotation with concrete type`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             let showInt: { x: Int } with Inspect Int -> Str = {x} -> x.to_dbg_str {}
             showInt {x = 42}
             """.trimIndent()
         )
-        val showIntType = getVariableType(program, "showInt")
+        val showIntType = getVariableType(result, "showInt")
         assertNotNull(showIntType, "Variable 'showInt' not found")
     }
 
@@ -1061,7 +1060,7 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function with effect annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             effect State where {
               get: {} -> Int <State>,
@@ -1075,13 +1074,13 @@ class AnnotationTypeCheckingTest {
             increment {}
             """.trimIndent()
         )
-        val incrementType = getVariableType(program, "increment")
+        val incrementType = getVariableType(result, "increment")
         assertNotNull(incrementType, "Variable 'increment' not found")
     }
 
     @Test
     fun `test function with multiple effects annotation`() {
-        val program = parseAndTypeCheck(
+        val result = parseAndTypeCheck(
             """
             effect State where {
               get: {} -> Int <State>
@@ -1097,7 +1096,7 @@ class AnnotationTypeCheckingTest {
             logState {}
             """.trimIndent()
         )
-        val logStateType = getVariableType(program, "logState")
+        val logStateType = getVariableType(result, "logState")
         assertNotNull(logStateType, "Variable 'logState' not found")
     }
 

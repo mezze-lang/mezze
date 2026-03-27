@@ -16,11 +16,8 @@ class EffectHandlingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun getVariableType(program: Program, variableName: String): MezzeType? {
-        return program.items
-            .filterIsInstance<LetBinding>()
-            .find { it.variableName == variableName }
-            ?.inferredType
+    private fun getVariableType(result: TypeCheckResult, variableName: String): MezzeType? {
+        return result.getVariableType(variableName)
     }
 
     private fun getFunctionEffects(type: MezzeType?): Set<String>? {
@@ -47,7 +44,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val effectfulType = getVariableType(typedProgram, "effectfulFunc") as MezzeType.FunctionType
         val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as MezzeType.FunctionType
@@ -105,7 +102,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val multiEffectType = getVariableType(typedProgram, "multiEffectFunc") as MezzeType.FunctionType
 
@@ -153,7 +150,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as MezzeType.FunctionType
         val partiallyHandledFuncType = getVariableType(typedProgram, "partiallyHandledFunc") as MezzeType.FunctionType
@@ -204,7 +201,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as MezzeType.FunctionType
         val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as MezzeType.FunctionType
@@ -249,7 +246,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as MezzeType.FunctionType
         val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as MezzeType.FunctionType
@@ -286,7 +283,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val effectfulType = getVariableType(typedProgram, "effectfulCalc") as MezzeType.FunctionType
         val handledType = getVariableType(typedProgram, "handledCalc") as MezzeType.FunctionType
@@ -333,7 +330,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val originalType = getVariableType(typedProgram, "dualEffectFunc") as MezzeType.FunctionType
         val partiallyHandledType = getVariableType(typedProgram, "partiallyHandled") as MezzeType.FunctionType
@@ -378,7 +375,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val composedType = getVariableType(typedProgram, "composedFunc") as MezzeType.FunctionType
         val handledType = getVariableType(typedProgram, "handledFunc") as MezzeType.FunctionType

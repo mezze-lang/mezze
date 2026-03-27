@@ -24,9 +24,9 @@ class RecordPatternTypeCheckingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========== Basic Record Pattern Matching ==========
@@ -41,8 +41,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_name { person = { name = "Alice" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -55,8 +55,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_sum { point = { x = 1, y = 2 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -69,8 +69,8 @@ class RecordPatternTypeCheckingTest {
             let result = describe { data = { name = "Bob", age = 30 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Type Inference from Record Patterns ==========
@@ -85,8 +85,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_x { point = { x = 5, y = 10 } } + 1
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -99,8 +99,8 @@ class RecordPatternTypeCheckingTest {
             let result = calculate { data = { a = 2, b = 3, c = 4 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Open Record Patterns ==========
@@ -115,8 +115,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_name { data = { name = "Alice", age = 30, city = "NYC" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -129,8 +129,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_x { point = { x = 5, y = 10, z = 15 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Nested Record Patterns ==========
@@ -145,8 +145,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_age { person = { name = "Alice", age = 30 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -161,8 +161,8 @@ class RecordPatternTypeCheckingTest {
             let result = describe_status { response = { status = 200 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Record Pattern with Guards ==========
@@ -177,8 +177,8 @@ class RecordPatternTypeCheckingTest {
             let result = classify { person = { age = 25 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -192,8 +192,8 @@ class RecordPatternTypeCheckingTest {
             let result = classify_point { point = { x = 1, y = 1 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Multiple Record Patterns ==========
@@ -209,8 +209,8 @@ class RecordPatternTypeCheckingTest {
             let result = is_origin_or_axis { point = { x = 0, y = 5 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Mixed Pattern Types ==========
@@ -225,8 +225,8 @@ class RecordPatternTypeCheckingTest {
             let result = process { data = { value = 5 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -239,8 +239,8 @@ class RecordPatternTypeCheckingTest {
             let result = process { data = { x = 1, y = 2 } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Practical Use Cases ==========
@@ -257,8 +257,8 @@ class RecordPatternTypeCheckingTest {
             let result = handle_response { response = { status = 200, body = "Hello" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -271,8 +271,8 @@ class RecordPatternTypeCheckingTest {
             let result = get_port { config = { port = 3000, host = "localhost" } }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -287,7 +287,7 @@ class RecordPatternTypeCheckingTest {
                 process { data = point }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 }

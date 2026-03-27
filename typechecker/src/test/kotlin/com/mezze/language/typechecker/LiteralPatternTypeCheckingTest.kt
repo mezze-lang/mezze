@@ -15,12 +15,12 @@ class LiteralPatternTypeCheckingTest {
 
     private val parser = MezzeParser()
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     // ========== Valid Integer Literal Patterns ==========
@@ -36,8 +36,8 @@ class LiteralPatternTypeCheckingTest {
             let result = classify { n = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -50,8 +50,8 @@ class LiteralPatternTypeCheckingTest {
             let result = is_small { n = 2 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -65,8 +65,8 @@ class LiteralPatternTypeCheckingTest {
             let result = describe { n = 0, verbose = True }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Valid String Literal Patterns ==========
@@ -82,8 +82,8 @@ class LiteralPatternTypeCheckingTest {
             let result = greet { name = "Alice" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -96,8 +96,8 @@ class LiteralPatternTypeCheckingTest {
             let result = check_empty { s = "" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -110,8 +110,8 @@ class LiteralPatternTypeCheckingTest {
             let result = is_greeting { word = "hello" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Valid Boolean Literal Patterns ==========
@@ -126,8 +126,8 @@ class LiteralPatternTypeCheckingTest {
             let result = to_str { b = True }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -140,8 +140,8 @@ class LiteralPatternTypeCheckingTest {
             let result = is_active { flag = False }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Mixed Literal and Variable Patterns ==========
@@ -184,8 +184,8 @@ class LiteralPatternTypeCheckingTest {
             let result = classify_pair { x = 0, y = 0 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Return Type Inference with Literal Patterns ==========
@@ -201,8 +201,8 @@ class LiteralPatternTypeCheckingTest {
             let result = get_value { n = 1 } + 10
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -216,8 +216,8 @@ class LiteralPatternTypeCheckingTest {
             let result = describe { cmd = "start" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Complex Expressions in Match Body ==========
@@ -233,8 +233,8 @@ class LiteralPatternTypeCheckingTest {
             let result = calculate { n = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Literal Patterns in Do Expressions ==========
@@ -250,8 +250,8 @@ class LiteralPatternTypeCheckingTest {
                 y
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== HTTP Status Code Style Matching ==========
@@ -270,8 +270,8 @@ class LiteralPatternTypeCheckingTest {
             let result = describe_status { code = 404 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ========== Command Parsing Style String Matching ==========
@@ -288,7 +288,7 @@ class LiteralPatternTypeCheckingTest {
             let result = parse_command { input = "help" }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 }

@@ -33,10 +33,8 @@ class TopLevelEffectRestrictionsTest {
         typeChecker = TypeChecker()
     }
 
-    private fun getVariableType(program: Program, name: String): MezzeType? {
-        val binding = program.items.filterIsInstance<LetBinding>()
-            .find { (it.pattern as? VariablePattern)?.name == name }
-        return binding?.inferredType
+    private fun getVariableType(result: TypeCheckResult, name: String): MezzeType? {
+        return result.getVariableType(name)
     }
 
     // ========================================================================
@@ -82,7 +80,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         // When wrapped in a function, it should have type {} -> {} <*>
         val funcType = getVariableType(typedProgram, "performedValue") as MezzeType.FunctionType
@@ -109,7 +107,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "myFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -138,7 +136,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "effectfulFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -164,7 +162,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val mainType = getVariableType(typedProgram, "main") as MezzeType.FunctionType
         assertNotNull(mainType.effects)
@@ -233,7 +231,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val funcType = getVariableType(typedProgram, "myFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -258,7 +256,7 @@ class TopLevelEffectRestrictionsTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast).program
+        val typedProgram = typeChecker.typeCheck(ast)
 
         val callerType = getVariableType(typedProgram, "caller") as MezzeType.FunctionType
         assertNotNull(callerType.effects)

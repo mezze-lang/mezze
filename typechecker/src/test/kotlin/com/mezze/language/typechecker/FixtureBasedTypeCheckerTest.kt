@@ -31,11 +31,11 @@ class FixtureBasedTypeCheckerTest {
             .joinToString("\n")
     }
 
-    private fun parseAndTypeCheck(source: String): Program {
+    private fun parseAndTypeCheck(source: String): TypeCheckResult {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun extractExpectedTypes(source: String): Map<String, String> {

@@ -36,15 +36,15 @@ class StringInterpolationPatternTypeCheckTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): Program {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program).program
+        return typeChecker.typeCheck(program)
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program).program
+            typeChecker.typeCheck(program)
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
@@ -66,8 +66,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = extract_middle {s = "prefix-hello-suffix"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -80,8 +80,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = extract_name {s = "John: some text"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -94,8 +94,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = extract_extension {s = "file.txt"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -107,8 +107,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = identity {s = "anything"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -125,8 +125,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = extract_pair {s = "hello-world"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -139,8 +139,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_date {s = "2024-01-15"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -153,8 +153,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_log {s = "[INFO] Hello World @12:00"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -171,8 +171,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = get_greeting {s = "Hello, Alice!"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -184,8 +184,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result: Str = extract {s = "test"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -198,8 +198,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result: { key: Str, value: Str } = parse {s = "name=test"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -212,8 +212,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = format {s = "user@example.com"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -231,8 +231,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = check_admin {s = "user:admin"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -247,8 +247,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = classify_level {s = "[ERROR] Something failed"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -261,8 +261,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = validate {s = "admin:secret"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -281,8 +281,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_command {s = "GET /api/users"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -297,8 +297,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = format_type {s = "data.json"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -313,8 +313,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = describe {s = "hello-world"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -436,8 +436,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse {s = "hello world"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -449,8 +449,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = identity {s = "test"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -462,8 +462,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = constant {s = "anything"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -481,8 +481,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_opt {opt = Some {val = "user@example.com"}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -495,8 +495,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_first {strs = ["hello-world", "foo-bar"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -512,8 +512,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_deeply {outer = Some {val = "name=test"}}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -530,8 +530,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = check {s = "exact match"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -544,8 +544,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = check {s = "cost: $100"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -559,8 +559,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_complex {s = "BEGIN-1-2-3-4-5-END"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -577,8 +577,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result: Str = parse {s = "hello world"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -590,8 +590,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = extract {s = "test"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -609,8 +609,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_url {url = "https://example.com/api/v1"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -628,8 +628,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = classify_log {line = "[ERROR] Connection failed"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -643,8 +643,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_email {email = "user@example.com"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -662,8 +662,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_cmd {input = "run main.mz"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -678,8 +678,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_config_line {line = "host = localhost"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -700,8 +700,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_pairs {lines = ["a=1", "b=2", "invalid", "c=3"]}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -718,8 +718,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_greeting {s = "hi Alice"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
@@ -737,8 +737,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = process {data = { input = "foo-bar", prefix = "foo" }}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -753,8 +753,8 @@ class StringInterpolationPatternTypeCheckTest {
             let output = analyze {s = "message: hello world"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -769,8 +769,8 @@ class StringInterpolationPatternTypeCheckTest {
             let result = parse_path {path = "/api/v1/users/123"}
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
     }
 
     // ==========================================================================
