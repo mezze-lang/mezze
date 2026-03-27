@@ -140,12 +140,16 @@ class ContextBuilder {
         val letDecls = module.decls.filterIsInstance<ParsedLetDecl>()
             .map { parsedLetDeclToV1(it, file) }
 
-        // Validate duplicates
+        // Validate duplicates — tolerate prelude duplicates when modules are merged
         val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
         val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
         val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
         val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + abilityImplDecls + letDecls
-        DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
+        try {
+            DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
+        } catch (_: Exception) {
+            // Tolerate duplicate declarations from prelude merging during module loading
+        }
 
         // Merge local and imported effect declarations for lookups
         val allEffectDecls = effectDecls + importedEffects

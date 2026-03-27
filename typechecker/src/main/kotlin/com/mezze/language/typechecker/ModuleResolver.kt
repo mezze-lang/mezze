@@ -588,6 +588,9 @@ class ModuleResolver(
 
                 // Extract exports from ParsedModule (no v1 Program dependency for exports)
                 val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
+                if (parsedExports.isEmpty() && parsedModule.decls.isNotEmpty()) {
+                    java.io.File("/tmp/empty_exports.txt").appendText("Module $modulePath: ${parsedModule.decls.size} decls but 0 exports. Decl types: ${parsedModule.decls.map { it::class.simpleName }}\n")
+                }
 
                 // Extract dependencies
                 val dependencies = extractDependencies(typedProgram)
@@ -1531,6 +1534,8 @@ class ModuleResolver(
      * @param typeContext Optional context from TypeChecker with inferred types for exports
      */
     fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, MezzeType>? = null) {
+        // Skip update if program is empty (new pipeline returns empty v1 Program)
+        if (typedProgram.items.isEmpty()) return
         DebugLogger.debug(Category.ModuleResolver) { "updateModuleExports: modulePath=$modulePath, ${typedProgram.items.size} items" }
 
         if (DebugLogger.isCategoryEnabled(Category.ModuleResolver)) {

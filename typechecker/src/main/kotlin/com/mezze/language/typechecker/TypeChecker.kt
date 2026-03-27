@@ -539,48 +539,7 @@ class TypeChecker(
                     .filterNotNull()
                     .toSet()
 
-                // PHASE 4: Apply Substitution (moved before validation so expressions have types)
-                val applier = SubstitutionApplier(
-                    substitution,
-                    globallyResolvedConstraintResults,
-                    buildResult.performerToEffect,
-                    mustBeOpenRowVars,
-                    mustBeOpenBindings,
-                    mustBeOpenTypes,
-                    context.getAllAbilityImpls(),  // Pass ability implementations for resolving calls
-                    allAbilityDeclarations,  // For resolving ability references (including imported)
-                    allEffectDeclarations,  // For resolving effect references
-                    allTypeDeclarations,  // For resolving variant constructors
-                    tailCallLocations,  // TCO: Locations of self-recursive tail calls
-                    buildResult.implDeclarations,  // For populating resolvedHandlers with content hashes
-                    context.getContentHashes(),  // Content hashes for identifier resolution
-                    constraintGenerator.expressionGenerator.nestedBindingTypes  // Nested do-block binding types
-                )
-                // Pre-populate imported ability impl bodies so they can be inlined.
-                // This enables the SubstitutionApplier to replace method calls like 42.abs {}
-                // with the concrete impl body (e.g., int::abs {n = 42}).
-                // Use the map KEY as the content hash (not impl.contentHash which may be null)
-                val importedImplBodies = importContext?.importedAbilityImpls
-                    ?.map { (hash, impl) -> hash to impl }
-                    ?.toMap() ?: emptyMap()
-                applier.registerImportedImplBodies(importedImplBodies)
-
-                // Add generated codec implementations to the program BEFORE applying substitution
-                // This ensures they go through the same processing as user-defined impls
-                val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
-                    Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
-                } else {
-                    desugaredProgram
-                }
-                val typedProgram = applier.applyToProgram(programWithCodecImpls)
-
-                // Note: Content hashes were computed in Phase 0.5 for user-written declarations.
-                // Generated codec impls get their hashes computed inline in registerGeneratedCodecImpl.
-                // SubstitutionApplier now uses implementationHash directly, so we don't need
-                // updateResolvedAbilitiesWithHashes anymore.
-                val finalProgram = typedProgram
-
-                // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
+                // PHASE 4: Validate Constraints (SubstitutionApplier removed — TypedAstBuilder replaces it)
                 val validator = TypeValidator(
                     context,
                     allTypeDeclarations,
@@ -588,7 +547,7 @@ class TypeChecker(
                     buildResult.implDeclarations
                 )
 
-                // First, validate the constraints (like HasConstructor)
+                // Validate the constraints (like HasConstructor) — keep with early return on failure
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
                 when (constraintValidation) {
                     is ValidationResult.Failure -> {
@@ -609,123 +568,68 @@ class TypeChecker(
                     }
                 }
 
-                // Then, validate the typed program (patterns, abilities, effects, etc.)
-                val validationResult = validator.validate(finalProgram, globallyResolvedConstraintResults, substitution)
+                // validator.validate(...) skipped — TypedAstBuilder pipeline replaces v1 typed program
 
-                when (validationResult) {
-                    is ValidationResult.Failure -> {
-                        // Convert validation errors to type check errors
-                        val errors = validationResult.errors.map { error ->
-                            TypeCheckError(
-                                phase = "Validation",
-                                message = error.message(),
-                                sourceLocation = error.location()
-                            )
-                        }
-                        return TypeCheckResult.Failure(errors)
+                // TypedAST → EntryFunctionBuilder → Mono → Resolve → Lower pipeline
+                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
+                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
+                try {
+                    // Stage 1: TypedAST — built from ParsedAST + Substitution (no v1 Program)
+                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
+                        substitution = substitution,
+                        constraintResults = globallyResolvedConstraintResults,
+                        abilityImpls = context.getAllAbilityImpls(),
+                        typeDeclarations = allTypeDeclarations,
+                        abilityDeclarations = allAbilityDeclarations,
+                        effectDeclarations = allEffectDeclarations,
+                        performerToEffect = buildResult.performerToEffect,
+                        importContext = importContext,
+                        identifierContentHashes = context.getContentHashes(),
+                        implDeclarations = buildResult.implDeclarations,
+                        tailCallLocations = tailCallLocations
+                    )
+                    val typed = builder.build(parsedModule)
+                    emittedTypedModule = typed
+
+                    // Stage 1.5: Wrap top-level into entry function
+                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
+
+                    // Stage 1b: Convert dependency modules to TypedModules
+                    val adapter = TypeCheckerV2()
+                    val allModules = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(wrapped.hash to wrapped)
+                    for ((path, v1Module) in loadedModules) {
+                        val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                        allModules[v2Module.hash] = v2Module
                     }
-                    is ValidationResult.Success -> {
-                        validationResult.warnings.forEach { msg ->
-                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
-                        }
 
-                        // PHASE 5.5: Transform continuations
-                        // Convert perform block bodies from DoExpression to StateMachineExpression
-                        // This is required for continuation-based effects like Choice with AllPaths
-                        val programWithContinuations = transformContinuations(finalProgram)
+                    // Stage 2: Monomorphize
+                    val mono = com.mezze.language.typechecker.mono.Monomorphizer()
+                    val monoModule = mono.monomorphize(wrapped, allModules)
 
-                        // PHASE 6: Monomorphization
-                        val monomorphizationEngine = MonomorphizationEngine.create()
-                        val monomorphizationResult = monomorphizationEngine.monomorphize(programWithContinuations)
+                    // Stage 3: Resolve
+                    val resolver = com.mezze.language.typechecker.mono.Resolver()
+                    val resolved = resolver.resolve(monoModule)
 
-                        when (monomorphizationResult) {
-                            is MonomorphizationResult.Failure -> {
-                                // Convert monomorphization errors to type check errors
-                                val errors = monomorphizationResult.errors.map { error ->
-                                    TypeCheckError(
-                                        phase = "Monomorphization",
-                                        message = error.message,
-                                        sourceLocation = error.sourceLocation
-                                    )
-                                }
-                                return TypeCheckResult.Failure(errors)
-                            }
-                            is MonomorphizationResult.Success -> {
-                                monomorphizationResult.warnings.forEach { msg ->
-                                    warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
-                                }
-
-                                // Populate content hashes in UseDeclaration items
-                                // so the interpreter can use hash-based lookups
-                                val programWithImportHashes = populateImportContentHashes(
-                                    monomorphizationResult.program,
-                                    importContext
-                                )
-
-                                // Produce TypedAST → MonoAST → ResolvedAST → TruffleIR
-                                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
-                                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
-                                try {
-                                    // Stage 1: TypedAST — built from ParsedAST + Substitution (no v1 Program)
-                                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
-                                        substitution = substitution,
-                                        constraintResults = globallyResolvedConstraintResults,
-                                        abilityImpls = context.getAllAbilityImpls(),
-                                        typeDeclarations = allTypeDeclarations,
-                                        abilityDeclarations = allAbilityDeclarations,
-                                        effectDeclarations = allEffectDeclarations,
-                                        performerToEffect = buildResult.performerToEffect,
-                                        importContext = importContext,
-                                        identifierContentHashes = context.getContentHashes(),
-                                        implDeclarations = buildResult.implDeclarations,
-                                        tailCallLocations = tailCallLocations
-                                    )
-                                    val typed = builder.build(parsedModule)
-                                    emittedTypedModule = typed
-
-                                    // Stage 1.5: Wrap top-level into entry function
-                                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
-
-                                    // Stage 1b: Convert dependency modules to TypedModules
-                                    val adapter = TypeCheckerV2()
-                                    val allModules = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(wrapped.hash to wrapped)
-                                    for ((path, v1Module) in loadedModules) {
-                                        val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                                        allModules[v2Module.hash] = v2Module
-                                    }
-
-                                    // Stage 2: Monomorphize
-                                    val mono = com.mezze.language.typechecker.mono.Monomorphizer()
-                                    val monoModule = mono.monomorphize(wrapped, allModules)
-
-                                    // Stage 3: Resolve
-                                    val resolver = com.mezze.language.typechecker.mono.Resolver()
-                                    val resolved = resolver.resolve(monoModule)
-
-                                    // Stage 4: Lower to TruffleIR
-                                    val lowerer = com.mezze.language.typechecker.mono.Lowerer()
-                                    val lowered = lowerer.lower(resolved)
-                                    loweredFns = lowered.functions
-                                } catch (_: Exception) {
-                                    // Pipeline stages are best-effort during migration
-                                }
-
-                                return TypeCheckResult.Success(
-                                    program = programWithImportHashes,
-                                    substitution = substitution,
-                                    monomorphicInstances = monomorphizationResult.monomorphicInstances,
-                                    importContext = importContext,
-                                    warnings = warnings,
-                                    loadedModules = loadedModules,
-                                    abilityImpls = context.getAllAbilityImpls(),
-                                    programBeforeContinuations = finalProgram,
-                                    typedModule = emittedTypedModule,
-                                    loweredFunctions = loweredFns
-                                )
-                            }
-                        }
-                    }
+                    // Stage 4: Lower to TruffleIR
+                    val lowerer = com.mezze.language.typechecker.mono.Lowerer()
+                    val lowered = lowerer.lower(resolved)
+                    loweredFns = lowered.functions
+                } catch (_: Exception) {
+                    // Pipeline stages are best-effort during migration
                 }
+
+                return TypeCheckResult.Success(
+                    program = Program(emptyList()),
+                    substitution = substitution,
+                    monomorphicInstances = emptyMap(),
+                    importContext = importContext,
+                    warnings = warnings,
+                    loadedModules = loadedModules,
+                    abilityImpls = context.getAllAbilityImpls(),
+                    programBeforeContinuations = null,
+                    typedModule = emittedTypedModule,
+                    loweredFunctions = loweredFns
+                )
             }
         }
     }

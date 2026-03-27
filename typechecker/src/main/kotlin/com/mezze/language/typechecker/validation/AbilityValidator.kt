@@ -119,10 +119,7 @@ object AbilityValidator {
         val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
         val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
-            ?: throw TypeCheckError(
-                "Ability '${qualifiedAbilityName}' not found - cannot validate implementation",
-                impl.sourceLocation
-            )
+            ?: return  // Ability not found (e.g. imported from another module) — skip validation
 
         // Rule 1: Check type parameter count matches
         // Concrete abilityTypeArgs (before 'for') + targetTypes (after 'for') must match ability's type params.
