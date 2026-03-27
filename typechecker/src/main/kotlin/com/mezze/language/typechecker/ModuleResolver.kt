@@ -1321,53 +1321,8 @@ class ModuleResolver(
                 // Ability implementation declarations
                 // ----------------------------------------------------------------
                 is ParsedImplAbilityDecl -> {
-                    val v1Target: ImplTarget = when (val t = decl.target) {
-                        is ParsedImplTarget.Named -> ImplTarget.Named(
-                            ability = QualifiedRef(
-                                localName = t.ability.localName,
-                                qualifier = t.ability.qualifier?.let { ModulePath(it.segments) }
-                            )
-                        )
-                        is ParsedImplTarget.Inherent -> ImplTarget.Inherent
-                    }
-                    val v1AbilityImpl = ImplAbilityDeclaration(
-                        target = v1Target,
-                        targetTypes = decl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                        abilityTypeArgs = decl.abilityTypeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                        forallVars = decl.forallVars,
-                        associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
-                            ParserBridge.toV1TypeAnnotation(ann, file)
-                        },
-                        operations = decl.operations.map { op ->
-                            ImplAbilityOperation(
-                                name = op.name,
-                                paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                                returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                                implementation = ParserBridge.toV1Expr(op.implementation, file),
-                                abilityConstraints = op.abilityConstraints.map { c ->
-                                    FunctionAbilityConstraint(
-                                        abilityName = c.abilityName,
-                                        typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                                        associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, ann) ->
-                                            ParserBridge.toV1TypeAnnotation(ann, file)
-                                        }
-                                    )
-                                }
-                            )
-                        },
-                        contentHash = null
-                    )
-                    val contentHash = ASTHasher.hashImplAbilityDeclaration(v1AbilityImpl).toFullHexString()
-
-                    // Use the content hash itself as the key for ability impls (same pattern
-                    // as ContentHashComputer) to avoid collisions between multiple impls
-                    exports[contentHash] = ExportedItem(
-                        name = contentHash,
-                        type = ExportedItemType.ABILITY,
-                        mezzeType = MezzeType.VarType(TypeVar.fresh()),
-                        originalName = contentHash,
-                        contentHash = contentHash
-                    )
+                    // Ability impls are NOT exported through the exports map.
+                    // They're imported via ProgramIndex.abilityImplsByHash instead.
                 }
 
                 // ----------------------------------------------------------------
