@@ -76,7 +76,10 @@ object BuiltInAbilities {
             }
         }
 
-        // Ensure Inspect is always present (compiler-provided)
+        // Ensure Inspect is always present (compiler-provided).
+        // Check by name since the hash-based lookup (WellKnownHashes) is itself computed
+        // by parsing this same file — no circular dependency here, but if the parse failed
+        // above we'd have no hash yet.  Name-based check is the right sentinel here.
         if ("Inspect" !in result) {
             result["Inspect"] = mapOf(
                 "to_dbg_str" to { _: MezzeType.VarType ->

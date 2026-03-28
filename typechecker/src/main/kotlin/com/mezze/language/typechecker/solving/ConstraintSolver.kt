@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.printing.TypeDiffPrinter
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 
 /**
@@ -1186,7 +1187,7 @@ class ConstraintSolver(
                     val typeArgs = tracked.typeArgs
                     val sourceLocation = tracked.sourceLocation
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
-                    if (abilityName == "Inspect") continue
+                    if (WellKnownHashes.isInspect(abilityName, tracked.abilityHash)) continue
                     // Substitute the type variable in typeArgs with the bound type
                     // Compare by ID or name since different TypeVar instances may represent the same variable
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
@@ -1247,7 +1248,7 @@ class ConstraintSolver(
         // CRITICAL: Filter out Inspect - it's universally available and shouldn't constrain types
         // This prevents multiInspect from incorrectly unifying {a: 'a, b: 'b, c: 'c} to {a: 'a, b: 'a, c: 'a}
         // See OldTypeChecker.kt:2651-2652
-        if (abilityName == "Inspect") {
+        if (WellKnownHashes.isInspect(abilityName, constraint.abilityHash)) {
             // Inspect is universally available - no constraint needed
             return ConstraintResult.Success(Substitution.empty)
         }
@@ -2177,23 +2178,23 @@ class ConstraintSolver(
 
         // Newtypes NEVER auto-derive Eq/Ord — requires explicit impl.
         // Only Inspect is universally available.
-        if (isNewtype && abilityName != BuiltinAbilities.INSPECT) {
+        if (isNewtype && !WellKnownHashes.isInspect(abilityName, null)) {
             return false
         }
 
-        return when (abilityName) {
-            // Inspect is universally available — no impl needed
-            "Inspect" -> true
+        return when {
+            // Inspect is universally available — no impl needed (identified by hash, name as fallback)
+            WellKnownHashes.isInspect(abilityName, null) -> true
 
             // Eq/Ord: VarType pass-through + derivation for composite types
-            "Eq" -> {
+            abilityName == "Eq" -> {
                 unwrappedType is MezzeType.VarType || isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it) }) ||
                 (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType)) ||
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
             }
-            "Ord" -> {
+            abilityName == "Ord" -> {
                 unwrappedType is MezzeType.VarType ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
@@ -2202,7 +2203,7 @@ class ConstraintSolver(
             }
 
             // Logical operators only work on Bool
-            "LogicalAnd", "LogicalOr", "LogicalNot" -> {
+            abilityName == "LogicalAnd" || abilityName == "LogicalOr" || abilityName == "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }

@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.ast.PrimitiveTypes
 
 /**
@@ -136,8 +137,8 @@ class AbilityResolver(
     }
 
     private fun checkRecordAbility(type: MezzeType.RecordType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
-        return when (abilityName) {
-            "Eq" -> {
+        return when {
+            abilityName == "Eq" -> {
                 // Records can have Eq if all fields have Eq
                 for ((fieldName, fieldType) in type.fields) {
                     val fieldCheck = checkAbility(fieldType, "Eq")
@@ -149,10 +150,10 @@ class AbilityResolver(
                 }
                 AbilityCheckResult.Satisfied("Derived from all fields")
             }
-            "Inspect" -> {
+            WellKnownHashes.isInspect(abilityName, null) -> {
                 // Records can have Inspect if all fields have Inspect
                 for ((fieldName, fieldType) in type.fields) {
-                    val fieldCheck = checkAbility(fieldType, "Inspect")
+                    val fieldCheck = checkAbility(fieldType, abilityName)
                     if (fieldCheck is AbilityCheckResult.Unsatisfied) {
                         return AbilityCheckResult.Unsatisfied(
                             reason = "Record Inspect requires all fields to have Inspect (field '$fieldName' does not)"
@@ -184,8 +185,8 @@ class AbilityResolver(
         }
 
         // Regular variant handling
-        return when (abilityName) {
-            "Eq" -> {
+        return when {
+            abilityName == "Eq" -> {
                 // Variants can have Eq if all constructors have Eq
                 for ((constructorName, dataType) in type.constructors) {
                     if (dataType != null) {
@@ -199,11 +200,11 @@ class AbilityResolver(
                 }
                 AbilityCheckResult.Satisfied("Derived from all constructors")
             }
-            "Inspect" -> {
+            WellKnownHashes.isInspect(abilityName, null) -> {
                 // Variants can have Inspect if all constructor data types have Inspect
                 for ((constructorName, dataType) in type.constructors) {
                     if (dataType != null) {
-                        val dataCheck = checkAbility(dataType, "Inspect")
+                        val dataCheck = checkAbility(dataType, abilityName)
                         if (dataCheck is AbilityCheckResult.Unsatisfied) {
                             return AbilityCheckResult.Unsatisfied(
                                 reason = "Variant Inspect requires all constructor data to have Inspect (constructor '$constructorName' does not)"
@@ -235,8 +236,8 @@ class AbilityResolver(
         // Get the wrapped type (payload of the single constructor)
         val wrappedType = type.constructors.values.firstOrNull()
 
-        return when (abilityName) {
-            BuiltinAbilities.INSPECT -> {
+        return when {
+            WellKnownHashes.isInspect(abilityName, null) -> {
                 // Inspect is always available for newtypes (universal debugging)
                 AbilityCheckResult.Satisfied("Built-in Newtype Inspect (universal)")
             }
@@ -260,8 +261,8 @@ class AbilityResolver(
         typeArgs: List<MezzeType>,
         definition: NewtypeDefinition
     ): AbilityCheckResult {
-        return when (abilityName) {
-            BuiltinAbilities.INSPECT -> {
+        return when {
+            WellKnownHashes.isInspect(abilityName, null) -> {
                 AbilityCheckResult.Satisfied("Built-in Newtype Inspect (universal)")
             }
             else -> {
@@ -279,8 +280,8 @@ class AbilityResolver(
         // Handle well-known built-in types
         when (type.constructor) {
             "Option", "Result" -> {
-                return when (abilityName) {
-                    "Eq" -> {
+                return when {
+                    abilityName == "Eq" -> {
                         // Option/Result have Eq if their type args have Eq
                         val allArgsHaveEq = type.args.all { arg ->
                             checkAbility(arg, "Eq") is AbilityCheckResult.Satisfied
@@ -293,10 +294,10 @@ class AbilityResolver(
                             )
                         }
                     }
-                    "Inspect" -> {
+                    WellKnownHashes.isInspect(abilityName, null) -> {
                         // Option/Result have Inspect if their type args have Inspect
                         val allArgsHaveInspect = type.args.all { arg ->
-                            checkAbility(arg, "Inspect") is AbilityCheckResult.Satisfied
+                            checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
                         }
                         if (allArgsHaveInspect) {
                             AbilityCheckResult.Satisfied("Built-in ${type.constructor} to_string")
@@ -323,7 +324,7 @@ class AbilityResolver(
             }
 
             // For regular variants and records, check built-in abilities
-            if (abilityName == "Eq" || abilityName == "Inspect") {
+            if (abilityName == "Eq" || WellKnownHashes.isInspect(abilityName, null)) {
                 // First check if type arguments support the ability
                 val allArgsSupport = type.args.all { arg ->
                     checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied

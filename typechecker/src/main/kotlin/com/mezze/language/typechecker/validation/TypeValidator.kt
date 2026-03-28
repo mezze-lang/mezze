@@ -12,6 +12,7 @@ import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.typechecker.WellKnownHashes
 
 /**
  * Type validator - validates types after constraint solving.
@@ -768,10 +769,10 @@ class TypeValidator(
             }
         }
 
-        return when (abilityName) {
-            "Inspect" -> true
+        return when {
+            WellKnownHashes.isInspect(abilityName, null) -> true
 
-            "Eq" -> {
+            abilityName == "Eq" -> {
                 unwrappedType is MezzeType.VarType ||
                 isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
@@ -780,7 +781,7 @@ class TypeValidator(
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
             }
 
-            "Ord" -> {
+            abilityName == "Ord" -> {
                 unwrappedType is MezzeType.VarType ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
@@ -788,7 +789,7 @@ class TypeValidator(
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType))
             }
 
-            "LogicalAnd", "LogicalOr", "LogicalNot" -> {
+            abilityName == "LogicalAnd" || abilityName == "LogicalOr" || abilityName == "LogicalNot" -> {
                 unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType)
             }
 
@@ -1361,11 +1362,11 @@ class TypeValidator(
         // See OldTypeChecker.kt:2651-2652 and ConstraintSolver.kt:396-402
         val abilities1 = func1.abilityConstraints
             .map { it.abilityName }
-            .filter { it != "Inspect" }
+            .filter { !WellKnownHashes.isInspect(it, null) }
             .toSet()
         val abilities2 = func2.abilityConstraints
             .map { it.abilityName }
-            .filter { it != "Inspect" }
+            .filter { !WellKnownHashes.isInspect(it, null) }
             .toSet()
 
         if (abilities1 != abilities2) {
