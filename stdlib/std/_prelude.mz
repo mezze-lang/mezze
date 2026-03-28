@@ -1,0 +1,28 @@
+# _prelude.mz — compiler-internal prelude
+#
+# This file defines what's auto-imported for every module.
+# It is NOT a user-importable module — the leading underscore marks it as internal.
+# The compiler loads this before user code to make ability impls available
+# (operators, method syntax, inherent methods).
+#
+# To add a new type to the prelude, add a `use` line here.
+# No need to change any Kotlin/Java source code.
+
+use std::int
+use std::float
+use std::nat
+use std::frac
+use std::bool
+use std::str
+use std::char
+use std::option
+use std::result
+use std::collections::seq
+use std::collections::list
+use std::collections::map
+use std::collections::set
+use std::collections::deque
+use std::collections::sorted_map
+use std::collections::sorted_set
+use std::collections::nonemptylist
+use std::collections::bytes

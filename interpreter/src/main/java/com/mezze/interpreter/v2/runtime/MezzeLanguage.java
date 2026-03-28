@@ -173,17 +173,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /**
      * Compile a typed program to a CallTarget.
      */
-    /** Prelude module paths — loaded for every user program to provide ability impls. */
-    private static final List<String> PRELUDE_MODULES = List.of(
-        "std::int", "std::float", "std::nat", "std::frac",
-        "std::bool", "std::str", "std::char",
-        "std::option", "std::result",
-        "std::collections::seq", "std::collections::list",
-        "std::collections::map", "std::collections::set",
-        "std::collections::deque", "std::collections::sorted_map",
-        "std::collections::sorted_set", "std::collections::nonemptylist",
-        "std::collections::bytes"
-    );
+    // Prelude modules loaded from stdlib/std/_prelude.mz — no hardcoded list here
 
     private CallTarget compileProgram(Program program, Path projectRoot) {
         // Extract imported modules from the program

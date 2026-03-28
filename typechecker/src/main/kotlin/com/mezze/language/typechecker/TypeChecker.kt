@@ -1259,20 +1259,25 @@ class TypeChecker(
         // Return cached prelude if available
         cachedPreludeContext?.let { return it }
 
-        val preludeModules = listOf(
-            listOf("std", "int"), listOf("std", "float"), listOf("std", "nat"), listOf("std", "frac"),
-            listOf("std", "bool"), listOf("std", "str"), listOf("std", "char"),
-            listOf("std", "option"), listOf("std", "result"),
-            listOf("std", "collections", "seq"), listOf("std", "collections", "list"),
-            listOf("std", "collections", "map"), listOf("std", "collections", "set"),
-            listOf("std", "collections", "deque"), listOf("std", "collections", "sorted_map"),
-            listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
-            listOf("std", "collections", "bytes"),
-        )
-
-        val syntheticUses = preludeModules
-            .map { UseDeclaration(path = ModulePath(it)) }
-        val syntheticProgram = Program(items = syntheticUses)
+        // Load prelude module list from _prelude.mz (compiler-internal, not user-importable)
+        val preludeSource = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
+            ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
+        val syntheticProgram = if (preludeSource != null) {
+            MezzeParser().parse(preludeSource)
+        } else {
+            // Fallback: hardcoded list if _prelude.mz not found
+            val preludeModules = listOf(
+                listOf("std", "int"), listOf("std", "float"), listOf("std", "nat"), listOf("std", "frac"),
+                listOf("std", "bool"), listOf("std", "str"), listOf("std", "char"),
+                listOf("std", "option"), listOf("std", "result"),
+                listOf("std", "collections", "seq"), listOf("std", "collections", "list"),
+                listOf("std", "collections", "map"), listOf("std", "collections", "set"),
+                listOf("std", "collections", "deque"), listOf("std", "collections", "sorted_map"),
+                listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
+                listOf("std", "collections", "bytes"),
+            )
+            Program(items = preludeModules.map { UseDeclaration(path = ModulePath(it)) })
+        }
 
         val result = importResolver.resolveImports(syntheticProgram)
         val preludeContext = when (result) {
