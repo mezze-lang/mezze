@@ -158,7 +158,6 @@ class AbilityConstraintGenerator {
 
         const val EQ = "Eq"
         const val ORD = "Ord"
-        const val SHOW = "Show"
         const val INSPECT = "Inspect"
 
         const val ITERABLE = "Iterable"
@@ -183,7 +182,6 @@ class AbilityConstraintGenerator {
             return when (abilityName) {
                 EQ -> true      // Can derive equality for many types
                 ORD -> true     // Can derive ordering if Eq is satisfied
-                SHOW -> true    // Can derive string conversion
                 INSPECT -> true // Can derive inspection
                 else -> false
             }

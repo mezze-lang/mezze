@@ -309,16 +309,10 @@ class ExpressionConstraintGenerator {
     private fun generateIdentifier(expr: ParsedIdentifier, context: ConstraintContext): ConstraintResult {
         val lookupKey = BindingKey(qualifier = expr.qualifier?.segments?.lastOrNull(), localName = expr.localName)
         val lookupKeyString = lookupKey.toKeyString()  // For usedVariables, DefinitionRef, etc.
-        if (expr.localName == "Show") {
-            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${lookupKeyString}'" }
-        }
 
         // Look up variable in typing context
         return when (val result = context.typingContext.lookup(lookupKey)) {
             is TypingContext.LookupResult.Found -> {
-                if (expr.localName == "Show") {
-                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${lookupKeyString}' in context!" }
-                }
                 when (val binding = result.binding) {
                     is TypingContext.Binding.Monomorphic -> {
                         // Monomorphic variable - use type directly
@@ -400,17 +394,6 @@ class ExpressionConstraintGenerator {
                 val isUserDefinedAbility = lookupKeyString in context.abilityNames
                 val isEffect = lookupKeyString in context.effectNames
 
-                if (expr.localName == "Show") {
-                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${lookupKeyString}'") {
-                        listOf(
-                            "isBuiltInAbility: $isBuiltInAbility",
-                            "isUserDefinedAbility: $isUserDefinedAbility",
-                            "context.abilityNames: ${context.abilityNames}",
-                            "isEffect: $isEffect",
-                            "context.effectNames: ${context.effectNames}"
-                        )
-                    }
-                }
 
                 if (isBuiltInAbility || isUserDefinedAbility || isEffect) {
                     // This is an ability or effect being used as a value - error!
