@@ -1129,8 +1129,23 @@ class TypeChecker(
             })
         }
 
-        // Now validate main for execution
-        val mainError = validator.validateMainForExecution(success.program, success.substitution)
+        // Validate main for execution using TypedModule
+        val mainTypeFromTypedModule = success.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == "main" && it.isPublic }?.scheme?.type
+
+        val mainError: com.mezze.language.typechecker.validation.ValidationError? = when {
+            mainTypeFromTypedModule != null -> validator.validateMainType(mainTypeFromTypedModule)
+            // Check if main exists in the parsed program but not in TypedModule
+            success.program.items.filterIsInstance<LetBinding>().none {
+                it.isSimpleBinding && it.variableName == "main"
+            } -> com.mezze.language.typechecker.validation.ValidationError.MainFunctionTypeError(
+                actualType = MezzeType.RecordType(emptyMap()),
+                reason = "no 'main' function found. Define main = {} -> perform Handler in ...",
+                sourceLocation = null
+            )
+            else -> null // main exists but type unknown — skip validation
+        }
 
         return if (mainError != null) {
             TypeCheckResult.Failure(listOf(

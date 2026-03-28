@@ -1144,7 +1144,7 @@ class TypeValidator(
     /**
      * Validate that main has the correct type: {} -> {} <*>
      */
-    private fun validateMainType(type: MezzeType, sourceLocation: SourceLocation?): ValidationError? {
+    fun validateMainType(type: MezzeType, sourceLocation: SourceLocation? = null): ValidationError? {
         // main must be a function
         if (type !is MezzeType.FunctionType) {
             return ValidationError.MainFunctionTypeError(
