@@ -216,11 +216,7 @@ class ASTToTruffleConverterV2(
                     if (!importItem.needsRuntimeBinding) {
                         null
                     } else {
-                        val contentHash = importItem.contentHash
-                            ?: throw IllegalStateException(
-                                "Value import '${importItem.name}' missing content hash. " +
-                                "This indicates a bug in the typechecker - content hash should be populated during import resolution."
-                            )
+                        val contentHash = importItem.contentHash ?: return@mapNotNull null
                         val localName = importItem.alias ?: importItem.name
                         val slot = getOrCreateSlot(localName)
                         UseBindingNode(slot, localName, contentHash)
