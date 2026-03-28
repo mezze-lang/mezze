@@ -138,10 +138,10 @@ class AbilityResolver(
 
     private fun checkRecordAbility(type: MezzeType.RecordType, abilityName: String, typeArgs: List<MezzeType>): AbilityCheckResult {
         return when {
-            abilityName == "Eq" -> {
+            WellKnownHashes.isEq(abilityName, null) -> {
                 // Records can have Eq if all fields have Eq
                 for ((fieldName, fieldType) in type.fields) {
-                    val fieldCheck = checkAbility(fieldType, "Eq")
+                    val fieldCheck = checkAbility(fieldType, abilityName)
                     if (fieldCheck is AbilityCheckResult.Unsatisfied) {
                         return AbilityCheckResult.Unsatisfied(
                             reason = "Record Eq requires all fields to have Eq (field '$fieldName' does not)"
@@ -186,11 +186,11 @@ class AbilityResolver(
 
         // Regular variant handling
         return when {
-            abilityName == "Eq" -> {
+            WellKnownHashes.isEq(abilityName, null) -> {
                 // Variants can have Eq if all constructors have Eq
                 for ((constructorName, dataType) in type.constructors) {
                     if (dataType != null) {
-                        val dataCheck = checkAbility(dataType, "Eq")
+                        val dataCheck = checkAbility(dataType, abilityName)
                         if (dataCheck is AbilityCheckResult.Unsatisfied) {
                             return AbilityCheckResult.Unsatisfied(
                                 reason = "Variant Eq requires all constructor data to have Eq (constructor '$constructorName' does not)"
@@ -281,10 +281,10 @@ class AbilityResolver(
         when (type.constructor) {
             "Option", "Result" -> {
                 return when {
-                    abilityName == "Eq" -> {
+                    WellKnownHashes.isEq(abilityName, null) -> {
                         // Option/Result have Eq if their type args have Eq
                         val allArgsHaveEq = type.args.all { arg ->
-                            checkAbility(arg, "Eq") is AbilityCheckResult.Satisfied
+                            checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
                         }
                         if (allArgsHaveEq) {
                             AbilityCheckResult.Satisfied("Built-in ${type.constructor} equality")
@@ -324,7 +324,7 @@ class AbilityResolver(
             }
 
             // For regular variants and records, check built-in abilities
-            if (abilityName == "Eq" || WellKnownHashes.isInspect(abilityName, null)) {
+            if (WellKnownHashes.isEq(abilityName, null) || WellKnownHashes.isInspect(abilityName, null)) {
                 // First check if type arguments support the ability
                 val allArgsSupport = type.args.all { arg ->
                     checkAbility(arg, abilityName) is AbilityCheckResult.Satisfied
