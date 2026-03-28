@@ -1459,8 +1459,12 @@ class TypeChecker(
                     .filter { it.name.startsWith("'") }
                     .map { it.name }
                     .toSet()
+                val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
+                    importContext.importedAbilities[name]?.contentHash
+                }
                 val implInfo = TypingContext.AbilityImplInfo(
                     abilityName = implDecl.abilityName,
+                    abilityDeclHash = abilityDeclHashForImpl,
                     targetTypes = implDecl.allTypeArgs.map { typeAnnotationToString(it) },
                     targetTypeAnnotations = implDecl.allTypeArgs,
                     associatedTypeBindings = implDecl.associatedTypeBindings,

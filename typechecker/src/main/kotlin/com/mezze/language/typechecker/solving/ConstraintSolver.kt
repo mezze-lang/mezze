@@ -1521,9 +1521,13 @@ class ConstraintSolver(
             }
         }
 
-        // Search for implementation using structural type matching
-        // Name-based lookup (hash-based TODO when fully debugged)
-        val impls = context.getAbilityImpls(abilityName)
+        // Search for implementation — prefer hash-based, fall back to name-based
+        val impls = if (abilityHash != null) {
+            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
+            if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
+        } else {
+            context.getAbilityImpls(abilityName)
+        }
 
         // Unwrap SuspendedType for matching — a suspended Int is still an Int for ability purposes
         val unwrappedTypeArgs = typeArgs.map { arg ->
