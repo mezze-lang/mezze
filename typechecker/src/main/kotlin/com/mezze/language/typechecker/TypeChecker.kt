@@ -568,7 +568,22 @@ class TypeChecker(
                     }
                 }
 
-                // validator.validate(...) skipped — TypedAstBuilder pipeline replaces v1 typed program
+                // Validate program structure using desugaredProgram (v1 without inferredType)
+                // This catches duplicate declarations, pattern errors, effect handling errors, etc.
+                val validationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
+                when (validationResult) {
+                    is ValidationResult.Failure -> {
+                        val errors = validationResult.errors.map { error ->
+                            TypeCheckError(phase = "Validation", message = error.message(), sourceLocation = error.location())
+                        }
+                        return TypeCheckResult.Failure(errors)
+                    }
+                    is ValidationResult.Success -> {
+                        validationResult.warnings.forEach { msg ->
+                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                        }
+                    }
+                }
 
                 // TypedAST → EntryFunctionBuilder → Mono → Resolve → Lower pipeline
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
