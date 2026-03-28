@@ -19,6 +19,7 @@ data class TypingContext(
     private val bindings: Map<BindingKey, Binding>,
     private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
     private val abilityImplsByName: Map<String?, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash] (null key = inherent impls)
+    private val abilityImplsByAbilityHash: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityDeclHash -> [implContentHash]
     // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
     private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
     private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
@@ -73,12 +74,13 @@ data class TypingContext(
      * Content hashes are computed in TypeChecker Phase 0.5 before context building.
      */
     data class AbilityImplInfo(
-        val abilityName: String?,  // null for inherent impls
+        val abilityName: String?,  // null for inherent impls — for error messages and fallback
+        val abilityDeclHash: String? = null,  // Content hash of the ability DECLARATION (not the impl)
         val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
         val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
         val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
-        val contentHash: String,  // Content hash (same as the map key) - required for O(1) lookup
+        val contentHash: String,  // Content hash of the IMPL (same as the map key)
         val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`
         val operationConstraints: List<FunctionAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
     )
@@ -196,9 +198,18 @@ data class TypingContext(
         val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
         val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
 
+        // Update hash-based secondary index: abilityDeclHash -> [implContentHash]
+        val newImplsByAbilityHash = if (implInfo.abilityDeclHash != null) {
+            val existingByHash = abilityImplsByAbilityHash[implInfo.abilityDeclHash] ?: emptyList()
+            abilityImplsByAbilityHash + (implInfo.abilityDeclHash to (existingByHash + key))
+        } else {
+            abilityImplsByAbilityHash
+        }
+
         return copy(
             abilityImpls = abilityImpls + (key to implInfo),
-            abilityImplsByName = newImplsByName
+            abilityImplsByName = newImplsByName,
+            abilityImplsByAbilityHash = newImplsByAbilityHash
         )
     }
 
@@ -245,6 +256,17 @@ data class TypingContext(
         val localHashes = abilityImplsByName[abilityName] ?: emptyList()
         val localImpls = localHashes.mapNotNull { abilityImpls[it] }
         val parentImpls = parent?.getAbilityImpls(abilityName) ?: emptyList()
+        return localImpls + parentImpls
+    }
+
+    /**
+     * Get all implementations for a given ability by its declaration hash.
+     * Preferred over name-based lookup — enables renaming via `use X as Y`.
+     */
+    fun getAbilityImplsByDeclHash(abilityDeclHash: String): List<AbilityImplInfo> {
+        val localHashes = abilityImplsByAbilityHash[abilityDeclHash] ?: emptyList()
+        val localImpls = localHashes.mapNotNull { abilityImpls[it] }
+        val parentImpls = parent?.getAbilityImplsByDeclHash(abilityDeclHash) ?: emptyList()
         return localImpls + parentImpls
     }
 
@@ -401,7 +423,8 @@ data class TypingContext(
         return TypingContext(
             bindings = emptyMap(),
             abilityImpls = emptyMap(),  // Start with empty impls (inherit via parent)
-            abilityImplsByName = emptyMap(),  // Start with empty secondary index (inherit via parent)
+            abilityImplsByName = emptyMap(),
+            abilityImplsByAbilityHash = emptyMap(),
             abilityOperationTypes = emptyMap(),
             effectOperationTypes = emptyMap(),
             performerAssociatedTypes = emptyMap(),
@@ -481,6 +504,7 @@ data class TypingContext(
             bindings = emptyMap(),
             abilityImpls = emptyMap(),
             abilityImplsByName = emptyMap(),
+            abilityImplsByAbilityHash = emptyMap(),
             abilityOperationTypes = emptyMap(),
             effectOperationTypes = emptyMap(),
             performerAssociatedTypes = emptyMap(),
@@ -497,7 +521,8 @@ data class TypingContext(
                     Binding.Monomorphic(type)
                 },
                 abilityImpls = emptyMap(),
-                abilityImplsByName = emptyMap()
+                abilityImplsByName = emptyMap(),
+                abilityImplsByAbilityHash = emptyMap()
             )
         }
 
@@ -510,7 +535,8 @@ data class TypingContext(
                     BindingKey.unqualified(name) to Binding.Monomorphic(type)
                 }.toMap(),
                 abilityImpls = emptyMap(),
-                abilityImplsByName = emptyMap()
+                abilityImplsByName = emptyMap(),
+                abilityImplsByAbilityHash = emptyMap()
             )
         }
     }

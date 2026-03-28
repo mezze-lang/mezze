@@ -209,9 +209,10 @@ class ContextBuilder {
             ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
         }
 
-        // Add ability implementations to context
+        // Add ability implementations to context (with ability declaration hashes for hash-based index)
+        val allAbilityDeclsForHash = abilityDecls + importedAbilities
         for (abilityImplDecl in abilityImplDecls) {
-            ctx = addAbilityImpl(ctx, abilityImplDecl)
+            ctx = addAbilityImpl(ctx, abilityImplDecl, allAbilityDeclsForHash, importedAbilities)
         }
 
         // VALIDATION PHASE: Run ability validations after context is built
@@ -367,8 +368,9 @@ class ContextBuilder {
         for ((_, implDecl) in importedImpls) {
             ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
         }
+        val allAbilityDeclsForHashV1 = abilityDecls + importedAbilities
         for (abilityImplDecl in abilityImplDecls) {
-            ctx = addAbilityImpl(ctx, abilityImplDecl)
+            ctx = addAbilityImpl(ctx, abilityImplDecl, allAbilityDeclsForHashV1, importedAbilities)
         }
 
         AbilityValidator.validateNameCollisions(
@@ -941,7 +943,12 @@ class ContextBuilder {
      * Creates a key like "Eq_String" or "Convert_Int_String" and stores
      * the implementation info for later validation.
      */
-    private fun addAbilityImpl(ctx: TypingContext, implDecl: ImplAbilityDeclaration): TypingContext {
+    private fun addAbilityImpl(
+        ctx: TypingContext,
+        implDecl: ImplAbilityDeclaration,
+        allAbilityDecls: Map<String, AbilityDeclaration> = emptyMap(),
+        importedAbilities: Map<String, AbilityDeclaration> = emptyMap()
+    ): TypingContext {
         // Extract target type names from type annotations
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
 
@@ -976,14 +983,17 @@ class ContextBuilder {
         // Collect method-level constraints from all operations
         val operationConstraints = implDecl.operations.flatMap { it.abilityConstraints }
 
-        // Create impl info
+        // Create impl info — look up ability declaration hash for hash-based index
+        val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
+            ?: importedAbilities[implDecl.abilityName!!]?.contentHash
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName!!,  // safe: not inherent
+            abilityDeclHash = abilityDeclHash,
             targetTypes = allTargetNames,
-            targetTypeAnnotations = allTargetAnnotations,  // Store original annotations for structural matching
-            associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings like 'item = Int
-            sourceModule = null,  // TODO: Track source module if needed
-            contentHash = implKey,  // Same as the key
+            targetTypeAnnotations = allTargetAnnotations,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
+            sourceModule = null,
+            contentHash = implKey,
             typeVars = typeVars,
             operationConstraints = operationConstraints
         )
