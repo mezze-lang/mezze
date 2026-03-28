@@ -1228,7 +1228,10 @@ class ConstraintGenerator(
         val qualifiedAbilityName = abilityQualifier?.let { "${it.segments.joinToString("::")}::$abilityName" } ?: abilityName
         val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
-            ?: return  // Ability not found (e.g. imported from another module) — skip validation
+            ?: throw com.mezze.language.typechecker.TypeCheckError(
+                "Ability '$qualifiedAbilityName' is not defined or not imported. " +
+                "Did you forget to import it with 'use'?"
+            )
 
         // Build allTypeArgs: concrete abilityTypeArgs (excluding type vars) + targetTypes
         val allTypeArgs: List<ParsedTypeAnnotation> = run {
@@ -1379,7 +1382,10 @@ class ConstraintGenerator(
         }
         val effectDeclaration = effectDeclarations[effectLookupKey]
             ?: effectDeclarations[effectRef.localName]  // Fallback to local name for selective imports
-            ?: return  // Effect not found (e.g. imported from another module) — skip validation
+            ?: throw com.mezze.language.typechecker.TypeCheckError(
+                "Effect '${effectLookupKey}' is not defined or not imported. " +
+                "Did you forget to import it with 'use'?"
+            )
 
         // Build substitution map: 'state -> Int, etc. (associated type bindings)
         val associatedTypeSubstitution = impl.associatedTypeBindings.mapKeys { (key, _) ->

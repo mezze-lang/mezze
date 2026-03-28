@@ -3,7 +3,6 @@ package com.mezze.language.typechecker
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
@@ -452,7 +451,6 @@ class AbilityImplementationBodyValidationTest {
     }
 
     @Test
-    @Disabled("Pre-existing: constraint solver doesn't reject wrong argument types for imported native module functions (int::to_str {n = \"not an int\"})")
     fun `test ability body with type mismatch in nested expression should fail`() {
         val source = """
             use std::int

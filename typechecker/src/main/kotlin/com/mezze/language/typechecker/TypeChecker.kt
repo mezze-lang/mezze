@@ -669,8 +669,20 @@ class TypeChecker(
                     // Pipeline best-effort
                 }
 
+                // Use validationProgram (has inferredType from SubstitutionApplier) for module export
+                // resolution — this ensures imported function types are concrete (e.g., {n: Int} -> Str
+                // for int::to_str) rather than VarType placeholders.
+                // Filter out generated codec impls (prepended by SubstitutionApplier) to avoid
+                // polluting module exports with auto-derived Encode/Decode impls.
+                val programForExport = if (generatedCodecImpls.isNotEmpty() && validationProgram !== desugaredProgram) {
+                    val codecCount = generatedCodecImpls.size
+                    Program(items = validationProgram.items.drop(codecCount))
+                } else {
+                    validationProgram
+                }
+
                 return TypeCheckResult.Success(
-                    program = desugaredProgram,  // Keep v1 structure for module loading (ProgramIndex, updateModuleExports)
+                    program = programForExport,
                     substitution = substitution,
                     monomorphicInstances = emptyMap(),
                     importContext = importContext,

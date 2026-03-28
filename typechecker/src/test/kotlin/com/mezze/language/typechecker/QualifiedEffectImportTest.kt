@@ -2,7 +2,6 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.assertThrows
@@ -33,7 +32,6 @@ class QualifiedEffectImportTest {
     // ========================================================================
 
     @Test
-    @Disabled("Pre-existing: undefined effect validation not yet in new constraint pipeline")
     fun `impl with undefined effect should error`() {
         val source = """
             impl UndefinedEffect for MyHandler {} where {
@@ -102,7 +100,6 @@ class QualifiedEffectImportTest {
     }
 
     @Test
-    @Disabled("Pre-existing: unqualified effect name validation not yet in new constraint pipeline")
     fun `impl with unqualified effect name and module import should error`() {
         val source = """
             use std::effects::log

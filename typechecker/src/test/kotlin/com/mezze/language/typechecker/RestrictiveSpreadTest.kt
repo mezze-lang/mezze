@@ -3,7 +3,6 @@ package com.mezze.language.typechecker
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
@@ -225,7 +224,6 @@ class RestrictiveSpreadTest {
     }
 
     @Test
-    @Disabled("Pre-existing: type annotation validation doesn't match spread expression type against type alias — infers {timeout_ms: Int} instead of HttpConfig")
     fun `should spread imported type alias with annotation`() {
         val code = """
             use std::effects::http::{default_http_config, HttpConfig}

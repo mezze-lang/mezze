@@ -212,7 +212,7 @@ class InherentImplTest {
     }
 
     @Test
-    @Disabled("Pre-existing: TypedAstBuilder returns VarType for method call result through inherent impl — constraint not fully resolved")
+    @Disabled("TypedAstBuilder returns VarType for inherent method call result — constraint not fully resolved in TypedAST")
     fun `inherent method using it receiver`() {
         val source = """
             type Pair = {first: Int, second: Int}
@@ -744,7 +744,6 @@ class InherentImplTest {
     // ========================================================================
 
     @Test
-    @Disabled("Pre-existing: non-existent ability validation not yet in new constraint pipeline")
     fun `impl for non-existent ability is rejected`() {
         val source = """
             type Foo = {x: Int}
