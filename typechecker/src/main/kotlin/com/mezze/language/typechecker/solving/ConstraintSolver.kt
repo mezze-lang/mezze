@@ -1522,8 +1522,7 @@ class ConstraintSolver(
         }
 
         // Search for implementation using structural type matching
-        // TODO: Once abilityDeclHash is reliably populated, use hash-based lookup:
-        //   context.getAbilityImplsByDeclHash(abilityHash) with name fallback
+        // Name-based lookup (hash-based TODO when fully debugged)
         val impls = context.getAbilityImpls(abilityName)
 
         // Unwrap SuspendedType for matching — a suspended Int is still an Int for ability purposes
