@@ -1203,7 +1203,7 @@ class ConstraintSolver(
                     // For codec abilities with open record types, close them for generation
                     // This enables bidirectional inference from field access: val.name tells us
                     // the record has a "name" field, and we close the record to generate the codec.
-                    val closedTypeArgs = if (isCodecAbility(abilityName)) {
+                    val closedTypeArgs = if (isCodecAbility(abilityName, tracked.abilityHash)) {
                         concreteTypeArgs.map { closeOpenRecordsForCodec(it) }
                     } else {
                         concreteTypeArgs
@@ -1503,7 +1503,7 @@ class ConstraintSolver(
         // Check codec abilities (Encode, EncodeRepr, Decode, DecodeRepr, StreamEncode, StreamDecode)
         // For Roc-style design, EncodeRepr/DecodeRepr take 1 type arg (data type)
         // The format type comes from Format/DecodeFormat impl in scope
-        if (isCodecAbility(abilityName)) {
+        if (isCodecAbility(abilityName, abilityHash)) {
             if (typeArgs.size == 2) {
                 // Old-style: 2 type args (format, data)
                 val formatType = typeArgs[0]
@@ -1895,11 +1895,13 @@ class ConstraintSolver(
     }
 
     /**
-     * Check if an ability name is a codec ability.
+     * Check if an ability is a codec ability.
+     *
+     * Delegates to [WellKnownHashes.isCodecAbility] which uses content-hash identification
+     * (with a name-based fallback) so that aliased imports are handled correctly.
      */
-    private fun isCodecAbility(abilityName: String): Boolean {
-        return abilityName in listOf("Encode", "EncodeRepr", "Decode", "DecodeRepr", "StreamEncode", "StreamDecode")
-    }
+    private fun isCodecAbility(abilityName: String, abilityHash: String? = null): Boolean =
+        WellKnownHashes.isCodecAbility(abilityName, abilityHash)
 
     /**
      * Check and possibly generate a codec ability implementation.

@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.NativeFunctionTypes
 import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.typechecker.WellKnownHashes
 
 /**
  * Substitution applier - applies type substitution to AST.
@@ -1436,12 +1437,7 @@ class SubstitutionApplier(
 
         // Check if this is actually an ability (not a regular variable)
         val hasImpl = mutableAbilityImpls.values.any { it.abilityName == abilityName }
-        val isCodecAbility = abilityName in setOf(
-            "Encode", "Decode", "EncodeRepr", "DecodeRepr",
-            "Format", "DecodeFormat",
-            "StreamFormat", "StreamDecodeFormat"
-        )
-        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !isCodecAbility) {
+        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !WellKnownHashes.isCodecAbility(abilityName)) {
             return resolvedAbilities
         }
 
