@@ -212,7 +212,9 @@ object V2PipelineRunner {
         val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
         val bodyNode = compiler.compileNode(mainFn.body, source)
 
-        // Module loading + result capture
+        // HashModuleLoaderNode registers v2-compiled functions by hash
+        // ModuleLoadingNode loads stdlib native functions at runtime
+        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
         val importedModules = mutableListOf(
             "std::int", "std::float", "std::nat", "std::frac",
             "std::bool", "std::str", "std::char",
@@ -224,8 +226,6 @@ object V2PipelineRunner {
             "std::collections::bytes"
         )
         importedModules.addAll(importedModulePaths)
-
-        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
         val withModules = MezzeLanguage.createModuleLoadingNode(withV2Functions, importedModules, projectRoot)
         val wrapped = MezzeLanguage.createResultCapturingNode(withModules)
 
