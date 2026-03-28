@@ -619,7 +619,7 @@ class TypeChecker(
                 }
 
                 return TypeCheckResult.Success(
-                    program = Program(emptyList()),
+                    program = desugaredProgram,  // Keep v1 structure for module loading (ProgramIndex, updateModuleExports)
                     substitution = substitution,
                     monomorphicInstances = emptyMap(),
                     importContext = importContext,
@@ -1742,8 +1742,7 @@ class TypeChecker(
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
-                    loweredFunctions = result.loweredFunctions ?: emptyList(),
-                    typedModule = result.typedModule
+                    loweredFunctions = result.loweredFunctions ?: emptyList()
                 )
             }
             is TypeCheckResult.Failure -> {
@@ -1798,8 +1797,16 @@ class TypeChecker(
 
         return when (result) {
             is TypeCheckResult.Success -> {
-                val typedModule = result.typedModule
-                    ?: throw TypeCheckError("TypedModule not produced by checkProgram")
+                // Emit from program BEFORE continuation transformation
+                // StateMachineExpression is a v1-only IR that the v2 pipeline can't handle
+                val emitProgram = result.programBeforeContinuations ?: result.program
+                val typedModule = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
+                    emitProgram,
+                    result.monomorphicInstances,
+                    result.importContext,
+                    module.path,
+                    result.abilityImpls
+                )
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
             }
             is TypeCheckResult.Failure -> {

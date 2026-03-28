@@ -220,11 +220,15 @@ class ModuleTypeChecker(
 
             return when (result) {
                 is TypeChecker.TypeCheckResult.Success -> {
-                    // Create typed module
+                    // Create typed module — use original program for structure
+                    // (result.program may be empty in new pipeline)
+                    val moduleProgram = if (result.program.items.isNotEmpty()) result.program else module.program
                     val typedModule = TypedModule(
                         modulePath = module.modulePath,
-                        program = result.program,
-                        exports = updateExportsWithTypes(module.exports, result.program),
+                        program = moduleProgram,
+                        exports = if (moduleProgram.items.isNotEmpty())
+                            updateExportsWithTypes(module.exports, moduleProgram)
+                            else module.exports,
                         context = moduleContext,
                         substitution = result.substitution,
                         monomorphicInstances = result.monomorphicInstances
@@ -233,13 +237,12 @@ class ModuleTypeChecker(
                     // Cache the result in GLOBAL cache (thread-safe)
                     putInGlobalCache(module.modulePath, typedModule)
 
-                    // CRITICAL FIX: Update ModuleResolver's cache with real inferred types
-                    // This ensures that subsequent imports of this module get the actual function types
-                    // instead of placeholder type variables
-                    moduleResolver?.let { resolver ->
-                        // Build type context from inferred types
-                        val typeContext = buildTypeContextFromProgram(result.program)
-                        resolver.updateModuleExports(module.modulePath, result.program, typeContext)
+                    // Update ModuleResolver's cache with real inferred types
+                    if (moduleProgram.items.isNotEmpty()) {
+                        moduleResolver?.let { resolver ->
+                            val typeContext = buildTypeContextFromProgram(moduleProgram)
+                            resolver.updateModuleExports(module.modulePath, moduleProgram, typeContext)
+                        }
                     }
 
                     ModuleTypeCheckResult.Success(typedModule)
