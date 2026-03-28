@@ -39,7 +39,8 @@ class ContextBuilder {
         val typeDeclarations: Map<String, TypeDeclaration>,
         val abilityDeclarations: Map<String, AbilityDeclaration>,
         val effectDeclarations: Map<String, EffectDeclaration>,
-        val performerToEffect: Map<String, String>,
+        val performerToEffect: Map<String, String>,  // performer name → effect name
+        val performerToEffectHash: Map<String, String> = emptyMap(),  // performer contentHash → effect contentHash
         /** Maps performer names to the set of effects they ADD (not handle) */
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
         /** Maps performer names to their ImplDeclaration (for content hash lookup) */
@@ -179,6 +180,21 @@ class ContextBuilder {
         }
         val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
 
+        // Build hash-based performer→effect mapping
+        val performerToEffectHashMap = mutableMapOf<String, String>()
+        for (impl in implDecls) {
+            val perfHash = impl.contentHash ?: continue
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            val effHash = effectDecl?.contentHash ?: continue
+            performerToEffectHashMap[perfHash] = effHash
+        }
+        for ((_, impl) in importedImpls) {
+            val perfHash = impl.contentHash ?: continue
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            val effHash = effectDecl?.contentHash ?: continue
+            performerToEffectHashMap[perfHash] = effHash
+        }
+
         // Build context with bindings for declarations
         var ctx = parentContext
 
@@ -295,6 +311,7 @@ class ContextBuilder {
             abilityDeclarations = abilityDecls,
             effectDeclarations = effectDecls,
             performerToEffect = performerToEffectMap,
+            performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
             implDeclarations = implDeclarationsMap
         )
@@ -350,6 +367,21 @@ class ContextBuilder {
             effectDecl?.name ?: impl.effect.localName
         }
         val performerToEffectMap = importedMapping + localMapping
+
+        // Hash-based performer→effect mapping
+        val performerToEffectHashMap = mutableMapOf<String, String>()
+        for (impl in implDecls) {
+            val perfHash = impl.contentHash ?: continue
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            val effHash = effectDecl?.contentHash ?: continue
+            performerToEffectHashMap[perfHash] = effHash
+        }
+        for ((_, impl) in importedImpls) {
+            val perfHash = impl.contentHash ?: continue
+            val effectDecl = allEffectDecls[impl.effect.localName]
+            val effHash = effectDecl?.contentHash ?: continue
+            performerToEffectHashMap[perfHash] = effHash
+        }
 
         var ctx = parentContext
 
@@ -427,6 +459,7 @@ class ContextBuilder {
             abilityDeclarations = abilityDecls,
             effectDeclarations = effectDecls,
             performerToEffect = performerToEffectMap,
+            performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
             implDeclarations = implDeclarationsMap
         )
