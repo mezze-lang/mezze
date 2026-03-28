@@ -598,6 +598,9 @@ class TypeChecker(
                         desugaredProgram
                     }
                     applier.applyToProgram(programWithCodecImpls)
+                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                    // Re-throw type check errors — these are real validation failures
+                    throw e
                 } catch (_: Exception) {
                     desugaredProgram  // Fallback: validate without types
                 }
@@ -633,7 +636,8 @@ class TypeChecker(
                         importContext = importContext,
                         identifierContentHashes = context.getContentHashes(),
                         implDeclarations = buildResult.implDeclarations,
-                        tailCallLocations = tailCallLocations
+                        tailCallLocations = tailCallLocations,
+                        mustBeOpenRowVars = mustBeOpenRowVars
                     )
                     val typed = builder.build(parsedModule)
                     emittedTypedModule = typed
@@ -1130,16 +1134,16 @@ class TypeChecker(
         }
 
         // Validate main for execution using TypedModule
+        // Note: main doesn't need to be pub — look for any let binding named "main"
         val mainTypeFromTypedModule = success.typedModule?.decls
             ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-            ?.find { it.name == "main" && it.isPublic }?.scheme?.type
+            ?.find { it.name == "main" }?.scheme?.type
+
+        val mainExistsInTypedModule = mainTypeFromTypedModule != null
 
         val mainError: com.mezze.language.typechecker.validation.ValidationError? = when {
             mainTypeFromTypedModule != null -> validator.validateMainType(mainTypeFromTypedModule)
-            // Check if main exists in the parsed program but not in TypedModule
-            success.program.items.filterIsInstance<LetBinding>().none {
-                it.isSimpleBinding && it.variableName == "main"
-            } -> com.mezze.language.typechecker.validation.ValidationError.MainFunctionTypeError(
+            !mainExistsInTypedModule -> com.mezze.language.typechecker.validation.ValidationError.MainFunctionTypeError(
                 actualType = MezzeType.RecordType(emptyMap()),
                 reason = "no 'main' function found. Define main = {} -> perform Handler in ...",
                 sourceLocation = null

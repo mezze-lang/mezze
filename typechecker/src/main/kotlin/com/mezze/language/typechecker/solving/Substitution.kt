@@ -365,6 +365,87 @@ data class Substitution(
 }
 
 /**
+ * Close generated row variables in a type.
+ *
+ * After type inference is complete, auto-generated row variables (from RowVar.fresh())
+ * should be closed (set to null) to produce closed record/variant types.
+ * Only user-specified row variables (from RowVar.userOpen(), e.g. {x: Int, ...})
+ * and row variables in the mustBeOpen set remain open.
+ *
+ * @param mustBeOpenRowVars Row variables that must stay open (from wildcard patterns etc.)
+ *
+ * This matches the behavior of SubstitutionApplier.closeGeneratedRowVars.
+ */
+fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType = when (type) {
+    is MezzeType.RecordType -> {
+        val existingRowVar = type.rowVar
+        val closedRowVar = if (existingRowVar != null
+            && !existingRowVar.isUserSpecified()
+            && existingRowVar !in mustBeOpenRowVars) {
+            null  // Close auto-generated row variable
+        } else {
+            existingRowVar  // Keep user-specified or must-be-open row variable
+        }
+        MezzeType.RecordType(
+            fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, mustBeOpenRowVars) },
+            rowVar = closedRowVar,
+            typeName = type.typeName
+        )
+    }
+    is MezzeType.VariantType -> {
+        val existingRowVar = type.rowVar
+        val shouldStayOpen = existingRowVar != null && existingRowVar in mustBeOpenRowVars
+        val closedRowVar = if (existingRowVar != null
+            && !existingRowVar.isUserSpecified()
+            && !shouldStayOpen) {
+            null  // Close auto-generated row variable
+        } else {
+            existingRowVar  // Keep user-specified or must-be-open row variable
+        }
+        MezzeType.VariantType(
+            constructors = type.constructors.mapValues { (_, payloadType) ->
+                payloadType?.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
+            },
+            rowVar = closedRowVar,
+            typeName = type.typeName
+        )
+    }
+    is MezzeType.FunctionType -> MezzeType.FunctionType(
+        paramType = closeGeneratedRowVars(type.paramType, mustBeOpenRowVars),
+        returnType = closeGeneratedRowVars(type.returnType, mustBeOpenRowVars),
+        effects = type.effects,
+        abilityConstraints = type.abilityConstraints
+    )
+    is MezzeType.SeqType -> MezzeType.SeqType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
+    is MezzeType.ListType -> MezzeType.ListType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
+    is MezzeType.SetType -> MezzeType.SetType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
+    is MezzeType.SortedMapType -> MezzeType.SortedMapType(
+        keyType = closeGeneratedRowVars(type.keyType, mustBeOpenRowVars),
+        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars)
+    )
+    is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeGeneratedRowVars(type.elementType, mustBeOpenRowVars))
+    is MezzeType.MapType -> MezzeType.MapType(
+        keyType = closeGeneratedRowVars(type.keyType, mustBeOpenRowVars),
+        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars)
+    )
+    is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+        constructor = type.constructor,
+        args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) }
+    )
+    is MezzeType.SuspendedType -> MezzeType.SuspendedType(
+        valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),
+        effects = type.effects
+    )
+    is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+        type.name,
+        type.constructor,
+        closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
+    )
+    // Types without row variables
+    else -> type
+}
+
+/**
  * Occurs check - prevent infinite types.
  *
  * Checks if a type variable occurs anywhere inside a type.

@@ -12,6 +12,7 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.typechecker.solving.closeGeneratedRowVars
 
 /**
  * TypedAstBuilder — walks ParsedModule + Substitution + ConstraintResults
@@ -43,7 +44,8 @@ class TypedAstBuilder(
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, String>,
     private val implDeclarations: Map<String, ImplDeclaration>,
-    private val tailCallLocations: Set<SourceLocation>
+    private val tailCallLocations: Set<SourceLocation>,
+    private val mustBeOpenRowVars: Set<RowVar> = emptySet()
 ) {
 
     // ========================================================================
@@ -175,10 +177,10 @@ class TypedAstBuilder(
         val name = if (decl.isSimpleBinding) decl.variableName else "__destructured__"
         val loc = decl.loc
 
-        // Look up type from constraintResults
+        // Look up type from constraintResults, apply substitution, and close generated row vars
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
             ?: MezzeType.VarType(TypeVar("unknown"))
-        val type = rawType
+        val type = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
 
         // Build the expression
         val value = buildExpr(decl.value, file, type)

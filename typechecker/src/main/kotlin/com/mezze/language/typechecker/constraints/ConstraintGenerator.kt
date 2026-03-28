@@ -1497,9 +1497,8 @@ class ConstraintGenerator(
 
                 // INFER scope type from the body's return type
                 // This is the key change - we get the type from what initialize_scope actually returns
-                if (bodyResult.type is MezzeType.RecordType) {
-                    inferredScopeType = bodyResult.type
-                }
+                // Accept ANY type (not just RecordType) — native calls may return opaque types
+                inferredScopeType = bodyResult.type
 
                 // Track effects from initialize_scope - they propagate to the perform site
                 // Effects run at the START of perform, before the body
