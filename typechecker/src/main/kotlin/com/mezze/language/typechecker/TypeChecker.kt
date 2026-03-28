@@ -615,7 +615,7 @@ class TypeChecker(
                     val lowered = lowerer.lower(resolved)
                     loweredFns = lowered.functions
                 } catch (_: Exception) {
-                    // Pipeline stages are best-effort during migration
+                    // Pipeline best-effort
                 }
 
                 return TypeCheckResult.Success(
@@ -1742,7 +1742,8 @@ class TypeChecker(
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
-                    loweredFunctions = result.loweredFunctions ?: emptyList()
+                    loweredFunctions = result.loweredFunctions ?: emptyList(),
+                    typedModule = result.typedModule
                 )
             }
             is TypeCheckResult.Failure -> {
