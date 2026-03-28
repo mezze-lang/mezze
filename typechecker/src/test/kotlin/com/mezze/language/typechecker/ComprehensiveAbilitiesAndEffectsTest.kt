@@ -41,25 +41,23 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        // Verify ability declaration is processed
-        val abilityDecl = typedProgram.items.find { it is AbilityDeclaration } as AbilityDeclaration?
+        // Verify ability declaration is processed (from parsed AST)
+        val abilityDecl = program.items.find { it is AbilityDeclaration } as AbilityDeclaration?
         assertNotNull(abilityDecl)
         assertEquals("Show", abilityDecl.name)
         assertEquals(listOf("'a"), abilityDecl.typeParams)
 
-        // Verify implementation is processed  
-        val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
+        // Verify implementation is processed (from parsed AST)
+        val implDecl = program.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
         assertEquals("Show", implDecl.abilityName)
 
         // Verify the displayValue binding has correct type
-        val displayValueBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "displayValue" 
-        } as LetBinding?
-        assertNotNull(displayValueBinding)
-        assertTrue(displayValueBinding.inferredType is MezzeType.FunctionType)
+        val displayValueType = result.getVariableType("displayValue")
+        assertNotNull(displayValueType)
+        assertTrue(displayValueType is MezzeType.FunctionType)
     }
 
     @Test
@@ -85,10 +83,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        // Verify MyOrd ability has method-level constraint (not ability-level dependency)
-        val ordDecl = typedProgram.items.find {
+        // Verify MyOrd ability has method-level constraint (not ability-level dependency) — from parsed AST
+        val ordDecl = program.items.find {
             it is AbilityDeclaration && it.name == "MyOrd"
         } as AbilityDeclaration?
         assertNotNull(ordDecl)
@@ -114,7 +112,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
         // Should not throw
         assertTrue(true)
@@ -140,15 +138,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Verify displayValue has ability constraints
-        val displayValueBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "displayValue" 
-        } as LetBinding?
-        assertNotNull(displayValueBinding)
-        
-        val functionType = displayValueBinding.inferredType as? MezzeType.FunctionType
+        val functionType = result.getVariableType("displayValue") as? MezzeType.FunctionType
         assertNotNull(functionType)
         assertTrue(functionType.abilityConstraints.isNotEmpty())
         assertEquals("Show", functionType.abilityConstraints.first().abilityName)
@@ -171,17 +164,17 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        // Verify multi-parameter ability declaration
-        val convertDecl = typedProgram.items.find {
+        // Verify multi-parameter ability declaration — from parsed AST
+        val convertDecl = program.items.find {
             it is AbilityDeclaration && it.name == "Convert"
         } as AbilityDeclaration?
         assertNotNull(convertDecl)
         assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
 
-        // Verify implementation with multiple target types
-        val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
+        // Verify implementation with multiple target types — from parsed AST
+        val implDecl = program.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
         assertNotNull(implDecl)
         assertEquals(2, implDecl.targetTypes.size)
     }
@@ -204,15 +197,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Verify fetchUser function has only Database effect
-        val fetchUserBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "fetchUser"
-        } as LetBinding?
-        assertNotNull(fetchUserBinding)
-
-        val functionType = fetchUserBinding.inferredType as? MezzeType.FunctionType
+        val functionType = result.getVariableType("fetchUser") as? MezzeType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Database"))
@@ -245,15 +233,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Verify only SecureDatabase effect is used
-        val fetchBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "secureUserFetch"
-        } as LetBinding?
-        assertNotNull(fetchBinding)
-
-        val functionType = fetchBinding.inferredType as? MezzeType.FunctionType
+        val functionType = result.getVariableType("secureUserFetch") as? MezzeType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
 
@@ -284,25 +267,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Verify loggedOperation has Log effect
-        val operationBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "loggedOperation"
-        } as LetBinding?
-        assertNotNull(operationBinding)
-
-        val functionType = operationBinding.inferredType as? MezzeType.FunctionType
+        val functionType = result.getVariableType("loggedOperation") as? MezzeType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Log"))
 
         // Verify getResult is a function with performed marker but no Log effect
-        val getResultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "getResult"
-        } as LetBinding?
-        assertNotNull(getResultBinding)
-        val getResultType = getResultBinding.inferredType as MezzeType.FunctionType
+        val getResultType = result.getVariableType("getResult") as MezzeType.FunctionType
         assertNotNull(getResultType.effects)
         assertTrue(getResultType.effects!!.performed, "Should have performed marker")
         assertFalse(getResultType.effects!!.effects.contains("Log"), "Log should be handled")
@@ -335,8 +309,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val program = parser.parse(source)
 
         // With strict validation, all ability constraints must have implementations
-        val typedProgram = typeChecker.typeCheck(program)
-        assertNotNull(typedProgram)
+        val result = typeChecker.typeCheck(program)
+        assertNotNull(result)
     }
 
     @Test
@@ -370,15 +344,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Verify loggedShow has both ability constraints and effects
-        val loggedShowBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "loggedShow"
-        } as LetBinding?
-        assertNotNull(loggedShowBinding)
-
-        val functionType = loggedShowBinding.inferredType as? MezzeType.FunctionType
+        val functionType = result.getVariableType("loggedShow") as? MezzeType.FunctionType
         assertNotNull(functionType)
 
         // Check ability constraints
@@ -390,11 +359,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         assertTrue(functionType.effects!!.effects.contains("Log"))
 
         // Verify getResult is a function with performed marker
-        val getResultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "getResult"
-        } as LetBinding?
-        assertNotNull(getResultBinding)
-        val getResultType = getResultBinding.inferredType as MezzeType.FunctionType
+        val getResultType = result.getVariableType("getResult") as MezzeType.FunctionType
         assertNotNull(getResultType.effects)
         assertTrue(getResultType.effects!!.performed, "Should have performed marker")
         assertEquals(MezzeType.StringType, getResultType.returnType)

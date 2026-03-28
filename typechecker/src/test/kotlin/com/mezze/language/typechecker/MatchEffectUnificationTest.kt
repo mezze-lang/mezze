@@ -38,8 +38,8 @@ class MatchEffectUnificationTest {
         return typeChecker.typeCheck(program)
     }
 
-    private fun getBinding(program: TypeCheckResult, name: String): LetBinding {
-        return program.items.filterIsInstance<LetBinding>().first { it.variableName == name }
+    private fun getBinding(program: TypeCheckResult, name: String): MezzeType.FunctionType {
+        return program.getVariableType(name) as MezzeType.FunctionType
     }
 
     @Test
@@ -67,7 +67,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // The function should have Log effect from the Some branch
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Match expression should have Log effect")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -109,7 +109,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // The function should have both Log and State effects
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Match expression should have effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
         assertTrue(funcType.effects!!.effects.contains("State"), "Should contain State effect")
@@ -130,7 +130,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Pure function should have no effects
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNull(funcType.effects, "All pure branches should result in no effects")
     }
 
@@ -170,7 +170,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have both Log and State effects
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Should have effects from Log and State branches")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
         assertTrue(funcType.effects!!.effects.contains("State"), "Should contain State effect")
@@ -204,7 +204,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have Log effect from nested match
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Nested match should propagate effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -234,7 +234,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "choose")
 
         // Function annotation declares <Log>, inferred type should match
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Should have Log effect")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -265,7 +265,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have Log effect from guarded branch
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Guarded effectful branch should add effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -321,10 +321,10 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "apply_to_opt")
 
         // The function should preserve polymorphic effects
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         // Note: Depending on implementation, this might be polymorphic or specific
         // The key is that it should type check without errors
-        assertNotNull(binding.inferredType, "Function should type check successfully")
+        assertNotNull(binding, "Function should type check successfully")
     }
 
     @Test
@@ -362,7 +362,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have both State (from creating the value) and Log (from match)
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Should have effects from both matched value and branches")
     }
 
@@ -408,7 +408,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have all three effects
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Should have effects from all three branches")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
         assertTrue(funcType.effects!!.effects.contains("State"), "Should contain State effect")
@@ -446,7 +446,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have Log effect from the effectful branches
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Mixed pure/effectful branches should have effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -477,7 +477,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "outer")
 
         // outer should have Log effect from the match in its body
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Let binding with effectful match should propagate effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
     }
@@ -523,7 +523,7 @@ class MatchEffectUnificationTest {
         val binding = getBinding(program, "test")
 
         // Should have both Log and State from different nested branches
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = binding
         assertNotNull(funcType.effects, "Deeply nested matches should accumulate effects")
         assertTrue(funcType.effects!!.effects.contains("Log"), "Should contain Log effect")
         assertTrue(funcType.effects!!.effects.contains("State"), "Should contain State effect")

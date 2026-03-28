@@ -26,9 +26,9 @@ class ComparisonAbilityConstraintTest {
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
-        val eqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "eq" }
-        assertTrue(eqBinding.inferredType is MezzeType.FunctionType)
-        val functionType = eqBinding.inferredType as MezzeType.FunctionType
+        val eqType = typedProgram.getVariableType("eq")
+        assertTrue(eqType is MezzeType.FunctionType)
+        val functionType = eqType as MezzeType.FunctionType
         val boolType = MezzeType.BoolType
         assertEquals(boolType, functionType.returnType)
     }
@@ -42,9 +42,9 @@ class ComparisonAbilityConstraintTest {
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
-        val neqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "neq" }
-        assertTrue(neqBinding.inferredType is MezzeType.FunctionType)
-        val functionType = neqBinding.inferredType as MezzeType.FunctionType
+        val neqType = typedProgram.getVariableType("neq")
+        assertTrue(neqType is MezzeType.FunctionType)
+        val functionType = neqType as MezzeType.FunctionType
         val boolType = MezzeType.BoolType
         assertEquals(boolType, functionType.returnType)
     }
@@ -58,9 +58,9 @@ class ComparisonAbilityConstraintTest {
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
-        val ltBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "lt" }
-        assertTrue(ltBinding.inferredType is MezzeType.FunctionType)
-        val functionType = ltBinding.inferredType as MezzeType.FunctionType
+        val ltType = typedProgram.getVariableType("lt")
+        assertTrue(ltType is MezzeType.FunctionType)
+        val functionType = ltType as MezzeType.FunctionType
         val boolType = MezzeType.BoolType
         assertEquals(boolType, functionType.returnType)
     }

@@ -48,6 +48,6 @@ class CacheQualificationTest {
         
         // If we get here without errors, the test passes
         assertNotNull(result)
-        assertTrue(result.program.items.isNotEmpty())
+        assertTrue(result.typedModule?.decls?.isNotEmpty() == true)
     }
 }

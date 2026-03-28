@@ -37,10 +37,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Find the let binding
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -64,9 +61,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -84,11 +79,8 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
         // With polymorphic parameter, should return function type with constraint
-        assertTrue(letBinding!!.inferredType is MezzeType.FunctionType)
-        val funcType = letBinding.inferredType as MezzeType.FunctionType
+        val funcType = typedProgram.getVariableType("test") as MezzeType.FunctionType
         // Verify Show constraint is present
         assertTrue(funcType.abilityConstraints.any { it.abilityName == "Show" })
     }
@@ -112,11 +104,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showResult" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is MezzeType.FunctionType)
-
-        val funcType = letBinding!!.inferredType as MezzeType.FunctionType
+        val funcType = typedProgram.getVariableType("showResult") as MezzeType.FunctionType
         // Verify ability constraint is present
         assertEquals(1, funcType.abilityConstraints.size)
         assertEquals("Show", funcType.abilityConstraints[0].abilityName)
@@ -148,11 +136,8 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val test1 = typedProgram.items.find { it is LetBinding && it.variableName == "test1" } as LetBinding?
-        val test2 = typedProgram.items.find { it is LetBinding && it.variableName == "test2" } as LetBinding?
-
-        assertEquals(MezzeType.StringType, test1!!.inferredType)
-        assertEquals(MezzeType.StringType, test2!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test1"))
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test2"))
     }
 
     @Test
@@ -219,9 +204,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -247,9 +230,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -271,11 +252,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is MezzeType.RecordType)
-
-        val recordType = letBinding!!.inferredType as MezzeType.RecordType
+        val recordType = typedProgram.getVariableType("test") as MezzeType.RecordType
         assertEquals(MezzeType.StringType, recordType.fields["result"])
     }
 
@@ -298,9 +275,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -333,12 +308,8 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showIfEqual" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is MezzeType.FunctionType)
-
         // Verify both Show and Eq constraints are present
-        val funcType = letBinding!!.inferredType as MezzeType.FunctionType
+        val funcType = typedProgram.getVariableType("showIfEqual") as MezzeType.FunctionType
         assertEquals(2, funcType.abilityConstraints.size)
 
         // Check that we have both Show and MyEq (order may vary)
@@ -366,9 +337,7 @@ class AbilityMethodCallTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals(MezzeType.StringType, letBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
 
     @Test

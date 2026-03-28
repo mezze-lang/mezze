@@ -17,11 +17,18 @@ import kotlin.test.assertNotNull
  */
 class OpenVariantTypeAliasTest {
 
-    private fun parseAndTypeCheck(code: String): TypeCheckResult {
+    private data class TypeCheckResults(val result: TypeCheckResult, val typeChecker: TypeChecker)
+
+    private fun parseAndTypeCheck(code: String): TypeCheckResults {
         val parser = MezzeParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(ast)
+        return TypeCheckResults(result, typeChecker)
+    }
+
+    private fun parseAndTypeCheckResult(code: String): TypeCheckResult {
+        return parseAndTypeCheck(code).result
     }
 
     private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {
@@ -29,23 +36,28 @@ class OpenVariantTypeAliasTest {
     }
 
     private fun assertTypeChecks(code: String, variableName: String, expectedType: String) {
-        val result = parseAndTypeCheck(code)
+        val result = parseAndTypeCheckResult(code)
         val actualType = getVariableType(result, variableName)
         assertNotNull(actualType, "Variable '$variableName' not found")
         assertEquals(expectedType, prettyPrintType(actualType))
     }
 
     private fun assertTypeChecks(code: String) {
-        parseAndTypeCheck(code)
+        parseAndTypeCheckResult(code)
     }
 
     private fun assertTypeCheckFails(code: String) {
         assertThrows<TypeCheckError> {
-            parseAndTypeCheck(code)
+            parseAndTypeCheckResult(code)
         }
     }
 
     // ===== Basic Tests: Verify isOpen flag is preserved =====
+
+    private fun getTypeDeclaration(code: String, typeName: String): MezzeType? {
+        val (_, tc) = parseAndTypeCheck(code)
+        return tc.getTypeAliases()[typeName]?.definition
+    }
 
     @Test
     fun `test closed variant type alias is created as closed`() {
@@ -54,9 +66,7 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val result = parseAndTypeCheck(code)
-        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
-            .find { it.name == "Color" }?.inferredType
+        val colorType = getTypeDeclaration(code, "Color")
 
         assertNotNull(colorType)
         assert(colorType is MezzeType.VariantType)
@@ -70,9 +80,7 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val result = parseAndTypeCheck(code)
-        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
-            .find { it.name == "Color" }?.inferredType
+        val colorType = getTypeDeclaration(code, "Color")
 
         assertNotNull(colorType)
         assert(colorType is MezzeType.VariantType)
@@ -88,9 +96,7 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val result = parseAndTypeCheck(code)
-        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
-            .find { it.name == "Color" }?.inferredType as? MezzeType.VariantType
+        val colorType = getTypeDeclaration(code, "Color") as? MezzeType.VariantType
 
         assertNotNull(colorType)
         assertNotNull(colorType.rowVar, "Open variant should have a rowVar")
@@ -103,9 +109,7 @@ class OpenVariantTypeAliasTest {
             Red
         """.trimIndent()
 
-        val result = parseAndTypeCheck(code)
-        val colorType = result.program.items.filterIsInstance<TypeDeclaration>()
-            .find { it.name == "Color" }?.inferredType as? MezzeType.VariantType
+        val colorType = getTypeDeclaration(code, "Color") as? MezzeType.VariantType
 
         assertNotNull(colorType)
         assertEquals(null, colorType.rowVar, "Closed variant should not have a rowVar")

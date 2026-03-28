@@ -169,15 +169,9 @@ class AbilityEffectErrorsTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        // Find the logTest binding
-        val logTestBinding = typedProgram.items
-            .filterIsInstance<LetBinding>()
-            .find { it.variableName == "logTest" }
-
-        assertNotNull(logTestBinding, "logTest binding should exist")
-        val logTestType = logTestBinding?.inferredType
+        val logTestType = result.getVariableType("logTest")
+        assertNotNull(logTestType, "logTest binding should exist")
         assertTrue(logTestType is MezzeType.FunctionType, "logTest should be a function")
 
         val funcType = logTestType as MezzeType.FunctionType
@@ -213,15 +207,9 @@ class AbilityEffectErrorsTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        // Find the test binding
-        val testBinding = typedProgram.items
-            .filterIsInstance<LetBinding>()
-            .find { it.variableName == "test" }
-
-        assertNotNull(testBinding, "test binding should exist")
-        val testType = testBinding?.inferredType
+        val testType = result.getVariableType("test")
+        assertNotNull(testType, "test binding should exist")
         assertTrue(testType is MezzeType.FunctionType, "test should be a function")
 
         val funcType = testType as MezzeType.FunctionType
@@ -249,15 +237,9 @@ class AbilityEffectErrorsTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        // Find main binding
-        val mainBinding = typedProgram.items
-            .filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main binding should exist")
-        val mainType = mainBinding?.inferredType
+        val mainType = result.getVariableType("main")
+        assertNotNull(mainType, "main binding should exist")
         assertTrue(mainType is MezzeType.FunctionType, "main should be a function")
 
         val funcType = mainType as MezzeType.FunctionType

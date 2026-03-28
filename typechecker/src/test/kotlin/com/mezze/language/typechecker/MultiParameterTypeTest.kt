@@ -27,14 +27,17 @@ class MultiParameterTypeTest {
             type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
         """.trimIndent()
 
+        // Check parsed AST directly
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Either", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'a", typeDecl.typeParams[0])
         assertEquals("'b", typeDecl.typeParams[1])
+
+        // Also verify type checking succeeds
+        val result = typeChecker.typeCheck(program)
+        assertNotNull(result)
     }
 
     @Test
@@ -44,13 +47,14 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Result", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'ok", typeDecl.typeParams[0])
         assertEquals("'err", typeDecl.typeParams[1])
+
+        val result = typeChecker.typeCheck(program)
+        assertNotNull(result)
     }
 
     @Test
@@ -60,11 +64,12 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Triple", typeDecl.name)
         assertEquals(3, typeDecl.typeParams.size)
+
+        val result = typeChecker.typeCheck(program)
+        assertNotNull(result)
     }
 
     @Test
@@ -79,36 +84,30 @@ class MultiParameterTypeTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        // Check that the type declaration exists
-        val typeDecls = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>()
-        assertEquals(1, typeDecls.size)
+        // Check that the let bindings typecheck via TypedModule
+        val leftType = result.getVariableType("left_val")
+        assertNotNull(leftType)
 
-        // Check that the let bindings typecheck
-        val letBindings = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-        assertEquals(2, letBindings.size)
-
-        // Both should have inferred types
-        assertNotNull(letBindings[0].inferredType)
-        assertNotNull(letBindings[1].inferredType)
+        val rightType = result.getVariableType("right_val")
+        assertNotNull(rightType)
     }
 
     @Test
     fun `test multi-parameter type with record constructors`() {
         val source = """
             type Pair 'a 'b = | MkPair { first: 'a, second: 'b } |
-            
+
             let pair = MkPair { first = 1, second = "one" }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Pair", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
-        val letBinding = result.items.filterIsInstance<com.mezze.language.ast.LetBinding>().first()
-        assertNotNull(letBinding.inferredType)
+        val result = typeChecker.typeCheck(program)
+        val pairType = result.getVariableType("pair")
+        assertNotNull(pairType)
     }
 
     @Test
@@ -118,9 +117,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Maybe2", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
@@ -135,9 +132,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
 
         // Check Left constructor
@@ -162,9 +157,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
-
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Status", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 

@@ -60,8 +60,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getFirst" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getFirst") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.TypeApplication)
         val returnTypeApp = funcType.returnType as MezzeType.TypeApplication
         assertEquals("Option", returnTypeApp.constructor)
@@ -87,8 +86,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getFirst" }
-        assertNotNull(binding.inferredType)
+        assertNotNull(program.getVariableType("getFirst"))
     }
 
     @Test
@@ -111,8 +109,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        val resultType = binding.inferredType
+        val resultType = program.getVariableType("result")
         assertTrue(resultType is MezzeType.TypeApplication)
         val typeApp = resultType as MezzeType.TypeApplication
         assertEquals("Option", typeApp.constructor)
@@ -189,8 +186,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getWithKnownKey" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getWithKnownKey") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -212,8 +208,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "areEqual" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("areEqual") as MezzeType.FunctionType
         val isBoolType = funcType.returnType is MezzeType.BoolType ||
             (funcType.returnType is MezzeType.TypeApplication &&
              (funcType.returnType as MezzeType.TypeApplication).constructor == "Bool") ||
@@ -251,8 +246,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "checkAndShow" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("checkAndShow") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.StringType)
     }
 
@@ -277,8 +271,7 @@ class AbilityConstraintAnnotationsTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        val resultType = binding.inferredType
+        val resultType = program.getVariableType("result")
         assertTrue(resultType is MezzeType.SeqType)
         assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
     }

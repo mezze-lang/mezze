@@ -31,8 +31,8 @@ class DebugTest {
             println("SUCCESS: Type checking passed")
             
             // Add the same assertions as the real test
-            val addBinding = typedProgram.items.find { it is com.mezze.language.ast.LetBinding && it.variableName == "add" } as com.mezze.language.ast.LetBinding
-            println("Add binding type: ${com.mezze.language.ast.prettyPrintType(addBinding.inferredType!!)}")
+            val addType = typedProgram.getVariableType("add")
+            println("Add binding type: ${addType?.let { com.mezze.language.ast.prettyPrintType(it) } ?: "unknown"}")
             
         } catch (e: Exception) {
             println("ERROR: ${e.message}")

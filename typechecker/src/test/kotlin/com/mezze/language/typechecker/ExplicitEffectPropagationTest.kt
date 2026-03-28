@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -38,13 +38,7 @@ class ExplicitEffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
         
-        // The useDatabase function should be at index 2
-        val useDatabaseDecl = typedProgram.items[2] as LetBinding
-        
-        assertNotNull(useDatabaseDecl.inferredType)
-        assertTrue(useDatabaseDecl.inferredType is MezzeType.FunctionType)
-        
-        val functionType = useDatabaseDecl.inferredType as MezzeType.FunctionType
+        val functionType = typedProgram.getVariableType("useDatabase") as MezzeType.FunctionType
         assertNotNull(functionType.effects)
         
         // Should have only Database effect
@@ -68,13 +62,7 @@ class ExplicitEffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
         
-        // The logSomething function should be at index 1
-        val logFunctionDecl = typedProgram.items[1] as LetBinding
-        
-        assertNotNull(logFunctionDecl.inferredType)
-        assertTrue(logFunctionDecl.inferredType is MezzeType.FunctionType)
-        
-        val functionType = logFunctionDecl.inferredType as MezzeType.FunctionType
+        val functionType = typedProgram.getVariableType("logSomething") as MezzeType.FunctionType
         
         // This is the key test - does effect inference work?
         if (functionType.effects != null) {

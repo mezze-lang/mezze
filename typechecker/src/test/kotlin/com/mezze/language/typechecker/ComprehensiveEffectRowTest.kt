@@ -30,10 +30,9 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val programBinding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
-        val inferredType = programBinding.inferredType
+        val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
         // Effect calls return SuspendedType (value with unhandled effects), not FunctionType
@@ -56,10 +55,9 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val programBinding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
-        val inferredType = programBinding.inferredType
+        val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
         // Do blocks with effects return SuspendedType (value with unhandled effects)
@@ -88,10 +86,9 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val programBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
-        val inferredType = programBinding.inferredType
+        val inferredType = result.getVariableType("program")
 
         assertNotNull(inferredType)
         // Do blocks with effects return SuspendedType
@@ -121,11 +118,10 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Check nested program - should accumulate both Log and Error effects
-        val nestedBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
-        val nestedType = nestedBinding.inferredType
+        val nestedType = result.getVariableType("nestedProgram")
         assertNotNull(nestedType)
         // Do blocks with effects return SuspendedType
         assertTrue(nestedType is MezzeType.SuspendedType)
@@ -154,19 +150,17 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Check program has effectful type (SuspendedType)
-        val programBinding = typedProgram.items[2] as com.mezze.language.ast.LetBinding
-        val programType = programBinding.inferredType
+        val programType = result.getVariableType("program")
         assertTrue(programType is MezzeType.SuspendedType)
         val programSuspended = programType as MezzeType.SuspendedType
         assertEquals(setOf("Log"), programSuspended.effects.effects)
 
         // Check getResult - after perform, all effects are handled
         // The function returns Int with <*> marker
-        val getResultBinding = typedProgram.items[3] as com.mezze.language.ast.LetBinding
-        val getResultType = getResultBinding.inferredType
+        val getResultType = result.getVariableType("getResult")
         assertTrue(getResultType is MezzeType.FunctionType)
         val fnType = getResultType as MezzeType.FunctionType
         assertEquals(MezzeType.IntType, fnType.returnType)
@@ -202,18 +196,16 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Check program has both effects
-        val programBinding = typedProgram.items[3] as com.mezze.language.ast.LetBinding
-        val programType = programBinding.inferredType
+        val programType = result.getVariableType("program")
         assertTrue(programType is MezzeType.FunctionType)
         val programFnType = programType as MezzeType.FunctionType
         assertEquals(setOf("Log", "Console"), programFnType.effects!!.effects)
 
         // Check partialResult - Logger handles Log, Console remains, <*> marker
-        val partialBinding = typedProgram.items[4] as com.mezze.language.ast.LetBinding
-        val partialType = partialBinding.inferredType
+        val partialType = result.getVariableType("partialResult")
         assertTrue(partialType is MezzeType.FunctionType)
         val partialFnType = partialType as MezzeType.FunctionType
         assertEquals(setOf("Console"), partialFnType.effects!!.effects)
@@ -252,26 +244,23 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Check program has both effects
-        val programBinding = typedProgram.items[4] as com.mezze.language.ast.LetBinding
-        val programType = programBinding.inferredType
+        val programType = result.getVariableType("program")
         assertTrue(programType is MezzeType.FunctionType)
         val programFnType = programType as MezzeType.FunctionType
         assertEquals(setOf("Log", "Console"), programFnType.effects!!.effects)
 
         // Check step1 - Logger handles Log, Console remains
-        val step1Binding = typedProgram.items[5] as com.mezze.language.ast.LetBinding
-        val step1Type = step1Binding.inferredType
+        val step1Type = result.getVariableType("step1")
         assertTrue(step1Type is MezzeType.FunctionType)
         val step1FnType = step1Type as MezzeType.FunctionType
         assertEquals(setOf("Console"), step1FnType.effects!!.effects)
         assertTrue(step1FnType.effects!!.performed)
 
         // Check step2 - Terminal handles Console, all effects handled
-        val step2Binding = typedProgram.items[6] as com.mezze.language.ast.LetBinding
-        val step2Type = step2Binding.inferredType
+        val step2Type = result.getVariableType("step2")
         assertTrue(step2Type is MezzeType.FunctionType)
         val step2FnType = step2Type as MezzeType.FunctionType
         assertTrue(step2FnType.effects!!.effects.isEmpty())
@@ -301,27 +290,23 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Check program has Log effect (SuspendedType)
-        val programBinding = typedProgram.items[3] as com.mezze.language.ast.LetBinding
-        val programType = programBinding.inferredType
+        val programType = result.getVariableType("program")
         assertTrue(programType is MezzeType.SuspendedType)
         val programSuspended = programType as MezzeType.SuspendedType
         assertEquals(setOf("Log"), programSuspended.effects.effects)
 
         // Both results should be functions returning {} with <*> marker
-        val getResult1Binding = typedProgram.items[4] as com.mezze.language.ast.LetBinding
-        val getResult2Binding = typedProgram.items[5] as com.mezze.language.ast.LetBinding
-
         // getResult1 should be {} -> {} <*>
-        val getResult1Type = getResult1Binding.inferredType as MezzeType.FunctionType
+        val getResult1Type = result.getVariableType("getResult1") as MezzeType.FunctionType
         assertEquals(MezzeType.RecordType(emptyMap()), getResult1Type.returnType)
         assertNotNull(getResult1Type.effects)
         assertTrue(getResult1Type.effects!!.performed)
 
         // getResult2 should be {} -> {} <*>
-        val getResult2Type = getResult2Binding.inferredType as MezzeType.FunctionType
+        val getResult2Type = result.getVariableType("getResult2") as MezzeType.FunctionType
         assertEquals(MezzeType.RecordType(emptyMap()), getResult2Type.returnType)
         assertNotNull(getResult2Type.effects)
         assertTrue(getResult2Type.effects!!.performed)
@@ -333,15 +318,15 @@ class ComprehensiveEffectRowTest {
             effect Database where {
               query : {sql: Str} -> Str <Database>
             }
-            
+
             effect Log where {
               info : {msg: Str} -> {} <Log>
             }
-            
+
             effect Cache where {
               get : {key: Str} -> Str <Cache>
             }
-            
+
             let fetchUser = {id: Str} -> do
               Log.info {msg = "Fetching user $(id)"}
               Cache.get {key = "user:$(id)"}
@@ -355,36 +340,24 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        // Debug output
-        println("DEBUG: typedProgram.items.size = ${typedProgram.items.size}")
-        for (i in typedProgram.items.indices) {
-            println("DEBUG: item[$i] = ${typedProgram.items[i]::class.simpleName}")
-        }
-        
+        val result = typeChecker.typeCheck(program)
+
         // Check fetchUser function has all three effects
-        val fetchUserBinding = if (typedProgram.items.size > 3) {
-            typedProgram.items[3] as com.mezze.language.ast.LetBinding
-        } else {
-            // Skip test if parsing failed
-            return
-        }
-        val fetchUserType = fetchUserBinding.inferredType
-        println("DEBUG: fetchUserType = $fetchUserType")
+        val fetchUserType = result.getVariableType("fetchUser")
+        assertNotNull(fetchUserType)
         assertTrue(fetchUserType is MezzeType.FunctionType)
+        val fetchUserFnType = fetchUserType as MezzeType.FunctionType
         // fetchUser should be: {id: Str} -> Str <Database, Log, Cache>
-        assertEquals(MezzeType.StringType, fetchUserType.returnType)
-        assertNotNull(fetchUserType.effects)
-        assertEquals(setOf("Database", "Log", "Cache"), fetchUserType.effects!!.effects)
-        
-        // Check processUsers has Log and Cache effects (if parsed)
-        if (typedProgram.items.size > 4) {
-            val processUsersBinding = typedProgram.items[4] as com.mezze.language.ast.LetBinding
-            val processUsersType = processUsersBinding.inferredType
-            assertTrue(processUsersType is MezzeType.FunctionType)
-            assertEquals(setOf("Log", "Cache"), processUsersType.effects!!.effects)
-        }
+        assertEquals(MezzeType.StringType, fetchUserFnType.returnType)
+        assertNotNull(fetchUserFnType.effects)
+        assertEquals(setOf("Database", "Log", "Cache"), fetchUserFnType.effects!!.effects)
+
+        // Check processUsers has Log and Cache effects
+        val processUsersType = result.getVariableType("processUsers")
+        assertNotNull(processUsersType)
+        assertTrue(processUsersType is MezzeType.FunctionType)
+        val processUsersFnType = processUsersType as MezzeType.FunctionType
+        assertEquals(setOf("Log", "Cache"), processUsersFnType.effects!!.effects)
     }
 
     @Test
@@ -397,11 +370,10 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        val binding = typedProgram.items[0] as com.mezze.language.ast.LetBinding
-        val inferredType = binding.inferredType
-        
+        val result = typeChecker.typeCheck(program)
+
+        val inferredType = result.getVariableType("pureComputation")
+
         // Should be just Int, not a function type with effects
         assertEquals(MezzeType.IntType, inferredType)
     }
@@ -421,10 +393,9 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items[1] as com.mezze.language.ast.LetBinding
-        val inferredType = binding.inferredType
+        val inferredType = result.getVariableType("mixedProgram")
 
         // Do blocks with effects return SuspendedType
         assertTrue(inferredType is MezzeType.SuspendedType)

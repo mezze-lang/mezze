@@ -48,13 +48,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // The useDatabase function should be the last item (index 4: Log, Database, Console impl, Postgres impl, useDatabase)
-        val useDatabaseDecl = typedProgram.items[4] as LetBinding
+        val useDatabaseType = typedProgram.getVariableType("useDatabase")
+        assertNotNull(useDatabaseType)
+        assertTrue(useDatabaseType is MezzeType.FunctionType)
 
-        assertNotNull(useDatabaseDecl.inferredType)
-        assertTrue(useDatabaseDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = useDatabaseDecl.inferredType as MezzeType.FunctionType
+        val functionType = useDatabaseType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         // Should have only Database effect (Log is internal to the implementation)
@@ -103,14 +101,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val secureQueryDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "secureQuery"
-        } as LetBinding
+        val secureQueryType = typedProgram.getVariableType("secureQuery")
+        assertNotNull(secureQueryType)
+        assertTrue(secureQueryType is MezzeType.FunctionType)
 
-        assertNotNull(secureQueryDecl.inferredType)
-        assertTrue(secureQueryDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = secureQueryDecl.inferredType as MezzeType.FunctionType
+        val functionType = secureQueryType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         val effects = functionType.effects!!.effects
@@ -150,14 +145,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val complexFunctionDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "complexFunction"
-        } as LetBinding
+        val complexFunctionType = typedProgram.getVariableType("complexFunction")
+        assertNotNull(complexFunctionType)
+        assertTrue(complexFunctionType is MezzeType.FunctionType)
 
-        assertNotNull(complexFunctionDecl.inferredType)
-        assertTrue(complexFunctionDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = complexFunctionDecl.inferredType as MezzeType.FunctionType
+        val functionType = complexFunctionType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         val effects = functionType.effects!!.effects
@@ -213,14 +205,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val copyFileDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "copyFile"
-        } as LetBinding
+        val copyFileType = typedProgram.getVariableType("copyFile")
+        assertNotNull(copyFileType)
+        assertTrue(copyFileType is MezzeType.FunctionType)
 
-        assertNotNull(copyFileDecl.inferredType)
-        assertTrue(copyFileDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = copyFileDecl.inferredType as MezzeType.FunctionType
+        val functionType = copyFileType as MezzeType.FunctionType
         assertNotNull(functionType.effects)
 
         val effects = functionType.effects!!.effects
@@ -262,14 +251,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val partiallyHandledDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "partiallyHandledQuery"
-        } as LetBinding
+        val partiallyHandledType = typedProgram.getVariableType("partiallyHandledQuery")
+        assertNotNull(partiallyHandledType)
+        assertTrue(partiallyHandledType is MezzeType.FunctionType)
 
-        assertNotNull(partiallyHandledDecl.inferredType)
-        assertTrue(partiallyHandledDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = partiallyHandledDecl.inferredType as MezzeType.FunctionType
+        val functionType = partiallyHandledType as MezzeType.FunctionType
 
         // After handling Database with TestDB, Database is removed but Log is added
         // because TestDB's impl body uses Log.log
@@ -301,14 +287,11 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val pureCalculationDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "pureCalculation"
-        } as LetBinding
+        val pureCalculationType = typedProgram.getVariableType("pureCalculation")
+        assertNotNull(pureCalculationType)
+        assertTrue(pureCalculationType is MezzeType.FunctionType)
 
-        assertNotNull(pureCalculationDecl.inferredType)
-        assertTrue(pureCalculationDecl.inferredType is MezzeType.FunctionType)
-
-        val functionType = pureCalculationDecl.inferredType as MezzeType.FunctionType
+        val functionType = pureCalculationType as MezzeType.FunctionType
         // Should have no effects or empty effect row
         assertTrue(functionType.effects == null || functionType.effects!!.effects.isEmpty(),
                   "Pure function should have no effects")
@@ -330,26 +313,13 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val twiceDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "twice"
-        } as LetBinding
+        val twiceType = typedProgram.getVariableType("twice")
+        assertNotNull(twiceType)
+        assertTrue(twiceType is MezzeType.FunctionType)
 
-        assertNotNull(twiceDecl.inferredType)
-        assertTrue(twiceDecl.inferredType is MezzeType.FunctionType)
-
-        // The function type should be { f: {} -> Int <...> } -> Int <...>
-        // But the actual inferred type depends on whether effects are propagated
-        val twiceType = twiceDecl.inferredType as MezzeType.FunctionType
-
-        val resultDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertNotNull(resultDecl.inferredType)
+        val resultType = typedProgram.getVariableType("result")
+        assertNotNull(resultType)
         // result should be Int, or SuspendedType<Int, empty effects> when using polymorphic effects
-        // The SuspendedType wrapper is kept because at constraint generation time we don't know
-        // if <...> will unify to empty effects or concrete effects
-        val resultType = resultDecl.inferredType
         val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
             (resultType is MezzeType.SuspendedType && resultType.valueType is MezzeType.IntType)
         assertTrue(isIntOrSuspendedInt,
@@ -383,15 +353,12 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertNotNull(resultDecl.inferredType)
+        val resultType = typedProgram.getVariableType("result")
+        assertNotNull(resultType)
         // result should be Int - but might need to handle Log effect
         // depending on how effect propagation works
-        assertTrue(resultDecl.inferredType is MezzeType.IntType ||
-                  resultDecl.inferredType is MezzeType.SuspendedType)
+        assertTrue(resultType is MezzeType.IntType ||
+                  resultType is MezzeType.SuspendedType)
     }
 
     @Test
@@ -434,13 +401,9 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertNotNull(resultDecl.inferredType)
+        val resultType = typedProgram.getVariableType("result")
+        assertNotNull(resultType)
         // result should be Int, or SuspendedType<Int, effects> when using polymorphic effects
-        val resultType = resultDecl.inferredType
         val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
             (resultType is MezzeType.SuspendedType && resultType.valueType is MezzeType.IntType)
         assertTrue(isIntOrSuspendedInt,
@@ -464,13 +427,9 @@ class EffectPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultDecl = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertNotNull(resultDecl.inferredType)
+        val resultType = typedProgram.getVariableType("result")
+        assertNotNull(resultType)
         // result should be Int, or SuspendedType<Int, effects> when using polymorphic effects
-        val resultType = resultDecl.inferredType
         val isIntOrSuspendedInt = resultType is MezzeType.IntType ||
             (resultType is MezzeType.SuspendedType && resultType.valueType is MezzeType.IntType)
         assertTrue(isIntOrSuspendedInt,

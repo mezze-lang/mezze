@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -34,42 +35,38 @@ class DebugRecordClosureTest {
         val result = typeChecker.typeCheck(ast)
         println("Type checked successfully!")
 
-        // Get the type of accessField
-        val accessFieldBinding = result.program.items.find {
-            it is com.mezze.language.ast.LetBinding &&
-            (it.pattern as? com.mezze.language.ast.VariablePattern)?.name == "accessField"
-        } as? com.mezze.language.ast.LetBinding
+        // Get the type of accessField via v2 API
+        val accessFieldType = result.getVariableType("accessField")
 
         println("\n===== TYPE INFORMATION =====")
-        println("accessField type: ${accessFieldBinding?.inferredType}")
-        println("accessField typeScheme: ${accessFieldBinding?.typeScheme}")
+        println("accessField type: $accessFieldType")
 
         // If it's a function type, extract parameter type
-        val funcType = accessFieldBinding?.inferredType as? com.mezze.language.ast.MezzeType.FunctionType
+        val funcType = accessFieldType as? MezzeType.FunctionType
         if (funcType != null) {
             println("\nParameter type: ${funcType.paramType}")
-            val paramRecord = funcType.paramType as? com.mezze.language.ast.MezzeType.RecordType
+            val paramRecord = funcType.paramType as? MezzeType.RecordType
             if (paramRecord != null) {
                 println("Parameter fields: ${paramRecord.fields}")
                 val vType = paramRecord.fields["v"]
                 println("v field type: $vType")
 
                 // If v is a variant type, check the Record constructor
-                val variantType = vType as? com.mezze.language.ast.MezzeType.VariantType
+                val variantType = vType as? MezzeType.VariantType
                 if (variantType != null) {
                     println("v is variant with constructors: ${variantType.constructors.keys}")
                     val recordConstructorType = variantType.constructors["Record"]
                     println("Record constructor type: $recordConstructorType")
 
                     // Check if it's a record type
-                    val recordDataType = recordConstructorType as? com.mezze.language.ast.MezzeType.RecordType
+                    val recordDataType = recordConstructorType as? MezzeType.RecordType
                     if (recordDataType != null) {
                         println("Record data fields: ${recordDataType.fields}")
                         val dataFieldType = recordDataType.fields["data"]
                         println("data field type: $dataFieldType")
 
                         // Check if data field is open or closed
-                        val dataRecordType = dataFieldType as? com.mezze.language.ast.MezzeType.RecordType
+                        val dataRecordType = dataFieldType as? MezzeType.RecordType
                         if (dataRecordType != null) {
                             println("data is ${if (dataRecordType.isOpen) "OPEN" else "CLOSED"} record")
                             println("data fields: ${dataRecordType.fields}")

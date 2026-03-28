@@ -38,8 +38,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items[0] as LetBinding
-        val inferredType = letBinding.inferredType
+        val inferredType = typedProgram.getVariableType("arr")
 
         // Should be Seq type, not List type
         assertTrue(inferredType is MezzeType.SeqType,
@@ -57,11 +56,7 @@ class SeqVsListTypeDistinctionTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val lstBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "lst"
-        } as LetBinding
-
-        val inferredType = lstBinding.inferredType
+        val inferredType = typedProgram.getVariableType("lst")
 
         // Should be a TypeApplication of List, not Array
         assertTrue(inferredType is MezzeType.TypeApplication || inferredType is MezzeType.VariantType,
@@ -178,11 +173,7 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - Seq matches Seq
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertTrue(resultBinding.inferredType is MezzeType.IntType)
+        assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType)
     }
 
     @Test
@@ -204,11 +195,7 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - List matches List
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertTrue(resultBinding.inferredType is MezzeType.IntType)
+        assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType)
     }
 
     // =============================================================================
@@ -284,11 +271,7 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - polymorphic function works with arrays
         val typedProgram = typeChecker.typeCheck(program)
 
-        val firstBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "first"
-        } as LetBinding
-
-        assertTrue(firstBinding.inferredType is MezzeType.IntType,
+        assertTrue(typedProgram.getVariableType("first") is MezzeType.IntType,
                   "Result should be IntType")
     }
 
@@ -314,12 +297,9 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - function works with List Int
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertTrue(resultBinding.inferredType is MezzeType.IntType,
-                  "Result should be Int type, got: ${prettyPrintType(resultBinding.inferredType!!)}")
+        val resultType = typedProgram.getVariableType("result")
+        assertTrue(resultType is MezzeType.IntType,
+                  "Result should be Int type, got: ${prettyPrintType(resultType!!)}")
     }
 
     @Test
@@ -413,14 +393,11 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - Seq can contain List elements
         val typedProgram = typeChecker.typeCheck(program)
 
-        val arrBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "arr_of_lists"
-        } as LetBinding
-
-        assertTrue(arrBinding.inferredType is MezzeType.SeqType,
+        val inferredArrType = typedProgram.getVariableType("arr_of_lists")
+        assertTrue(inferredArrType is MezzeType.SeqType,
                   "Should be SeqType")
 
-        val arrayType = arrBinding.inferredType as MezzeType.SeqType
+        val arrayType = inferredArrType as MezzeType.SeqType
         // Element type should be List type
         assertTrue(arrayType.elementType is MezzeType.TypeApplication ||
                   arrayType.elementType is MezzeType.VariantType ||
@@ -446,13 +423,11 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - List can contain Seq elements
         val typedProgram = typeChecker.typeCheck(program)
 
-        val lstBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "list_of_arrs"
-        } as LetBinding
+        val lstType = typedProgram.getVariableType("list_of_arrs")
 
         // Should be List type (TypeApplication or VariantType)
-        assertTrue(lstBinding.inferredType is MezzeType.TypeApplication ||
-                  lstBinding.inferredType is MezzeType.VariantType,
+        assertTrue(lstType is MezzeType.TypeApplication ||
+                  lstType is MezzeType.VariantType,
                   "Should be List type")
     }
 
@@ -481,14 +456,11 @@ class SeqVsListTypeDistinctionTest {
         try {
             val typedProgram = typeChecker.typeCheck(program)
 
-            val combinedBinding = typedProgram.items.find {
-                it is LetBinding && it.variableName == "combined"
-            } as? LetBinding
-
-            if (combinedBinding != null) {
+            val combinedType = typedProgram.getVariableType("combined")
+            if (combinedType != null) {
                 // Should be List type
-                assertTrue(combinedBinding.inferredType is MezzeType.TypeApplication ||
-                          combinedBinding.inferredType is MezzeType.VariantType,
+                assertTrue(combinedType is MezzeType.TypeApplication ||
+                          combinedType is MezzeType.VariantType,
                           "concat result should be List type")
             }
         } catch (e: Exception) {
@@ -520,11 +492,7 @@ class SeqVsListTypeDistinctionTest {
         // Should succeed - seq operations with arrays
         val typedProgram = typeChecker.typeCheck(program)
 
-        val resultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
-        } as LetBinding
-
-        assertTrue(resultBinding.inferredType is MezzeType.IntType,
+        assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType,
                   "Result should be IntType")
     }
 

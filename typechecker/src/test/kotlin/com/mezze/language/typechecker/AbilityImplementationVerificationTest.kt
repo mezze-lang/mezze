@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
 
 class AbilityImplementationVerificationTest {
 
@@ -61,9 +62,9 @@ class AbilityImplementationVerificationTest {
         val program = parser.parse(source)
 
         // Should succeed because impl Show for Bool exists
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
         // Just verify it doesn't throw
-        assertTrue(typedProgram.items.isNotEmpty())
+        assertNotNull(result)
     }
 
     @Test
@@ -81,8 +82,8 @@ class AbilityImplementationVerificationTest {
         val program = parser.parse(source)
 
         // Should succeed because x is polymorphic, not a concrete type
-        val typedProgram = typeChecker.typeCheck(program)
-        assertTrue(typedProgram.items.isNotEmpty())
+        val result = typeChecker.typeCheck(program)
+        assertNotNull(result)
     }
 
     @Test

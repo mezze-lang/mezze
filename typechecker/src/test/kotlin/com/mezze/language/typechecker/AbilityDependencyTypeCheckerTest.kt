@@ -140,18 +140,23 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertEquals(2, typedProgram.items.size)
+        // Check via parsed AST that Eq and Ord were processed
+        val eq = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Eq" }
+        assertNotNull(eq)
 
-        val eq = typedProgram.items[0] as AbilityDeclaration
-        assertNotNull(eq.inferredType)
-
-        val ord = typedProgram.items[1] as AbilityDeclaration
-        assertNotNull(ord.inferredType)
+        val ord = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Ord" }
+        assertNotNull(ord)
         // No ability-level dependencies
-        assertEquals(0, ord.dependencies.size)
+        assertEquals(0, ord!!.dependencies.size)
         // But method has constraint
         assertEquals(1, ord.operations[0].abilityConstraints.size)
         assertEquals("Eq", ord.operations[0].abilityConstraints[0].abilityName)
+
+        // Verify type checking succeeds for both via TypedModule
+        val eqDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Eq" }
+        assertNotNull(eqDecl)
+        val ordDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Ord" }
+        assertNotNull(ordDecl)
     }
 
     @Test
@@ -173,12 +178,14 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertEquals(3, typedProgram.items.size)
-
-        val serializable = typedProgram.items[2] as AbilityDeclaration
-        assertNotNull(serializable.inferredType)
-        assertEquals(0, serializable.dependencies.size)
+        val serializable = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Serializable" }
+        assertNotNull(serializable)
+        assertEquals(0, serializable!!.dependencies.size)
         assertEquals(2, serializable.operations[0].abilityConstraints.size)
+
+        // Verify type checking succeeds
+        val serializableDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Serializable" }
+        assertNotNull(serializableDecl)
     }
 
     @Test
@@ -192,12 +199,14 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertEquals(1, typedProgram.items.size)
-
-        val show = typedProgram.items[0] as AbilityDeclaration
-        assertNotNull(show.inferredType)
-        assertEquals(0, show.dependencies.size)
+        val show = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Show" }
+        assertNotNull(show)
+        assertEquals(0, show!!.dependencies.size)
         assertEquals(0, show.operations[0].abilityConstraints.size)
+
+        // Verify type checking succeeds
+        val showDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }
+        assertNotNull(showDecl)
     }
 
     @Test
@@ -226,7 +235,7 @@ class AbilityDependencyTypeCheckerTest {
         val typedProgram = typeChecker.typeCheck(program)
 
         // Should type check without errors
-        assertTrue(typedProgram.items.isNotEmpty())
+        assertNotNull(typedProgram.getVariableType("test"))
     }
 
     @Test
@@ -285,16 +294,10 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertEquals(4, typedProgram.items.size)
-
-        // All items should type check successfully
-        typedProgram.items.forEach { item ->
-            when (item) {
-                is AbilityDeclaration -> assertNotNull(item.inferredType)
-                is ImplAbilityDeclaration -> assertNotNull(item.inferredType)
-                else -> {}
-            }
-        }
+        // All abilities and impls should type check successfully
+        assertNotNull(typedProgram.typedModule?.abilityDecls?.find { it.name == "Eq" })
+        assertNotNull(typedProgram.typedModule?.abilityDecls?.find { it.name == "Ord" })
+        assertTrue(typedProgram.typedModule?.abilityImpls?.size == 2)
     }
 
     @Test
@@ -318,16 +321,20 @@ class AbilityDependencyTypeCheckerTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val collection = typedProgram.items[2] as AbilityDeclaration
-        assertNotNull(collection.inferredType)
+        // Check via parsed AST that Collection operations have the right constraints
+        val collection = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Collection" }
+        assertNotNull(collection)
 
         // length has no constraints
-        assertEquals(0, collection.operations[0].abilityConstraints.size)
+        assertEquals(0, collection!!.operations[0].abilityConstraints.size)
         // contains has Eq constraint
         assertEquals(1, collection.operations[1].abilityConstraints.size)
         assertEquals("Eq", collection.operations[1].abilityConstraints[0].abilityName)
         // show_all has Show constraint
         assertEquals(1, collection.operations[2].abilityConstraints.size)
         assertEquals("Show", collection.operations[2].abilityConstraints[0].abilityName)
+
+        // Verify type checking succeeds
+        assertNotNull(typedProgram.typedModule?.abilityDecls?.find { it.name == "Collection" })
     }
 }

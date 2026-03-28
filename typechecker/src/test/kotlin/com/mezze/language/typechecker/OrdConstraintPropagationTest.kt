@@ -30,11 +30,11 @@ class OrdConstraintPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is MezzeType.FunctionType)
+        val testType = typedProgram.getVariableType("test")
+        assertNotNull(testType)
+        assertTrue(testType is MezzeType.FunctionType)
 
-        val funcType = letBinding.inferredType as MezzeType.FunctionType
+        val funcType = testType as MezzeType.FunctionType
         // Should have Ord constraint
         val hasOrd = funcType.abilityConstraints.any { it.abilityName == "Ord" }
         assertTrue(hasOrd, "Expected Ord constraint for direct parameter comparison")
@@ -57,11 +57,11 @@ class OrdConstraintPropagationTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is MezzeType.FunctionType)
+        val testType = typedProgram.getVariableType("test")
+        assertNotNull(testType)
+        assertTrue(testType is MezzeType.FunctionType)
 
-        val funcType = letBinding.inferredType as MezzeType.FunctionType
+        val funcType = testType as MezzeType.FunctionType
 
         // Should have NumAdd, NumSub, and Ord constraints
         val hasNumAdd = funcType.abilityConstraints.any { it.abilityName == "NumAdd" }

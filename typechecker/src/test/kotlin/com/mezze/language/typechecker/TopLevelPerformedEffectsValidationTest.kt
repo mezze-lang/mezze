@@ -450,12 +450,11 @@ class TopLevelPerformedEffectsValidationTest {
         assertTrue(result is TypeChecker.TypeCheckResult.Success,
             "Perform wrapped in function should type check")
 
-        val typedProgram = (result as TypeChecker.TypeCheckResult.Success).program
-        val handleBinding = typedProgram.items.filterIsInstance<com.mezze.language.ast.LetBinding>()
-            .find { (it.pattern as? com.mezze.language.ast.VariablePattern)?.name == "handle" }
-
-        assertNotNull(handleBinding?.inferredType)
-        val funcType = handleBinding!!.inferredType as com.mezze.language.ast.MezzeType.FunctionType
+        val successResult = result as TypeChecker.TypeCheckResult.Success
+        val funcType = successResult.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == "handle" }
+            ?.scheme?.type as com.mezze.language.ast.MezzeType.FunctionType
 
         // Return type should be Result variant (may be expanded to VariantType or kept as TypeApplication)
         // The key is it has BOTH Ok and Err constructors (not just Ok as in the bug)

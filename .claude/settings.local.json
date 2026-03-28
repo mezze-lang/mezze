@@ -253,7 +253,8 @@
       "Bash(git:*)",
       "Bash(sed:*)",
       "Bash(cd:*)",
-      "Bash(BASE=\"/Users/shriyans/Projects/funk/typechecker/src/test/kotlin/com/mezze/language/typechecker\"\n\nfor f in AbilityEffectComprehensiveTest.kt MutationEffectTest.kt GuardOperatorTest.kt MethodCallSyntaxTest.kt AbilityOrphanRulesTest.kt IfLetGuardTypeCheckerTest.kt TypeCheckerCompatibilityTest.kt QualifiedEffectImportTest.kt NewtypeComprehensiveTest.kt NewtypeDerivingTest.kt; do\n  sed -i '' 's/assertNotNull\\(result\\\\.program\\)/assertNotNull\\(result\\)/g' \"$BASE/$f\"\ndone\necho \"Done\")"
+      "Bash(BASE=\"/Users/shriyans/Projects/funk/typechecker/src/test/kotlin/com/mezze/language/typechecker\"\n\nfor f in AbilityEffectComprehensiveTest.kt MutationEffectTest.kt GuardOperatorTest.kt MethodCallSyntaxTest.kt AbilityOrphanRulesTest.kt IfLetGuardTypeCheckerTest.kt TypeCheckerCompatibilityTest.kt QualifiedEffectImportTest.kt NewtypeComprehensiveTest.kt NewtypeDerivingTest.kt; do\n  sed -i '' 's/assertNotNull\\(result\\\\.program\\)/assertNotNull\\(result\\)/g' \"$BASE/$f\"\ndone\necho \"Done\")",
+      "Bash(FILE=\"/Users/shriyans/Projects/funk/typechecker/src/test/kotlin/com/mezze/language/typechecker/AbilityAssociatedTypesTest.kt\"\nsed -i '' 's/val typedProgram = typeChecker\\\\.typeCheck\\(program\\)/val result = typeChecker.typeCheck\\(program\\)/g' \"$FILE\" && echo \"ok\")"
     ],
     "deny": [],
     "ask": []

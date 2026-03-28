@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.typedast.TypedAbilityDecl
+import com.mezze.language.typedast.TypedAbilityImpl
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -25,20 +27,17 @@ class AbilityTypeCheckerTest {
               encode : {val: 'a} -> Str
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(1, typedProgram.items.size)
-        val ability = typedProgram.items[0] as AbilityDeclaration
-        assertNotNull(ability.inferredType)
-        assertTrue(ability.inferredType is MezzeType.RecordType)
-        
-        val recordType = ability.inferredType as MezzeType.RecordType
-        assertTrue(recordType.fields.containsKey("encode"))
-        assertTrue(recordType.fields["encode"] is MezzeType.FunctionType)
+
+        val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Encoder" }
+        assertNotNull(ability)
+        assertTrue(ability!!.operations.any { it.name == "encode" })
+        val encodeOp = ability.operations.first { it.name == "encode" }
+        assertTrue(encodeOp.returnType is MezzeType.StringType)
     }
-    
+
     @Test
     fun testImplAbilityDeclaration() {
         val source = """
@@ -52,23 +51,18 @@ class AbilityTypeCheckerTest {
               encode : {val: Int} -> Str = {val} -> int::to_str {n = val}
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertEquals(3, typedProgram.items.size) // use statement + ability + impl
+        val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Encoder" }
+        assertNotNull(ability)
 
-        val ability = typedProgram.items[1] as AbilityDeclaration
-        assertNotNull(ability.inferredType)
-
-        val impl = typedProgram.items[2] as ImplAbilityDeclaration
-        assertNotNull(impl.inferredType)
-        assertTrue(impl.inferredType is MezzeType.RecordType)
-        
-        val recordType = impl.inferredType as MezzeType.RecordType
-        assertTrue(recordType.fields.containsKey("encode"))
+        val impl = typedProgram.typedModule?.abilityImpls?.firstOrNull()
+        assertNotNull(impl)
+        assertTrue(impl!!.operations.containsKey("encode"))
     }
-    
+
     @Test
     fun testMultipleAbilityOperations() {
         val source = """
@@ -82,25 +76,23 @@ class AbilityTypeCheckerTest {
               debug : {val: Str} -> Str = {val} -> "\"$(val)\""
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val ability = typedProgram.items[0] as AbilityDeclaration
-        val abilityType = ability.inferredType as MezzeType.RecordType
-        assertEquals(2, abilityType.fields.size)
-        assertTrue(abilityType.fields.containsKey("show"))
-        assertTrue(abilityType.fields.containsKey("debug"))
-        
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
-        val implType = impl.inferredType as MezzeType.RecordType
-        assertEquals(2, implType.fields.size)
-        assertTrue(implType.fields.containsKey("show"))
-        assertTrue(implType.fields.containsKey("debug"))
+
+        val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }
+        assertNotNull(ability)
+        assertEquals(2, ability!!.operations.size)
+        assertTrue(ability.operations.any { it.name == "show" })
+        assertTrue(ability.operations.any { it.name == "debug" })
+
+        val impl = typedProgram.typedModule?.abilityImpls?.firstOrNull()
+        assertNotNull(impl)
+        assertEquals(2, impl!!.operations.size)
+        assertTrue(impl.operations.containsKey("show"))
+        assertTrue(impl.operations.containsKey("debug"))
     }
-    
+
     @Test
     fun testAbilityWithComplexTypes() {
         val source = """
@@ -109,20 +101,20 @@ class AbilityTypeCheckerTest {
               deserialize : {str: Str} -> 'a
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
-        val ability = typedProgram.items[0] as AbilityDeclaration
-        val abilityType = ability.inferredType as MezzeType.RecordType
-        
+
+        val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Serializer" }
+        assertNotNull(ability)
+
         // Check serialize operation
-        val serializeType = abilityType.fields["serialize"] as MezzeType.FunctionType
-        assertTrue(serializeType.returnType is MezzeType.StringType)
-        
-        // Check deserialize operation
-        val deserializeType = abilityType.fields["deserialize"] as MezzeType.FunctionType
-        assertTrue(deserializeType.returnType is MezzeType.VarType)
+        val serializeOp = ability!!.operations.first { it.name == "serialize" }
+        assertTrue(serializeOp.returnType is MezzeType.StringType)
+
+        // Check deserialize operation returns a type variable
+        val deserializeOp = ability.operations.first { it.name == "deserialize" }
+        assertTrue(deserializeOp.returnType is MezzeType.VarType)
     }
     
     @Test

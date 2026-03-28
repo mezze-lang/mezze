@@ -61,8 +61,7 @@ class SuspendedTypeEffectMergeTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
         // The return type may be SuspendedType wrapping Int if effects are propagated via SuspendedType
         // OR plain Int with effects tracked in the function's effect row
@@ -101,8 +100,7 @@ class SuspendedTypeEffectMergeTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
         // Should have Log effect from the then branch
         assertNotNull(fnType.effects, "Function should have effects")
@@ -132,8 +130,7 @@ class SuspendedTypeEffectMergeTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
         // Should have Log effect from the else branch
         assertNotNull(fnType.effects, "Function should have effects")
@@ -184,8 +181,7 @@ class SuspendedTypeEffectMergeTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
         // Should have ALL effects: Log, State, FileSystem
         assertNotNull(fnType.effects, "Function should have effects")
@@ -229,8 +225,7 @@ class SuspendedTypeEffectMergeTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
         // Should have both A and B effects
         assertNotNull(fnType.effects, "Function should have effects")

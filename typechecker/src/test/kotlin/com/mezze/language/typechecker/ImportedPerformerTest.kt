@@ -2,7 +2,6 @@ package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.LetBinding
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -42,16 +41,10 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
         // Find main binding and check its type
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType
-        assertNotNull(mainType, "main should have inferred type")
+        val mainType = result.getVariableType("main")
+        assertNotNull(mainType, "main should be defined")
         assertTrue(mainType is MezzeType.FunctionType, "main should be a function type")
 
         val funcType = mainType as MezzeType.FunctionType
@@ -77,14 +70,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -110,14 +97,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -180,14 +161,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val testBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "test" }
-
-        assertNotNull(testBinding, "test should be defined")
-
-        val testType = testBinding!!.inferredType as? MezzeType.FunctionType
+        val testType = result.getVariableType("test") as? MezzeType.FunctionType
         assertNotNull(testType, "test should be a function type")
 
         val effectRow = testType!!.effects
@@ -218,14 +193,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -259,14 +228,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -306,14 +269,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -351,14 +308,8 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        assertNotNull(mainBinding, "main should be defined")
-
-        val mainType = mainBinding!!.inferredType as? MezzeType.FunctionType
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
 
         val effectRow = mainType!!.effects
@@ -386,13 +337,9 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-
-        assertNotNull(resultBinding, "result should be defined")
-        assertEquals(MezzeType.StringType, resultBinding!!.inferredType)
+        assertNotNull(result.getVariableType("result"), "result should be defined")
+        assertEquals(MezzeType.StringType, result.getVariableType("result"))
     }
 
     @Test
@@ -424,22 +371,10 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val intStrBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "intStr" }
-        val strStrBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "strStr" }
-        val boolStrBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "boolStr" }
-
-        assertNotNull(intStrBinding, "intStr should be defined")
-        assertNotNull(strStrBinding, "strStr should be defined")
-        assertNotNull(boolStrBinding, "boolStr should be defined")
-
-        assertEquals(MezzeType.StringType, intStrBinding!!.inferredType)
-        assertEquals(MezzeType.StringType, strStrBinding!!.inferredType)
-        assertEquals(MezzeType.StringType, boolStrBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, result.getVariableType("intStr"))
+        assertEquals(MezzeType.StringType, result.getVariableType("strStr"))
+        assertEquals(MezzeType.StringType, result.getVariableType("boolStr"))
     }
 
     @Test
@@ -463,18 +398,12 @@ class ImportedPerformerTest {
 
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
-        val typedProgram = result.program
 
-        val serializedBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "serialized" }
-        val sumBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "sum" }
+        assertNotNull(result.getVariableType("serialized"), "serialized should be defined")
+        assertNotNull(result.getVariableType("sum"), "sum should be defined")
 
-        assertNotNull(serializedBinding, "serialized should be defined")
-        assertNotNull(sumBinding, "sum should be defined")
-
-        assertEquals(MezzeType.StringType, serializedBinding!!.inferredType)
-        assertEquals(MezzeType.IntType, sumBinding!!.inferredType)
+        assertEquals(MezzeType.StringType, result.getVariableType("serialized"))
+        assertEquals(MezzeType.IntType, result.getVariableType("sum"))
     }
 
     @Test
@@ -491,7 +420,7 @@ class ImportedPerformerTest {
         val result = typeChecker.typeCheck(program)
 
         // Should pass type checking
-        assertNotNull(result.program, "Program should type check")
+        assertNotNull(result, "Program should type check")
     }
 
     // ========== ERROR MESSAGE TESTS ==========

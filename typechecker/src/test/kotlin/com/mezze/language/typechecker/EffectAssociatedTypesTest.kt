@@ -168,10 +168,9 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getUseState" }
-        println("[TEST DO BLOCK] Actual type: ${binding.inferredType}")
-        println("[TEST DO BLOCK] Type class: ${binding.inferredType?.javaClass?.simpleName}")
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getUseState") as MezzeType.FunctionType
+        println("[TEST DO BLOCK] Actual type: ${funcType.returnType}")
+        println("[TEST DO BLOCK] Type class: ${funcType.returnType?.javaClass?.simpleName}")
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -192,8 +191,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getReadEnv" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getReadEnv") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.StringType)
     }
 
@@ -245,8 +243,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         val actualType = funcType.returnType
         val typeClass = actualType?.javaClass?.simpleName
         val typeStr = actualType?.let { prettyPrintType(it) }
@@ -314,8 +311,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.StringType)
     }
 
@@ -356,8 +352,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.RecordType)
     }
 
@@ -378,8 +373,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.TypeApplication)
     }
 
@@ -400,8 +394,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -425,8 +418,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         val returnType = funcType.returnType
         println("[TEST LIST] Actual type: $returnType")
         println("[TEST LIST] Type class: ${returnType?.javaClass?.simpleName}")
@@ -545,8 +537,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getUseResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getUseResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -570,13 +561,11 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getSuccessResult" }
-        val successFuncType = successBinding.inferredType as MezzeType.FunctionType
+        val successFuncType = program.getVariableType("getSuccessResult") as MezzeType.FunctionType
         // Bool is represented as BoolType internally (not VariantType)
         assertTrue(successFuncType.returnType is MezzeType.BoolType || successFuncType.returnType is MezzeType.VariantType)
 
-        val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getFailResult" }
-        val failFuncType = failBinding.inferredType as MezzeType.FunctionType
+        val failFuncType = program.getVariableType("getFailResult") as MezzeType.FunctionType
         assertTrue(failFuncType.returnType is MezzeType.FloatType)
     }
 
@@ -685,8 +674,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getResult") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -722,8 +710,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getCombined" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("getCombined") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -751,8 +738,7 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "mayFail" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = program.getVariableType("mayFail") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.TypeApplication || funcType.returnType is MezzeType.VariantType)
     }
 

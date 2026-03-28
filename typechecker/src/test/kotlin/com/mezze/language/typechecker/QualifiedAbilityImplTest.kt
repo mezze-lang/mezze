@@ -99,11 +99,12 @@ class QualifiedAbilityImplTest {
 
         // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
-        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
-        assertNotNull(typedProgram)
+        val typedResult = typeCheckerWithRoot.typeCheck(program, tempDir)
+        assertNotNull(typedResult)
 
         // After type checking, the impl should have been resolved as an ability impl
-        val resolvedImpl = typedProgram.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
+        // The typechecker sets resolution on parsed AST nodes as a side effect
+        val resolvedImpl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(resolvedImpl, "Typechecker should convert cross-module ability impl to ImplAbilityDeclaration")
         assertEquals("Serializable", resolvedImpl!!.abilityName)
 
@@ -153,11 +154,12 @@ class QualifiedAbilityImplTest {
 
         // Type check should succeed and convert to ImplAbilityDeclaration
         val typeCheckerWithRoot = TypeChecker()
-        val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
-        assertNotNull(typedProgram)
+        val typedResult = typeCheckerWithRoot.typeCheck(program, tempDir)
+        assertNotNull(typedResult)
 
         // After type checking, the impl should have been resolved
-        val resolvedImpl = typedProgram.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
+        // The typechecker sets resolution on parsed AST nodes as a side effect
+        val resolvedImpl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
         assertNotNull(resolvedImpl, "Typechecker should convert cross-module ability impl to ImplAbilityDeclaration")
         assertEquals("Encoder", resolvedImpl!!.abilityName)
 

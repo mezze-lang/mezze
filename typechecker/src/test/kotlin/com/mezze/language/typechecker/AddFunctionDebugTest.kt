@@ -24,18 +24,6 @@ class AddFunctionDebugTest {
 
         println("Parsed program: $program")
 
-        // Debug: Print the lambda body in detail
-        val letBinding = program.items[0] as LetBinding
-        val lambda = letBinding.expression as LambdaExpression
-        println("Lambda body type: ${lambda.body.javaClass.simpleName}")
-        println("Lambda body: ${lambda.body}")
-        if (lambda.body is FunctionCall) {
-            val funcCall = lambda.body as FunctionCall
-            println("  Function: ${funcCall.function}")
-            println("  Function type: ${funcCall.function.javaClass.simpleName}")
-            println("  Arguments: ${funcCall.arguments}")
-        }
-
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         val typeAliases = typeChecker.getTypeAliases()

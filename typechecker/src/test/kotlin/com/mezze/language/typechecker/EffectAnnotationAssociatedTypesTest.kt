@@ -47,11 +47,10 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Int <State having 'state = Int> = {} -> State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getState" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("getState") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -73,11 +72,10 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Int = {} -> perform Counter in State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getState" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("getState") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -110,8 +108,8 @@ class EffectAnnotationAssociatedTypesTest {
                     State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -127,8 +125,8 @@ class EffectAnnotationAssociatedTypesTest {
                 Operation.succeed { value = 42 }
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -144,8 +142,8 @@ class EffectAnnotationAssociatedTypesTest {
                 State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -160,8 +158,8 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Int <State having 'state = Int, ...> = {} -> State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     @Test
@@ -183,8 +181,8 @@ class EffectAnnotationAssociatedTypesTest {
                     State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     // ========================================================================
@@ -202,11 +200,10 @@ class EffectAnnotationAssociatedTypesTest {
             let getIntState: {} -> Int <State> = {} -> State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getIntState" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("getIntState") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
         assertNotNull(funcType.effects)
         assertTrue(funcType.effects!!.effects.contains("State") || funcType.effects!!.effectInstances.any { it.name == "State" })
@@ -223,11 +220,10 @@ class EffectAnnotationAssociatedTypesTest {
             let putString: {s: Str} -> {} <State> = {s} -> State.put { value = s }
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "putString" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("putString") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.RecordType)
     }
 
@@ -249,11 +245,10 @@ class EffectAnnotationAssociatedTypesTest {
                     State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "combined" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("combined") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -268,11 +263,10 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Int <State, ...> = {} -> State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getState" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("getState") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
         assertNotNull(funcType.effects)
         assertNotNull(funcType.effects!!.rowVar)
@@ -294,11 +288,10 @@ class EffectAnnotationAssociatedTypesTest {
             let pureGet: {} -> Int = {} -> perform IntState in State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "pureGet" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("pureGet") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
         val effects = funcType.effects
         assertTrue(effects == null || (effects.effects.isEmpty() && effects.effectInstances.isEmpty()))
@@ -322,11 +315,10 @@ class EffectAnnotationAssociatedTypesTest {
                     State.get {}
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "mixed" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("mixed") as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
 
@@ -340,11 +332,10 @@ class EffectAnnotationAssociatedTypesTest {
             let logSomething: {msg: Str} -> {} <Log> = {msg} -> Log.info { msg = msg }
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "logSomething" }
-        val funcType = binding.inferredType as MezzeType.FunctionType
+        val funcType = result.getVariableType("logSomething") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
     }
 
@@ -419,8 +410,8 @@ class EffectAnnotationAssociatedTypesTest {
                     State.put { value = current }
         """.trimIndent()
 
-        val program = typeCheck(code)
-        assertNotNull(program)
+        val result = typeCheck(code)
+        assertNotNull(result)
     }
 
     // ========================================================================

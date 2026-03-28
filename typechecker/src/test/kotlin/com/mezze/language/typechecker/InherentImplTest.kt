@@ -48,7 +48,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.isInherent)
         assertNull(impl.abilityName)
         assertNull(impl.abilityRef)
@@ -71,7 +71,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.isInherent)
         assertEquals(2, impl.operations.size)
         assertEquals("zero", impl.operations[0].name)
@@ -99,7 +99,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
         assertEquals(2, impls.size)
 
         val abilityImpl = impls.find { !it.isInherent }
@@ -126,7 +126,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertNotNull(impl.contentHash)
         assertTrue(impl.contentHash!!.isNotEmpty())
     }
@@ -144,7 +144,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertNotNull(impl.sourceLocation)
     }
 
@@ -168,10 +168,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val binding = result.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(binding)
-        assertEquals(MezzeType.BoolType, binding.inferredType)
+        assertEquals(MezzeType.BoolType, result.getVariableType("result"))
     }
 
     @Test
@@ -191,9 +188,7 @@ class InherentImplTest {
         // Should typecheck without error even if exact return type is inferred as type variable
         val result = typeChecker.typeCheck(program)
 
-        val binding = result.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(binding)
+        assertNotNull(result.getVariableType("result"))
     }
 
     @Test
@@ -212,10 +207,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val binding = result.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(binding)
-        assertNotNull(binding.inferredType)
+        assertNotNull(result.getVariableType("result"))
     }
 
     @Test
@@ -234,10 +226,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val binding = result.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(binding)
-        assertEquals(MezzeType.IntType, binding.inferredType)
+        assertEquals(MezzeType.IntType, result.getVariableType("result"))
     }
 
     // ========================================================================
@@ -265,7 +254,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
         assertEquals(2, impls.size)
         assertTrue(impls.any { it.abilityName == "Describe" })
         assertTrue(impls.any { it.isInherent })
@@ -288,7 +277,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.isInherent)
         assertEquals("Shape", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
     }
@@ -315,7 +304,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
             .filter { it.isInherent }
         assertEquals(2, impls.size)
     }
@@ -342,7 +331,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
             .filter { it.isInherent }
         assertEquals(2, impls.size)
 
@@ -369,8 +358,8 @@ class InherentImplTest {
         val program2 = parser.parse(source)
         val result2 = TypeChecker().typeCheck(program2)
 
-        val hash1 = result1.program.items.filterIsInstance<ImplAbilityDeclaration>().first().contentHash
-        val hash2 = result2.program.items.filterIsInstance<ImplAbilityDeclaration>().first().contentHash
+        val hash1 = program1.items.filterIsInstance<ImplAbilityDeclaration>().first().contentHash
+        val hash2 = program2.items.filterIsInstance<ImplAbilityDeclaration>().first().contentHash
 
         assertEquals(hash1, hash2, "Same source should produce same content hash")
     }
@@ -392,7 +381,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.forallVars.isEmpty())
         assertTrue(impl.associatedTypeBindings.isEmpty())
     }
@@ -415,7 +404,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertEquals(2, impl.operations.size)
     }
 
@@ -436,7 +425,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         val op = impl.operations[0]
         assertEquals("get_v", op.name)
         assertNotNull(op.returnType)
@@ -460,7 +449,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.isInherent)
     }
 
@@ -586,7 +575,7 @@ class InherentImplTest {
         // This should succeed because Foreign IS defined locally
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
         assertTrue(impl.isInherent)
     }
 
@@ -641,7 +630,7 @@ class InherentImplTest {
         val program = parser.parse(source)
         val result = typeChecker.typeCheck(program)
 
-        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>()
             .find { !it.isInherent }
         assertNotNull(impl)
         assertEquals("Stringify", impl.abilityName)

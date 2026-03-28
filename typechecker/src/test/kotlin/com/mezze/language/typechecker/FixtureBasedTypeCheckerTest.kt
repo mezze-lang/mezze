@@ -3,6 +3,8 @@ package com.mezze.language.typechecker
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
+import com.mezze.language.typedast.TypedLetDecl
+import com.mezze.language.typedast.TypedTypeDecl
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.assertThrows
@@ -58,27 +60,23 @@ class FixtureBasedTypeCheckerTest {
         val result = typeChecker.typeCheck(program)
         val typeAliases = typeChecker.getTypeAliases()
 
-        // Collect type declarations for pretty printing
-        val typeDeclarations = result.items.filterIsInstance<TypeDeclaration>()
-
         val actualTypes = mutableMapOf<String, String>()
 
-        for (item in result.items) {
-            when (item) {
-                is LetBinding -> {
-                    val typeStr = item.inferredType?.let {
-                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
-                    } ?: "unknown"
-                    actualTypes[item.variableName] = typeStr
+        // Collect let bindings from TypedModule
+        result.typedModule?.decls?.forEach { decl ->
+            when (decl) {
+                is TypedLetDecl -> {
+                    val ty = decl.scheme.type
+                    val typeStr = prettyPrintTypeWithAliases(ty, typeAliases, showExpansion = false, typeDeclarations = emptyList())
+                    actualTypes[decl.name] = typeStr
                 }
-                is TypeDeclaration -> {
-                    val expansionStr = item.inferredType?.let {
-                        prettyPrintType(it)
-                    } ?: ""
-                    actualTypes[item.name] = expansionStr
+                is TypedTypeDecl -> {
+                    val definition = typeAliases[decl.name]?.definition
+                    val expansionStr = definition?.let { prettyPrintType(it) } ?: ""
+                    actualTypes[decl.name] = expansionStr
                 }
                 else -> {
-                    // Skip other program items (modules, etc.)
+                    // Skip other declarations
                 }
             }
         }

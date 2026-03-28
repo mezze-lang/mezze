@@ -28,10 +28,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(1, typedProgram.items.size)
-        val item = typedProgram.items[0]
+        // Check structural properties from parsed AST (typechecker populates inferredType)
+        val item = program.items[0]
         assertTrue(item is AbilityDeclaration)
 
         val ability = item as AbilityDeclaration
@@ -56,18 +56,17 @@ class FunctionAbilityConstraintTypeCheckerTest {
                 show = {} -> "INT"
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val abilityDecl = typedProgram.items[0] as AbilityDeclaration
-        val implDecl = typedProgram.items[1] as ImplAbilityDeclaration
-        
+        typeChecker.typeCheck(program)
+
+        // Check structural properties from parsed AST (typechecker populates inferredType)
+        val abilityDecl = program.items[0] as AbilityDeclaration
+        val implDecl = program.items[1] as ImplAbilityDeclaration
+
         assertNotNull(abilityDecl.inferredType)
         assertNotNull(implDecl.inferredType)
-        
+
         assertTrue(implDecl.inferredType is MezzeType.RecordType)
         val implType = implDecl.inferredType as MezzeType.RecordType
         assertTrue(implType.fields.containsKey("show"))
@@ -84,11 +83,10 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(2, typedProgram.items.size)
-
-        val topLevel = typedProgram.items[1] as TopLevelExpression
+        // Check structural properties from parsed AST
+        val topLevel = program.items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
 
         val lambda = topLevel.expression as LambdaExpression
@@ -116,24 +114,23 @@ class FunctionAbilityConstraintTypeCheckerTest {
 
             { left: 'a, right: 'a } -> Str with Eq 'a, Show 'a = {left, right} -> "test"
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(3, typedProgram.items.size)
-        
-        val topLevel = typedProgram.items[2] as TopLevelExpression
+        typeChecker.typeCheck(program)
+
+        // Check structural properties from parsed AST
+        val topLevel = program.items[2] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
-        
+
         val lambda = topLevel.expression as LambdaExpression
         assertNotNull(lambda.inferredType)
-        
+
         assertTrue(lambda.inferredType is MezzeType.FunctionType)
         val functionType = lambda.inferredType as MezzeType.FunctionType
-        
+
         // Check that both ability constraints are preserved
         assertEquals(2, functionType.abilityConstraints.size)
-        
+
         val constraints = functionType.abilityConstraints
         val abilityNames = constraints.map { it.abilityName }.toSet()
         assertTrue(abilityNames.contains("Eq"))
@@ -172,21 +169,20 @@ class FunctionAbilityConstraintTypeCheckerTest {
 
             { key: 'a, value: 'b } -> {} with KVStore 'b 'a = {key, value} -> {}
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val topLevel = typedProgram.items[1] as TopLevelExpression
+        typeChecker.typeCheck(program)
+
+        // Check structural properties from parsed AST
+        val topLevel = program.items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
-        
+
         val lambda = topLevel.expression as LambdaExpression
         assertNotNull(lambda.inferredType)
-        
+
         assertTrue(lambda.inferredType is MezzeType.FunctionType)
         val functionType = lambda.inferredType as MezzeType.FunctionType
-        
+
         // Check multi-parameter ability constraint
         assertEquals(1, functionType.abilityConstraints.size)
         val constraint = functionType.abilityConstraints[0]
@@ -203,29 +199,27 @@ class FunctionAbilityConstraintTypeCheckerTest {
 
             { val: Int } -> Str with Show Int = {val} -> "test"
         """.trimIndent()
-        
+
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val topLevel = typedProgram.items[1] as TopLevelExpression
+        typeChecker.typeCheck(program)
+
+        // Check structural properties from parsed AST
+        val topLevel = program.items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
-        
+
         val lambda = topLevel.expression as LambdaExpression
-        
-        
+
         assertNotNull(lambda.inferredType)
-        
+
         assertTrue(lambda.inferredType is MezzeType.FunctionType)
         val functionType = lambda.inferredType as MezzeType.FunctionType
-        
+
         // Check concrete type in ability constraint
         assertEquals(1, functionType.abilityConstraints.size)
         val constraint = functionType.abilityConstraints[0]
         assertEquals("Show", constraint.abilityName)
         assertEquals(1, constraint.typeArgs.size)
-        
+
         val typeArg = constraint.typeArgs[0]
         assertTrue(typeArg is MezzeType.IntType)
     }

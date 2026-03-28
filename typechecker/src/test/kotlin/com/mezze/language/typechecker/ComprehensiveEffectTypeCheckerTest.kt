@@ -29,11 +29,10 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(1, checkedProgram.items.size)
-        val effectDecl = checkedProgram.items[0] as EffectDeclaration
-
+        // Check structural properties from parsed AST
+        val effectDecl = program.items.filterIsInstance<EffectDeclaration>().first()
         assertEquals("Log", effectDecl.name)
         assertEquals(2, effectDecl.operations.size)
 
@@ -64,12 +63,11 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(2, checkedProgram.items.size)
-
-        val effectDecl = checkedProgram.items[0] as EffectDeclaration
-        val implDecl = checkedProgram.items[1] as ImplDeclaration
+        // Check structural properties from parsed AST
+        val effectDecl = program.items.filterIsInstance<EffectDeclaration>().first()
+        val implDecl = program.items.filterIsInstance<ImplDeclaration>().first()
 
         assertEquals("Log", effectDecl.name)
         assertEquals("Log", implDecl.effect.localName)
@@ -99,11 +97,11 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(3, checkedProgram.items.size)
-
-        val performExpr = (checkedProgram.items[2] as TopLevelExpression).expression as PerformExpression
+        // Check structural properties from parsed AST
+        val topLevelExpr = program.items.filterIsInstance<TopLevelExpression>().first()
+        val performExpr = topLevelExpr.expression as PerformExpression
         assertEquals(1, performExpr.handlers.size)
         assertEquals("Console", performExpr.handlers[0].performer.localName)
 
@@ -129,11 +127,10 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(3, checkedProgram.items.size)
-
-        val letBinding = checkedProgram.items[2] as LetBinding
+        // Check structural properties from parsed AST
+        val letBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "getRandomValue" }!!
         assertEquals("getRandomValue", letBinding.variableName)
 
         // The let binding expression should be a lambda
@@ -191,29 +188,29 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(6, checkedProgram.items.size)
-
-        // Check effect declarations
-        val logEffect = checkedProgram.items[0] as EffectDeclaration
-        val randomEffect = checkedProgram.items[1] as EffectDeclaration
+        // Check structural properties from parsed AST
+        val effectDecls = program.items.filterIsInstance<EffectDeclaration>()
+        val logEffect = effectDecls.find { it.name == "Log" }!!
+        val randomEffect = effectDecls.find { it.name == "Random" }!!
         assertEquals("Log", logEffect.name)
         assertEquals("Random", randomEffect.name)
 
         // Check impl declarations
-        val logImpl = checkedProgram.items[2] as ImplDeclaration
-        val randomImpl = checkedProgram.items[3] as ImplDeclaration
+        val implDecls = program.items.filterIsInstance<ImplDeclaration>()
+        val logImpl = implDecls.find { it.performerName == "Console" }!!
+        val randomImpl = implDecls.find { it.performerName == "MathRandom" }!!
         assertEquals("Log", logImpl.effect.localName)
         assertEquals("Random", randomImpl.effect.localName)
 
         // Check let binding
-        val letBinding = checkedProgram.items[4] as LetBinding
+        val letBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "gameLogic" }!!
         assertEquals("gameLogic", letBinding.variableName)
         assertTrue(letBinding.expression is LambdaExpression)
 
         // Check final expression (gameLogic identifier)
-        val finalExpr = checkedProgram.items[5] as TopLevelExpression
+        val finalExpr = program.items.filterIsInstance<TopLevelExpression>().last()
         assertTrue(finalExpr.expression is Identifier)
         val identifier = finalExpr.expression as Identifier
         assertEquals("gameLogic", identifier.localName)
@@ -248,11 +245,10 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(5, checkedProgram.items.size)
-
-        val letBinding = checkedProgram.items[4] as LetBinding
+        // Check structural properties from parsed AST
+        val letBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "computation" }!!
         assertEquals("computation", letBinding.variableName)
 
         // The lambda body should be a do expression
@@ -286,12 +282,11 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(2, checkedProgram.items.size)
-
-        val effectDecl = checkedProgram.items[0] as EffectDeclaration
-        val implDecl = checkedProgram.items[1] as ImplDeclaration
+        // Check structural properties from parsed AST
+        val effectDecl = program.items.filterIsInstance<EffectDeclaration>().first()
+        val implDecl = program.items.filterIsInstance<ImplDeclaration>().first()
 
         assertEquals(2, effectDecl.operations.size)
         assertEquals(2, implDecl.operations.size)
@@ -325,20 +320,19 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(4, checkedProgram.items.size)
-
-        val loggedFunctionBinding = checkedProgram.items[2] as LetBinding
+        // Check structural properties from parsed AST
+        val loggedFunctionBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "loggedFunction" }!!
         assertEquals("loggedFunction", loggedFunctionBinding.variableName)
 
-        // The function should have inferred type information
+        // The function should have a lambda expression
         assertTrue(loggedFunctionBinding.expression is LambdaExpression)
         val lambda = loggedFunctionBinding.expression as LambdaExpression
         assertTrue(lambda.body is DoExpression)
 
         // Check getResult binding
-        val getResultBinding = checkedProgram.items[3] as LetBinding
+        val getResultBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "getResult" }!!
         assertEquals("getResult", getResultBinding.variableName)
         assertTrue(getResultBinding.expression is LambdaExpression)
     }
@@ -366,11 +360,10 @@ class ComprehensiveEffectTypeCheckerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val checkedProgram = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        assertEquals(3, checkedProgram.items.size)
-
-        val letBinding = checkedProgram.items[2] as LetBinding
+        // Check structural properties from parsed AST
+        val letBinding = program.items.filterIsInstance<LetBinding>().find { it.variableName == "nestedLogging" }!!
         assertEquals("nestedLogging", letBinding.variableName)
 
         val lambda = letBinding.expression as LambdaExpression

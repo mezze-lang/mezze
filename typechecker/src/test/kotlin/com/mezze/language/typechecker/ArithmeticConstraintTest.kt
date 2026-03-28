@@ -29,12 +29,12 @@ class ArithmeticConstraintTest {
             assertNotNull(typedProgram)
             
             // Check that the add function has the expected polymorphic type
-            val addBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "add" }
-            assertNotNull(addBinding.inferredType)
-            
+            val addType = typedProgram.getVariableType("add")
+            assertNotNull(addType)
+
             // The type should be a function type
-            assertTrue(addBinding.inferredType is MezzeType.FunctionType)
-            val functionType = addBinding.inferredType as MezzeType.FunctionType
+            assertTrue(addType is MezzeType.FunctionType)
+            val functionType = addType as MezzeType.FunctionType
             
             // Parameter should be a record with x and y fields of the same type variable
             assertTrue(functionType.paramType is MezzeType.RecordType)
@@ -70,12 +70,12 @@ class ArithmeticConstraintTest {
             assertNotNull(typedProgram)
             
             // Check that the compare function has the expected type
-            val compareBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "compare" }
-            assertNotNull(compareBinding.inferredType)
-            
+            val compareType = typedProgram.getVariableType("compare")
+            assertNotNull(compareType)
+
             // The type should be a function type
-            assertTrue(compareBinding.inferredType is MezzeType.FunctionType)
-            val functionType = compareBinding.inferredType as MezzeType.FunctionType
+            assertTrue(compareType is MezzeType.FunctionType)
+            val functionType = compareType as MezzeType.FunctionType
             
             // Return type should be Boolean for comparison
             val boolType = MezzeType.BoolType
@@ -123,11 +123,8 @@ class ArithmeticConstraintTest {
             assertNotNull(typedProgram)
             
             // Check that result has a valid type (could be Int or polymorphic with NumAdd)
-            val resultBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-            assertNotNull(resultBinding.inferredType, "Result should have an inferred type")
-            
-            // The type should be either Int or a polymorphic type with NumAdd constraint
-            val resultType = resultBinding.inferredType
+            val resultType = typedProgram.getVariableType("result")
+            assertNotNull(resultType, "Result should have an inferred type")
             assertTrue(
                 resultType is MezzeType.IntType || 
                 (resultType is MezzeType.VarType) ||

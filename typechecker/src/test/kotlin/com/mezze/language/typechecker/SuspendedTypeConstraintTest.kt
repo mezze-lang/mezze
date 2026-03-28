@@ -64,8 +64,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val getValueBinding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val getValueType = getValueBinding.inferredType
+        val getValueType = typedProgram.getVariableType("getValue")
 
         assertTrue(getValueType is MezzeType.FunctionType, "Expected FunctionType but got ${getValueType!!::class.simpleName}")
         val fnType = getValueType as MezzeType.FunctionType
@@ -101,8 +100,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("getOrDefault") as MezzeType.FunctionType
 
         // Return type should be String
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
@@ -126,8 +124,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("getHost") as MezzeType.FunctionType
 
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
         // Effects may or may not be tracked depending on how the typechecker handles direct field access
@@ -152,8 +149,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("getName") as MezzeType.FunctionType
 
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
     }
@@ -204,8 +200,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("maybeThrow") as MezzeType.FunctionType
 
         // Should have Exception effect
         assertNotNull(fnType.effects)
@@ -255,8 +250,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("processResult") as MezzeType.FunctionType
 
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
     }
@@ -289,8 +283,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("getName") as MezzeType.FunctionType
 
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
     }
@@ -318,8 +311,7 @@ class SuspendedTypeConstraintTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        val binding = typedProgram.items.last() as com.mezze.language.ast.LetBinding
-        val fnType = binding.inferredType as MezzeType.FunctionType
+        val fnType = typedProgram.getVariableType("getUserTheme") as MezzeType.FunctionType
 
         assertTrue(fnType.returnType is MezzeType.StringType, "Expected StringType return but got ${fnType.returnType::class.simpleName}")
         assertNotNull(fnType.effects)

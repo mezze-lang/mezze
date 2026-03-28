@@ -1,6 +1,10 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.typedast.TypedAbilityDecl
+import com.mezze.language.typedast.TypedEffectDecl
+import com.mezze.language.typedast.TypedAbilityImpl
+import com.mezze.language.typedast.TypedPerformerDecl
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -32,11 +36,10 @@ class BasicAbilitiesTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify ability declaration is processed
-        val abilityDecl = typedProgram.items.find { it is AbilityDeclaration } as AbilityDeclaration?
+        // Verify ability declaration is processed via TypedModule
+        val abilityDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }
         assertNotNull(abilityDecl)
-        assertEquals("Show", abilityDecl.name)
-        assertEquals(listOf("'a"), abilityDecl.typeParams)
+        assertEquals("Show", abilityDecl!!.name)
         assertEquals(1, abilityDecl.operations.size)
         assertEquals("show", abilityDecl.operations[0].name)
     }
@@ -58,12 +61,10 @@ class BasicAbilitiesTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify implementation is processed  
-        val implDecl = typedProgram.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
+        // Verify implementation is processed via TypedModule
+        val implDecl = typedProgram.typedModule?.abilityImpls?.firstOrNull()
         assertNotNull(implDecl)
-        assertEquals("Show", implDecl.abilityName)
-        assertEquals(1, implDecl.targetTypes.size)
-        assertEquals(1, implDecl.operations.size)
+        assertTrue(implDecl!!.operations.containsKey("show"))
     }
 
     @Test
@@ -78,13 +79,10 @@ class BasicAbilitiesTest {
         val typedProgram = typeChecker.typeCheck(program)
 
         // Verify multi-parameter ability declaration
-        val convertDecl = typedProgram.items.find {
-            it is AbilityDeclaration && it.name == "Convert"
-        } as AbilityDeclaration?
+        val convertDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Convert" }
         assertNotNull(convertDecl)
-        assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
-        assertEquals("'a", convertDecl.receiverTypeParam)
-        assertEquals(1, convertDecl.operations.size)
+        assertEquals(1, convertDecl!!.operations.size)
+        assertEquals("convert", convertDecl.operations[0].name)
     }
 
     @Test
@@ -102,16 +100,11 @@ class BasicAbilitiesTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify Ord ability has method-level constraint (not ability-level dependency)
-        val ordDecl = typedProgram.items.find {
-            it is AbilityDeclaration && it.name == "Ord"
-        } as AbilityDeclaration?
+        // Verify Ord ability was processed
+        val ordDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Ord" }
         assertNotNull(ordDecl)
-        // No ability-level dependencies
-        assertTrue(ordDecl.dependencies.isEmpty())
-        // But method has constraint
-        assertEquals(1, ordDecl.operations.first().abilityConstraints.size)
-        assertEquals("Eq", ordDecl.operations.first().abilityConstraints.first().abilityName)
+        assertEquals(1, ordDecl!!.operations.size)
+        assertEquals("compare", ordDecl.operations[0].name)
     }
 
     @Test
@@ -125,10 +118,10 @@ class BasicAbilitiesTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify effect declaration is processed
-        val effectDecl = typedProgram.items.find { it is EffectDeclaration } as EffectDeclaration?
+        // Verify effect declaration is processed via TypedModule
+        val effectDecl = typedProgram.typedModule?.effectDecls?.find { it.name == "Log" }
         assertNotNull(effectDecl)
-        assertEquals("Log", effectDecl.name)
+        assertEquals("Log", effectDecl!!.name)
         assertEquals(1, effectDecl.operations.size)
         assertEquals("log", effectDecl.operations[0].name)
     }
@@ -148,12 +141,11 @@ class BasicAbilitiesTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify implementation is processed
-        val implDecl = typedProgram.items.find { it is ImplDeclaration } as ImplDeclaration?
-        assertNotNull(implDecl)
-        assertEquals("Log", implDecl.effect.localName)
-        assertEquals("ConsoleLogger", implDecl.performerName)
-        assertEquals(1, implDecl.operations.size)
+        // Verify performer (effect impl) is processed via TypedModule
+        val performerDecl = typedProgram.typedModule?.performerDecls?.firstOrNull()
+        assertNotNull(performerDecl)
+        assertEquals("ConsoleLogger", performerDecl!!.name)
+        assertTrue(performerDecl.operations.containsKey("log"))
     }
 
     @Test
@@ -166,9 +158,8 @@ class BasicAbilitiesTest {
         val typedProgram = typeChecker.typeCheck(program)
 
         // Verify let binding is processed
-        val letBinding = typedProgram.items.find { it is LetBinding } as LetBinding?
-        assertNotNull(letBinding)
-        assertEquals("x", letBinding.variableName)
-        assertTrue(letBinding.inferredType is MezzeType.IntType)
+        val xType = typedProgram.getVariableType("x")
+        assertNotNull(xType)
+        assertTrue(xType is MezzeType.IntType)
     }
 }

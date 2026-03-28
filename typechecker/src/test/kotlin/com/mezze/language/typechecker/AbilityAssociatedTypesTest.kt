@@ -31,10 +31,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(1, typedProgram.items.size)
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        assertEquals(1, program.items.size)
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("Collection", ability.name)
         assertEquals("'item", ability.associatedType)
         assertNotNull(ability.inferredType)
@@ -63,14 +63,14 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(2, typedProgram.items.size)
+        assertEquals(2, program.items.size)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
 
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
+        val impl = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl.inferredType)
     }
 
@@ -87,9 +87,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
 
         val recordType = ability.inferredType as MezzeType.RecordType
@@ -113,9 +113,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
@@ -146,17 +146,17 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(3, typedProgram.items.size)
+        assertEquals(3, program.items.size)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
 
-        val impl1 = typedProgram.items[1] as ImplAbilityDeclaration
+        val impl1 = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl1.inferredType)
 
-        val impl2 = typedProgram.items[2] as ImplAbilityDeclaration
+        val impl2 = program.items[2] as ImplAbilityDeclaration
         assertNotNull(impl2.inferredType)
     }
 
@@ -170,9 +170,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'product", ability.associatedType)
 
         val recordType = ability.inferredType as MezzeType.RecordType
@@ -191,9 +191,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
 
         val recordType = ability.inferredType as MezzeType.RecordType
@@ -227,9 +227,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'key", ability.associatedType)
     }
 
@@ -248,12 +248,12 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Should have 2 items: ability and impl
-        assertEquals(2, typedProgram.items.size)
+        assertEquals(2, program.items.size)
 
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
+        val impl = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl.inferredType)
     }
 
@@ -293,9 +293,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'elem", ability.associatedType)
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
@@ -315,9 +315,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
     }
 
@@ -355,10 +355,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(1, typedProgram.items.size)
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        assertEquals(1, program.items.size)
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals("Convert", ability.name)
         assertEquals(2, ability.associatedTypes.size)
         assertTrue(ability.associatedTypes.contains("'to"))
@@ -377,9 +377,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals(3, ability.associatedTypes.size)
         assertTrue(ability.associatedTypes.contains("'a"))
         assertTrue(ability.associatedTypes.contains("'b"))
@@ -401,10 +401,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(2, typedProgram.items.size)
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
+        assertEquals(2, program.items.size)
+        val impl = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl.inferredType)
     }
 
@@ -425,10 +425,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(2, typedProgram.items.size)
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
+        assertEquals(2, program.items.size)
+        val impl = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl.inferredType)
     }
 
@@ -447,10 +447,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Just verify the program type checks successfully
-        assertEquals(2, typedProgram.items.size)
+        assertEquals(2, program.items.size)
     }
 
     @Test
@@ -539,10 +539,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Just verify the program type checks successfully
-        assertEquals(2, typedProgram.items.size)
+        assertEquals(2, program.items.size)
     }
 
     @Test
@@ -568,14 +568,14 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(4, typedProgram.items.size)
+        assertEquals(4, program.items.size)
 
-        val ability1 = typedProgram.items[0] as AbilityDeclaration
+        val ability1 = program.items[0] as AbilityDeclaration
         assertEquals(2, ability1.associatedTypes.size)
 
-        val ability2 = typedProgram.items[1] as AbilityDeclaration
+        val ability2 = program.items[1] as AbilityDeclaration
         assertEquals(2, ability2.associatedTypes.size)
     }
 
@@ -589,9 +589,9 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        val ability = typedProgram.items[0] as AbilityDeclaration
+        val ability = program.items[0] as AbilityDeclaration
         assertEquals(2, ability.associatedTypes.size)
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
@@ -621,17 +621,17 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
-        assertEquals(4, typedProgram.items.size)
+        assertEquals(4, program.items.size)
 
-        val impl1 = typedProgram.items[1] as ImplAbilityDeclaration
+        val impl1 = program.items[1] as ImplAbilityDeclaration
         assertNotNull(impl1.inferredType)
 
-        val impl2 = typedProgram.items[2] as ImplAbilityDeclaration
+        val impl2 = program.items[2] as ImplAbilityDeclaration
         assertNotNull(impl2.inferredType)
 
-        val impl3 = typedProgram.items[3] as ImplAbilityDeclaration
+        val impl3 = program.items[3] as ImplAbilityDeclaration
         assertNotNull(impl3.inferredType)
     }
 
@@ -655,15 +655,10 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-
-        // Find the 'result' binding
-        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
+        val result = typeChecker.typeCheck(program)
 
         // The type should be Option Int, not Option 'a
-        val resultType = resultBinding!!.inferredType
+        val resultType = result.getVariableType("result")
         assertNotNull(resultType)
         assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
         val typeApp = resultType as MezzeType.TypeApplication
@@ -714,19 +709,13 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Find the 'key' binding - should be Int
-        val keyBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "key" }
-        assertNotNull(keyBinding)
-        assertEquals(MezzeType.IntType, keyBinding!!.inferredType, "Expected key to be Int")
+        assertEquals(MezzeType.IntType, result.getVariableType("key"), "Expected key to be Int")
 
         // Find the 'value' binding - should be String
-        val valueBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "value" }
-        assertNotNull(valueBinding)
-        assertEquals(MezzeType.StringType, valueBinding!!.inferredType, "Expected value to be String")
+        assertEquals(MezzeType.StringType, result.getVariableType("value"), "Expected value to be String")
     }
 
     @Test
@@ -745,13 +734,11 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Find the 'result' binding - should be [Int]
-        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        val resultType = resultBinding!!.inferredType
+        val resultType = result.getVariableType("result")
+        assertNotNull(resultType)
         assertTrue(resultType is MezzeType.SeqType, "Expected SeqType but got $resultType")
         assertEquals(MezzeType.IntType, (resultType as MezzeType.SeqType).elementType)
     }
@@ -772,13 +759,11 @@ class AbilityAssociatedTypesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
 
         // Find the 'result' binding - should be Option [Int]
-        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "result" }
-        assertNotNull(resultBinding)
-        val resultType = resultBinding!!.inferredType
+        val resultType = result.getVariableType("result")
+        assertNotNull(resultType)
         assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
         val typeApp = resultType as MezzeType.TypeApplication
         assertEquals("Option", typeApp.constructor)
