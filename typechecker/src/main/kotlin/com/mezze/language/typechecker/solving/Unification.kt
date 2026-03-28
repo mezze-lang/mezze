@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.util.StringDistance
@@ -1028,11 +1029,19 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     val allEffects2 = eff2.allEffectNames
     val combinedEffects = allEffects1 + allEffects2
 
-    if ("Mut" in combinedEffects && combinedEffects.size > 1) {
-        val otherEffects = (combinedEffects - "Mut").joinToString(", ")
+    // Build a merged effectHashes map from both rows for hash-based Mut identification
+    val combinedHashes = eff1.effectHashes + eff2.effectHashes
+
+    val mutEffect = combinedEffects.firstOrNull { name ->
+        WellKnownHashes.isMut(name, combinedHashes[name])
+    }
+    if (mutEffect != null && combinedEffects.size > 1) {
+        val otherEffects = combinedEffects.filter { name ->
+            !WellKnownHashes.isMut(name, combinedHashes[name])
+        }.joinToString(", ")
         return UnificationResult.Failure(
-            message = "Mut effect is hermetic: cannot coexist with other effects ($otherEffects). " +
-                "Mut must be the only effect in scope to prevent data races. " +
+            message = "$mutEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +
+                "$mutEffect must be the only effect in scope to prevent data races. " +
                 "Either handle the other effects before entering the mutation scope, " +
                 "or restructure the code to separate mutation from other effectful operations.",
             type1 = eff1,

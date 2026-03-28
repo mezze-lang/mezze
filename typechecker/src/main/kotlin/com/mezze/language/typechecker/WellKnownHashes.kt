@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.AbilityDeclaration
+import com.mezze.language.ast.EffectDeclaration
 import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.parser.MezzeParser
 
@@ -27,9 +28,9 @@ import com.mezze.language.parser.MezzeParser
  *
  * ## Mut note
  *
- * Effects don't carry content hashes yet — `MezzeType.EffectRow` stores effect names
- * as `Set<String>`.  The Mut check therefore remains name-based for now.
- * TODO: switch Mut to hash-based once effects carry declaration hashes.
+ * `MezzeType.EffectRow` now carries `effectHashes: Map<String, String>` populated by
+ * `ContextBuilder` when converting type annotations.  The Mut check therefore uses
+ * hash-based identification (with a name-based fallback for robustness).
  */
 object WellKnownHashes {
 
@@ -42,6 +43,15 @@ object WellKnownHashes {
      * be found (should not happen in production; allows graceful degradation).
      */
     val inspectAbilityHash: String? by lazy { computeInspectHash() }
+
+    /**
+     * Content hash of the `Mut` effect declaration
+     * (`stdlib/std/effects/mutation.mz`).
+     *
+     * Computed lazily on first access.  Returns `null` if the resource cannot
+     * be found (allows graceful name-based fallback).
+     */
+    val mutEffectHash: String? by lazy { computeMutHash() }
 
     // -------------------------------------------------------------------------
     // Public helpers
@@ -68,12 +78,24 @@ object WellKnownHashes {
         isInspect(abilityHash) || abilityName == "Inspect"
 
     /**
-     * Returns `true` when [effectName] names the Mut effect.
+     * Returns `true` when [effectHash] identifies the Mut effect by content.
      *
-     * Currently name-based only — see class-level TODO.
+     * Use this as the primary check.  A null hash never matches (the caller should
+     * fall back to the name-based check when the hash is unavailable).
      */
-    fun isMut(effectName: String): Boolean =
-        effectName == "Mut"  // TODO: use hash once effects carry declaration hashes
+    fun isMut(effectHash: String?): Boolean =
+        effectHash != null && effectHash == mutEffectHash
+
+    /**
+     * Returns `true` when the constraint identifies the Mut effect.
+     *
+     * Checks by content hash first; falls back to the legacy name "Mut" so that
+     * code paths that haven't been migrated to hash-based effect rows continue to
+     * work.  The name fallback also keeps the compiler working when
+     * `mutEffectHash` could not be computed (missing resource).
+     */
+    fun isMut(effectName: String, effectHash: String? = null): Boolean =
+        isMut(effectHash) || effectName == "Mut"
 
     // -------------------------------------------------------------------------
     // Internal computation
@@ -92,6 +114,24 @@ object WellKnownHashes {
                 ?: return null
 
             ASTHasher.hashAbilityDeclaration(decl).toFullHexString()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun computeMutHash(): String? {
+        return try {
+            val source = ModuleResolver.readStdlibFile("stdlib/std/effects/mutation.mz")
+                ?: ModuleResolver.readStdlibFile("std/effects/mutation.mz")
+                ?: return null
+
+            val parser = MezzeParser()
+            val program = parser.parse(source)
+            val decl = program.items.filterIsInstance<EffectDeclaration>()
+                .firstOrNull { it.name == "Mut" }
+                ?: return null
+
+            ASTHasher.hashEffectDeclaration(decl).toFullHexString()
         } catch (_: Exception) {
             null
         }

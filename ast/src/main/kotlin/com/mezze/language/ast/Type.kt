@@ -264,6 +264,7 @@ sealed interface MezzeType {
     data class EffectRow(
         val effects: Set<String>,
         val effectInstances: Set<EffectInstance> = emptySet(), // Effects with associated type info
+        val effectHashes: Map<String, String> = emptyMap(),  // effectName → effectDeclHash
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val performed: Boolean = false // true = effects have been performed via 'perform'
     ) : MezzeType {
@@ -311,13 +312,13 @@ sealed interface MezzeType {
 
         companion object {
             /** Create an EffectRow from simple effect names (backward compatible) */
-            fun simple(effects: Set<String>, rowVar: RowVar? = null, performed: Boolean = false): EffectRow {
-                return EffectRow(effects = effects, effectInstances = emptySet(), rowVar = rowVar, performed = performed)
+            fun simple(effects: Set<String>, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, String> = emptyMap()): EffectRow {
+                return EffectRow(effects = effects, effectInstances = emptySet(), effectHashes = effectHashes, rowVar = rowVar, performed = performed)
             }
 
             /** Create an EffectRow with a single effect instance (with associated types) */
-            fun withInstance(instance: EffectInstance, rowVar: RowVar? = null, performed: Boolean = false): EffectRow {
-                return EffectRow(effects = emptySet(), effectInstances = setOf(instance), rowVar = rowVar, performed = performed)
+            fun withInstance(instance: EffectInstance, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, String> = emptyMap()): EffectRow {
+                return EffectRow(effects = emptySet(), effectInstances = setOf(instance), effectHashes = effectHashes, rowVar = rowVar, performed = performed)
             }
         }
     }

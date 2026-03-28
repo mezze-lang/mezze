@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
 
@@ -30,6 +31,13 @@ class ContextBuilder {
      * the type system to think we have infinite types like 'a = {val: 'a}.
      */
     private val typeVarCache = mutableMapOf<String, TypeVar>()
+
+    /**
+     * Effect declarations available during the current build() invocation.
+     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * can resolve effect names to their content hashes for EffectRow.effectHashes.
+     */
+    private var currentEffectDecls: Map<String, EffectDeclaration> = emptyMap()
 
     /**
      * Build result - contains all typing environments
@@ -161,6 +169,10 @@ class ContextBuilder {
 
         // Merge local and imported effect declarations for lookups
         val allEffectDecls = effectDecls + importedEffects
+
+        // Make effect declarations available to convertTypeAnnotationInternal so it can
+        // populate EffectRow.effectHashes with content hashes for hermetic checks.
+        currentEffectDecls = allEffectDecls
 
         // Build performer to effect mapping
         // CRITICAL: Merge imported impls with local impls
@@ -356,6 +368,10 @@ class ContextBuilder {
         val abilityImplDecls = program.items.filterIsInstance<ImplAbilityDeclaration>()
 
         val allEffectDecls = effectDecls + importedEffects
+
+        // Make effect declarations available to convertTypeAnnotationInternal so it can
+        // populate EffectRow.effectHashes with content hashes for hermetic checks.
+        currentEffectDecls = allEffectDecls
 
         val localMapping = implDecls.associate { impl ->
             val effectDecl = allEffectDecls[impl.effect.localName]
@@ -1310,9 +1326,15 @@ class ContextBuilder {
                         // Use allEffectNames to include both simple effects and effect annotations
                         validateHermeticEffects(effectRow.allEffectNames)
 
+                        // Build effectHashes: map each effect name to its content hash (if known)
+                        val hashes = effectRow.effects.mapNotNull { name ->
+                            val hash = currentEffectDecls[name]?.contentHash ?: return@mapNotNull null
+                            name to hash
+                        }.toMap()
+
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed, hashes)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(
@@ -1774,26 +1796,29 @@ class ContextBuilder {
 
     companion object {
         /**
-         * Names of hermetic effects that cannot coexist with other effects.
-         * Hermetic effects are isolated for data-race freedom.
-         */
-        private val HERMETIC_EFFECTS = setOf("Mut")
-
-        /**
          * Validate that an effect set doesn't violate hermetic effect rules.
          *
          * Hermetic effects (like Mut) cannot coexist with other effects
-         * to ensure data-race freedom.
+         * to ensure data-race freedom.  Uses hash-based identification via
+         * WellKnownHashes.isMut() with name fallback for robustness.
          *
          * @param effects The set of effect names
+         * @param effectHashes Optional map of effectName → contentHash for hash-based identification
          * @param sourceLocation Optional source location for error messages
          * @throws TypeCheckError if a hermetic effect coexists with other effects
          */
-        fun validateHermeticEffects(effects: Set<String>, sourceLocation: SourceLocation? = null) {
-            val hermeticEffectsInSet = effects.intersect(HERMETIC_EFFECTS)
-            if (hermeticEffectsInSet.isNotEmpty() && effects.size > 1) {
-                val hermeticEffect = hermeticEffectsInSet.first()
-                val otherEffects = (effects - HERMETIC_EFFECTS).joinToString(", ")
+        fun validateHermeticEffects(
+            effects: Set<String>,
+            effectHashes: Map<String, String> = emptyMap(),
+            sourceLocation: SourceLocation? = null
+        ) {
+            val hermeticEffect = effects.firstOrNull { name ->
+                WellKnownHashes.isMut(name, effectHashes[name])
+            }
+            if (hermeticEffect != null && effects.size > 1) {
+                val otherEffects = effects.filter { name ->
+                    !WellKnownHashes.isMut(name, effectHashes[name])
+                }.joinToString(", ")
                 throw TypeCheckError(
                     "$hermeticEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +
                         "$hermeticEffect must be the only effect in scope to prevent data races. " +
