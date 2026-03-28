@@ -825,6 +825,7 @@ class ConstraintGenerator(
                             Constraint.AbilityRequired(
                                 typeVar = typeVarArg.variable,
                                 abilityName = constraint.abilityName,
+                                abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = constraint.typeArgs,
                                 context = "Type annotation on ${getBindingName(binding)}"
                             )
@@ -841,6 +842,7 @@ class ConstraintGenerator(
                             Constraint.AbilityRequired(
                                 typeVar = typeVarArg.variable,
                                 abilityName = constraint.abilityName,
+                                abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = allTypeArgs,
                                 context = "Type annotation on ${getBindingName(binding)}"
                             )

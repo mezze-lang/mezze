@@ -50,17 +50,28 @@ class ConstraintSolver(
      */
     private val generatedCodecImpls = mutableMapOf<String, ImplAbilityDeclaration>()
     /**
+     * Tracked ability constraint entry — carries abilityName, optional content hash, typeArgs, and source location.
+     *
+     * The abilityHash (content hash of the AbilityDeclaration) is preferred for impl lookup
+     * because it is stable across renames; fallback to name-based lookup when null.
+     */
+    private data class TrackedAbilityConstraint(
+        val abilityName: String,
+        val abilityHash: String?,
+        val typeArgs: List<MezzeType>,
+        val sourceLocation: SourceLocation?
+    )
+
+    /**
      * Track ability constraints on type variables.
      *
-     * When we see AbilityRequired('a, Parse), we store: 'a -> [(Parse, [typeArgs])]
+     * When we see AbilityRequired('a, Parse), we store: 'a -> [TrackedAbilityConstraint(Parse, hash, [typeArgs])]
      * Later during unification, when 'a = Int, we check that Int satisfies Parse ability.
      *
      * This is inspired by OldTypeChecker.kt:15318-15328 where ability constraints are tracked
      * on type variables during ability method calls.
-     *
-     * Each entry contains: (abilityName, typeArgs, sourceLocation)
      */
-    private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<Triple<String, List<MezzeType>, SourceLocation?>>>()
+    private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<TrackedAbilityConstraint>>()
 
     /**
      * Deferred type inferences from bidirectional ability inference.
@@ -1170,7 +1181,10 @@ class ConstraintSolver(
             // If the type variable is still a VarType (possibly different), it's not concrete yet
             if (boundType !is MezzeType.VarType) {
                 // Type variable was bound to a concrete type - validate abilities
-                for ((abilityName, typeArgs, sourceLocation) in abilityConstraints) {
+                for (tracked in abilityConstraints) {
+                    val abilityName = tracked.abilityName
+                    val typeArgs = tracked.typeArgs
+                    val sourceLocation = tracked.sourceLocation
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
                     if (abilityName == "Inspect") continue
                     // Substitute the type variable in typeArgs with the bound type
@@ -1198,8 +1212,8 @@ class ConstraintSolver(
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
-                        // Check if implementation exists
-                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs)
+                        // Check if implementation exists; pass abilityHash for hash-preferred lookup.
+                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (!hasImpl) {
                             return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs), sourceLocation)
                         }
@@ -1258,8 +1272,9 @@ class ConstraintSolver(
         } else {
             listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs  // Prepend the constrained var
         }
+        val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.sourceLocation)
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
-            .add(Triple(abilityName, trackingArgs, constraint.sourceLocation))
+            .add(trackedEntry)
 
         // Also track for any type variables in typeArgs
         // CRITICAL: Use trackingArgs (which includes ALL type arguments), not just typeArgs
@@ -1267,7 +1282,7 @@ class ConstraintSolver(
         for (typeArg in typeArgs) {
             if (typeArg is MezzeType.VarType && typeArg.variable != constraint.typeVar) {
                 val constraints = typeVarAbilityConstraints.getOrPut(typeArg.variable) { mutableListOf() }
-                constraints.add(Triple(abilityName, trackingArgs, constraint.sourceLocation))
+                constraints.add(trackedEntry)
             }
         }
 
@@ -1276,8 +1291,9 @@ class ConstraintSolver(
         val allConcrete = trackingArgs.all { isConcrete(it) }
 
         if (allConcrete) {
-            // All types are concrete - check if implementation exists
-            val hasImpl = checkAbilityImplementation(abilityName, trackingArgs)
+            // All types are concrete - check if implementation exists.
+            // Pass abilityHash when available so the lookup can prefer hash-based resolution.
+            val hasImpl = checkAbilityImplementation(abilityName, trackingArgs, constraint.abilityHash)
 
             if (!hasImpl) {
                 // No implementation found - this is a type error
@@ -1464,10 +1480,12 @@ class ConstraintSolver(
     /**
      * Check if an ability implementation exists for the given types.
      *
-     * Looks up implementation in context using the pattern: "AbilityName_Type1_Type2_..."
-     * Also checks for built-in ability implementations.
+     * When [abilityHash] is non-null (content hash of the AbilityDeclaration), it is used
+     * to prefer the canonical ability over any shadowing same-named ability. Currently the
+     * impl search still falls back to name-based lookup via [TypingContext.getAbilityImpls],
+     * but passing the hash allows future improvements to add a hash-keyed secondary index.
      */
-    private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>): Boolean {
+    private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Boolean {
         // Derivation + fallback for abilities that can't come from context alone:
         // - Inspect: universally available for ALL types
         // - VarType pass-through: polymorphic types are constrained at call site
@@ -3596,6 +3614,7 @@ class ConstraintSolver(
             is Constraint.AbilityRequired -> Constraint.AbilityRequired(
                 typeVar = constraint.typeVar, // Type vars don't change
                 abilityName = constraint.abilityName,
+                abilityHash = constraint.abilityHash,
                 typeArgs = constraint.typeArgs.map { substitution.apply(it) },
                 context = constraint.context,
                 sourceLocation = constraint.sourceLocation

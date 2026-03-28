@@ -352,9 +352,11 @@ class ExpressionConstraintGenerator {
                         // The fresh constraints now contain the actual TypeVar (not just a name string)
                         // and typeArgs for multi-parameter abilities like Encode Json 'a
                         val abilityConstraints = instantiation.freshConstraints.map { freshConstraint ->
+                            val abilityHash = context.abilityDeclarations[freshConstraint.abilityName]?.contentHash
                             Constraint.AbilityRequired(
                                 typeVar = freshConstraint.typeVar,
                                 abilityName = freshConstraint.abilityName,
+                                abilityHash = abilityHash,
                                 typeArgs = freshConstraint.typeArgs,
                                 context = "Polymorphic instantiation of '${lookupKeyString}'",
                                 sourceLocation = expr.loc.toSL()
@@ -745,6 +747,7 @@ class ExpressionConstraintGenerator {
                         abilityConstraints = listOf(Constraint.AbilityRequired(
                             typeVar = freshTypeVar.variable,
                             abilityName = receiverName,
+                            abilityHash = context.abilityDeclarations[receiverName]?.contentHash,
                             typeArgs = emptyList(),
                             context = "Direct ability call: ${receiverName}.${expr.member}",
                             sourceLocation = expr.loc.toSL()
@@ -1070,6 +1073,7 @@ class ExpressionConstraintGenerator {
             abilityConstraints.add(Constraint.AbilityRequired(
                 typeVar = freshTypeVar.variable,
                 abilityName = abilityName,
+                abilityHash = context.abilityDeclarations[abilityName]?.contentHash,
                 typeArgs = emptyList(),
                 context = "Method call: $methodName",
                 sourceLocation = expr.loc.toSL()
@@ -1139,6 +1143,7 @@ class ExpressionConstraintGenerator {
                 abilityConstraints.add(Constraint.AbilityRequired(
                     typeVar = abilityTypeVars.first(),
                     abilityName = abilityName,
+                    abilityHash = abilityDecl?.contentHash,
                     typeArgs = typeArgs,
                     context = "Method call: $methodName",
                     sourceLocation = expr.loc.toSL()
@@ -1181,6 +1186,7 @@ class ExpressionConstraintGenerator {
                         abilityConstraints.add(Constraint.AbilityRequired(
                             typeVar = freshTypeVar,
                             abilityName = constraint.abilityName,
+                            abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                             typeArgs = constraint.typeArgs.drop(1),
                             context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
                             sourceLocation = expr.loc.toSL()
@@ -3047,6 +3053,7 @@ class ExpressionConstraintGenerator {
                             Constraint.AbilityRequired(
                                 typeVar = constrainedType.variable,
                                 abilityName = constraint.abilityName,
+                                abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                                 context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
                                 sourceLocation = expr.loc.toSL()
@@ -3145,6 +3152,7 @@ class ExpressionConstraintGenerator {
                         Constraint.AbilityRequired(
                             typeVar = constrainedType.variable,
                             abilityName = constraint.abilityName,
+                            abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                             typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                             context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
                             sourceLocation = expr.loc.toSL()
