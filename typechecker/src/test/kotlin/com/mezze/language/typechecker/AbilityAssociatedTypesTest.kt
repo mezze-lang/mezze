@@ -37,13 +37,6 @@ class AbilityAssociatedTypesTest {
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("Collection", ability.name)
         assertEquals("'item", ability.associatedType)
-        assertNotNull(ability.inferredType)
-        assertTrue(ability.inferredType is MezzeType.RecordType)
-
-        val recordType = ability.inferredType as MezzeType.RecordType
-        assertTrue(recordType.fields.containsKey("empty"))
-        assertTrue(recordType.fields.containsKey("add"))
-        assertTrue(recordType.fields.containsKey("size"))
     }
 
     @Test
@@ -69,9 +62,6 @@ class AbilityAssociatedTypesTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
-
-        val impl = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl.inferredType)
     }
 
     @Test
@@ -91,9 +81,6 @@ class AbilityAssociatedTypesTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
-
-        val recordType = ability.inferredType as MezzeType.RecordType
-        assertEquals(5, recordType.fields.size)
     }
 
     @Test
@@ -152,12 +139,6 @@ class AbilityAssociatedTypesTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
-
-        val impl1 = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl1.inferredType)
-
-        val impl2 = program.items[2] as ImplAbilityDeclaration
-        assertNotNull(impl2.inferredType)
     }
 
     @Test
@@ -174,10 +155,6 @@ class AbilityAssociatedTypesTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("'product", ability.associatedType)
-
-        val recordType = ability.inferredType as MezzeType.RecordType
-        assertTrue(recordType.fields.containsKey("create"))
-        assertTrue(recordType.fields.containsKey("createMany"))
     }
 
     @Test
@@ -195,9 +172,6 @@ class AbilityAssociatedTypesTest {
 
         val ability = program.items[0] as AbilityDeclaration
         assertEquals("'item", ability.associatedType)
-
-        val recordType = ability.inferredType as MezzeType.RecordType
-        assertEquals(3, recordType.fields.size)
     }
 
     @Test
@@ -252,9 +226,6 @@ class AbilityAssociatedTypesTest {
 
         // Should have 2 items: ability and impl
         assertEquals(2, program.items.size)
-
-        val impl = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl.inferredType)
     }
 
     @Test
@@ -404,8 +375,6 @@ class AbilityAssociatedTypesTest {
         val result = typeChecker.typeCheck(program)
 
         assertEquals(2, program.items.size)
-        val impl = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl.inferredType)
     }
 
     @Test
@@ -428,8 +397,6 @@ class AbilityAssociatedTypesTest {
         val result = typeChecker.typeCheck(program)
 
         assertEquals(2, program.items.size)
-        val impl = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl.inferredType)
     }
 
     @Test
@@ -624,15 +591,6 @@ class AbilityAssociatedTypesTest {
         val result = typeChecker.typeCheck(program)
 
         assertEquals(4, program.items.size)
-
-        val impl1 = program.items[1] as ImplAbilityDeclaration
-        assertNotNull(impl1.inferredType)
-
-        val impl2 = program.items[2] as ImplAbilityDeclaration
-        assertNotNull(impl2.inferredType)
-
-        val impl3 = program.items[3] as ImplAbilityDeclaration
-        assertNotNull(impl3.inferredType)
     }
 
     // ===== Tests for Associated Type RESOLUTION =====

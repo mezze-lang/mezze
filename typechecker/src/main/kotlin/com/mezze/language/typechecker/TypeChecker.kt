@@ -568,9 +568,41 @@ class TypeChecker(
                     }
                 }
 
-                // Validate program structure using desugaredProgram (v1 without inferredType)
-                // This catches duplicate declarations, pattern errors, effect handling errors, etc.
-                val validationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
+                // Run SubstitutionApplier for VALIDATION ONLY — fills in inferredType
+                // so the validator can check patterns, variants, exhaustiveness, etc.
+                // The output is NOT used for the pipeline — TypedAstBuilder produces the real output.
+                val validationProgram = try {
+                    val applier = SubstitutionApplier(
+                        substitution,
+                        globallyResolvedConstraintResults,
+                        buildResult.performerToEffect,
+                        mustBeOpenRowVars,
+                        mustBeOpenBindings,
+                        mustBeOpenTypes,
+                        context.getAllAbilityImpls(),
+                        allAbilityDeclarations,
+                        allEffectDeclarations,
+                        allTypeDeclarations,
+                        tailCallLocations,
+                        buildResult.implDeclarations,
+                        context.getContentHashes(),
+                        constraintGenerator.expressionGenerator.nestedBindingTypes
+                    )
+                    val importedImplBodies = importContext?.importedAbilityImpls
+                        ?.map { (hash, impl) -> hash to impl }
+                        ?.toMap() ?: emptyMap()
+                    applier.registerImportedImplBodies(importedImplBodies)
+                    val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
+                        Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
+                    } else {
+                        desugaredProgram
+                    }
+                    applier.applyToProgram(programWithCodecImpls)
+                } catch (_: Exception) {
+                    desugaredProgram  // Fallback: validate without types
+                }
+
+                val validationResult = validator.validate(validationProgram, globallyResolvedConstraintResults, substitution)
                 when (validationResult) {
                     is ValidationResult.Failure -> {
                         val errors = validationResult.errors.map { error ->

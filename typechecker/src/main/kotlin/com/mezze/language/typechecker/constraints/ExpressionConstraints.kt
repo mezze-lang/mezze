@@ -1170,8 +1170,16 @@ class ExpressionConstraintGenerator {
                 for (constraint in instantiatedMethodType.abilityConstraints) {
                     val constrainedType = constraint.typeArgs.firstOrNull()
                     if (constrainedType is MezzeType.VarType) {
+                        // The constrainedType.variable may be an un-instantiated TypeVar from the
+                        // ability method's stored type (e.g., TypeVar("a", id=0) from ContextBuilder).
+                        // If so, use originalToFresh to get the proper fresh TypeVar that is connected
+                        // to the receiver/annotation TypeVars through the constraint solver.
+                        // This handles the case where the ability type param only appears in
+                        // abilityConstraints (not in param/return types), so instantiation missed it.
+                        val normalizedName = constrainedType.variable.name.removePrefix("'")
+                        val freshTypeVar = originalToFresh[normalizedName] ?: constrainedType.variable
                         abilityConstraints.add(Constraint.AbilityRequired(
-                            typeVar = constrainedType.variable,
+                            typeVar = freshTypeVar,
                             abilityName = constraint.abilityName,
                             typeArgs = constraint.typeArgs.drop(1),
                             context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",

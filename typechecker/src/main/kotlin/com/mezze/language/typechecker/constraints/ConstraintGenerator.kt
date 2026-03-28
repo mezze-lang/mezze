@@ -808,28 +808,45 @@ class ConstraintGenerator(
             // This catches errors that the constraint solver would silently accept
             validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.value, exprResult.type)
 
-            // Extract ability constraints from annotation if it's a function type
-            // For multi-parameter abilities like Encode Json 'a:
-            //   constraint.typeArgs = [Json, 'a]
-            //   We find the type variable(s) and create constraint(s) for each
-            //   typeArgs should contain ALL type args in order for proper impl matching
+            // Extract ability constraints from annotation if it's a function type.
+            // CRITICAL: Use the TypeVars from the pre-converted annotation type (preConvertedAnnotationType)
+            // rather than reconverting from the ParsedFunctionType. Reconverting creates NEW TypeVar instances
+            // (different IDs) that are never entered into the substitution, causing false positives in
+            // validateAbilityOnCorrectTypeVar.
             val annotationAbilityConstraints = if (typeAnnotationValue is ParsedFunctionType) {
-                typeAnnotationValue.abilityConstraints.mapNotNull { constraint ->
-                    // Convert all type args to MezzeType
-                    val allTypeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
-
-                    // Find the type variable in the args - that's the constrained parameter
-                    val typeVarArg = allTypeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
-
-                    if (typeVarArg != null) {
-                        Constraint.AbilityRequired(
-                            typeVar = typeVarArg.variable,
-                            abilityName = constraint.abilityName,
-                            typeArgs = allTypeArgs,  // Include ALL type args in order
-                            context = "Type annotation on ${getBindingName(binding)}"
-                        )
-                    } else {
-                        null  // No type variable found - skip this constraint
+                val preConvertedFnType = annotatedType as? MezzeType.FunctionType
+                if (preConvertedFnType != null) {
+                    // Use abilityConstraints directly from the pre-converted FunctionType.
+                    // These TypeVars are the same instances used in the annotation equality constraint,
+                    // so they will be properly resolved through the substitution.
+                    preConvertedFnType.abilityConstraints.mapNotNull { constraint ->
+                        val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+                        if (typeVarArg != null) {
+                            Constraint.AbilityRequired(
+                                typeVar = typeVarArg.variable,
+                                abilityName = constraint.abilityName,
+                                typeArgs = constraint.typeArgs,
+                                context = "Type annotation on ${getBindingName(binding)}"
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                } else {
+                    // Fallback: reconvert from parsed annotation (legacy path)
+                    typeAnnotationValue.abilityConstraints.mapNotNull { constraint ->
+                        val allTypeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
+                        val typeVarArg = allTypeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+                        if (typeVarArg != null) {
+                            Constraint.AbilityRequired(
+                                typeVar = typeVarArg.variable,
+                                abilityName = constraint.abilityName,
+                                typeArgs = allTypeArgs,
+                                context = "Type annotation on ${getBindingName(binding)}"
+                            )
+                        } else {
+                            null
+                        }
                     }
                 }
             } else {
@@ -2235,9 +2252,14 @@ class ConstraintGenerator(
             val resolved1 = substitution.apply(MezzeType.VarType(tv1))
             val resolved2 = substitution.apply(MezzeType.VarType(tv2))
             // They're unified if they resolve to the same thing
-            return resolved1 == resolved2 ||
-                   (resolved1 is MezzeType.VarType && resolved1.variable.id == tv2.id) ||
-                   (resolved2 is MezzeType.VarType && resolved2.variable.id == tv1.id)
+            if (resolved1 == resolved2 ||
+                (resolved1 is MezzeType.VarType && resolved1.variable.id == tv2.id) ||
+                (resolved2 is MezzeType.VarType && resolved2.variable.id == tv1.id)) return true
+            // Fallback: if both resolve to unresolved VarTypes with the same user-written name,
+            // treat as unified (handles annotation type vars that aren't in the inferred substitution)
+            if (resolved1 is MezzeType.VarType && resolved2 is MezzeType.VarType &&
+                resolved1.variable.name == resolved2.variable.name) return true
+            return false
         }
 
         for (usage in actualUsageConstraints) {

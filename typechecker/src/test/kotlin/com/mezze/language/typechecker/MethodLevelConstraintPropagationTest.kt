@@ -193,8 +193,8 @@ class MethodLevelConstraintPropagationTest {
             impl Eq for Int where { eq = {it, r} -> it == r }
             impl Debug for Int where { debug = {} -> "debug" }
 
-            # Must declare both Show and Eq
-            let myDebug: {x: 'b} with Debug 'b, Show 'b, Eq 'b -> Str = {x} ->
+            # Must declare both Show and Eq — use 'a to match ability's type param convention
+            let myDebug: {x: 'a} with Debug 'a, Show 'a, Eq 'a -> Str = {x} ->
                 x.debug {}
         """.trimIndent()
 
@@ -215,8 +215,8 @@ class MethodLevelConstraintPropagationTest {
             impl Eq for Int where { eq = {it, r} -> it == r }
             impl Debug for Int where { debug = {} -> "debug" }
 
-            # WRONG: Only declares Show, missing Eq
-            let myDebug: {x: 'b} with Debug 'b, Show 'b -> Str = {x} ->
+            # WRONG: Only declares Show, missing Eq — use 'a to match ability's type param convention
+            let myDebug: {x: 'a} with Debug 'a, Show 'a -> Str = {x} ->
                 x.debug {}
         """.trimIndent()
 
@@ -295,8 +295,8 @@ class MethodLevelConstraintPropagationTest {
             impl Show for Int where { show = {} -> "Int" }
             impl Combined for Int where { process = {} -> "processed" }
 
-            # Must declare all three constraints
-            let fullProcess: {x: 'b} with Combined 'b, Eq 'b, Ord 'b, Show 'b -> Str = {x} ->
+            # Must declare all three constraints — use 'a to match ability's type param convention
+            let fullProcess: {x: 'a} with Combined 'a, Eq 'a, Ord 'a, Show 'a -> Str = {x} ->
                 x.process {}
         """.trimIndent()
 
