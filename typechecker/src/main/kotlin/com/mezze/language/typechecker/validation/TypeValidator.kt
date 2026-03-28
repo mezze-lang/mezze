@@ -261,10 +261,12 @@ class TypeValidator(
                     val type = substitution.apply(MezzeType.VarType(constraint.typeVar))
                     // Apply substitution to typeArgs as well for multi-parameter abilities
                     val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+                    val resolvedHash = constraint.abilityHash ?: WellKnownHashes.hashForName(constraint.abilityName)
                     val result = abilityResolver.checkAbility(
                         type,
                         constraint.abilityName,
-                        resolvedTypeArgs
+                        resolvedTypeArgs,
+                        resolvedHash
                     )
 
                     if (result is AbilityResolver.AbilityCheckResult.Unsatisfied) {
@@ -404,6 +406,8 @@ class TypeValidator(
             }
 
             val abilityName = constraint.abilityName
+            // Resolve effective hash: prefer constraint's hash, fall back to well-known hash by name.
+            val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(abilityName)
 
             // Built-in abilities are validated by the ConstraintSolver (Phase 3).
             // No need to re-validate here — if we reached Phase 5, they passed.
@@ -413,7 +417,7 @@ class TypeValidator(
 
             // Derivation: Inspect universality, VarType pass-through,
             // Eq/Ord composite derivation, Bool logical operators.
-            if (canDeriveAbility(abilityName, concreteType)) {
+            if (canDeriveAbility(abilityName, concreteType, effectiveHash)) {
                 continue
             }
 
@@ -759,7 +763,7 @@ class TypeValidator(
      * - Eq/Ord derivation for composite types (records, variants, lists, seqs)
      * - Bool variant matching for logical operators
      */
-    private fun canDeriveAbility(abilityName: String, type: MezzeType): Boolean {
+    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         if (unwrappedType is MezzeType.TypeApplication) {
@@ -770,23 +774,23 @@ class TypeValidator(
         }
 
         return when {
-            WellKnownHashes.isInspect(abilityName, null) -> true
+            WellKnownHashes.isInspect(abilityHash) -> true
 
-            abilityName == "Eq" -> {
+            WellKnownHashes.isEq(abilityHash) -> {
                 unwrappedType is MezzeType.VarType ||
                 isBoolVariant(unwrappedType) ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Eq", it, abilityHash) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Eq", it, abilityHash) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Eq", unwrappedType.elementType, abilityHash)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Eq", unwrappedType.elementType, abilityHash))
             }
 
-            abilityName == "Ord" -> {
+            WellKnownHashes.isOrd(abilityHash) -> {
                 unwrappedType is MezzeType.VarType ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Ord", unwrappedType.elementType)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl("Ord", it, abilityHash) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl("Ord", it, abilityHash) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl("Ord", unwrappedType.elementType, abilityHash)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl("Ord", unwrappedType.elementType, abilityHash))
             }
 
             abilityName == "LogicalAnd" || abilityName == "LogicalOr" || abilityName == "LogicalNot" -> {
@@ -800,8 +804,8 @@ class TypeValidator(
     /**
      * Check if a type has an ability via derivation OR via an explicit impl in context.
      */
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType): Boolean {
-        return canDeriveAbility(abilityName, type) || hasImplInContext(abilityName, type)
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+        return canDeriveAbility(abilityName, type, abilityHash) || hasImplInContext(abilityName, type)
     }
 
     /**
@@ -1360,13 +1364,15 @@ class TypeValidator(
         // Check ability constraints (simplified - just check names)
         // CRITICAL: Filter out Inspect - it's universally available and shouldn't affect type compatibility
         // See OldTypeChecker.kt:2651-2652 and ConstraintSolver.kt:396-402
+        // TODO: FunctionAbilityConstraint should carry abilityHash so we can use hash-only check here.
+        //       For now, use name comparison since FunctionAbilityConstraint lacks hash field.
         val abilities1 = func1.abilityConstraints
             .map { it.abilityName }
-            .filter { !WellKnownHashes.isInspect(it, null) }
+            .filter { it != "Inspect" }
             .toSet()
         val abilities2 = func2.abilityConstraints
             .map { it.abilityName }
-            .filter { !WellKnownHashes.isInspect(it, null) }
+            .filter { it != "Inspect" }
             .toSet()
 
         if (abilities1 != abilities2) {

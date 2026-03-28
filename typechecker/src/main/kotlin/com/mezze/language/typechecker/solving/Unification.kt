@@ -1031,13 +1031,16 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
 
     // Build a merged effectHashes map from both rows for hash-based Mut identification
     val combinedHashes = eff1.effectHashes + eff2.effectHashes
+    // Resolve hash: prefer effectHashes, fall back to well-known hash by name
+    fun resolveEffectHash(name: String): String? =
+        combinedHashes[name] ?: WellKnownHashes.hashForName(name)
 
     val mutEffect = combinedEffects.firstOrNull { name ->
-        WellKnownHashes.isMut(name, combinedHashes[name])
+        WellKnownHashes.isMut(resolveEffectHash(name))
     }
     if (mutEffect != null && combinedEffects.size > 1) {
         val otherEffects = combinedEffects.filter { name ->
-            !WellKnownHashes.isMut(name, combinedHashes[name])
+            !WellKnownHashes.isMut(resolveEffectHash(name))
         }.joinToString(", ")
         return UnificationResult.Failure(
             message = "$mutEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +

@@ -1187,7 +1187,8 @@ class ConstraintSolver(
                     val typeArgs = tracked.typeArgs
                     val sourceLocation = tracked.sourceLocation
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
-                    if (WellKnownHashes.isInspect(abilityName, tracked.abilityHash)) continue
+                    val trackedEffectiveHash = tracked.abilityHash ?: WellKnownHashes.hashForName(abilityName)
+                    if (WellKnownHashes.isInspect(trackedEffectiveHash)) continue
                     // Substitute the type variable in typeArgs with the bound type
                     // Compare by ID or name since different TypeVar instances may represent the same variable
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
@@ -1244,11 +1245,14 @@ class ConstraintSolver(
     private fun solveAbilityRequired(constraint: Constraint.AbilityRequired): ConstraintResult {
         val abilityName = constraint.abilityName
         val typeArgs = constraint.typeArgs
+        // Resolve effective hash: prefer constraint's hash, fall back to well-known hash by name.
+        // This bridge handles constraints created without hash (e.g., from FunctionAbilityConstraint).
+        val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(abilityName)
 
         // CRITICAL: Filter out Inspect - it's universally available and shouldn't constrain types
         // This prevents multiInspect from incorrectly unifying {a: 'a, b: 'b, c: 'c} to {a: 'a, b: 'a, c: 'a}
         // See OldTypeChecker.kt:2651-2652
-        if (WellKnownHashes.isInspect(abilityName, constraint.abilityHash)) {
+        if (WellKnownHashes.isInspect(effectiveHash)) {
             // Inspect is universally available - no constraint needed
             return ConstraintResult.Success(Substitution.empty)
         }
@@ -1273,6 +1277,7 @@ class ConstraintSolver(
         } else {
             listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs  // Prepend the constrained var
         }
+        // Use original constraint hash for tracking (used in impl lookup), not the resolved effectiveHash
         val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.sourceLocation)
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
             .add(trackedEntry)
@@ -1293,7 +1298,7 @@ class ConstraintSolver(
 
         if (allConcrete) {
             // All types are concrete - check if implementation exists.
-            // Pass abilityHash when available so the lookup can prefer hash-based resolution.
+            // Pass original constraint hash for impl lookup (not effectiveHash, which is for identification only).
             val hasImpl = checkAbilityImplementation(abilityName, trackingArgs, constraint.abilityHash)
 
             if (!hasImpl) {
@@ -1487,6 +1492,10 @@ class ConstraintSolver(
      * but passing the hash allows future improvements to add a hash-keyed secondary index.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Boolean {
+        // Resolve effective hash for well-known ability identification (Inspect, Eq, Ord, etc.)
+        // The original abilityHash is used for impl lookup; effectiveHash is only for identification.
+        val effectiveHash = abilityHash ?: WellKnownHashes.hashForName(abilityName)
+
         // Derivation + fallback for abilities that can't come from context alone:
         // - Inspect: universally available for ALL types
         // - VarType pass-through: polymorphic types are constrained at call site
@@ -1495,7 +1504,7 @@ class ConstraintSolver(
         // - Primitive type impls as fallback (needed when stdlib modules don't have
         //   cross-type impls in scope, e.g. std::str using == on Int)
         if (typeArgs.size == 1) {
-            if (canDeriveAbility(abilityName, typeArgs.first())) {
+            if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
                 return true
             }
         }
@@ -1522,10 +1531,11 @@ class ConstraintSolver(
             }
         }
 
-        // Search for implementation — prefer hash-based, fall back to name-based
+        // Search for implementation — hash-based when available.
+        // TODO: Remove name-based fallback once all constraint paths carry abilityHash
+        //       (e.g., SubstitutionApplier, canDeriveOrHasImpl).
         val impls = if (abilityHash != null) {
-            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
-            if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
+            context.getAbilityImplsByDeclHash(abilityHash)
         } else {
             context.getAbilityImpls(abilityName)
         }
@@ -1895,13 +1905,13 @@ class ConstraintSolver(
     }
 
     /**
-     * Check if an ability is a codec ability.
+     * Check if an ability is a codec ability (hash-only via WellKnownHashes).
      *
-     * Delegates to [WellKnownHashes.isCodecAbility] which uses content-hash identification
-     * (with a name-based fallback) so that aliased imports are handled correctly.
+     * TODO: Remove name fallback once all call paths provide abilityHash.
+     *       Currently `canDeriveOrHasImpl` calls `checkAbilityImplementation` without hash.
      */
     private fun isCodecAbility(abilityName: String, abilityHash: String? = null): Boolean =
-        WellKnownHashes.isCodecAbility(abilityName, abilityHash)
+        WellKnownHashes.isCodecAbility(abilityHash) || abilityName in WellKnownHashes.CODEC_ABILITY_NAMES
 
     /**
      * Check and possibly generate a codec ability implementation.
@@ -2151,7 +2161,7 @@ class ConstraintSolver(
      * TODO: Remove primitive checks once the context propagation for imported
      * ability impls is fixed in ModuleTypeChecker/ConstraintSolver.
      */
-    private fun canDeriveAbility(abilityName: String, type: MezzeType): Boolean {
+    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         // Track if the original type was a newtype — newtypes don't auto-derive Eq/Ord
@@ -2180,30 +2190,30 @@ class ConstraintSolver(
 
         // Newtypes NEVER auto-derive Eq/Ord — requires explicit impl.
         // Only Inspect is universally available.
-        if (isNewtype && !WellKnownHashes.isInspect(abilityName, null)) {
+        if (isNewtype && !WellKnownHashes.isInspect(abilityHash)) {
             return false
         }
 
         return when {
-            // Inspect is universally available — no impl needed (identified by hash, name as fallback)
-            WellKnownHashes.isInspect(abilityName, null) -> true
+            // Inspect is universally available — no impl needed (hash-only identification)
+            WellKnownHashes.isInspect(abilityHash) -> true
 
             // Eq: VarType pass-through + derivation for composite types
-            WellKnownHashes.isEq(abilityName, null) -> {
+            WellKnownHashes.isEq(abilityHash) -> {
                 unwrappedType is MezzeType.VarType || isBoolVariant(unwrappedType) ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash))
             }
 
             // Ord: VarType pass-through + derivation for composite types
-            WellKnownHashes.isOrd(abilityName, null) -> {
+            WellKnownHashes.isOrd(abilityHash) -> {
                 unwrappedType is MezzeType.VarType ||
-                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it) }) ||
-                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it) }) ||
-                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType)) ||
-                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType))
+                (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
+                (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
+                (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash)) ||
+                (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash))
             }
 
             // Logical operators only work on Bool
@@ -2222,8 +2232,11 @@ class ConstraintSolver(
      * Check if a type has an ability via derivation OR via an explicit impl in context.
      * Used for recursive Eq/Ord derivation on composite types.
      */
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType): Boolean {
-        return canDeriveAbility(abilityName, type) || checkAbilityImplementation(abilityName, listOf(type))
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+        // Pass abilityHash for identification in canDeriveAbility, but NOT for impl lookup
+        // in checkAbilityImplementation (the hash may be synthetic from hashForName and
+        // won't match the hash-indexed impl registry).
+        return canDeriveAbility(abilityName, type, abilityHash) || checkAbilityImplementation(abilityName, listOf(type))
     }
 
     /**

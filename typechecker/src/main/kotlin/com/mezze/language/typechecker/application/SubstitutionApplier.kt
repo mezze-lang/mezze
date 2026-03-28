@@ -1437,7 +1437,8 @@ class SubstitutionApplier(
 
         // Check if this is actually an ability (not a regular variable)
         val hasImpl = mutableAbilityImpls.values.any { it.abilityName == abilityName }
-        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !WellKnownHashes.isCodecAbility(abilityName)) {
+        // TODO: Use hash-based codec ability check once abilityHash is available in this context.
+        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && abilityName !in WellKnownHashes.CODEC_ABILITY_NAMES) {
             return resolvedAbilities
         }
 

@@ -1799,11 +1799,11 @@ class ContextBuilder {
          * Validate that an effect set doesn't violate hermetic effect rules.
          *
          * Hermetic effects (like Mut) cannot coexist with other effects
-         * to ensure data-race freedom.  Uses hash-based identification via
-         * WellKnownHashes.isMut() with name fallback for robustness.
+         * to ensure data-race freedom.  Uses hash-only identification via
+         * WellKnownHashes.isMut().
          *
          * @param effects The set of effect names
-         * @param effectHashes Optional map of effectName → contentHash for hash-based identification
+         * @param effectHashes Map of effectName → contentHash for hash-based identification
          * @param sourceLocation Optional source location for error messages
          * @throws TypeCheckError if a hermetic effect coexists with other effects
          */
@@ -1812,12 +1812,16 @@ class ContextBuilder {
             effectHashes: Map<String, String> = emptyMap(),
             sourceLocation: SourceLocation? = null
         ) {
+            // Resolve hash: prefer effectHashes, fall back to well-known hash by name
+            fun resolveHash(name: String): String? =
+                effectHashes[name] ?: WellKnownHashes.hashForName(name)
+
             val hermeticEffect = effects.firstOrNull { name ->
-                WellKnownHashes.isMut(name, effectHashes[name])
+                WellKnownHashes.isMut(resolveHash(name))
             }
             if (hermeticEffect != null && effects.size > 1) {
                 val otherEffects = effects.filter { name ->
-                    !WellKnownHashes.isMut(name, effectHashes[name])
+                    !WellKnownHashes.isMut(resolveHash(name))
                 }.joinToString(", ")
                 throw TypeCheckError(
                     "$hermeticEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +

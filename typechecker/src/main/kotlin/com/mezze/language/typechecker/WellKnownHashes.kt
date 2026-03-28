@@ -17,22 +17,16 @@ import com.mezze.language.parser.MezzeParser
  * - **Codec abilities** — auto-derived serialization abilities (`Encode`, `EncodeRepr`,
  *   `Decode`, `DecodeRepr`, `StreamEncode`, `StreamDecode`, and their format counterparts)
  *
- * These were previously identified by name string ("Inspect", "Mut", "Encode", …), which
- * breaks when a user imports a declaration under an alias:
- *
- *   use std::abilities::inspect::{Inspect as Debug}
- *
- * After that import the compiler saw "Debug" in the constraint, not "Inspect", so
- * the special-case logic was silently skipped.
- *
- * The fix is to identify these by the *content hash* of the declaration, which is
- * stable across renames.
+ * These are identified by the *content hash* of the declaration, which is
+ * stable across renames and aliased imports.  Name-based fallbacks have been
+ * intentionally removed — if a hash is not available, that is a bug in the
+ * caller (constraint creation, context building, etc.).
  *
  * ## Mut note
  *
  * `MezzeType.EffectRow` now carries `effectHashes: Map<String, String>` populated by
- * `ContextBuilder` when converting type annotations.  The Mut check therefore uses
- * hash-based identification (with a name-based fallback for robustness).
+ * `ContextBuilder` when converting type annotations.  The Mut check uses
+ * hash-only identification.
  */
 object WellKnownHashes {
 
@@ -42,7 +36,7 @@ object WellKnownHashes {
      *
      * Computed lazily on first access so that the parser/resource loader is not
      * invoked during static initialisation.  Returns `null` if the resource cannot
-     * be found (should not happen in production; allows graceful degradation).
+     * be found (should not happen in production).
      */
     val inspectAbilityHash: String? by lazy { computeInspectHash() }
 
@@ -51,7 +45,7 @@ object WellKnownHashes {
      * (`stdlib/std/effects/mutation.mz`).
      *
      * Computed lazily on first access.  Returns `null` if the resource cannot
-     * be found (allows graceful name-based fallback).
+     * be found (should not happen in production).
      */
     val mutEffectHash: String? by lazy { computeMutHash() }
 
@@ -64,7 +58,7 @@ object WellKnownHashes {
      *   Format (EncodeFormat), DecodeFormat, StreamFormat, StreamDecodeFormat
      *
      * Computed lazily on first access.  The set is empty if the resource cannot
-     * be found (the name-based fallback in [isCodecAbility] then takes over).
+     * be found (should not happen in production).
      */
     val codecAbilityHashes: Set<String> by lazy { computeCodecHashes() }
 
@@ -125,176 +119,135 @@ object WellKnownHashes {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns `true` when [abilityHash] identifies the Inspect ability by content.
-     *
-     * Use this as the primary check.  A null hash never matches (the caller should
-     * fall back to the name-based check below when the hash is unavailable).
+     * Returns `true` when [hash] identifies the Inspect ability by content hash.
+     * Hash-only identification — no name-based fallback. If hash is null, returns false.
      */
-    fun isInspect(abilityHash: String?): Boolean =
-        abilityHash != null && abilityHash == inspectAbilityHash
+    fun isInspect(hash: String?): Boolean =
+        hash != null && hash == inspectAbilityHash
 
     /**
-     * Returns `true` when the constraint identifies the Inspect ability.
-     *
-     * Checks by content hash first; falls back to the legacy name "Inspect" so that
-     * code paths that haven't been migrated to hash-based constraints continue to
-     * work.  The name fallback also keeps the compiler working when
-     * `inspectAbilityHash` could not be computed (missing resource).
+     * Returns `true` when [hash] identifies the Mut effect by content hash.
+     * Hash-only identification — no name-based fallback. If hash is null, returns false.
      */
-    fun isInspect(abilityName: String, abilityHash: String?): Boolean =
-        isInspect(abilityHash) || abilityName == "Inspect"
+    fun isMut(hash: String?): Boolean =
+        hash != null && hash == mutEffectHash
 
     /**
-     * Returns `true` when [effectHash] identifies the Mut effect by content.
-     *
-     * Use this as the primary check.  A null hash never matches (the caller should
-     * fall back to the name-based check when the hash is unavailable).
+     * Returns `true` when [hash] identifies one of the codec abilities by content hash.
+     * Hash-only identification — no name-based fallback. If hash is null, returns false.
      */
-    fun isMut(effectHash: String?): Boolean =
-        effectHash != null && effectHash == mutEffectHash
-
-    /**
-     * Returns `true` when the constraint identifies the Mut effect.
-     *
-     * Checks by content hash first; falls back to the legacy name "Mut" so that
-     * code paths that haven't been migrated to hash-based effect rows continue to
-     * work.  The name fallback also keeps the compiler working when
-     * `mutEffectHash` could not be computed (missing resource).
-     */
-    fun isMut(effectName: String, effectHash: String? = null): Boolean =
-        isMut(effectHash) || effectName == "Mut"
-
-    /**
-     * Returns `true` when [abilityHash] identifies one of the codec abilities by content.
-     *
-     * Use this as the primary check.  A null hash never matches (the caller should fall
-     * back to the name-based overload below when the hash is unavailable).
-     */
-    fun isCodecAbility(abilityHash: String?): Boolean =
-        abilityHash != null && abilityHash in codecAbilityHashes
-
-    /**
-     * Returns `true` when the constraint identifies a codec ability.
-     *
-     * Checks by content hash first; falls back to a fixed set of canonical names so
-     * that code paths that haven't been migrated to hash-based constraints continue to
-     * work.  The name fallback also keeps the compiler working when
-     * `codecAbilityHashes` could not be computed (missing resource).
-     */
-    fun isCodecAbility(abilityName: String, abilityHash: String? = null): Boolean =
-        isCodecAbility(abilityHash) || abilityName in CODEC_ABILITY_NAMES
+    fun isCodecAbility(hash: String?): Boolean =
+        hash != null && hash in codecAbilityHashes
 
     // -------------------------------------------------------------------------
-    // Comparison ability helpers
+    // Comparison ability helpers (hash-only)
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns `true` when the constraint identifies the `Eq` ability.
-     *
-     * Checks by content hash first; falls back to the canonical name "Eq".
-     */
-    fun isEq(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == eqAbilityHash) || abilityName == "Eq"
+    /** Returns `true` when [hash] identifies the `Eq` ability by content hash. */
+    fun isEq(hash: String?): Boolean =
+        hash != null && hash == eqAbilityHash
 
-    /**
-     * Returns `true` when the constraint identifies the `Ord` ability.
-     *
-     * Checks by content hash first; falls back to the canonical name "Ord".
-     */
-    fun isOrd(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == ordAbilityHash) || abilityName == "Ord"
+    /** Returns `true` when [hash] identifies the `Ord` ability by content hash. */
+    fun isOrd(hash: String?): Boolean =
+        hash != null && hash == ordAbilityHash
 
     // -------------------------------------------------------------------------
-    // Numeric ability helpers
+    // Numeric ability helpers (hash-only)
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns `true` when the constraint identifies the `NumAdd` ability.
-     */
-    fun isNumAdd(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numAddAbilityHash) || abilityName == "NumAdd"
+    /** Returns `true` when [hash] identifies the `NumAdd` ability by content hash. */
+    fun isNumAdd(hash: String?): Boolean =
+        hash != null && hash == numAddAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumSub` ability by content hash. */
+    fun isNumSub(hash: String?): Boolean =
+        hash != null && hash == numSubAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumMul` ability by content hash. */
+    fun isNumMul(hash: String?): Boolean =
+        hash != null && hash == numMulAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumDiv` ability by content hash. */
+    fun isNumDiv(hash: String?): Boolean =
+        hash != null && hash == numDivAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumMod` ability by content hash. */
+    fun isNumMod(hash: String?): Boolean =
+        hash != null && hash == numModAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumZero` ability by content hash. */
+    fun isNumZero(hash: String?): Boolean =
+        hash != null && hash == numZeroAbilityHash
+
+    /** Returns `true` when [hash] identifies the `NumOne` ability by content hash. */
+    fun isNumOne(hash: String?): Boolean =
+        hash != null && hash == numOneAbilityHash
 
     /**
-     * Returns `true` when the constraint identifies the `NumSub` ability.
+     * Returns `true` when [hash] identifies any numeric ability
+     * (NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne) by content hash.
      */
-    fun isNumSub(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numSubAbilityHash) || abilityName == "NumSub"
-
-    /**
-     * Returns `true` when the constraint identifies the `NumMul` ability.
-     */
-    fun isNumMul(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numMulAbilityHash) || abilityName == "NumMul"
-
-    /**
-     * Returns `true` when the constraint identifies the `NumDiv` ability.
-     */
-    fun isNumDiv(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numDivAbilityHash) || abilityName == "NumDiv"
-
-    /**
-     * Returns `true` when the constraint identifies the `NumMod` ability.
-     */
-    fun isNumMod(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numModAbilityHash) || abilityName == "NumMod"
-
-    /**
-     * Returns `true` when the constraint identifies the `NumZero` ability.
-     */
-    fun isNumZero(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numZeroAbilityHash) || abilityName == "NumZero"
-
-    /**
-     * Returns `true` when the constraint identifies the `NumOne` ability.
-     */
-    fun isNumOne(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == numOneAbilityHash) || abilityName == "NumOne"
-
-    /**
-     * Returns `true` when the constraint identifies any numeric ability
-     * (NumAdd, NumSub, NumMul, NumDiv, NumMod, NumZero, NumOne).
-     */
-    fun isNumericAbility(abilityName: String, abilityHash: String? = null): Boolean =
-        isNumAdd(abilityName, abilityHash) ||
-        isNumSub(abilityName, abilityHash) ||
-        isNumMul(abilityName, abilityHash) ||
-        isNumDiv(abilityName, abilityHash) ||
-        isNumMod(abilityName, abilityHash) ||
-        isNumZero(abilityName, abilityHash) ||
-        isNumOne(abilityName, abilityHash)
+    fun isNumericAbility(hash: String?): Boolean =
+        isNumAdd(hash) || isNumSub(hash) || isNumMul(hash) || isNumDiv(hash) ||
+        isNumMod(hash) || isNumZero(hash) || isNumOne(hash)
 
     // -------------------------------------------------------------------------
-    // Conversion ability helpers
+    // Conversion ability helpers (hash-only)
+    // -------------------------------------------------------------------------
+
+    /** Returns `true` when [hash] identifies the `Into` ability by content hash. */
+    fun isInto(hash: String?): Boolean =
+        hash != null && hash == intoAbilityHash
+
+    /** Returns `true` when [hash] identifies the `TryInto` ability by content hash. */
+    fun isTryInto(hash: String?): Boolean =
+        hash != null && hash == tryIntoAbilityHash
+
+    // -------------------------------------------------------------------------
+    // Default ability helper (hash-only)
+    // -------------------------------------------------------------------------
+
+    /** Returns `true` when [hash] identifies the `Default` ability by content hash. */
+    fun isDefault(hash: String?): Boolean =
+        hash != null && hash == defaultAbilityHash
+
+    // -------------------------------------------------------------------------
+    // Hash resolution from name (bridging utility)
     // -------------------------------------------------------------------------
 
     /**
-     * Returns `true` when the constraint identifies the `Into` ability.
+     * Look up the well-known hash for a given ability/effect name.
+     *
+     * This is a BRIDGING utility for call sites where the constraint doesn't carry
+     * a hash (e.g., FunctionAbilityConstraint, AbilityConstraints paths). Callers
+     * should prefer passing the hash from the constraint directly.
+     *
+     * Returns the hash if the name matches a well-known ability/effect, or null.
      */
-    fun isInto(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == intoAbilityHash) || abilityName == "Into"
-
-    /**
-     * Returns `true` when the constraint identifies the `TryInto` ability.
-     */
-    fun isTryInto(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == tryIntoAbilityHash) || abilityName == "TryInto"
-
-    // -------------------------------------------------------------------------
-    // Default ability helper
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns `true` when the constraint identifies the `Default` ability.
-     */
-    fun isDefault(abilityName: String, abilityHash: String? = null): Boolean =
-        (abilityHash != null && abilityHash == defaultAbilityHash) || abilityName == "Default"
+    fun hashForName(name: String): String? = when (name) {
+        "Inspect" -> inspectAbilityHash
+        "Mut" -> mutEffectHash
+        "Eq" -> eqAbilityHash
+        "Ord" -> ordAbilityHash
+        "NumAdd" -> numAddAbilityHash
+        "NumSub" -> numSubAbilityHash
+        "NumMul" -> numMulAbilityHash
+        "NumDiv" -> numDivAbilityHash
+        "NumMod" -> numModAbilityHash
+        "NumZero" -> numZeroAbilityHash
+        "NumOne" -> numOneAbilityHash
+        "Into" -> intoAbilityHash
+        "TryInto" -> tryIntoAbilityHash
+        "Default" -> defaultAbilityHash
+        else -> null
+    }
 
     // -------------------------------------------------------------------------
     // Internal computation
     // -------------------------------------------------------------------------
 
-    /** Canonical names used as a name-based fallback for codec ability identification. */
-    private val CODEC_ABILITY_NAMES = setOf(
+    /** Canonical names of codec abilities — used for error messages only, NOT for identification. */
+    val CODEC_ABILITY_NAMES = setOf(
         "Encode", "EncodeRepr", "Decode", "DecodeRepr",
         "StreamEncode", "StreamDecode",
         "Format", "DecodeFormat", "StreamFormat", "StreamDecodeFormat"

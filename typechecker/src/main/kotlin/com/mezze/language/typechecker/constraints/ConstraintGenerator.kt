@@ -1019,7 +1019,8 @@ class ConstraintGenerator(
                 // Check if this type variable appears in our function type
                 val matchingTypeVar = typeVars.find { it.name == solvedTypeVar.variable.name }
 
-                if (matchingTypeVar != null && !WellKnownHashes.isInspect(constraint.abilityName, constraint.abilityHash)) {
+                val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(constraint.abilityName)
+                if (matchingTypeVar != null && !WellKnownHashes.isInspect(effectiveHash)) {
                     // CRITICAL FIX: Filter out Inspect - it's universally available
                     // and shouldn't appear in type signatures (matches OldTypeChecker line 2651-2652)
                     MezzeType.FunctionAbilityConstraint(
@@ -2271,7 +2272,8 @@ class ConstraintGenerator(
         }
 
         for (usage in actualUsageConstraints) {
-            if (WellKnownHashes.isInspect(usage.abilityName, usage.abilityHash)) continue  // Skip implicit Inspect
+            val usageHash = usage.abilityHash ?: WellKnownHashes.hashForName(usage.abilityName)
+            if (WellKnownHashes.isInspect(usageHash)) continue  // Skip implicit Inspect
 
             // Find ALL annotated abilities with the same name (there might be multiple, e.g., Show 'x and Show 'y)
             val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
@@ -2358,7 +2360,8 @@ class ConstraintGenerator(
             // Example: annotation declares NumAdd 'b but implementation uses NumAdd 'a
             for (usage in actualUsageConstraints) {
                 // Skip Inspect - it's implicit
-                if (WellKnownHashes.isInspect(usage.abilityName, usage.abilityHash)) continue
+                val usageEffHash = usage.abilityHash ?: WellKnownHashes.hashForName(usage.abilityName)
+                if (WellKnownHashes.isInspect(usageEffHash)) continue
 
                 // Find matching annotation constraint by ability name
                 val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
@@ -2384,8 +2387,9 @@ class ConstraintGenerator(
             // Only check for simple functions without function calls
             if (!containsFunctionCalls(expression)) {
                 for (annotated in annotatedAbilities) {
-                    // Skip Inspect - it's implicit (FunctionAbilityConstraint has no hash; name fallback is correct)
-                    if (WellKnownHashes.isInspect(annotated.abilityName, null)) continue
+                    // Skip Inspect - it's implicit
+                    // TODO: FunctionAbilityConstraint should carry abilityHash for hash-only check.
+                    if (annotated.abilityName == "Inspect") continue
 
                     // Skip abilities on concrete types - they don't need to be used
                     val hasConcreteTypes = annotated.typeArgs.any { it !is MezzeType.VarType }
