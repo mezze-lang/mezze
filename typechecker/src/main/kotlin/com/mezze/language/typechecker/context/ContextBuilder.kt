@@ -147,8 +147,15 @@ class ContextBuilder {
         val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + abilityImplDecls + letDecls
         try {
             DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
-        } catch (_: Exception) {
-            // Tolerate duplicate declarations from prelude merging during module loading
+        } catch (e: TypeCheckError) {
+            // Only suppress duplicates from prelude injection (stdlib performer types)
+            // Re-throw user code duplicates
+            val msg = e.message ?: ""
+            val preludeTypes = setOf("Int", "Float", "Nat", "Frac", "Bool", "Str", "Char",
+                "Option", "Result", "Seq", "List", "Map", "Set", "Deque", "Bytes",
+                "SortedMap", "SortedSet", "NonEmptyList")
+            val isPrelude = preludeTypes.any { msg.contains("'$it'") && msg.contains("performer") }
+            if (!isPrelude) throw e
         }
 
         // Merge local and imported effect declarations for lookups
