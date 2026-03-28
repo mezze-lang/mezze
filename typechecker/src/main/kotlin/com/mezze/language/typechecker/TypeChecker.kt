@@ -1110,12 +1110,13 @@ class TypeChecker(
      * This performs normal type-checking AND validates that main has the correct type:
      * {} -> {} <*>
      *
-     * Use this when you want to run the program as an executable.
+     * TODO: Move main/exec validation to CLI layer. The typechecker should only do type inference.
      * Use checkProgram() for library code or tests that don't require a valid main.
      *
      * @param program The program to type-check
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
+    @Deprecated("Main validation should be in CLI, not typechecker. Use checkProgram() + validate main separately.")
     fun checkProgramForExecution(program: Program, currentPath: Path = Paths.get("."), enablePrelude: Boolean = false): TypeCheckResult {
         // First, do normal type-checking (with prelude if enabled for CLI/project mode)
         val result = checkProgram(program, currentPath, enablePrelude = enablePrelude)
