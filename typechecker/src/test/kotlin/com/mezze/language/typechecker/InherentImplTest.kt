@@ -3,7 +3,6 @@ package com.mezze.language.typechecker
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertTrue
@@ -212,7 +211,6 @@ class InherentImplTest {
     }
 
     @Test
-    @Disabled("TypedAstBuilder returns VarType for inherent method call result — constraint not fully resolved in TypedAST")
     fun `inherent method using it receiver`() {
         val source = """
             type Pair = {first: Int, second: Int}

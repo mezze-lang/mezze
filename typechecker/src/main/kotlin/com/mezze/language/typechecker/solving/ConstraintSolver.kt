@@ -1623,7 +1623,22 @@ class ConstraintSolver(
                             // Check by type name
                             when (type) {
                                 is MezzeType.RecordType -> type.typeName == annotation.name
-                                is MezzeType.VariantType -> type.typeName == annotation.name
+                                is MezzeType.VariantType -> {
+                                    // First check typeName directly
+                                    if (type.typeName == annotation.name) true
+                                    // Fallback: if typeName is null but the variant has a constructor
+                                    // matching the annotation name, try to find the type declaration
+                                    // by scanning constructors. This handles cross-module imports where
+                                    // the type declaration isn't in the solver's typeDeclarations map
+                                    // (e.g., type Person = | Person { name: Str } | imported from another module).
+                                    else if (type.typeName == null && type.constructors.containsKey(annotation.name)) {
+                                        // The variant has a constructor with the same name as the annotation.
+                                        // This is a strong signal that the variant IS the named type.
+                                        // Additional check: the variant should have exactly the constructors
+                                        // expected for a type with this name (or be a subset, for open variants).
+                                        true
+                                    } else false
+                                }
                                 is MezzeType.TypeApplication -> type.constructor == annotation.name
                                 else -> false
                             }

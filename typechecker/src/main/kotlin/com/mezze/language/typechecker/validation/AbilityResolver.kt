@@ -672,7 +672,15 @@ class AbilityResolver(
                         } else {
                             when (type) {
                                 is MezzeType.RecordType -> type.typeName == annotation.name
-                                is MezzeType.VariantType -> type.typeName == annotation.name
+                                is MezzeType.VariantType -> {
+                                    if (type.typeName == annotation.name) true
+                                    // Fallback: if typeName is null but the variant has a constructor
+                                    // matching the annotation name, treat it as a match.
+                                    // This handles cross-module imports where the type declaration
+                                    // isn't in the resolver's typeDeclarations map.
+                                    else if (type.typeName == null && type.constructors.containsKey(annotation.name)) true
+                                    else false
+                                }
                                 is MezzeType.TypeApplication -> type.constructor == annotation.name && type.args.isEmpty()
                                 else -> false
                             }

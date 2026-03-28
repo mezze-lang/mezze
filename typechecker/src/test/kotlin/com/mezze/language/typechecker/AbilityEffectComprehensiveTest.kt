@@ -5,7 +5,6 @@ import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.assertThrows
@@ -661,7 +660,6 @@ class AbilityEffectComprehensiveTest {
         }
 
         @Test
-        @Disabled("Cross-module ability: locally-defined Show shadows prelude Show, causing '[Person] to String' error in method resolution")
         fun `import type and use with local ability impl`() {
             // Create type module
             val typeMod = tempDir.resolve("types.mz")
@@ -1043,7 +1041,6 @@ class AbilityEffectComprehensiveTest {
         }
 
         @Test
-        @Disabled("Cross-module ability: locally-defined Show shadows prelude Show, causing '[Person] to String' error in method resolution")
         fun `impl for local ability with imported type is valid`() {
             // Create type module
             val typeMod = tempDir.resolve("types.mz")

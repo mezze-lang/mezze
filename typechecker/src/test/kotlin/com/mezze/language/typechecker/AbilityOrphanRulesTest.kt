@@ -5,7 +5,6 @@ import com.mezze.language.parser.ParseException
 import com.mezze.language.ast.LetBinding
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.assertThrows
 import java.nio.file.Files
@@ -431,7 +430,6 @@ class AbilityOrphanRulesTest {
     }
 
     @Test
-    @Disabled("Cross-module ability impl: concrete variant types from inferred exports prevent solver from matching impl Show for Person")
     fun `ability impl is visible when type is imported`() {
         // Impl should be auto-visible when you import the type
 

@@ -396,6 +396,14 @@ class ImportResolver(
                         isQualified = isQualified,
                         contentHash = export.contentHash
                     )
+                    // CRITICAL: When a CONSTRUCTOR shares a name with a type declaration
+                    // (e.g., type Person = | Person { ... } |), also import the type declaration.
+                    // Without this, ability impl matching fails because the type isn't in
+                    // allTypeDeclarations and typeMatchesAnnotation can't resolve it.
+                    val typeDecl = module?.index?.typeDeclarations?.get(export.originalName)
+                    if (typeDecl != null) {
+                        types[export.originalName] = typeDecl
+                    }
                 }
                 ExportedItemType.ABILITY -> {
                     // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
@@ -537,6 +545,16 @@ class ImportResolver(
                         isQualified = false,  // Selective imports are unqualified
                         contentHash = export.contentHash
                     )
+                    // CRITICAL: When a CONSTRUCTOR shares a name with a type declaration
+                    // (e.g., type Person = | Person { ... } |), also import the type declaration.
+                    // Without this, ability impl matching fails because the type isn't in
+                    // allTypeDeclarations and typeMatchesAnnotation can't resolve it.
+                    if (export.type == ExportedItemType.CONSTRUCTOR) {
+                        val typeDecl = module?.index?.typeDeclarations?.get(item.name)
+                        if (typeDecl != null) {
+                            types[localName] = typeDecl
+                        }
+                    }
                 }
                 ExportedItemType.TYPE -> {
                     // O(1) lookup via module index
