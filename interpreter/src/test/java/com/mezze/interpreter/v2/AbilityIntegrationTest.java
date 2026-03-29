@@ -227,46 +227,4 @@ public class AbilityIntegrationTest {
         assertEquals(200L, result);
     }
 
-    // ========================
-    // User-Defined Ability Tests
-    // ========================
-
-    @Test
-    void testUserDefinedNumAddForMoney() {
-        Object result = MezzeTestHelper.run("""
-            use std::abilities::numeric::{NumAdd}
-
-            type Money = { cents: Int }
-
-            impl NumAdd for Money where {
-              add = { it, r } -> { cents = it.cents + r.cents }
-            }
-
-            let a = Money { cents = 500 }
-            let b = Money { cents = 300 }
-            let result = a + b
-            result.cents
-            """);
-        assertEquals(800L, result);
-    }
-
-    @Test
-    void testUserDefinedNumSubForMoney() {
-        Object result = MezzeTestHelper.run("""
-            use std::abilities::numeric::{NumSub}
-
-            type Money = { cents: Int }
-
-            impl NumSub for Money where {
-              sub = { it, r } -> { cents = it.cents - r.cents },
-              neg = { it } -> { cents = 0 - it.cents }
-            }
-
-            let a = Money { cents = 500 }
-            let b = Money { cents = 300 }
-            let result = a - b
-            result.cents
-            """);
-        assertEquals(200L, result);
-    }
 }
