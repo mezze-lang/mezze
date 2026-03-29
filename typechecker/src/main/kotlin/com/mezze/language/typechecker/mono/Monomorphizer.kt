@@ -245,8 +245,6 @@ class Monomorphizer {
                 expr.loc
             )
             is TypedCall -> {
-                // Detect method-syntax calls: TypedCall(TypedFieldAccess(receiver, methodName), args)
-                // where methodName matches an ability operation. Resolve to direct ByHash call.
                 val resolved = tryResolveMethodCall(expr, globalDecls, worklist, processed)
                 if (resolved != null) {
                     resolved
@@ -469,8 +467,8 @@ class Monomorphizer {
         if (fn !is TypedFieldAccess) return null
 
         val methodName = fn.field
-        val candidates = abilityOpIndex[methodName] ?: return null
-        if (candidates.isEmpty()) return null
+        val candidates = abilityOpIndex[methodName]
+        if (candidates == null || candidates.isEmpty()) return null
 
         // Get the receiver's type
         val receiverType = fn.record.type

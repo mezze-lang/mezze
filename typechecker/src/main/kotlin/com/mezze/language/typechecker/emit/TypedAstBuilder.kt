@@ -521,11 +521,18 @@ class TypedAstBuilder(
                 // Method call resolution is handled by the Monomorphizer's tryResolveMethodCall.
                 // TypedAstBuilder emits TypedCall(TypedFieldAccess(receiver, method), args)
                 // and the Monomorphizer detects this pattern and resolves to direct ByHash call.
-                val methodInfo: ConstraintResult.MethodCallInfo? = null  // Disabled — Monomorphizer handles this
+                val methodInfo = methodCallResolutions[expr.loc]
                 if (methodInfo != null && expr.function is ParsedMemberAccess) {
+                    // Method-syntax call: x.neg {} or x.is_empty {}
+                    // Inject the receiver into the arguments, but let the normal function
+                    // resolution handle the function reference (it already resolves to the
+                    // correct native function or ability operation via the constraint solver).
                     val memberAccess = expr.function as ParsedMemberAccess
                     val receiverExpr = buildExpr(memberAccess.receiver, file)
                     val argExpr = buildExpr(expr.arguments, file)
+
+                    // Build the function normally
+                    val fn = buildExpr(expr.function, file)
 
                     // Wrap the receiver into the arguments as the receiver field (e.g., "it")
                     val receiverFieldName = methodInfo.receiverFieldName
@@ -544,40 +551,20 @@ class TypedAstBuilder(
                             TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)
                         }
                         else -> {
-                            // Argument is not a record — wrap as {it = receiver}
                             val entries = listOf(receiverField)
                             TypedRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverExpr.type)), loc)
                         }
                     }
 
-                    // Resolve the method binding
-                    val receiverType = substitution.apply(receiverExpr.type)
-                    val methodBinding = if (methodInfo.isInherentMethod) {
-                        resolveInherentMethodBinding(methodInfo.methodName, methodInfo.implContentHash)
-                    } else {
-                        val abilityName = methodInfo.abilityName
-                        if (abilityName != null) {
-                            resolveAbilityMethodBinding(abilityName, methodInfo.methodName, receiverType)
-                        } else null
-                    } ?: resolveBinding(methodInfo.methodName, null)  // Fallback to normal binding resolution
-
-                    // Determine the method's full function type (including receiver)
-                    val methodType = substitution.apply(contextType)
-                    val callReturnType = substitution.apply(contextType)
-
-                    // Build method TypedVar
-                    val qualifiedMethodName = if (methodInfo.abilityName != null) {
-                        "${methodInfo.methodName}\$${methodInfo.abilityName}"
-                    } else {
-                        methodInfo.methodName
+                    val callReturnType = when (val ft = substitution.apply(fn.type)) {
+                        is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                        else -> substitution.apply(contextType)
                     }
-                    val methodFuncType = MezzeType.FunctionType(wrappedArg.type, callReturnType)
-                    val methodVar = TypedVar(qualifiedMethodName, methodBinding, methodFuncType, memberAccess.loc)
 
                     val isTailCall = isTailCallLocation(expr.loc)
 
                     TypedCall(
-                        function = methodVar,
+                        function = fn,
                         arg = wrappedArg,
                         instantiation = null,
                         isTailCall = isTailCall,
