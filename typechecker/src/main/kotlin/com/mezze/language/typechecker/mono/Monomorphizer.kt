@@ -482,14 +482,12 @@ class Monomorphizer {
         }
 
         if (matchingEntry != null) {
-            // Found matching ability operation — emit direct call
-            try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
-                "MATCHED: method=$methodName opHash=${matchingEntry.opHash.hex.take(16)} receiver=$receiverType\n"
-            ) } catch (_: Exception) {}
+            // Found matching ability operation — emit direct call.
+            // NOTE: Do NOT add opHash to worklist — the ability impl processing loop
+            // (after worklist processing) handles compilation of ability operations.
+            // Adding to worklist marks it as processed but the worklist can't compile it
+            // (it's not a let-binding), causing the impl loop to skip it.
             val opHash = matchingEntry.opHash
-            if (opHash !in processed) {
-                worklist.add(opHash)
-            }
 
             // Build the wrapped argument: inject receiver as first field
             val receiverExpr = convertExpr(fn.record, globalDecls, worklist, processed)

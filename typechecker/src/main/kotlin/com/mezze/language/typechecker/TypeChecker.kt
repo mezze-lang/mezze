@@ -231,6 +231,11 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
+                        // Include prelude modules in loadedModules so the Monomorphizer
+                        // has access to all ability impl operations for method call resolution
+                        cachedPreludeLoadedModules?.let { preludeModules ->
+                            loadedModules = loadedModules + preludeModules
+                        }
                         mergeImportContext(parentContext, importContext!!)
                     } else {
                         mergeImportContext(parentContext, importContext!!)
@@ -1263,6 +1268,9 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
+    /** Cached prelude loaded modules — shared across loadPreludeModules calls */
+    private var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
+
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1297,6 +1305,8 @@ class TypeChecker(
                 // context-based constraint solving (replacing hardcoded checks).
                 // No bindings — prevents name collisions (option::fold vs seq::fold).
                 val ctx = result.importContext
+                // Cache loaded modules for inclusion in Monomorphizer's allModules
+                cachedPreludeLoadedModules = result.loadedModules
                 ModuleImportContext(
                     importedBindings = emptyMap(),
                     importedTypes = emptyMap(),
