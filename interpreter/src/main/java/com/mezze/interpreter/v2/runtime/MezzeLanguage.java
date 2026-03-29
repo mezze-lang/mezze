@@ -13,6 +13,7 @@ import com.mezze.language.ast.SelectivePath;
 import com.mezze.language.ast.UseDeclaration;
 import com.mezze.language.ast.UsePath;
 import com.mezze.language.parser.MezzeParser;
+import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.typechecker.TypeChecker;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -63,12 +64,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // Store variable slots for context capture
     private static final ThreadLocal<Map<String, Integer>> lastVariableSlots = new ThreadLocal<>();
 
-    // ThreadLocal for direct AST execution (bypasses parsing)
-    private static final ThreadLocal<Program> directExecutionProgram = new ThreadLocal<>();
+    // ThreadLocal for direct TruffleIR execution (bypasses parsing)
+    private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<Path> directExecutionRoot = new ThreadLocal<>();
-
-    // ThreadLocal for monomorphic instances (compiler-generated specializations)
-    private static final ThreadLocal<Map<String, LetBinding>> monomorphicInstances = new ThreadLocal<>();
 
     @Override
     protected MezzeContext createContext(Env env) {
@@ -102,23 +100,20 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         Source source = request.getSource();
         String sourceCode = source.getCharacters().toString();
 
-        // Check for direct AST execution (from tests or CLI)
-        Program directProgram = directExecutionProgram.get();
-        if (directProgram != null) {
-            directExecutionProgram.remove();
+        // Check for direct TruffleIR execution (from tests or CLI)
+        List<FunctionIR> directFunctions = directExecutionFunctions.get();
+        if (directFunctions != null) {
+            directExecutionFunctions.remove();
             Path projectRoot = directExecutionRoot.get();
             directExecutionRoot.remove();
             if (projectRoot == null) {
                 projectRoot = Paths.get(System.getProperty("mezze.project.root", "."));
             }
 
-            // Get monomorphic instances (compiler-generated specializations)
-            Map<String, LetBinding> instances = monomorphicInstances.get();
-            monomorphicInstances.remove();
-
-            // Prepend monomorphic instances to the program
-            Program programToCompile = prependMonomorphicInstances(directProgram, instances);
-            return compileProgram(programToCompile, projectRoot);
+            // All modules are already included in the FunctionIR list — no import extraction needed
+            return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
+                this, directFunctions, Collections.emptyList(), projectRoot
+            );
         }
 
         // Determine project root
@@ -144,7 +139,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
-            return compileFunctionIR(loweredFunctions, typeCheckResult.getProgram(), projectRoot);
+            return compileFunctionIR(loweredFunctions, projectRoot);
         }
 
         // TruffleIR not available — error
@@ -154,24 +149,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * Prepend monomorphic instances to a program.
-     * Monomorphic instances are specialized versions of polymorphic functions
-     * (e.g., displayValue$Int is the Int-specialized version of displayValue).
-     * They must be registered BEFORE the call sites that use them.
-     */
-    private Program prependMonomorphicInstances(Program program, Map<String, LetBinding> instances) {
-        if (instances == null || instances.isEmpty()) {
-            return program;
-        }
-
-        List<ProgramItem> items = new ArrayList<>();
-        items.addAll(instances.values());
-        items.addAll(program.getItems());
-        return new Program(items, java.util.Collections.emptyList());
-    }
-
-    /**
      * Compile a typed program to a CallTarget.
+     * TODO: Remove this method once all callers use TruffleIR path (compileFromIR).
      */
     // Prelude modules loaded from stdlib/std/_prelude.mz — no hardcoded list here
 
@@ -222,15 +201,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /**
      * Compile from pre-lowered TruffleIR (FunctionIR list).
      * This is the new path: typechecker produces TruffleIR directly.
+     * All modules are already included in the FunctionIR list — no import extraction needed.
      */
     private CallTarget compileFunctionIR(
-            List<com.mezze.language.truffleir.FunctionIR> functions,
-            Program program,
+            List<FunctionIR> functions,
             Path projectRoot) {
-        // Extract import paths from program for module loading
-        List<String> importedModules = extractImportedModules(program);
+        // All dependency modules are already monomorphized and included in FunctionIR list
         return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
-            this, functions, importedModules, projectRoot
+            this, functions, Collections.emptyList(), projectRoot
         );
     }
 
@@ -582,20 +560,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * Set a pre-parsed program for direct execution.
-     * Used by test helpers to bypass parsing.
+     * Set pre-lowered TruffleIR functions for direct execution.
+     * Used by CLI and test helpers to bypass parsing — all modules are
+     * already included in the FunctionIR list via monomorphization.
      */
-    public static void setProgramForDirectExecution(Program program, Path projectRoot) {
-        directExecutionProgram.set(program);
+    public static void setFunctionsForDirectExecution(List<FunctionIR> functions, Path projectRoot) {
+        directExecutionFunctions.set(functions);
         directExecutionRoot.set(projectRoot);
-    }
-
-    /**
-     * Set monomorphic instances (compiler-generated specializations).
-     * Used by CLI for direct execution with pre-typed programs.
-     */
-    public static void setMonomorphicInstances(Map<String, LetBinding> instances) {
-        monomorphicInstances.set(instances);
     }
 
     /**

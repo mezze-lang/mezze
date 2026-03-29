@@ -192,18 +192,12 @@ class DevCommand {
             println()
         }
 
-        // Add a call to main() at the end of the program
-        val mainCall = FunctionCall(
-            function = Identifier("main", null, null),
-            arguments = RecordLiteral(emptyList(), false, null),
-            inferredType = null,
-            sourceLocation = null
-        )
-        val programToExecute = typeCheckResult.program.copy(
-            items = typeCheckResult.program.items + listOf(TopLevelExpression(mainCall))
-        )
+        // Use TruffleIR (loweredFunctions) — all modules are already included via monomorphization.
+        // The compileFromIR path finds "main" and executes its body directly,
+        // so no need to append a main() call.
+        val functions = typeCheckResult.loweredFunctions
 
-        // Execute using V2 interpreter
+        // Execute using V2 interpreter with TruffleIR
         try {
             System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
             System.setProperty("polyglot.log.level", "OFF")
@@ -215,18 +209,13 @@ class DevCommand {
                 .build()
 
             try {
-                // Store the program for direct execution (bypasses parsing)
-                com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(programToExecute, currentDir.toPath())
-
-                // Store monomorphic instances (compiler-generated specializations)
-                if (typeCheckResult.monomorphicInstances.isNotEmpty()) {
-                    com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(typeCheckResult.monomorphicInstances)
-                }
+                // Store TruffleIR functions for direct execution (bypasses parsing)
+                com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, currentDir.toPath())
 
                 // Create a dummy source to trigger MezzeLanguage.parse()
                 val source = org.graalvm.polyglot.Source.newBuilder(
                     com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
-                    "# Direct AST execution",
+                    "# Direct TruffleIR execution",
                     "__direct_execution__.mz"
                 ).buildLiteral()
 

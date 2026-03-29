@@ -1336,16 +1336,10 @@ private fun handleExecCommand(args: List<String>) {
     val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
     val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000
 
-    // Add a call to main() at the end of the program
-    val mainCall = com.mezze.language.ast.FunctionCall(
-        function = com.mezze.language.ast.Identifier("main", null, null),
-        arguments = com.mezze.language.ast.RecordLiteral(emptyList(), false, null),
-        inferredType = null,
-        sourceLocation = null
-    )
-    val programToExecute = successResult.program.copy(
-        items = successResult.program.items + listOf(com.mezze.language.ast.TopLevelExpression(mainCall))
-    )
+    // Use TruffleIR (loweredFunctions) — all modules are already included via monomorphization.
+    // The compileFromIR path finds "main" or "__entry__" and executes its body directly,
+    // so no need to append a main() call.
+    val functions = successResult.loweredFunctions ?: emptyList()
 
     try {
         // Suppress verbose Truffle logging (JIT compilation is enabled via truffle-runtime)
@@ -1358,9 +1352,9 @@ private fun handleExecCommand(args: List<String>) {
             java.nio.file.Paths.get(".").toAbsolutePath()
         }
 
-        // Execute using V2 interpreter
+        // Execute using V2 interpreter with TruffleIR
         val execStart = System.nanoTime()
-        executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
+        executeWithV2Interpreter(functions, projectRootPath)
         val execTime = (System.nanoTime() - execStart) / 1_000_000
         val totalTime = (System.nanoTime() - totalStart) / 1_000_000
 
@@ -1397,13 +1391,13 @@ private fun handleExecCommand(args: List<String>) {
 }
 
 /**
- * Execute a program using the V2 interpreter (optimized Truffle implementation).
+ * Execute pre-lowered TruffleIR using the V2 interpreter (optimized Truffle implementation).
  * V2 uses shape-cached record access, typed frame slots, and jump table dispatch.
+ * All modules are already included in the FunctionIR list via monomorphization.
  */
 private fun executeWithV2Interpreter(
-    program: Program,
-    projectRoot: java.nio.file.Path,
-    monomorphicInstances: Map<String, LetBinding> = emptyMap()
+    functions: List<com.mezze.language.truffleir.FunctionIR>,
+    projectRoot: java.nio.file.Path
 ) {
     // Set up V2 context
     val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
@@ -1412,18 +1406,13 @@ private fun executeWithV2Interpreter(
         .build()
 
     try {
-        // Store the program for direct execution (bypasses parsing)
-        com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(program, projectRoot)
-
-        // Store monomorphic instances (compiler-generated specializations)
-        if (monomorphicInstances.isNotEmpty()) {
-            com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
-        }
+        // Store TruffleIR functions for direct execution (bypasses parsing)
+        com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, projectRoot)
 
         // Create a dummy source to trigger MezzeLanguage.parse()
         val source = org.graalvm.polyglot.Source.newBuilder(
             com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
-            "# Direct AST execution",
+            "# Direct TruffleIR execution",
             "__direct_execution__.mz"
         ).buildLiteral()
 

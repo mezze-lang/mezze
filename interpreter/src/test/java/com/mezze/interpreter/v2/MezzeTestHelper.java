@@ -86,6 +86,7 @@ public final class MezzeTestHelper {
 
     /**
      * Execute a pre-typed program directly.
+     * Typechecks the program to obtain TruffleIR (loweredFunctions) for execution.
      */
     public static Object execute(Program program) {
         return execute(program, null);
@@ -93,13 +94,27 @@ public final class MezzeTestHelper {
 
     /**
      * Execute a pre-typed program with custom project root.
+     * Typechecks the program to obtain TruffleIR (loweredFunctions) for execution.
      */
     public static Object execute(Program program, Path projectRoot) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
 
+        // Clear module cache for clean state
+        ModuleResolver.clearCache();
+        TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
+
+        // Type-check the program to get TruffleIR (loweredFunctions)
+        var tc = new TypeChecker();
+        var result = tc.typeCheck(program, root);
+        var functions = result.getLoweredFunctions();
+        if (functions == null) {
+            functions = java.util.Collections.emptyList();
+        }
 
         Context context = Context.newBuilder(MezzeLanguage.ID)
                 .engine(sharedEngine)
@@ -108,8 +123,8 @@ public final class MezzeTestHelper {
                 .build();
 
         try {
-            // Set the program for direct execution
-            MezzeLanguage.setProgramForDirectExecution(program, root);
+            // Set TruffleIR functions for direct execution
+            MezzeLanguage.setFunctionsForDirectExecution(functions, root);
 
             // Trigger execution with minimal source
             Source source = Source.newBuilder(MezzeLanguage.ID, "# direct", "__direct__.mz")

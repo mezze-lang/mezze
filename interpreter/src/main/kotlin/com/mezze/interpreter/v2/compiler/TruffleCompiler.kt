@@ -14,6 +14,7 @@ import com.mezze.interpreter.v2.nodes.variant.VariantConstructNode
 import com.mezze.interpreter.v2.nodes.effect.HandleNode
 import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.v2.converter.InterpolatedStringNode
+import com.mezze.interpreter.v2.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.language.resolvedast.SlotKind
 import com.mezze.language.truffleir.*
@@ -113,9 +114,8 @@ class TruffleCompiler(
                 }
             }
             is CallNativeIR -> {
-                val fnNode = com.mezze.interpreter.v2.converter.GlobalLookupNode(node.name)
                 val argNode = compileNode(node.arg, source)
-                InvokeNode.create(fnNode, arrayOf(argNode))
+                NativeDispatch.create(node.name, argNode)
             }
             is CallIndirectIR -> {
                 // Check for inline operator pattern: CallIndirect(ReadField(receiver, "add"), {r=...})

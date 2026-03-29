@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.codebase.CodebaseLoader
 import com.mezze.language.codebase.SQLiteCodebase
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
+import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typechecker.TypeChecker
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.MapSerializer
@@ -52,8 +53,14 @@ object StandaloneHelper {
                 items = allModuleItems + mainProgram.items + listOf(TopLevelExpression(mainCall))
             )
 
+            // Type-check the combined program to get TruffleIR (loweredFunctions)
+            val typeChecker = TypeChecker()
+            val projectRoot = java.nio.file.Paths.get(".")
+            val typeCheckResult = typeChecker.typeCheck(combinedProgram, projectRoot)
+            val functions = typeCheckResult.loweredFunctions ?: emptyList()
+
             // Execute using full Truffle with JIT optimization
-            executeTruffleProgram(combinedProgram)
+            executeTruffleFunctions(functions)
         }
     }
 
@@ -85,11 +92,17 @@ object StandaloneHelper {
             items = enhancedProgram.items + listOf(TopLevelExpression(mainCall))
         )
 
+        // Type-check the program to get TruffleIR (loweredFunctions)
+        val typeChecker = TypeChecker()
+        val projectRoot = java.nio.file.Paths.get(".")
+        val typeCheckResult = typeChecker.typeCheck(programWithMainCall, projectRoot)
+        val functions = typeCheckResult.loweredFunctions ?: emptyList()
+
         // Execute using full Truffle with JIT optimization
-        return executeTruffleProgram(programWithMainCall)
+        return executeTruffleFunctions(functions)
     }
 
-    private fun executeTruffleProgram(program: Program): Any? {
+    private fun executeTruffleFunctions(functions: List<FunctionIR>): Any? {
         val engine = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .build()
@@ -104,13 +117,13 @@ object StandaloneHelper {
         return try {
             val projectRoot = java.nio.file.Paths.get(".")
 
-            // Store the program for direct execution (bypasses parsing)
-            MezzeLanguage.setProgramForDirectExecution(program, projectRoot)
+            // Store TruffleIR functions for direct execution (bypasses parsing)
+            MezzeLanguage.setFunctionsForDirectExecution(functions, projectRoot)
 
             // Create a dummy source to trigger MezzeLanguage.parse()
             val source = Source.newBuilder(
                 MezzeLanguage.ID,
-                "# Direct AST execution",
+                "# Direct TruffleIR execution",
                 "__direct_execution__.mz"
             ).buildLiteral()
 
