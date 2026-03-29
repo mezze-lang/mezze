@@ -43,7 +43,8 @@ class Monomorphizer {
         val abilityName: String?,
         val targetTypes: List<MezzeType>,
         val methodName: String,
-        val opHash: Hash
+        val opHash: Hash,
+        val opBody: TypedExpr  // The operation's expression (typically a lambda)
     )
 
     /**
@@ -77,10 +78,10 @@ class Monomorphizer {
         // Build ability operation index for method call resolution
         abilityOpIndex.clear()
         for (impl in globalAbilityImpls) {
-            for ((opName, _) in impl.operations) {
+            for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
-                    AbilityOpEntry(impl.hash, null, impl.targetTypes, opName, opHash)
+                    AbilityOpEntry(impl.hash, null, impl.targetTypes, opName, opHash, opBody)
                 )
             }
         }
@@ -131,26 +132,14 @@ class Monomorphizer {
                 if (opHash !in processedFunctions) {
                     processedFunctions.add(opHash)
                     val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
-                    // If the operation body is a lambda (e.g., { it, r } -> ...),
-                    // unwrap it: use the lambda's body as the function body.
-                    // The params are already extracted from the lambda by extractParams.
-                    // Without unwrapping, calling the function returns a closure object
-                    // instead of executing the lambda body.
-                    val (actualBody, actualCaptures) = if (monoBody is MonoLambda) {
-                        monoBody.body to monoBody.captures.map { c ->
-                            MonoCapture(c.name, c.type, c.source)
-                        }
-                    } else {
-                        monoBody to emptyList()
-                    }
                     monoFunctions.add(MonoFunction(
                         hash = opHash,
                         name = "${impl.hash.hex.take(8)}.${opName}",
                         originalName = opName,
                         originalHash = impl.hash,
                         params = extractParams(opBody),
-                        captures = actualCaptures,
-                        body = actualBody,
+                        captures = emptyList(),
+                        body = monoBody,
                         type = opBody.type,
                         isPublic = false,
                         loc = opBody.loc
@@ -480,9 +469,6 @@ class Monomorphizer {
 
         val methodName = fn.field
         val candidates = abilityOpIndex[methodName]
-        try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
-            "tryResolve: method=$methodName indexSize=${abilityOpIndex.size} candidates=${candidates?.size}\n"
-        ) } catch (_: Exception) {}
         if (candidates == null || candidates.isEmpty()) return null
 
         // Get the receiver's type
@@ -533,9 +519,14 @@ class Monomorphizer {
                 }
             }
 
-            val methodRef = MonoBinding.Function(MonoFunctionRef.ByHash(opHash))
+            // Convert the operation body (lambda) and call it directly with wrappedArg.
+            // This invokes the lambda with {it=receiver, r=rightArg} which destructures
+            // into the lambda's params and executes the body.
+            // Using inline lambda call instead of ByHash avoids the closure-return issue
+            // where CallDirectIR(opHash) returns a closure instead of executing the body.
+            val convertedOpBody = convertExpr(matchingEntry.opBody, globalDecls, worklist, processed)
             return MonoCall(
-                MonoVar(methodName, methodRef, fn.type, fn.loc),
+                convertedOpBody,
                 wrappedArg,
                 expr.isTailCall,
                 expr.type,
