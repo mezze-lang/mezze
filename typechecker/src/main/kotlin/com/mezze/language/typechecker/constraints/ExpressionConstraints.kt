@@ -1002,6 +1002,7 @@ class ExpressionConstraintGenerator {
         // Resolve to the matching ability and get the receiver-stripped method type
         val strippedMethodType: MezzeType.FunctionType
         val receiverConstraintType: MezzeType  // The type the receiver must match (first field's type)
+        var resolvedAbilityName: String? = null  // Tracks which ability was resolved for MethodCallInfo
         // Collect ability constraints: from this method call AND from nested sub-expressions
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
@@ -1037,6 +1038,7 @@ class ExpressionConstraintGenerator {
             // Built-in ability — method type from .mz files includes `it` param.
             // Strip `it` for method-call syntax (receiver is handled separately).
             val abilityName = builtInMatches.first()
+            resolvedAbilityName = abilityName
             val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
             val fullMethodType = BuiltInAbilities.getAbilityMethodType(abilityName, methodName, freshTypeVar)!!
 
@@ -1064,6 +1066,7 @@ class ExpressionConstraintGenerator {
         } else if (filteredMatchingAbilities.isNotEmpty()) {
             // User-defined ability
             val (abilityName, rawMethodType) = filteredMatchingAbilities.first()
+            resolvedAbilityName = abilityName
             val abilityDecl = context.abilityDeclarations[abilityName]
             val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
 
@@ -1235,6 +1238,15 @@ class ExpressionConstraintGenerator {
             sourceLocation = expr.loc.toSL()
         ))
 
+        // Store method call resolution for the TypedAstBuilder
+        val methodCallInfo = ConstraintResult.MethodCallInfo(
+            abilityName = resolvedAbilityName,
+            methodName = methodName,
+            methodHash = null,  // Resolved at TypedAstBuilder time via ability impl index
+            receiverFieldName = "it",  // Ability methods always use "it" as receiver param
+            isInherentMethod = false
+        )
+
         return ConstraintResult(
             type = resultType,
             constraints = constraints,
@@ -1243,7 +1255,8 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
-            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables
+            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
+            methodCallResolutions = mapOf(expr.loc to methodCallInfo)
         )
     }
 
@@ -1331,6 +1344,18 @@ class ExpressionConstraintGenerator {
             }
         }
 
+        // Store inherent method call resolution for the TypedAstBuilder
+        val inherentMethodCallInfo = if (methodInfo != null) {
+            ConstraintResult.MethodCallInfo(
+                abilityName = null,  // Inherent methods have no ability
+                methodName = methodName,
+                methodHash = null,   // Resolved at TypedAstBuilder time
+                receiverFieldName = "it",  // Inherent methods also use "it" as receiver param
+                isInherentMethod = true,
+                implContentHash = methodInfo.implContentHash
+            )
+        } else null
+
         return ConstraintResult(
             type = resultType,
             constraints = constraints,
@@ -1339,7 +1364,8 @@ class ExpressionConstraintGenerator {
             abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
-            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables
+            usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
+            methodCallResolutions = if (inherentMethodCallInfo != null) mapOf(expr.loc to inherentMethodCallInfo) else emptyMap()
         )
     }
 

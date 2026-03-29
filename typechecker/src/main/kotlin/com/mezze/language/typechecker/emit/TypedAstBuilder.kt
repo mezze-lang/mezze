@@ -9,6 +9,7 @@ import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typedast.*
 import com.mezze.language.typedast.TypeScheme as V2TypeScheme
 import com.mezze.language.typechecker.constraints.ConstraintResult
+import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.solving.Substitution
@@ -45,7 +46,8 @@ class TypedAstBuilder(
     private val identifierContentHashes: Map<BindingKey, String>,
     private val implDeclarations: Map<String, ImplDeclaration>,
     private val tailCallLocations: Set<SourceLocation>,
-    private val mustBeOpenRowVars: Set<RowVar> = emptySet()
+    private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
+    private val methodCallResolutions: Map<Loc, MethodCallInfo> = emptyMap()
 ) {
 
     // ========================================================================
@@ -516,25 +518,93 @@ class TypedAstBuilder(
             // ------------------------------------------------------------------
 
             is ParsedFunctionCall -> {
-                val fn = buildExpr(expr.function, file)
-                val argExpr = buildExpr(expr.arguments, file)
+                // Check if the constraint generator resolved this as a method call
+                // (e.g., x.neg {} → ability method call, not field access)
+                val methodInfo = methodCallResolutions[expr.loc]
+                if (methodInfo != null && expr.function is ParsedMemberAccess) {
+                    val memberAccess = expr.function as ParsedMemberAccess
+                    val receiverExpr = buildExpr(memberAccess.receiver, file)
+                    val argExpr = buildExpr(expr.arguments, file)
 
-                // Derive call return type from function type
-                val callType = when (val ft = substitution.apply(fn.type)) {
-                    is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                    else -> substitution.apply(contextType)
+                    // Wrap the receiver into the arguments as the receiver field (e.g., "it")
+                    val receiverFieldName = methodInfo.receiverFieldName
+                    val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
+
+                    // Merge receiver into argument record
+                    val wrappedArg = when (argExpr) {
+                        is TypedRecord -> {
+                            val allEntries = listOf(receiverField) + argExpr.entries
+                            val allFieldTypes = mutableMapOf(receiverFieldName to receiverExpr.type)
+                            for (entry in argExpr.entries) {
+                                if (entry is TypedRecordEntry.Field) {
+                                    allFieldTypes[entry.name] = entry.value.type
+                                }
+                            }
+                            TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)
+                        }
+                        else -> {
+                            // Argument is not a record — wrap as {it = receiver}
+                            val entries = listOf(receiverField)
+                            TypedRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverExpr.type)), loc)
+                        }
+                    }
+
+                    // Resolve the method binding
+                    val receiverType = substitution.apply(receiverExpr.type)
+                    val methodBinding = if (methodInfo.isInherentMethod) {
+                        resolveInherentMethodBinding(methodInfo.methodName, methodInfo.implContentHash)
+                    } else {
+                        val abilityName = methodInfo.abilityName
+                        if (abilityName != null) {
+                            resolveAbilityMethodBinding(abilityName, methodInfo.methodName, receiverType)
+                        } else null
+                    } ?: resolveBinding(methodInfo.methodName, null)  // Fallback to normal binding resolution
+
+                    // Determine the method's full function type (including receiver)
+                    val methodType = substitution.apply(contextType)
+                    val callReturnType = substitution.apply(contextType)
+
+                    // Build method TypedVar
+                    val qualifiedMethodName = if (methodInfo.abilityName != null) {
+                        "${methodInfo.methodName}\$${methodInfo.abilityName}"
+                    } else {
+                        methodInfo.methodName
+                    }
+                    val methodFuncType = MezzeType.FunctionType(wrappedArg.type, callReturnType)
+                    val methodVar = TypedVar(qualifiedMethodName, methodBinding, methodFuncType, memberAccess.loc)
+
+                    val isTailCall = isTailCallLocation(expr.loc)
+
+                    TypedCall(
+                        function = methodVar,
+                        arg = wrappedArg,
+                        instantiation = null,
+                        isTailCall = isTailCall,
+                        type = callReturnType,
+                        loc = loc
+                    )
+                } else {
+                    // Normal function call (no method resolution)
+                    val fn = buildExpr(expr.function, file)
+                    val argExpr = buildExpr(expr.arguments, file)
+
+                    // Derive call return type from function type
+                    val callType = when (val ft = substitution.apply(fn.type)) {
+                        is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                        else -> substitution.apply(contextType)
+                    }
+
+                    val isTailCall = isTailCallLocation(expr.loc)
+
+                    TypedCall(
+                        function = fn,
+                        arg = argExpr,
+                        instantiation = null,
+                        isTailCall = isTailCall,
+                        type = callType,
+                        loc = loc
+                    )
                 }
-
-                val isTailCall = isTailCallLocation(expr.loc)
-
-                TypedCall(
-                    function = fn,
-                    arg = argExpr,
-                    instantiation = null,
-                    isTailCall = isTailCall,
-                    type = callType,
-                    loc = loc
-                )
             }
 
             // ------------------------------------------------------------------
@@ -1183,5 +1253,104 @@ class TypedAstBuilder(
             is MezzeType.TypeApplication -> "${type.constructor}<${type.args.joinToString(",") { typeToString(it) }}>"
             else -> type.toString()
         }
+    }
+
+    /**
+     * Get the simple type name used for ability impl matching.
+     * Returns the type name string that matches against AbilityImplInfo.targetTypes.
+     */
+    private fun getTypeNameForImpl(type: MezzeType): String? = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.BytesType -> "Bytes"
+        is MezzeType.OrderingType -> "Ordering"
+        is MezzeType.SeqType -> "[${getTypeNameForImpl(type.elementType) ?: "?"}]"
+        is MezzeType.ListType -> "List_${getTypeNameForImpl(type.elementType) ?: "?"}"
+        is MezzeType.SetType -> "Set_${getTypeNameForImpl(type.elementType) ?: "?"}"
+        is MezzeType.MapType -> "Map_${getTypeNameForImpl(type.keyType) ?: "?"}_${getTypeNameForImpl(type.valueType) ?: "?"}"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.RecordType -> type.typeName
+        is MezzeType.VariantType -> type.typeName
+        else -> null
+    }
+
+    /**
+     * Resolve an ability method call to a BindingRef.
+     *
+     * Uses the ability impl index to find the impl matching the receiver type,
+     * then resolves the method binding within that impl.
+     *
+     * Returns null if no matching impl is found (falls back to existing logic).
+     */
+    private fun resolveAbilityMethodBinding(
+        abilityName: String,
+        methodName: String,
+        receiverType: MezzeType
+    ): BindingRef? {
+        val typeName = getTypeNameForImpl(receiverType) ?: return null
+        val impls = abilityImplIndex[abilityName] ?: return null
+
+        // Find the impl that matches the receiver type
+        val matchingImpl = impls.firstOrNull { entry ->
+            entry.targetTypes.any { it == typeName }
+        }
+
+        if (matchingImpl != null) {
+            // We found the impl. Now we need the method's content hash.
+            // The impl hash is matchingImpl.contentHash. The method binding
+            // within the impl should be in identifierContentHashes as a qualified binding.
+            // Try: BindingKey(abilityName, methodName) or the method name in the impl.
+            val qualKey = BindingKey(abilityName, methodName)
+            identifierContentHashes[qualKey]?.let {
+                return BindingRef.ByHash(Hash.fromV1(it))
+            }
+
+            // Try unqualified method name
+            val unqualKey = BindingKey.unqualified(methodName)
+            identifierContentHashes[unqualKey]?.let {
+                return BindingRef.ByHash(Hash.fromV1(it))
+            }
+
+            // Try import context
+            importContext?.importedBindings?.get(methodName)?.let { binding ->
+                return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+            }
+
+            // Fall back to using the impl content hash itself as the method reference
+            return BindingRef.ByHash(Hash.fromV1(matchingImpl.contentHash))
+        }
+
+        return null
+    }
+
+    /**
+     * Resolve an inherent method call to a BindingRef.
+     *
+     * Uses the impl content hash from MethodCallInfo to find the method binding.
+     */
+    private fun resolveInherentMethodBinding(
+        methodName: String,
+        implContentHash: String?
+    ): BindingRef? {
+        if (implContentHash != null) {
+            return BindingRef.ByHash(Hash.fromV1(implContentHash))
+        }
+
+        // Fallback: try to find by method name
+        val unqualKey = BindingKey.unqualified(methodName)
+        identifierContentHashes[unqualKey]?.let {
+            return BindingRef.ByHash(Hash.fromV1(it))
+        }
+
+        importContext?.importedBindings?.get(methodName)?.let { binding ->
+            return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+        }
+
+        return null
     }
 }

@@ -539,6 +539,12 @@ class TypeChecker(
                     .filterNotNull()
                     .toSet()
 
+                // Collect method call resolutions from all constraint results
+                val allMethodCallResolutions = constraintResults.values
+                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo>()) { acc, r ->
+                        acc + r.methodCallResolutions
+                    }
+
                 // PHASE 4: Validate Constraints (SubstitutionApplier removed — TypedAstBuilder replaces it)
                 val validator = TypeValidator(
                     context,
@@ -637,7 +643,8 @@ class TypeChecker(
                         identifierContentHashes = context.getContentHashes(),
                         implDeclarations = buildResult.implDeclarations,
                         tailCallLocations = tailCallLocations,
-                        mustBeOpenRowVars = mustBeOpenRowVars
+                        mustBeOpenRowVars = mustBeOpenRowVars,
+                        methodCallResolutions = allMethodCallResolutions
                     )
                     val typed = builder.build(parsedModule)
                     emittedTypedModule = typed

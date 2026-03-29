@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedPerform
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
@@ -259,8 +260,23 @@ data class ConstraintResult(
     val usedVariables: Set<String> = emptySet(),  // Variables that were referenced in this expression
     val unusedVariables: List<UnusedVariable> = emptyList(),  // Unused pattern bindings (warnings)
     val patternWarnings: List<String> = emptyList(),  // Warnings from pattern analysis (e.g., float literal patterns)
-    val referencedBindings: Set<DefinitionRef.ByName> = emptySet()  // Module-qualified references for dependency tracking
+    val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),  // Module-qualified references for dependency tracking
+    val methodCallResolutions: Map<Loc, MethodCallInfo> = emptyMap()  // Method call resolutions keyed by ParsedFunctionCall loc
 ) {
+    /**
+     * Information about a resolved method call (ability method or inherent method).
+     *
+     * Stored during constraint generation so the TypedAstBuilder can emit proper
+     * TypedCall nodes instead of TypedFieldAccess for `value.method { args }` syntax.
+     */
+    data class MethodCallInfo(
+        val abilityName: String?,        // null for inherent methods
+        val methodName: String,
+        val methodHash: String?,         // Content hash of the resolved method (from impl)
+        val receiverFieldName: String,   // The field name the receiver maps to (e.g., "it" for ability methods)
+        val isInherentMethod: Boolean = false,
+        val implContentHash: String? = null  // Content hash of the impl declaration (for inherent methods)
+    )
     /**
      * Information about an undefined variable.
      */
@@ -318,7 +334,8 @@ data class ConstraintResult(
                 usedVariables = results.flatMap { it.usedVariables }.toSet(),
                 unusedVariables = results.flatMap { it.unusedVariables },
                 patternWarnings = results.flatMap { it.patternWarnings },
-                referencedBindings = results.flatMap { it.referencedBindings }.toSet()
+                referencedBindings = results.flatMap { it.referencedBindings }.toSet(),
+                methodCallResolutions = results.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions }
             )
         }
 
