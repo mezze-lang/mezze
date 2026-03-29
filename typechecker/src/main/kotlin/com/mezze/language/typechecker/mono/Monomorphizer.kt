@@ -476,8 +476,16 @@ class Monomorphizer {
         // Get the receiver's type
         val receiverType = fn.record.type
 
-        // Try to find matching impl by receiver type
+        // Try to find matching impl by receiver type.
+        // Prefer exact type match over VarType (generic) match to ensure
+        // the correct impl is selected when multiple exist (e.g., NumAdd for Int vs Float).
         val matchingEntry = candidates.firstOrNull { entry ->
+            entry.targetTypes.any { targetType ->
+                typeMatchesTarget(receiverType, targetType) &&
+                targetType !is MezzeType.VarType && receiverType !is MezzeType.VarType
+            }
+        } ?: candidates.firstOrNull { entry ->
+            // Fallback: allow VarType matching (generic impl or unresolved receiver)
             entry.targetTypes.any { targetType -> typeMatchesTarget(receiverType, targetType) }
         }
 
