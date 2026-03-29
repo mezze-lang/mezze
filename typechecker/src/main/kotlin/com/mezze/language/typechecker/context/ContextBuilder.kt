@@ -234,9 +234,17 @@ class ContextBuilder {
 
         // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
 
-        // Add ability methods to context
+        // Add ability methods to context — both local AND imported abilities
+        // so that method-syntax calls (x.add, x.eq) and operators (+, ==)
+        // can resolve to the correct ability for user-defined types
         for (abilityDecl in abilityDecls.values) {
             ctx = addAbilityMethods(ctx, abilityDecl)
+        }
+        for (abilityDecl in importedAbilities.values) {
+            // Only add if not already present (local takes precedence)
+            if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
+                ctx = addAbilityMethods(ctx, abilityDecl)
+            }
         }
 
         // Add effect operations to context
@@ -428,6 +436,11 @@ class ContextBuilder {
         }
         for (abilityDecl in abilityDecls.values) {
             ctx = addAbilityMethods(ctx, abilityDecl)
+        }
+        for (abilityDecl in importedAbilities.values) {
+            if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
+                ctx = addAbilityMethods(ctx, abilityDecl)
+            }
         }
         for (effectDecl in effectDecls.values) {
             ctx = addEffectOperations(ctx, effectDecl)
