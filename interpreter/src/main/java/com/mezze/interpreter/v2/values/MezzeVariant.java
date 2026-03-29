@@ -161,12 +161,12 @@ public final class MezzeVariant implements TruffleObject {
                 throw new IllegalStateException("Cannot dynamically allocate tags in non-global registry");
             }
 
-            // LOCK-FREE allocation using computeIfAbsent
-            // This is atomic: only one thread will execute the mapping function
+            // Use deterministic hash-based tag assignment.
+            // MUST match Resolver.kt's tag computation: name.hashCode() & 0x7FFFFFFF
+            // This ensures compiled TruffleIR code and native functions produce
+            // variants with the same tags for the same constructor names.
             return nameToTagMap.computeIfAbsent(constructorName, name -> {
-                // Atomically increment counter and get new tag
-                int newTag = tagCounter.getAndIncrement();
-                // CopyOnWriteArrayList.add is thread-safe
+                int newTag = name.hashCode() & 0x7FFFFFFF;
                 dynamicNames.add(name);
                 return newTag;
             });
