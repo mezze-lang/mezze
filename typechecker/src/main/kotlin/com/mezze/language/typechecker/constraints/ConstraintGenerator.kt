@@ -1883,14 +1883,17 @@ class ConstraintGenerator(
                 fields = type.fields.mapValues { (_, fieldType) ->
                     substituteTypeParams(fieldType, substitution)
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, payloadType) ->
                     payloadType?.let { substituteTypeParams(it, substitution) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,

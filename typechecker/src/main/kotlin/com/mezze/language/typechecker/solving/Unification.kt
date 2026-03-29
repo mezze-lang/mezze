@@ -756,7 +756,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // CRITICAL: If closed variant has a typeName (is a declared type or inline annotation),
         // check that ALL constructors in the open variant exist in the closed variant.
         // This prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`.
-        if (closedVar.typeName != null) {
+        if (closedVar.typeHash != null || closedVar.typeName != null) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
                 val available = closedCtors.sorted().joinToString(", ")
@@ -817,7 +817,16 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     //
     // HOWEVER: If BOTH variants have a typeName (are declared types), they must be the SAME type.
     // This prevents `Animal` from unifying with `Color` even if they happen to share a constructor.
-    if (var1.typeName != null && var2.typeName != null && var1.typeName != var2.typeName) {
+    // Hash-first comparison: if both have typeHash, compare by hash (rename-safe).
+    // Fall back to typeName comparison if hashes are not available.
+    val bothNamed = (var1.typeHash != null && var2.typeHash != null) ||
+                    (var1.typeName != null && var2.typeName != null)
+    val namesMatch = if (var1.typeHash != null && var2.typeHash != null) {
+        var1.typeHash == var2.typeHash
+    } else {
+        var1.typeName == var2.typeName
+    }
+    if (bothNamed && !namesMatch) {
         return UnificationResult.Failure(
             message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
             type1 = var1,
@@ -825,11 +834,13 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         )
     }
 
-    // If only one has a typeName (is a declared type), check that ALL constructors from the
+    // If only one has a typeName/typeHash (is a declared type), check that ALL constructors from the
     // anonymous variant exist in the declared type
+    val isDeclared1 = var1.typeHash != null || var1.typeName != null
+    val isDeclared2 = var2.typeHash != null || var2.typeName != null
     val (declaredVar, anonymousVar) = when {
-        var1.typeName != null && var2.typeName == null -> Pair(var1, var2)
-        var2.typeName != null && var1.typeName == null -> Pair(var2, var1)
+        isDeclared1 && !isDeclared2 -> Pair(var1, var2)
+        isDeclared2 && !isDeclared1 -> Pair(var2, var1)
         else -> Pair(null, null)  // Both named (already checked above) or both anonymous
     }
 
@@ -1418,7 +1429,8 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     return MezzeType.VariantType(
         constructors = constructors,
         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-        typeName = typeDecl.name  // Preserve the type name for validation
+        typeName = typeDecl.name,  // Preserve the type name for validation
+        typeHash = typeDecl.contentHash  // Preserve content hash for rename-safe identity
     )
 }
 

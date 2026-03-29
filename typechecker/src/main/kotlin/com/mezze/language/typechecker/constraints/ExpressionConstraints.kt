@@ -1751,14 +1751,17 @@ class ExpressionConstraintGenerator {
                 fields = type.fields.mapValues { (_, fieldType) ->
                     substituteAssociatedTypesInType(fieldType, associatedTypeBindings)
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { substituteAssociatedTypesInType(it, associatedTypeBindings) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
@@ -1966,14 +1969,17 @@ class ExpressionConstraintGenerator {
                 fields = type.fields.mapValues { (_, fieldType) ->
                     applyTypeVarSubstitution(fieldType, substitution)
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyTypeVarSubstitution(it, substitution) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)

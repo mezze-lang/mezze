@@ -177,7 +177,9 @@ private fun applySubstitutionToType(
                 fields = type.fields.mapValues { (_, fieldType) ->
                     applySubstitutionToType(fieldType, substitution)
                 },
-                rowVar = type.rowVar  // RowVar doesn't get substituted
+                rowVar = type.rowVar,  // RowVar doesn't get substituted
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
         }
         is MezzeType.VariantType -> {
@@ -186,13 +188,15 @@ private fun applySubstitutionToType(
                     payloadType?.let { applySubstitutionToType(it, substitution) }
                 },
                 rowVar = type.rowVar,  // RowVar doesn't get substituted
-                typeName = type.typeName  // Preserve type name for validation
+                typeName = type.typeName,  // Preserve type name for validation
+                typeHash = type.typeHash  // Preserve content hash for rename-safe identity
             )
         }
         is MezzeType.TypeApplication -> {
             MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applySubstitutionToType(it, substitution) }
+                args = type.args.map { applySubstitutionToType(it, substitution) },
+                typeHash = type.typeHash
             )
         }
         is MezzeType.SeqType -> {

@@ -604,7 +604,8 @@ class ContextBuilder {
                     MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = null,
-                        typeName = typeDecl.name
+                        typeName = typeDecl.name,
+                        typeHash = typeDecl.contentHash
                     )
                 }
             }

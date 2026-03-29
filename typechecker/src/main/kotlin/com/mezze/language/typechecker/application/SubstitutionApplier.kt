@@ -399,7 +399,7 @@ class SubstitutionApplier(
      * This matches OldTypeChecker.kt:1569 which does `item.copy(inferredType = definitionType)`
      */
     private fun applyToTypeDeclaration(typeDecl: TypeDeclaration): TypeDeclaration {
-        val computedType = typeDecl.inferredType ?: convertTypeDefinition(typeDecl.definition, typeDecl.name)
+        val computedType = typeDecl.inferredType ?: convertTypeDefinition(typeDecl.definition, typeDecl.name, typeDecl.contentHash)
         val updatedInferredType = substitution.apply(computedType)
 
         return typeDecl.copy(
@@ -413,7 +413,7 @@ class SubstitutionApplier(
      * This matches OldTypeChecker.kt:10808-10852.
      * CRITICAL: Preserves isOpen flag and rowVar for variants.
      */
-    private fun convertTypeDefinition(definition: TypeDefinition, typeName: String? = null): MezzeType {
+    private fun convertTypeDefinition(definition: TypeDefinition, typeName: String? = null, typeHash: String? = null): MezzeType {
         return when (definition) {
             is NewtypeDefinition -> {
                 // Convert the wrapped type
@@ -422,7 +422,8 @@ class SubstitutionApplier(
                 MezzeType.VariantType(
                     constructors = mapOf(definition.constructor to wrappedMezzeType),
                     rowVar = null,  // Newtypes are always closed
-                    typeName = typeName
+                    typeName = typeName,
+                    typeHash = typeHash
                 )
             }
             is RecordDefinition -> {
@@ -431,9 +432,9 @@ class SubstitutionApplier(
                 }
                 // CRITICAL: Preserve isOpen flag from RecordDefinition
                 if (definition.isOpen) {
-                    MezzeType.RecordType(fields, RowVar("rest"))
+                    MezzeType.RecordType(fields, RowVar("rest"), typeName = typeName, typeHash = typeHash)
                 } else {
-                    MezzeType.RecordType(fields)
+                    MezzeType.RecordType(fields, typeName = typeName, typeHash = typeHash)
                 }
             }
             is VariantDefinition -> {
@@ -443,10 +444,10 @@ class SubstitutionApplier(
                 // CRITICAL: Preserve isOpen flag from VariantDefinition
                 if (definition.isOpen) {
                     // Create open variant with a row variable
-                    MezzeType.VariantType(constructors, RowVar("rest"), typeName = typeName)
+                    MezzeType.VariantType(constructors, RowVar("rest"), typeName = typeName, typeHash = typeHash)
                 } else {
                     // Create closed variant
-                    MezzeType.VariantType(constructors, typeName = typeName)
+                    MezzeType.VariantType(constructors, typeName = typeName, typeHash = typeHash)
                 }
             }
         }
@@ -1096,7 +1097,8 @@ class SubstitutionApplier(
                         MezzeType.VariantType(
                             constructors = constructors,
                             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                            typeName = if (typeDecl.typeParams.isEmpty()) typeDecl.name else null
+                            typeName = if (typeDecl.typeParams.isEmpty()) typeDecl.name else null,
+                            typeHash = if (typeDecl.typeParams.isEmpty()) typeDecl.contentHash else null
                         )
                     } else {
                         // Fallback: create an open variant with just this constructor
@@ -2106,11 +2108,21 @@ class SubstitutionApplier(
                     if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
                         true
                     } else {
-                        // Type constructor match
+                        // Type constructor match — hash-first, then fall back to name
+                        val declHash = typeDeclarations[annotation.name]?.contentHash
                         when (type) {
-                            is MezzeType.TypeApplication -> type.constructor == annotation.name
-                            is MezzeType.RecordType -> type.typeName == annotation.name
-                            is MezzeType.VariantType -> type.typeName == annotation.name
+                            is MezzeType.TypeApplication -> {
+                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                else type.constructor == annotation.name
+                            }
+                            is MezzeType.RecordType -> {
+                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                else type.typeName == annotation.name
+                            }
+                            is MezzeType.VariantType -> {
+                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                else type.typeName == annotation.name
+                            }
                             else -> false
                         }
                     }
@@ -2131,7 +2143,11 @@ class SubstitutionApplier(
                         when (annotation.constructor) {
                             BuiltinTypes.OPTION -> constructors == setOf(BuiltinTypes.SOME, BuiltinTypes.NONE)
                             BuiltinTypes.RESULT -> constructors == setOf(BuiltinTypes.OK, BuiltinTypes.ERR)
-                            else -> type.typeName == annotation.constructor
+                            else -> {
+                                val declHash = typeDeclarations[annotation.constructor]?.contentHash
+                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                else type.typeName == annotation.constructor
+                            }
                         }
                     }
                     is MezzeType.SeqType -> {
@@ -2305,19 +2321,19 @@ class SubstitutionApplier(
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
                     closeOpenRecords(fieldType)
                 }
-                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName)
+                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.TypeApplication -> {
                 // For Result {name: String} DecodeError, close nested records in args
                 val closedArgs = type.args.map { closeOpenRecords(it) }
-                MezzeType.TypeApplication(type.constructor, closedArgs)
+                MezzeType.TypeApplication(type.constructor, closedArgs, typeHash = type.typeHash)
             }
             is MezzeType.VariantType -> {
                 // Close records in variant payloads
                 val closedConstructors = type.constructors.mapValues { (_, payload) ->
                     payload?.let { closeOpenRecords(it) }
                 }
-                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
+                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.ListType -> MezzeType.ListType(closeOpenRecords(type.elementType))
             is MezzeType.SeqType -> MezzeType.SeqType(closeOpenRecords(type.elementType))
@@ -2468,7 +2484,7 @@ class SubstitutionApplier(
                 val typeDecl = typeDeclarations[type.constructor]
                 if (typeDecl != null) {
                     // Use the existing convertTypeDefinition method
-                    val definitionType = convertTypeDefinition(typeDecl.definition, typeDecl.name)
+                    val definitionType = convertTypeDefinition(typeDecl.definition, typeDecl.name, typeDecl.contentHash)
 
                     // CRITICAL: Substitute type parameters with actual args
                     // e.g., Option Int should substitute 'a with Int in the variant definition

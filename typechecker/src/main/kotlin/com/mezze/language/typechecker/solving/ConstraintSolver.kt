@@ -380,9 +380,9 @@ class ConstraintSolver(
             if (definition.isOpen) {
                 // OPEN variant: Accept if SOME constructors match
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    MezzeType.TypeApplication(typeName, freshArgs)
+                    MezzeType.TypeApplication(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
-                    MezzeType.TypeApplication(typeName, emptyList())
+                    MezzeType.TypeApplication(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             } else {
@@ -406,10 +406,10 @@ class ConstraintSolver(
 
                 // All constructors match - this is the right variant
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    MezzeType.TypeApplication(typeName, freshArgs)
+                    MezzeType.TypeApplication(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
                     // Non-parametric variant type
-                    MezzeType.TypeApplication(typeName, emptyList())
+                    MezzeType.TypeApplication(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             }
@@ -704,7 +704,8 @@ class ConstraintSolver(
                                         val mergedVariant = MezzeType.VariantType(
                                             constructors = mergedConstructors,
                                             rowVar = mergedRowVar,
-                                            typeName = leftType.typeName ?: rightType.typeName
+                                            typeName = leftType.typeName ?: rightType.typeName,
+                                            typeHash = leftType.typeHash ?: rightType.typeHash
                                         )
 
                                         val updatedMappings = mutableMapOf<TypeVar, MezzeType>()
@@ -1643,12 +1644,17 @@ class ConstraintSolver(
                         if (typeDecl != null) {
                             typeMatchesDeclaration(type, typeDecl)
                         } else {
-                            // Check by type name
+                            // Check by typeHash first (rename-safe), then fall back to typeName
                             when (type) {
-                                is MezzeType.RecordType -> type.typeName == annotation.name
+                                is MezzeType.RecordType -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.typeName == annotation.name)
                                 is MezzeType.VariantType -> {
-                                    // First check typeName directly
-                                    if (type.typeName == annotation.name) true
+                                    // Hash-first check: compare typeHash with the declaration's contentHash
+                                    val declHash = typeDeclarations[annotation.name]?.contentHash
+                                    if (type.typeHash != null && declHash != null) {
+                                        type.typeHash == declHash
+                                    }
+                                    // Fall back to typeName directly
+                                    else if (type.typeName == annotation.name) true
                                     // Fallback: if typeName is null but the variant has a constructor
                                     // matching the annotation name, try to find the type declaration
                                     // by scanning constructors. This handles cross-module imports where
@@ -1662,7 +1668,7 @@ class ConstraintSolver(
                                         true
                                     } else false
                                 }
-                                is MezzeType.TypeApplication -> type.constructor == annotation.name
+                                is MezzeType.TypeApplication -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.constructor == annotation.name)
                                 else -> false
                             }
                         }
@@ -1758,19 +1764,24 @@ class ConstraintSolver(
      * Check if a type matches a type declaration (for non-parametric types).
      */
     private fun typeMatchesDeclaration(type: MezzeType, typeDecl: TypeDeclaration): Boolean {
-        // Handle TypeApplication - check if the constructor matches the type declaration name
+        // Handle TypeApplication - check hash first, then constructor name
         if (type is MezzeType.TypeApplication) {
-            return type.constructor == typeDecl.name && type.args.isEmpty()
+            val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+            return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
         }
 
         return when (val definition = typeDecl.definition) {
             is RecordDefinition -> {
                 if (type !is MezzeType.RecordType) return false
-                type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
+                // Hash-first comparison
+                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
             }
             is VariantDefinition -> {
                 if (type !is MezzeType.VariantType) return false
-                type.typeName == typeDecl.name ||
+                // Hash-first comparison
+                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                hashMatch || type.typeName == typeDecl.name ||
                 definition.constructors.map { it.name }.toSet().containsAll(type.constructors.keys)
             }
             else -> false
@@ -1994,7 +2005,7 @@ class ConstraintSolver(
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
                     closeOpenRecordsForCodec(fieldType)
                 }
-                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName)
+                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.TypeApplication -> {
                 // OPTIMIZATION: Check if any args need closing
@@ -2015,7 +2026,7 @@ class ConstraintSolver(
                 val closedConstructors = type.constructors.mapValues { (_, payload) ->
                     payload?.let { closeOpenRecordsForCodec(it) }
                 }
-                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
+                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName, typeHash = type.typeHash)
             }
             is MezzeType.ListType -> {
                 if (!needsClosingForCodec(type.elementType)) return type
@@ -3812,14 +3823,17 @@ class ConstraintSolver(
                 fields = type.fields.mapValues { (_, fieldType) ->
                     applyVarSubstitution(fieldType, substitution)
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyVarSubstitution(it, substitution) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,

@@ -3019,11 +3019,11 @@ class TypeValidator(
                     if (builtinMatch != null) {
                         builtinMatch
                     } else {
-                        // Check by type name
+                        // Check by typeHash first (rename-safe), then fall back to typeName
                         when (type) {
-                            is MezzeType.RecordType -> type.typeName == annotation.name
-                            is MezzeType.VariantType -> type.typeName == annotation.name
-                            is MezzeType.TypeApplication -> type.constructor == annotation.name
+                            is MezzeType.RecordType -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.typeName == annotation.name)
+                            is MezzeType.VariantType -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.typeName == annotation.name)
+                            is MezzeType.TypeApplication -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.constructor == annotation.name)
                             else -> false
                         }
                     }

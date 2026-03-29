@@ -674,10 +674,17 @@ class AbilityResolver(
                         if (typeDecl != null) {
                             typeMatchesDeclaration(type, typeDecl)
                         } else {
+                            // Hash-first comparison: check typeHash against declaration's contentHash if available
+                            val declHash = typeDeclarations[annotation.name]?.contentHash
                             when (type) {
-                                is MezzeType.RecordType -> type.typeName == annotation.name
+                                is MezzeType.RecordType -> {
+                                    if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                    else type.typeName == annotation.name
+                                }
                                 is MezzeType.VariantType -> {
-                                    if (type.typeName == annotation.name) true
+                                    // Hash-first check
+                                    if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                    else if (type.typeName == annotation.name) true
                                     // Fallback: if typeName is null but the variant has a constructor
                                     // matching the annotation name, treat it as a match.
                                     // This handles cross-module imports where the type declaration
@@ -685,7 +692,10 @@ class AbilityResolver(
                                     else if (type.typeName == null && type.constructors.containsKey(annotation.name)) true
                                     else false
                                 }
-                                is MezzeType.TypeApplication -> type.constructor == annotation.name && type.args.isEmpty()
+                                is MezzeType.TypeApplication -> {
+                                    if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                    else type.constructor == annotation.name && type.args.isEmpty()
+                                }
                                 else -> false
                             }
                         }
@@ -760,17 +770,21 @@ class AbilityResolver(
     }
 
     private fun typeMatchesDeclaration(type: MezzeType, typeDecl: TypeDeclaration): Boolean {
+        // Hash-first: check typeHash against declaration's contentHash
         if (type is MezzeType.TypeApplication) {
-            return type.constructor == typeDecl.name && type.args.isEmpty()
+            val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+            return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
         }
         return when (val definition = typeDecl.definition) {
             is RecordDefinition -> {
                 if (type !is MezzeType.RecordType) return false
-                type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
+                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
             }
             is VariantDefinition -> {
                 if (type !is MezzeType.VariantType) return false
-                type.typeName == typeDecl.name ||
+                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                hashMatch || type.typeName == typeDecl.name ||
                 definition.constructors.map { it.name }.toSet().containsAll(type.constructors.keys)
             }
             else -> false

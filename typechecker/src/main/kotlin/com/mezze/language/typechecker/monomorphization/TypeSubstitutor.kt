@@ -122,7 +122,9 @@ class TypeSubstitutor(
 
             is MezzeType.RecordType -> MezzeType.RecordType(
                 fields = type.fields.mapValues { (_, fieldType) -> applyToType(fieldType) },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
 
             is MezzeType.VariantType -> MezzeType.VariantType(
@@ -130,7 +132,8 @@ class TypeSubstitutor(
                     dataType?.let { applyToType(it) }
                 },
                 rowVar = type.rowVar,
-                typeName = type.typeName
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
 
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(

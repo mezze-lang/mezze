@@ -169,7 +169,9 @@ data class Substitution(
 
             is MezzeType.RecordType -> MezzeType.RecordType(
                 fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars) },
-                rowVar = type.rowVar // Row variables handled separately in row unification
+                rowVar = type.rowVar, // Row variables handled separately in row unification
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
 
             is MezzeType.VariantType -> {
@@ -179,7 +181,8 @@ data class Substitution(
                 MezzeType.VariantType(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar, // Row variables handled separately
-                    typeName = type.typeName // Preserve type name for validation
+                    typeName = type.typeName, // Preserve type name for validation
+                    typeHash = type.typeHash // Preserve content hash for rename-safe identity
                 )
             }
 
@@ -391,7 +394,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         MezzeType.RecordType(
             fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, mustBeOpenRowVars) },
             rowVar = closedRowVar,
-            typeName = type.typeName
+            typeName = type.typeName,
+            typeHash = type.typeHash
         )
     }
     is MezzeType.VariantType -> {
@@ -409,7 +413,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
                 payloadType?.let { closeGeneratedRowVars(it, mustBeOpenRowVars) }
             },
             rowVar = closedRowVar,
-            typeName = type.typeName
+            typeName = type.typeName,
+            typeHash = type.typeHash
         )
     }
     is MezzeType.FunctionType -> MezzeType.FunctionType(

@@ -102,7 +102,8 @@ sealed interface MezzeType {
     data class RecordType(
         val fields: Map<String, MezzeType>,
         val rowVar: RowVar? = null, // null = closed, non-null = open
-        val typeName: String? = null // Original type alias name (e.g., "Person" for `type Person = { ... }`)
+        val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = { ... }`)
+        val typeHash: String? = null  // Content hash of the type declaration (for rename-safe identity)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
@@ -119,7 +120,8 @@ sealed interface MezzeType {
     data class VariantType(
         val constructors: Map<String, MezzeType?>, // null = no data, MezzeType = constructor data
         val rowVar: RowVar? = null, // null = closed, non-null = open
-        val typeName: String? = null // Original type alias name (e.g., "Person" for `type Person = | ... |`)
+        val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = | ... |`)
+        val typeHash: String? = null  // Content hash of the type declaration (for rename-safe identity)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
@@ -397,13 +399,17 @@ data class TypeScheme(
                 type.fields.mapValues { (_, fieldType) ->
                     applySubstitutionToType(fieldType, substitution)
                 },
-                type.rowVar
+                type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.VariantType -> MezzeType.VariantType(
                 type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applySubstitutionToType(it, substitution) }
                 },
-                type.rowVar
+                type.rowVar,
+                typeName = type.typeName,
+                typeHash = type.typeHash
             )
             is MezzeType.NewtypeType -> MezzeType.NewtypeType(
                 type.name,
