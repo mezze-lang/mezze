@@ -33,6 +33,20 @@ class Monomorphizer {
     )
 
     /**
+     * Index of ability operation hashes: (methodName, targetTypeName) → opHash.
+     * Built during monomorphize(), used by convertExpr() to resolve method calls.
+     */
+    private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOpEntry>>()
+
+    private data class AbilityOpEntry(
+        val implHash: Hash,
+        val abilityName: String?,
+        val targetTypes: List<MezzeType>,
+        val methodName: String,
+        val opHash: Hash
+    )
+
+    /**
      * Monomorphize starting from an entry point.
      *
      * @param entryModule The module containing `main`
@@ -58,6 +72,17 @@ class Monomorphizer {
             globalAbilityImpls.addAll(module.abilityImpls)
             globalEffectDecls.addAll(module.effectDecls)
             globalPerformerDecls.addAll(module.performerDecls)
+        }
+
+        // Build ability operation index for method call resolution
+        abilityOpIndex.clear()
+        for (impl in globalAbilityImpls) {
+            for ((opName, _) in impl.operations) {
+                val opHash = computeOpHash(impl.hash, opName)
+                abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
+                    AbilityOpEntry(impl.hash, null, impl.targetTypes, opName, opHash)
+                )
+            }
         }
 
         // Phase 1: Collect all specialization requests by walking from entry point
@@ -220,15 +245,20 @@ class Monomorphizer {
                 expr.loc
             )
             is TypedCall -> {
-                // If this call has a type instantiation, we'd need to generate
-                // a specialized version. For now, treat as direct call.
-                MonoCall(
-                    convertExpr(expr.function, globalDecls, worklist, processed),
-                    convertExpr(expr.arg, globalDecls, worklist, processed),
-                    expr.isTailCall,
-                    expr.type,
-                    expr.loc
-                )
+                // Detect method-syntax calls: TypedCall(TypedFieldAccess(receiver, methodName), args)
+                // where methodName matches an ability operation. Resolve to direct ByHash call.
+                val resolved = tryResolveMethodCall(expr, globalDecls, worklist, processed)
+                if (resolved != null) {
+                    resolved
+                } else {
+                    MonoCall(
+                        convertExpr(expr.function, globalDecls, worklist, processed),
+                        convertExpr(expr.arg, globalDecls, worklist, processed),
+                        expr.isTailCall,
+                        expr.type,
+                        expr.loc
+                    )
+                }
             }
             // TypedAbilityCall removed — ability calls are now TypedCall with ByHash
             is TypedRecord -> MonoRecord(
@@ -419,6 +449,103 @@ class Monomorphizer {
                 pattern.elements.map { convertPattern(it) },
                 pattern.rest, pattern.type, pattern.loc
             )
+        }
+    }
+
+    /**
+     * Detect method-syntax ability calls: `receiver.method { args }` produces
+     * TypedCall(TypedFieldAccess(receiver, methodName), args).
+     *
+     * When methodName matches an ability operation and the receiver type matches
+     * a known impl, resolve to a direct MonoCall(ByHash(opHash), wrappedArgs).
+     */
+    private fun tryResolveMethodCall(
+        expr: TypedCall,
+        globalDecls: Map<Hash, TypedLetDecl>,
+        worklist: ArrayDeque<Hash>,
+        processed: Set<Hash>
+    ): MonoExpr? {
+        val fn = expr.function
+        if (fn !is TypedFieldAccess) return null
+
+        val methodName = fn.field
+        val candidates = abilityOpIndex[methodName] ?: return null
+        if (candidates.isEmpty()) return null
+
+        // Get the receiver's type
+        val receiverType = fn.record.type
+
+        // Try to find matching impl by receiver type
+        val matchingEntry = candidates.firstOrNull { entry ->
+            entry.targetTypes.any { targetType -> typeMatchesTarget(receiverType, targetType) }
+        }
+
+        if (matchingEntry != null) {
+            // Found matching ability operation — emit direct call
+            val opHash = matchingEntry.opHash
+            if (opHash !in processed) {
+                worklist.add(opHash)
+            }
+
+            // Build the wrapped argument: inject receiver as first field
+            val receiverExpr = convertExpr(fn.record, globalDecls, worklist, processed)
+            val argExpr = convertExpr(expr.arg, globalDecls, worklist, processed)
+
+            // The ability method expects {it: ReceiverType, ...args}
+            // Get the first param name from the operation's params
+            val receiverFieldName = "it"  // Default; ability methods use "it" as receiver
+
+            // Wrap: {it = receiver, ...existingArgs}
+            val wrappedArg = when (argExpr) {
+                is MonoRecord -> {
+                    val entries = listOf(MonoRecordEntry.Field(receiverFieldName, receiverExpr)) + argExpr.entries
+                    val fieldTypes = mutableMapOf<String, MezzeType>(receiverFieldName to receiverType)
+                    for (e in argExpr.entries) {
+                        if (e is MonoRecordEntry.Field) {
+                            fieldTypes[e.name] = MezzeType.VarType(TypeVar.fresh()) // approx
+                        }
+                    }
+                    MonoRecord(entries, MezzeType.RecordType(fieldTypes), argExpr.loc)
+                }
+                else -> {
+                    val entries = listOf(MonoRecordEntry.Field(receiverFieldName, receiverExpr))
+                    MonoRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverType)), expr.arg.loc)
+                }
+            }
+
+            val methodRef = MonoBinding.Function(MonoFunctionRef.ByHash(opHash))
+            return MonoCall(
+                MonoVar(methodName, methodRef, fn.type, fn.loc),
+                wrappedArg,
+                expr.isTailCall,
+                expr.type,
+                expr.loc
+            )
+        }
+
+        return null
+    }
+
+    /** Check if a concrete type matches a target type from an ability impl */
+    private fun typeMatchesTarget(concreteType: MezzeType, targetType: MezzeType): Boolean {
+        // Direct equality
+        if (concreteType == targetType) return true
+        // Match by type name for common patterns
+        return when {
+            concreteType is MezzeType.IntType && targetType is MezzeType.IntType -> true
+            concreteType is MezzeType.FloatType && targetType is MezzeType.FloatType -> true
+            concreteType is MezzeType.StringType && targetType is MezzeType.StringType -> true
+            concreteType is MezzeType.BoolType && targetType is MezzeType.BoolType -> true
+            concreteType is MezzeType.NatType && targetType is MezzeType.NatType -> true
+            concreteType is MezzeType.CharType && targetType is MezzeType.CharType -> true
+            concreteType is MezzeType.FracType && targetType is MezzeType.FracType -> true
+            // TypeApplication match by constructor name
+            concreteType is MezzeType.TypeApplication && targetType is MezzeType.TypeApplication ->
+                concreteType.constructor == targetType.constructor
+            // VarType on EITHER side matches anything (generic impl or unresolved receiver)
+            targetType is MezzeType.VarType -> true
+            concreteType is MezzeType.VarType -> true
+            else -> false
         }
     }
 

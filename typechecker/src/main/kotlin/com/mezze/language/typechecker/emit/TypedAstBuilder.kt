@@ -518,9 +518,10 @@ class TypedAstBuilder(
             // ------------------------------------------------------------------
 
             is ParsedFunctionCall -> {
-                // Check if the constraint generator resolved this as a method call
-                // (e.g., x.neg {} → ability method call, not field access)
-                val methodInfo = methodCallResolutions[expr.loc]
+                // Method call resolution is handled by the Monomorphizer's tryResolveMethodCall.
+                // TypedAstBuilder emits TypedCall(TypedFieldAccess(receiver, method), args)
+                // and the Monomorphizer detects this pattern and resolves to direct ByHash call.
+                val methodInfo: ConstraintResult.MethodCallInfo? = null  // Disabled — Monomorphizer handles this
                 if (methodInfo != null && expr.function is ParsedMemberAccess) {
                     val memberAccess = expr.function as ParsedMemberAccess
                     val receiverExpr = buildExpr(memberAccess.receiver, file)
