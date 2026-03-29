@@ -474,10 +474,15 @@ class Monomorphizer {
         // Get the receiver's type
         val receiverType = fn.record.type
 
-        // If receiver type is unknown (VarType), skip method resolution — let the
-        // TruffleCompiler's inline op detection handle it (works for all primitive types).
-        // Only resolve when we have a concrete receiver type to pick the right impl.
+        // Skip method resolution for VarType (unknown) and primitive types.
+        // VarType: let TruffleCompiler's inline op detection handle it.
+        // Primitives: inline ops (DirectAddNode etc.) are faster and avoid lambda inlining
+        // which can cause variable name collisions in nested expressions.
         if (receiverType is MezzeType.VarType) return null
+        if (receiverType is MezzeType.IntType || receiverType is MezzeType.FloatType ||
+            receiverType is MezzeType.StringType || receiverType is MezzeType.BoolType ||
+            receiverType is MezzeType.NatType || receiverType is MezzeType.CharType ||
+            receiverType is MezzeType.FracType) return null
 
 
         // Try to find matching impl by receiver type.
