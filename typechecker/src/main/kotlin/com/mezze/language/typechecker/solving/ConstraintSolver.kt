@@ -1540,6 +1540,7 @@ class ConstraintSolver(
             if (arg is MezzeType.SuspendedType) arg.valueType else arg
         }
 
+
         val hasImpl = impls.any { implInfo ->
             // Use structural matching - compare actual types against type annotations
             val annotations = implInfo.targetTypeAnnotations ?: return@any false
@@ -1771,10 +1772,21 @@ class ConstraintSolver(
 
         return when (val definition = typeDecl.definition) {
             is RecordDefinition -> {
-                if (type !is MezzeType.RecordType) return false
-                // Hash-first comparison
-                val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
-                hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
+                // Direct record match
+                if (type is MezzeType.RecordType) {
+                    val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
+                    return hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
+                }
+                // VariantType with single constructor matching the record type name
+                // e.g., Money { cents = 500 } produces VariantType({Money: {cents: Int}})
+                // but type Money = { cents: Int } is a RecordDefinition
+                if (type is MezzeType.VariantType && type.constructors.size == 1) {
+                    val (ctorName, ctorPayload) = type.constructors.entries.first()
+                    if (ctorName == typeDecl.name && ctorPayload is MezzeType.RecordType) {
+                        return ctorPayload.fields.keys == definition.fields.map { it.name }.toSet()
+                    }
+                }
+                return false
             }
             is VariantDefinition -> {
                 if (type !is MezzeType.VariantType) return false
