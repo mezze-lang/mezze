@@ -1189,7 +1189,8 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
             is MezzeType.TypeApplication -> {
                 MezzeType.TypeApplication(
                     constructor = type.constructor,
-                    args = type.args.map { substituteTypeParams(it) }
+                    args = type.args.map { substituteTypeParams(it) },
+                    typeHash = type.typeHash
                 )
             }
             is MezzeType.SeqType -> {
@@ -1338,7 +1339,8 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
             is MezzeType.TypeApplication -> {
                 MezzeType.TypeApplication(
                     constructor = type.constructor,
-                    args = type.args.map { substituteTypeParams(it) }
+                    args = type.args.map { substituteTypeParams(it) },
+                    typeHash = type.typeHash
                 )
             }
             is MezzeType.SeqType -> {

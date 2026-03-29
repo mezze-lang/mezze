@@ -254,7 +254,8 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
             val newAbilityConstraints = type.abilityConstraints.map { constraint ->
                 MezzeType.FunctionAbilityConstraint(
                     constraint.abilityName,
-                    constraint.typeArgs.map { arg -> substituteTypeVariables(arg, mapping) }
+                    constraint.typeArgs.map { arg -> substituteTypeVariables(arg, mapping) },
+                    abilityHash = constraint.abilityHash
                 )
             }
             MezzeType.FunctionType(newParamType, newReturnType, type.effects, newAbilityConstraints)
@@ -274,7 +275,7 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
         }
         is MezzeType.TypeApplication -> {
             val newArgs = type.args.map { substituteTypeVariables(it, mapping) }
-            MezzeType.TypeApplication(type.constructor, newArgs)
+            MezzeType.TypeApplication(type.constructor, newArgs, type.typeHash)
         }
         is MezzeType.ListType -> {
             val newElementType = substituteTypeVariables(type.elementType, mapping)

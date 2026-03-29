@@ -40,6 +40,20 @@ class ContextBuilder {
     private var currentEffectDecls: Map<String, EffectDeclaration> = emptyMap()
 
     /**
+     * Ability declarations available during the current build() invocation.
+     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * can resolve ability names to their content hashes for FunctionAbilityConstraint.abilityHash.
+     */
+    private var currentAbilityDecls: Map<String, AbilityDeclaration> = emptyMap()
+
+    /**
+     * Type declarations available during the current build() invocation.
+     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * can resolve type constructor names to their content hashes for TypeApplication.typeHash.
+     */
+    private var currentTypeDecls: Map<String, TypeDeclaration> = emptyMap()
+
+    /**
      * Build result - contains all typing environments
      */
     data class BuildResult(
@@ -173,6 +187,11 @@ class ContextBuilder {
         // Make effect declarations available to convertTypeAnnotationInternal so it can
         // populate EffectRow.effectHashes with content hashes for hermetic checks.
         currentEffectDecls = allEffectDecls
+
+        // Make ability and type declarations available to convertTypeAnnotationInternal
+        // so it can populate abilityHash / typeHash content hashes.
+        currentAbilityDecls = abilityDecls + importedAbilities
+        currentTypeDecls = typeDecls + importedTypes
 
         // Build performer to effect mapping
         // CRITICAL: Merge imported impls with local impls
@@ -372,6 +391,11 @@ class ContextBuilder {
         // Make effect declarations available to convertTypeAnnotationInternal so it can
         // populate EffectRow.effectHashes with content hashes for hermetic checks.
         currentEffectDecls = allEffectDecls
+
+        // Make ability and type declarations available to convertTypeAnnotationInternal
+        // so it can populate abilityHash / typeHash content hashes.
+        currentAbilityDecls = abilityDecls + importedAbilities
+        currentTypeDecls = typeDecls + importedTypes
 
         val localMapping = implDecls.associate { impl ->
             val effectDecl = allEffectDecls[impl.effect.localName]
@@ -623,7 +647,8 @@ class ContextBuilder {
                 val constraints = op.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
+                        typeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) },
+                        abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                     )
                 }
                 val functionType = MezzeType.FunctionType(
@@ -1312,7 +1337,7 @@ class ContextBuilder {
                             MezzeType.VarType(typeVar)
                         } else {
                             // Type constructor with no args - treat as type application
-                            MezzeType.TypeApplication(annotation.name, emptyList())
+                            MezzeType.TypeApplication(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
                         }
                     }
                 }
@@ -1339,7 +1364,8 @@ class ContextBuilder {
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = constraint.abilityName,
-                            typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) }
+                            typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) },
+                            abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                         )
                     }
                 )
@@ -1363,26 +1389,27 @@ class ContextBuilder {
             is TypeApplicationAnnotation -> {
                 // Special handling for built-in collection types
                 // These have dedicated MezzeType representations for optimization
+                val resolvedTypeHash = currentTypeDecls[annotation.constructor]?.contentHash
                 when (annotation.constructor) {
                     "List" -> {
                         if (annotation.args.size == 1) {
                             MezzeType.ListType(convertTypeAnnotationInternal(annotation.args[0]))
                         } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
                         }
                     }
                     "Seq" -> {
                         if (annotation.args.size == 1) {
                             MezzeType.SeqType(convertTypeAnnotationInternal(annotation.args[0]))
                         } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
                         }
                     }
                     "Set" -> {
                         if (annotation.args.size == 1) {
                             MezzeType.SetType(convertTypeAnnotationInternal(annotation.args[0]))
                         } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
                         }
                     }
                     "Map" -> {
@@ -1392,14 +1419,15 @@ class ContextBuilder {
                                 valueType = convertTypeAnnotationInternal(annotation.args[1])
                             )
                         } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
                         }
                     }
                     // Note: Deque support will be added when DequeType is defined in MezzeType
                     else -> {
                         MezzeType.TypeApplication(
                             constructor = annotation.constructor,
-                            args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                            args = annotation.args.map { convertTypeAnnotationInternal(it) },
+                            typeHash = resolvedTypeHash
                         )
                     }
                 }
@@ -1417,7 +1445,8 @@ class ContextBuilder {
             is QualifiedTypeAnnotation -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.qualifiedName,
-                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                    args = annotation.args.map { convertTypeAnnotationInternal(it) },
+                    typeHash = currentTypeDecls[annotation.qualifiedName]?.contentHash
                 )
             }
         }

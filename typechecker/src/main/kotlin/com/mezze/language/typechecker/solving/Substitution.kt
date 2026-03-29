@@ -161,7 +161,8 @@ data class Substitution(
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars) }
+                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars) },
+                        abilityHash = constraint.abilityHash
                     )
                 }
             )
@@ -184,7 +185,8 @@ data class Substitution(
 
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applyWithVisited(it, visitedVars) }
+                args = type.args.map { applyWithVisited(it, visitedVars) },
+                typeHash = type.typeHash
             )
 
             is MezzeType.SeqType -> MezzeType.SeqType(
@@ -430,7 +432,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
     )
     is MezzeType.TypeApplication -> MezzeType.TypeApplication(
         constructor = type.constructor,
-        args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) }
+        args = type.args.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
+        typeHash = type.typeHash
     )
     is MezzeType.SuspendedType -> MezzeType.SuspendedType(
         valueType = closeGeneratedRowVars(type.valueType, mustBeOpenRowVars),

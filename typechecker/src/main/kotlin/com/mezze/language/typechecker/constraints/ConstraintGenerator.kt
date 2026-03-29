@@ -236,7 +236,8 @@ class ConstraintGenerator(
                                         // User-defined type alias - preserve it, apply substitution to type arguments only
                                         MezzeType.TypeApplication(
                                             constructor = preConvertedAnnotationType.constructor,
-                                            args = preConvertedAnnotationType.args.map { substitution.apply(it) }
+                                            args = preConvertedAnnotationType.args.map { substitution.apply(it) },
+                                            typeHash = preConvertedAnnotationType.typeHash
                                         )
                                     } else {
                                         // Built-in type (Seq, List, etc.) - apply substitution normally
@@ -1025,7 +1026,8 @@ class ConstraintGenerator(
                     // and shouldn't appear in type signatures (matches OldTypeChecker line 2651-2652)
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = listOf(MezzeType.VarType(matchingTypeVar))
+                        typeArgs = listOf(MezzeType.VarType(matchingTypeVar)),
+                        abilityHash = constraint.abilityHash
                     )
                 } else null
             } else null
@@ -1119,7 +1121,7 @@ class ConstraintGenerator(
                             }
                             MezzeType.VarType(typeVar)
                         } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList())
+                            MezzeType.TypeApplication(annotation.name, emptyList(), typeDeclarations[annotation.name]?.contentHash)
                         }
                     }
                 }
@@ -1132,7 +1134,8 @@ class ConstraintGenerator(
                         typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) },
                         associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
                             convertTypeAnnotationInternal(typeAnnotation)
-                        }
+                        },
+                        abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash
                     )
                 }
 
@@ -1189,7 +1192,8 @@ class ConstraintGenerator(
             is ParsedTypeApp -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.constructor,
-                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                    args = annotation.args.map { convertTypeAnnotationInternal(it) },
+                    typeHash = typeDeclarations[annotation.constructor]?.contentHash
                 )
             }
             is ParsedSeqType -> {
@@ -1201,9 +1205,11 @@ class ConstraintGenerator(
                 MezzeType.EffectRow(annotation.effects.toSet())
             }
             is ParsedQualifiedType -> {
+                val qualifiedName = annotation.modulePath.joinToString("::") + "::" + annotation.typeName
                 MezzeType.TypeApplication(
-                    constructor = annotation.modulePath.joinToString("::") + "::" + annotation.typeName,
-                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertTypeAnnotationInternal(it) },
+                    typeHash = typeDeclarations[qualifiedName]?.contentHash
                 )
             }
         }
@@ -1888,7 +1894,8 @@ class ConstraintGenerator(
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { substituteTypeParams(it, substitution) }
+                args = type.args.map { substituteTypeParams(it, substitution) },
+                typeHash = type.typeHash
             )
             is MezzeType.ListType -> MezzeType.ListType(
                 elementType = substituteTypeParams(type.elementType, substitution)
@@ -2388,8 +2395,7 @@ class ConstraintGenerator(
             if (!containsFunctionCalls(expression)) {
                 for (annotated in annotatedAbilities) {
                     // Skip Inspect - it's implicit
-                    // TODO: FunctionAbilityConstraint should carry abilityHash for hash-only check.
-                    if (annotated.abilityName == "Inspect") continue
+                    if (WellKnownHashes.isInspect(annotated.abilityHash)) continue
 
                     // Skip abilities on concrete types - they don't need to be used
                     val hasConcreteTypes = annotated.typeArgs.any { it !is MezzeType.VarType }

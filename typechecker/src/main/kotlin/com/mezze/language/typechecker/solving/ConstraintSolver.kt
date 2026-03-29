@@ -2014,7 +2014,7 @@ class ConstraintSolver(
                 }
                 // For Result {name: String} DecodeError, close nested records in args
                 val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
-                MezzeType.TypeApplication(type.constructor, closedArgs)
+                MezzeType.TypeApplication(type.constructor, closedArgs, type.typeHash)
             }
             is MezzeType.VariantType -> {
                 // OPTIMIZATION: Check if already closed and no payloads need closing
@@ -3589,7 +3589,8 @@ class ConstraintSolver(
             is MezzeType.TypeApplication -> {
                 MezzeType.TypeApplication(
                     constructor = type.constructor,
-                    args = type.args.map { closeRowVarsInType(it, rowVarsToClose) }
+                    args = type.args.map { closeRowVarsInType(it, rowVarsToClose) },
+                    typeHash = type.typeHash
                 )
             }
             is MezzeType.SuspendedType -> {
@@ -3834,7 +3835,8 @@ class ConstraintSolver(
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applyVarSubstitution(it, substitution) }
+                args = type.args.map { applyVarSubstitution(it, substitution) },
+                typeHash = type.typeHash
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyVarSubstitution(type.elementType, substitution)

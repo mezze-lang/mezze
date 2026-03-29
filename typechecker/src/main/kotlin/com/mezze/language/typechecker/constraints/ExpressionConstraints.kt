@@ -1736,7 +1736,8 @@ class ExpressionConstraintGenerator {
                     // Regular type application - recurse into args
                     MezzeType.TypeApplication(
                         constructor = type.constructor,
-                        args = type.args.map { substituteAssociatedTypesInType(it, associatedTypeBindings) }
+                        args = type.args.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
+                        typeHash = type.typeHash
                     )
                 }
             }
@@ -1956,7 +1957,8 @@ class ExpressionConstraintGenerator {
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applyTypeVarSubstitution(it, substitution) }
+                        typeArgs = constraint.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
+                        abilityHash = constraint.abilityHash
                     )
                 }
             )
@@ -1999,7 +2001,8 @@ class ExpressionConstraintGenerator {
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applyTypeVarSubstitution(it, substitution) }
+                args = type.args.map { applyTypeVarSubstitution(it, substitution) },
+                typeHash = type.typeHash
             )
             is MezzeType.NewtypeType -> MezzeType.NewtypeType(
                 type.name,

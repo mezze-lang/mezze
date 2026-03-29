@@ -174,7 +174,7 @@ sealed interface MezzeType {
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
     @Serializable
-    data class TypeApplication(val constructor: String, val args: List<MezzeType>) : MezzeType {
+    data class TypeApplication(val constructor: String, val args: List<MezzeType>, val typeHash: String? = null) : MezzeType {
         override fun toString(): String = safeToString(
             "TypeApplication",
             truncatedContent = { "$constructor, ${args.size} args" },
@@ -328,7 +328,8 @@ sealed interface MezzeType {
     data class FunctionAbilityConstraint(
         val abilityName: String,
         val typeArgs: List<MezzeType> = emptyList(),  // Type arguments for the ability
-        val associatedTypeBindings: Map<String, MezzeType> = emptyMap()  // Associated type bindings (e.g., 'item = Int)
+        val associatedTypeBindings: Map<String, MezzeType> = emptyMap(),  // Associated type bindings (e.g., 'item = Int)
+        val abilityHash: String? = null  // Content hash of the ability declaration
     ) {
         /** True if this constraint has any associated type bindings specified */
         val hasAssociatedTypes: Boolean get() = associatedTypeBindings.isNotEmpty()
@@ -411,7 +412,8 @@ data class TypeScheme(
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 type.constructor,
-                type.args.map { applySubstitutionToType(it, substitution) }
+                type.args.map { applySubstitutionToType(it, substitution) },
+                type.typeHash
             )
             is MezzeType.ListType -> MezzeType.ListType(
                 applySubstitutionToType(type.elementType, substitution)

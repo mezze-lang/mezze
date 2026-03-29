@@ -114,7 +114,8 @@ class TypeSubstitutor(
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applyToType(it) }
+                        typeArgs = constraint.typeArgs.map { applyToType(it) },
+                        abilityHash = constraint.abilityHash
                     )
                 }
             )
@@ -134,7 +135,8 @@ class TypeSubstitutor(
 
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applyToType(it) }
+                args = type.args.map { applyToType(it) },
+                typeHash = type.typeHash
             )
 
             is MezzeType.ListType -> MezzeType.ListType(applyToType(type.elementType))
