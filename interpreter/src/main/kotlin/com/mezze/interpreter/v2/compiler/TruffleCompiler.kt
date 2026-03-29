@@ -292,19 +292,27 @@ class TruffleCompiler(
                 val bodyNode = compileNode(node.body, source)
                 if (node.handlers.isNotEmpty()) {
                     val handler = node.handlers.first()
-                    // Use performer NAME for handler lookup (registered by EffectImplStorageNode via defineLocal)
-                    // The handler hash is used for the content hash array
                     val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
-                    // HandlerLookupNode uses the FIRST contentHash for lookup
-                    // But we need to use performer name — use the create overload that takes a single contentHash
-                    // and pass the performer name as contentHash (it's registered under that name in context)
-                    // Try effect hash for lookup (EffectImplStorageNode registers under both impl and effect hash)
-                    HandleNode.create(
-                        -1,
-                        handler.effectHash.hex,              // Look up by EFFECT hash
-                        arrayOf(handler.effectHash.hex),
+                    // Compile handler params as the handler value expression.
+                    // If params is null, fall back to looking up by effect hash in context.
+                    val paramsIR = handler.params
+                    val handlerNode: MezzeNode = if (paramsIR != null) {
+                        compileNode(paramsIR, source)
+                    } else {
+                        com.mezze.interpreter.v2.converter.GlobalLookupNode(handler.performerName)
+                    }
+                    HandleNode(
+                        -1,                     // no local slot
+                        arrayOf(handler.effectHash.hex),  // effect names for context registration
                         handler.performerName,
-                        bodyNode
+                        contentHashes,
+                        handlerNode,
+                        bodyNode,
+                        -1,     // no scope slot
+                        null,   // no initialize_scope
+                        null,   // no finalize_scope
+                        false,  // no initialize
+                        false   // no finalize
                     )
                 } else {
                     bodyNode
