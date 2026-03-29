@@ -493,31 +493,9 @@ class Monomorphizer {
             // (it's not a let-binding), causing the impl loop to skip it.
             val opHash = matchingEntry.opHash
 
-            // Build the wrapped argument: inject receiver as first field
-            val receiverExpr = convertExpr(fn.record, globalDecls, worklist, processed)
-            val argExpr = convertExpr(expr.arg, globalDecls, worklist, processed)
-
-            // The ability method expects {it: ReceiverType, ...args}
-            // Get the first param name from the operation's params
-            val receiverFieldName = "it"  // Default; ability methods use "it" as receiver
-
-            // Wrap: {it = receiver, ...existingArgs}
-            val wrappedArg = when (argExpr) {
-                is MonoRecord -> {
-                    val entries = listOf(MonoRecordEntry.Field(receiverFieldName, receiverExpr)) + argExpr.entries
-                    val fieldTypes = mutableMapOf<String, MezzeType>(receiverFieldName to receiverType)
-                    for (e in argExpr.entries) {
-                        if (e is MonoRecordEntry.Field) {
-                            fieldTypes[e.name] = MezzeType.VarType(TypeVar.fresh()) // approx
-                        }
-                    }
-                    MonoRecord(entries, MezzeType.RecordType(fieldTypes), argExpr.loc)
-                }
-                else -> {
-                    val entries = listOf(MonoRecordEntry.Field(receiverFieldName, receiverExpr))
-                    MonoRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverType)), expr.arg.loc)
-                }
-            }
+            // The argument is already wrapped by the TypedAstBuilder's MethodCallInfo
+            // path: {it=receiver, r=rightArg, ...}. Just convert it as-is.
+            val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
 
             // Convert the operation body (lambda) and call it directly with wrappedArg.
             // This invokes the lambda with {it=receiver, r=rightArg} which destructures
