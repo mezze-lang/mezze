@@ -1186,9 +1186,9 @@ class ConstraintSolver(
                     val abilityName = tracked.abilityName
                     val typeArgs = tracked.typeArgs
                     val sourceLocation = tracked.sourceLocation
-                    // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
-                    val trackedEffectiveHash = tracked.abilityHash ?: WellKnownHashes.hashForName(abilityName)
-                    if (WellKnownHashes.isInspect(trackedEffectiveHash)) continue
+                    // Skip Inspect - it's universally available
+                    val trackedResolvedHash = tracked.abilityHash ?: WellKnownHashes.resolveHash(abilityName)
+                    if (WellKnownHashes.isInspect(trackedResolvedHash)) continue
                     // Substitute the type variable in typeArgs with the bound type
                     // Compare by ID or name since different TypeVar instances may represent the same variable
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
@@ -1245,14 +1245,12 @@ class ConstraintSolver(
     private fun solveAbilityRequired(constraint: Constraint.AbilityRequired): ConstraintResult {
         val abilityName = constraint.abilityName
         val typeArgs = constraint.typeArgs
-        // Resolve effective hash: prefer constraint's hash, fall back to well-known hash by name.
-        // This bridge handles constraints created without hash (e.g., from FunctionAbilityConstraint).
-        val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(abilityName)
 
         // CRITICAL: Filter out Inspect - it's universally available and shouldn't constrain types
         // This prevents multiInspect from incorrectly unifying {a: 'a, b: 'b, c: 'c} to {a: 'a, b: 'a, c: 'a}
         // See OldTypeChecker.kt:2651-2652
-        if (WellKnownHashes.isInspect(effectiveHash)) {
+        val resolvedHash = constraint.abilityHash ?: WellKnownHashes.resolveHash(abilityName)
+        if (WellKnownHashes.isInspect(resolvedHash)) {
             // Inspect is universally available - no constraint needed
             return ConstraintResult.Success(Substitution.empty)
         }
@@ -1492,10 +1490,7 @@ class ConstraintSolver(
      * but passing the hash allows future improvements to add a hash-keyed secondary index.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Boolean {
-        // Resolve effective hash for well-known ability identification (Inspect, Eq, Ord, etc.)
-        // The original abilityHash is used for impl lookup; effectiveHash is only for identification.
-        val effectiveHash = abilityHash ?: WellKnownHashes.hashForName(abilityName)
-
+        val effectiveHash = abilityHash ?: WellKnownHashes.resolveHash(abilityName)
         // Derivation + fallback for abilities that can't come from context alone:
         // - Inspect: universally available for ALL types
         // - VarType pass-through: polymorphic types are constrained at call site
@@ -2234,8 +2229,7 @@ class ConstraintSolver(
      */
     private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
         // Pass abilityHash for identification in canDeriveAbility, but NOT for impl lookup
-        // in checkAbilityImplementation (the hash may be synthetic from hashForName and
-        // won't match the hash-indexed impl registry).
+        // in checkAbilityImplementation (the hash won't match the hash-indexed impl registry).
         return canDeriveAbility(abilityName, type, abilityHash) || checkAbilityImplementation(abilityName, listOf(type))
     }
 

@@ -261,12 +261,11 @@ class TypeValidator(
                     val type = substitution.apply(MezzeType.VarType(constraint.typeVar))
                     // Apply substitution to typeArgs as well for multi-parameter abilities
                     val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
-                    val resolvedHash = constraint.abilityHash ?: WellKnownHashes.hashForName(constraint.abilityName)
                     val result = abilityResolver.checkAbility(
                         type,
                         constraint.abilityName,
                         resolvedTypeArgs,
-                        resolvedHash
+                        constraint.abilityHash
                     )
 
                     if (result is AbilityResolver.AbilityCheckResult.Unsatisfied) {
@@ -406,8 +405,7 @@ class TypeValidator(
             }
 
             val abilityName = constraint.abilityName
-            // Resolve effective hash: prefer constraint's hash, fall back to well-known hash by name.
-            val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(abilityName)
+            val effectiveHash = constraint.abilityHash
 
             // Built-in abilities are validated by the ConstraintSolver (Phase 3).
             // No need to re-validate here — if we reached Phase 5, they passed.

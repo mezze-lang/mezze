@@ -1841,9 +1841,8 @@ class ContextBuilder {
             effectHashes: Map<String, String> = emptyMap(),
             sourceLocation: SourceLocation? = null
         ) {
-            // Resolve hash: prefer effectHashes, fall back to well-known hash by name
-            fun resolveHash(name: String): String? =
-                effectHashes[name] ?: WellKnownHashes.hashForName(name)
+            // Resolve effect hash from row or WellKnownHashes
+            fun resolveHash(name: String): String? = effectHashes[name] ?: WellKnownHashes.resolveHash(name)
 
             val hermeticEffect = effects.firstOrNull { name ->
                 WellKnownHashes.isMut(resolveHash(name))

@@ -1020,8 +1020,8 @@ class ConstraintGenerator(
                 // Check if this type variable appears in our function type
                 val matchingTypeVar = typeVars.find { it.name == solvedTypeVar.variable.name }
 
-                val effectiveHash = constraint.abilityHash ?: WellKnownHashes.hashForName(constraint.abilityName)
-                if (matchingTypeVar != null && !WellKnownHashes.isInspect(effectiveHash)) {
+                val constraintResolvedHash = constraint.abilityHash ?: WellKnownHashes.resolveHash(constraint.abilityName)
+                if (matchingTypeVar != null && !WellKnownHashes.isInspect(constraintResolvedHash)) {
                     // CRITICAL FIX: Filter out Inspect - it's universally available
                     // and shouldn't appear in type signatures (matches OldTypeChecker line 2651-2652)
                     MezzeType.FunctionAbilityConstraint(
@@ -2279,8 +2279,7 @@ class ConstraintGenerator(
         }
 
         for (usage in actualUsageConstraints) {
-            val usageHash = usage.abilityHash ?: WellKnownHashes.hashForName(usage.abilityName)
-            if (WellKnownHashes.isInspect(usageHash)) continue  // Skip implicit Inspect
+            if (WellKnownHashes.isInspect(usage.abilityHash)) continue  // Skip implicit Inspect
 
             // Find ALL annotated abilities with the same name (there might be multiple, e.g., Show 'x and Show 'y)
             val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
@@ -2367,8 +2366,7 @@ class ConstraintGenerator(
             // Example: annotation declares NumAdd 'b but implementation uses NumAdd 'a
             for (usage in actualUsageConstraints) {
                 // Skip Inspect - it's implicit
-                val usageEffHash = usage.abilityHash ?: WellKnownHashes.hashForName(usage.abilityName)
-                if (WellKnownHashes.isInspect(usageEffHash)) continue
+                if (WellKnownHashes.isInspect(usage.abilityHash)) continue
 
                 // Find matching annotation constraint by ability name
                 val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
