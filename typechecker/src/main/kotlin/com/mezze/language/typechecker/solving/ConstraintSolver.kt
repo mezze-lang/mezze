@@ -1486,9 +1486,9 @@ class ConstraintSolver(
      * Check if an ability implementation exists for the given types.
      *
      * When [abilityHash] is non-null (content hash of the AbilityDeclaration), it is used
-     * to prefer the canonical ability over any shadowing same-named ability. Currently the
-     * impl search still falls back to name-based lookup via [TypingContext.getAbilityImpls],
-     * but passing the hash allows future improvements to add a hash-keyed secondary index.
+     * for hash-based impl lookup via [TypingContext.getAbilityImplsByDeclHash].
+     * Falls back to name-based lookup via [TypingContext.getAbilityImpls] only when
+     * hash is not available.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Boolean {
         val effectiveHash = abilityHash ?: WellKnownHashes.resolveHash(abilityName)
@@ -1527,9 +1527,7 @@ class ConstraintSolver(
             }
         }
 
-        // Search for implementation — hash-based when available.
-        // TODO: Remove name-based fallback once all constraint paths carry abilityHash
-        //       (e.g., SubstitutionApplier, canDeriveOrHasImpl).
+        // Search for implementation — hash-based primary, name-based fallback.
         val impls = if (abilityHash != null) {
             context.getAbilityImplsByDeclHash(abilityHash)
         } else {
@@ -1570,7 +1568,7 @@ class ConstraintSolver(
                             else -> typeAnnotationToMezzeType(typeArg)
                         }
                     }
-                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs)
+                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, WellKnownHashes.resolveHash(constraint.abilityName))
                 }
             } else {
                 true
@@ -2233,9 +2231,12 @@ class ConstraintSolver(
      * Used for recursive Eq/Ord derivation on composite types.
      */
     private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
-        // Pass abilityHash for identification in canDeriveAbility, but NOT for impl lookup
-        // in checkAbilityImplementation (the hash won't match the hash-indexed impl registry).
-        return canDeriveAbility(abilityName, type, abilityHash) || checkAbilityImplementation(abilityName, listOf(type))
+        // Try derivation first, then impl lookup.
+        // For impl lookup: try hash-based first, fall back to name-based if hash finds nothing
+        // (some impls may not have abilityDeclHash populated when ability declaration is not in scope).
+        if (canDeriveAbility(abilityName, type, abilityHash)) return true
+        if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash)) return true
+        return checkAbilityImplementation(abilityName, listOf(type))
     }
 
     /**

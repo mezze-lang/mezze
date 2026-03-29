@@ -582,6 +582,7 @@ class ConstraintGenerator(
                                 else -> null
                             }
                         }
+                        val targetTypeHash = targetTypeName?.let { typeDeclarations[it]?.contentHash }
 
                         for (op in item.operations) {
                             // Each operation gets a FRESH target type to prevent type variable leakage
@@ -594,7 +595,11 @@ class ConstraintGenerator(
                             if (op.implementation !is ParsedLambda) continue
                             val lambda = op.implementation as ParsedLambda
 
-                            val methodInfo = if (targetTypeName != null) {
+                            // Hash-first inherent method lookup, fall back to name
+                            val methodInfo = if (targetTypeHash != null) {
+                                currentContext.findAnonymousMethodByHash(targetTypeHash, op.name)
+                                    ?: targetTypeName?.let { currentContext.findAnonymousMethod(it, op.name) }
+                            } else if (targetTypeName != null) {
                                 currentContext.findAnonymousMethod(targetTypeName, op.name)
                             } else null
 
