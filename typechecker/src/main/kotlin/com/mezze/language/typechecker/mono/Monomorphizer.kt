@@ -131,14 +131,26 @@ class Monomorphizer {
                 if (opHash !in processedFunctions) {
                     processedFunctions.add(opHash)
                     val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
+                    // If the operation body is a lambda (e.g., { it, r } -> ...),
+                    // unwrap it: use the lambda's body as the function body.
+                    // The params are already extracted from the lambda by extractParams.
+                    // Without unwrapping, calling the function returns a closure object
+                    // instead of executing the lambda body.
+                    val (actualBody, actualCaptures) = if (monoBody is MonoLambda) {
+                        monoBody.body to monoBody.captures.map { c ->
+                            MonoCapture(c.name, c.type, c.source)
+                        }
+                    } else {
+                        monoBody to emptyList()
+                    }
                     monoFunctions.add(MonoFunction(
                         hash = opHash,
                         name = "${impl.hash.hex.take(8)}.${opName}",
                         originalName = opName,
                         originalHash = impl.hash,
                         params = extractParams(opBody),
-                        captures = emptyList(),
-                        body = monoBody,
+                        captures = actualCaptures,
+                        body = actualBody,
                         type = opBody.type,
                         isPublic = false,
                         loc = opBody.loc
@@ -481,6 +493,7 @@ class Monomorphizer {
         // Only resolve when we have a concrete receiver type to pick the right impl.
         if (receiverType is MezzeType.VarType) return null
 
+
         // Try to find matching impl by receiver type.
         val matchingEntry = candidates.firstOrNull { entry ->
             entry.targetTypes.any { targetType -> typeMatchesTarget(receiverType, targetType) }
@@ -549,6 +562,15 @@ class Monomorphizer {
             // TypeApplication match by constructor name
             concreteType is MezzeType.TypeApplication && targetType is MezzeType.TypeApplication ->
                 concreteType.constructor == targetType.constructor
+            // VariantType with single constructor matching TypeApplication name
+            // e.g., Money { cents = 500 } produces VariantType({Money: {cents: Int}})
+            // and impl target is TypeApplication("Money", [])
+            concreteType is MezzeType.VariantType && targetType is MezzeType.TypeApplication &&
+                concreteType.constructors.size == 1 &&
+                concreteType.constructors.keys.first() == targetType.constructor -> true
+            // RecordType with typeName matching TypeApplication name
+            concreteType is MezzeType.RecordType && targetType is MezzeType.TypeApplication &&
+                concreteType.typeName == targetType.constructor -> true
             // VarType on EITHER side matches anything (generic impl or unresolved receiver)
             targetType is MezzeType.VarType -> true
             concreteType is MezzeType.VarType -> true
