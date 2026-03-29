@@ -2453,10 +2453,16 @@ internal fun MezzeParser.desugarUnaryOperatorParsed(
         ?: throw IllegalArgumentException("Unknown unary operator: $operator")
     val operationName = op.method
 
-    // Desugar to method call syntax: -x → x.neg {}, !x → x.not {}
+    // Desugar to ability call syntax: -x → NumSub.neg {it = x}, !x → LogicalNot.not {val = x}
+    // This matches binary operator desugaring: x + y → NumAdd.add {it = x, r = y}
+    // The ability name becomes the receiver, and the operand is wrapped as a record field.
+    val abilityRef = ParsedIdentifier(op.ability, null, loc)
     val desugared = ParsedFunctionCall(
-        function = ParsedMemberAccess(operand, operationName, loc),
-        arguments = ParsedRecordLit(emptyList(), loc),
+        function = ParsedMemberAccess(abilityRef, operationName, loc),
+        arguments = ParsedRecordLit(
+            listOf(ParsedRecordEntry.Field("it", operand, loc)),
+            loc
+        ),
         loc = loc
     )
 
