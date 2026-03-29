@@ -229,9 +229,8 @@ class TypeChecker(
                     // Wrap in TypeVar save/restore so prelude loading + merging
                     // doesn't shift type variable IDs in the user's program.
                     if (shouldInjectPrelude) {
-                        val (preludeContext, preludeModules) = loadPreludeModulesWithDeps(importResolver, importContext!!)
+                        val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        loadedModules = loadedModules + preludeModules
                         mergeImportContext(parentContext, importContext!!)
                     } else {
                         mergeImportContext(parentContext, importContext!!)
@@ -1264,41 +1263,6 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
-    /**
-     * Load prelude modules and return both the import context AND the loaded module map.
-     * The loaded modules are needed by the Monomorphizer to access ability impl operations.
-     */
-    private fun loadPreludeModulesWithDeps(
-        importResolver: ImportResolver,
-        userImportContext: ModuleImportContext
-    ): Pair<ModuleImportContext, Map<String, com.mezze.language.typechecker.module.TypedModule>> {
-        val ctx = loadPreludeModules(importResolver, userImportContext)
-
-        // Get loaded modules from the import resolver's cache
-        // The prelude modules were loaded during loadPreludeModules
-        val preludeSource = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
-            ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
-        val preludeModulePaths = if (preludeSource != null) {
-            val parser = MezzeParser()
-            val program = parser.parse(preludeSource)
-            program.items.filterIsInstance<UseDeclaration>().mapNotNull { useDecl ->
-                when (val path = useDecl.path) {
-                    is ModulePath -> path.segments.joinToString("::")
-                    else -> null
-                }
-            }
-        } else emptyList()
-
-        // Collect prelude modules from the global cache (they were loaded during import resolution)
-        val modules = mutableMapOf<String, com.mezze.language.typechecker.module.TypedModule>()
-        for (path in preludeModulePaths) {
-            com.mezze.language.typechecker.module.ModuleTypeChecker.getFromCache(path)?.let { cached ->
-                modules[path] = cached
-            }
-        }
-        return Pair(ctx, modules)
-    }
-
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
