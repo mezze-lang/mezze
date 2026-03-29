@@ -75,6 +75,9 @@ class ModuleTypeChecker(
             }
         }
 
+        /** Public accessor for the global cache — used by TypeChecker to include prelude modules in monomorphization. */
+        fun getFromCache(modulePath: String): TypedModule? = getFromGlobalCache(modulePath)
+
         /**
          * Store a typed module in the global cache.
          */
