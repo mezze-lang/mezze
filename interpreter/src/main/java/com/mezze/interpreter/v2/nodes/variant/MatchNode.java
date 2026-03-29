@@ -109,6 +109,16 @@ public final class MatchNode extends MezzeNode {
     @CompilationFinal
     private final Map<Object, Integer> literalToBranchIndex;
 
+    // ===== HASH MAP DISPATCH (for sparse/hashCode-based tags) =====
+    // When tags are large hashCode values (not dense 0..N), jump table is disabled.
+    // This HashMap provides O(1) dispatch for any tag value.
+    // Built at construction time — Truffle JIT treats it as a constant.
+    @CompilationFinal
+    private final boolean hasVariantTagMap;
+
+    @CompilationFinal
+    private final Map<Integer, Integer> variantTagMap;  // tag → branch index
+
     // ===== MONOMORPHIC VARIANT ASSUMPTION =====
     // If a match site always sees the same tag, we can eliminate all dispatch
     @CompilationFinal
@@ -142,12 +152,29 @@ public final class MatchNode extends MezzeNode {
             this.branchProfiles[i] = CountingConditionProfile.create();
         }
 
-        // Build jump table if possible
+        // Build jump table if possible (for dense sequential tags)
         JumpTableInfo info = buildJumpTable(branches, wildcardBranchIndex);
         this.useJumpTable = info.useJumpTable;
         this.tagToIndex = info.tagToIndex;
         this.minTag = info.minTag;
         this.maxTag = info.maxTag;
+
+        // Build HashMap dispatch for sparse tags (hashCode-based)
+        // Only used when jump table is not available
+        if (!this.useJumpTable) {
+            Map<Integer, Integer> tagMap = new HashMap<>();
+            for (int i = 0; i < branches.length; i++) {
+                int tag = branches[i].getTag();
+                if (tag >= 0 && !tagMap.containsKey(tag)) {
+                    tagMap.put(tag, i);
+                }
+            }
+            this.hasVariantTagMap = !tagMap.isEmpty();
+            this.variantTagMap = tagMap.isEmpty() ? null : tagMap;
+        } else {
+            this.hasVariantTagMap = false;
+            this.variantTagMap = null;
+        }
 
         // Pre-compute Cons/Nil pattern indices - O(N) once at construction, O(1) at runtime
         int consIdx = -1;
@@ -294,10 +321,15 @@ public final class MatchNode extends MezzeNode {
                 }
             }
 
-            // Use jump table dispatch if available
+            // Use jump table dispatch if available (dense sequential tags)
             if (useJumpTable) {
                 return executeJumpTableMatch(frame, variant);
             }
+            // Use HashMap dispatch for sparse tags (hashCode-based) — O(1)
+            if (hasVariantTagMap) {
+                return executeHashMapMatch(frame, variant);
+            }
+            // Fallback: linear search
             return executeVariantMatch(frame, variant);
         }
 
@@ -385,6 +417,45 @@ public final class MatchNode extends MezzeNode {
         noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for variant tag: " + tag);
+    }
+
+    /**
+     * O(1) HashMap-based dispatch for sparse variant tags (hashCode-based).
+     * Used when tags are too spread out for a jump table array.
+     */
+    private Object executeHashMapMatch(VirtualFrame frame, MezzeVariant variant) {
+        int tag = variant.getTag();
+        Integer branchIdx = lookupVariantTag(tag);
+
+        if (branchIdx != null) {
+            MatchBranchNode branch = branches[branchIdx];
+            branch.bindPayload(frame, variant);
+            Object result = branch.execute(frame);
+            if (result != null || !branch.hasGuardsOrIfLet()) {
+                return result;
+            }
+            // Guard failed — fall through to linear search for remaining branches
+            return executeVariantMatch(frame, variant);
+        }
+
+        // Not in map — try wildcard
+        if (wildcardBranchIndex >= 0) {
+            MatchBranchNode wildcard = branches[wildcardBranchIndex];
+            wildcard.bindValue(frame, variant);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
+        }
+
+        noMatchProfile.enter();
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        throw new RuntimeException("No matching pattern for variant tag: " + tag);
+    }
+
+    @TruffleBoundary
+    private Integer lookupVariantTag(int tag) {
+        return variantTagMap.get(tag);
     }
 
     @ExplodeLoop
@@ -505,12 +576,17 @@ public final class MatchNode extends MezzeNode {
      * Used for establishing monomorphic state.
      */
     private int findBranchForTag(int tag) {
-        // Use jump table if available
+        // Use jump table if available (dense tags)
         if (useJumpTable && tag >= 0 && tag <= maxTag) {
             int idx = tagToIndex[tag];
             return idx >= 0 ? idx : wildcardBranchIndex;
         }
-        // Linear search
+        // Use HashMap if available (sparse/hashCode tags)
+        if (hasVariantTagMap) {
+            Integer idx = variantTagMap.get(tag);
+            return idx != null ? idx : wildcardBranchIndex;
+        }
+        // Linear search fallback
         for (int i = 0; i < branchCount; i++) {
             if (branches[i].matches(tag)) {
                 return i;
