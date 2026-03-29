@@ -468,6 +468,9 @@ class Monomorphizer {
 
         val methodName = fn.field
         val candidates = abilityOpIndex[methodName]
+        try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
+            "tryResolve: method=$methodName indexSize=${abilityOpIndex.size} candidates=${candidates?.size}\n"
+        ) } catch (_: Exception) {}
         if (candidates == null || candidates.isEmpty()) return null
 
         // Get the receiver's type
@@ -480,6 +483,9 @@ class Monomorphizer {
 
         if (matchingEntry != null) {
             // Found matching ability operation — emit direct call
+            try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
+                "MATCHED: method=$methodName opHash=${matchingEntry.opHash.hex.take(16)} receiver=$receiverType\n"
+            ) } catch (_: Exception) {}
             val opHash = matchingEntry.opHash
             if (opHash !in processed) {
                 worklist.add(opHash)

@@ -672,8 +672,11 @@ class TypeChecker(
                     val lowerer = com.mezze.language.typechecker.mono.Lowerer()
                     val lowered = lowerer.lower(resolved)
                     loweredFns = lowered.functions
-                } catch (_: Exception) {
-                    // Pipeline best-effort
+                } catch (pipelineEx: Exception) {
+                    // Pipeline best-effort — log to debug file
+                    try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
+                        "Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}\n${pipelineEx.stackTraceToString().take(500)}\n---\n"
+                    ) } catch (_: Exception) {}
                 }
 
                 // Use validationProgram (has inferredType from SubstitutionApplier) for module export
