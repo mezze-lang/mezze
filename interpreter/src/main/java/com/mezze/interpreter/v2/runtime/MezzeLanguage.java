@@ -134,7 +134,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
         // Type check — produces both v1 Program and TruffleIR (loweredFunctions)
         TypeChecker typeChecker = new TypeChecker();
-        var typeCheckResult = typeChecker.typeCheck(ast, projectRoot);
+        var typeCheckResult = typeChecker.typeCheck(ast, projectRoot, true, null);
 
         // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
