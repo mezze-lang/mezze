@@ -1010,11 +1010,11 @@ class SubstitutionApplier(
             is TypeApplicationAnnotation -> {
                 val args = annotation.args.map { typeAnnotationToMezzeType(it) }
                 when (annotation.constructor) {
-                    "List" -> if (args.isNotEmpty()) MezzeType.ListType(args.first()) else MezzeType.TypeApplication("List", args)
-                    "Set" -> if (args.isNotEmpty()) MezzeType.SetType(args.first()) else MezzeType.TypeApplication("Set", args)
-                    "Map" -> if (args.size >= 2) MezzeType.MapType(args[0], args[1]) else MezzeType.TypeApplication("Map", args)
-                    "Option" -> MezzeType.TypeApplication("Option", args)
-                    "Result" -> MezzeType.TypeApplication("Result", args)
+                    BuiltinTypes.LIST -> if (args.isNotEmpty()) MezzeType.ListType(args.first()) else MezzeType.TypeApplication(BuiltinTypes.LIST, args)
+                    BuiltinTypes.SET -> if (args.isNotEmpty()) MezzeType.SetType(args.first()) else MezzeType.TypeApplication(BuiltinTypes.SET, args)
+                    BuiltinTypes.MAP -> if (args.size >= 2) MezzeType.MapType(args[0], args[1]) else MezzeType.TypeApplication(BuiltinTypes.MAP, args)
+                    BuiltinTypes.OPTION -> MezzeType.TypeApplication(BuiltinTypes.OPTION, args)
+                    BuiltinTypes.RESULT -> MezzeType.TypeApplication(BuiltinTypes.RESULT, args)
                     else -> MezzeType.TypeApplication(annotation.constructor, args)
                 }
             }
@@ -1048,21 +1048,21 @@ class SubstitutionApplier(
                     // Bool is a primitive type, use BoolType for consistent matching
                     MezzeType.BoolType
                 }
-                "None" -> {
+                BuiltinTypes.NONE -> {
                     // Option None: Option 'a = | Some { val: 'a }, None |
                     // We create a type application for Option with a fresh type var
-                    MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar.fresh())))
+                    MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(TypeVar.fresh())))
                 }
-                "Some" -> {
+                BuiltinTypes.SOME -> {
                     // Option Some: Option 'a = | Some { val: 'a }, None |
                     // The type parameter comes from the payload
                     val innerType = updatedValue?.inferredType?.let {
                         when (it) {
-                            is MezzeType.RecordType -> it.fields["val"] ?: MezzeType.VarType(TypeVar.fresh())
+                            is MezzeType.RecordType -> it.fields[BuiltinTypes.VAL_FIELD] ?: MezzeType.VarType(TypeVar.fresh())
                             else -> MezzeType.VarType(TypeVar.fresh())
                         }
                     } ?: MezzeType.VarType(TypeVar.fresh())
-                    MezzeType.TypeApplication("Option", listOf(innerType))
+                    MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(innerType))
                 }
                 "Nil" -> {
                     // List Nil constructor
@@ -1577,7 +1577,7 @@ class SubstitutionApplier(
             // For built-in parametric types (Option, Result), keep them as TypeApplication
             // so the codec generator can use the specialized encoders
             val resolvedPrimaryType = if (dataType is MezzeType.TypeApplication &&
-                (dataType.constructor == "Option" || dataType.constructor == "Result")) {
+                (dataType.constructor == BuiltinTypes.OPTION || dataType.constructor == BuiltinTypes.RESULT)) {
                 dataType // Don't resolve Option/Result - use specialized encoder
             } else {
                 resolveTypeAlias(dataType)
@@ -1771,7 +1771,7 @@ class SubstitutionApplier(
             }
 
             val resolvedDataType = if (dataType is MezzeType.TypeApplication &&
-                (dataType.constructor == "Option" || dataType.constructor == "Result")) {
+                (dataType.constructor == BuiltinTypes.OPTION || dataType.constructor == BuiltinTypes.RESULT)) {
                 dataType
             } else {
                 resolveTypeAlias(dataType)
@@ -2097,29 +2097,21 @@ class SubstitutionApplier(
     private fun typeMatchesAnnotation(type: MezzeType, annotation: TypeAnnotation): Boolean {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> type is MezzeType.IntType
-                    "Float" -> type is MezzeType.FloatType
-                    "Str" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BoolType
-                    "Nat" -> type is MezzeType.NatType
-                    "Frac" -> type is MezzeType.FracType
-                    "Char" -> type is MezzeType.CharType
-                    "Bytes" -> type is MezzeType.BytesType
-                    "ByteBuffer" -> type is MezzeType.ByteBufferType
-                    "Ordering" -> type is MezzeType.OrderingType
-                    else -> {
-                        // Type variable in annotation - matches any type
-                        if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
-                            true
-                        } else {
-                            // Type constructor match
-                            when (type) {
-                                is MezzeType.TypeApplication -> type.constructor == annotation.name
-                                is MezzeType.RecordType -> type.typeName == annotation.name
-                                is MezzeType.VariantType -> type.typeName == annotation.name
-                                else -> false
-                            }
+                // Check if annotation refers to a built-in type (primitives + Ordering)
+                val builtinMatch = PrimitiveTypes.matchesBuiltinType(annotation.name, type)
+                if (builtinMatch != null) {
+                    builtinMatch
+                } else {
+                    // Type variable in annotation - matches any type
+                    if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                        true
+                    } else {
+                        // Type constructor match
+                        when (type) {
+                            is MezzeType.TypeApplication -> type.constructor == annotation.name
+                            is MezzeType.RecordType -> type.typeName == annotation.name
+                            is MezzeType.VariantType -> type.typeName == annotation.name
+                            else -> false
                         }
                     }
                 }
@@ -2137,28 +2129,28 @@ class SubstitutionApplier(
                         // Match variant types against known type constructors
                         val constructors = type.constructors.keys
                         when (annotation.constructor) {
-                            "Option" -> constructors == setOf("Some", "None")
-                            "Result" -> constructors == setOf("Ok", "Err")
+                            BuiltinTypes.OPTION -> constructors == setOf(BuiltinTypes.SOME, BuiltinTypes.NONE)
+                            BuiltinTypes.RESULT -> constructors == setOf(BuiltinTypes.OK, BuiltinTypes.ERR)
                             else -> type.typeName == annotation.constructor
                         }
                     }
                     is MezzeType.SeqType -> {
-                        annotation.constructor == "Seq" &&
+                        annotation.constructor == BuiltinTypes.SEQ &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     is MezzeType.ListType -> {
-                        annotation.constructor == "List" &&
+                        annotation.constructor == BuiltinTypes.LIST &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     is MezzeType.SetType -> {
-                        annotation.constructor == "Set" &&
+                        annotation.constructor == BuiltinTypes.SET &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotation(type.elementType, annotation.args[0])
                     }
                     is MezzeType.MapType -> {
-                        annotation.constructor == "Map" &&
+                        annotation.constructor == BuiltinTypes.MAP &&
                         annotation.args.size == 2 &&
                         typeMatchesAnnotation(type.keyType, annotation.args[0]) &&
                         typeMatchesAnnotation(type.valueType, annotation.args[1])
@@ -2372,7 +2364,7 @@ class SubstitutionApplier(
         if (returnType == null) return null
         return when (returnType) {
             is MezzeType.TypeApplication -> {
-                if (returnType.constructor == "Result" && returnType.args.isNotEmpty()) {
+                if (returnType.constructor == BuiltinTypes.RESULT && returnType.args.isNotEmpty()) {
                     returnType.args.first() // The 'a in Result 'a DecodeError
                 } else {
                     null
@@ -2380,9 +2372,9 @@ class SubstitutionApplier(
             }
             is MezzeType.VariantType -> {
                 // Result is represented as a variant: | Ok {val: 'a} | Err {error: 'e} |
-                val okConstructor = returnType.constructors["Ok"]
+                val okConstructor = returnType.constructors[BuiltinTypes.OK]
                 if (okConstructor is MezzeType.RecordType) {
-                    okConstructor.fields["val"]
+                    okConstructor.fields[BuiltinTypes.VAL_FIELD]
                 } else {
                     null
                 }

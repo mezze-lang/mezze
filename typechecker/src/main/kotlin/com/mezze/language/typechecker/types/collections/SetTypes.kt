@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.types.collections
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 
 /**
@@ -216,7 +217,7 @@ object SetTypes {
                     MezzeType.BoolType
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_count: {s: Set 'a, p: {val: 'a} -> Bool} -> Int
@@ -236,13 +237,13 @@ object SetTypes {
         // __native_set_min: {s: Set 'a} -> Option 'a
         context["__native_set_min"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_max: {s: Set 'a} -> Option 'a
         context["__native_set_max"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_sum: {s: Set Int} -> Int
@@ -282,7 +283,7 @@ object SetTypes {
                     MezzeType.VarType(setElemTypeVar)
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_min_by: {s: Set 'a, f: {val: 'a} -> 'b} -> Option 'a
@@ -295,7 +296,7 @@ object SetTypes {
                     MezzeType.VarType(setElemTypeVarB2)
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_max_by: {s: Set 'a, f: {val: 'a} -> 'b} -> Option 'a
@@ -307,7 +308,7 @@ object SetTypes {
                     MezzeType.VarType(setElemTypeVarB2)
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(setElemTypeVar)))
+            MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
         )
 
         // __native_set_partition: {s: Set 'a, p: {val: 'a} -> Bool} -> {pass: Set 'a, fail: Set 'a}
@@ -394,7 +395,7 @@ object SetTypes {
                     "set" to MezzeType.SetType(elemType),
                     "f" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("val" to elemType)),
-                        MezzeType.TypeApplication("Option", listOf(resultType))
+                        MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(resultType))
                     )
                 )),
                 MezzeType.SetType(resultType)
@@ -410,7 +411,7 @@ object SetTypes {
                     "set" to MezzeType.SetType(elemType),
                     "f" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("val" to elemType)),
-                        MezzeType.TypeApplication("Option", listOf(resultType))
+                        MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(resultType))
                     )
                 )),
                 MezzeType.SeqType(resultType)
@@ -426,7 +427,7 @@ object SetTypes {
                     "set" to MezzeType.SetType(elemType),
                     "f" to MezzeType.FunctionType(
                         MezzeType.RecordType(mapOf("val" to elemType)),
-                        MezzeType.TypeApplication("Option", listOf(resultType))
+                        MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(resultType))
                     )
                 )),
                 MezzeType.ListType(resultType)

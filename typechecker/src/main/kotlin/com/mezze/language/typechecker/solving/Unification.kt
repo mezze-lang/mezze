@@ -284,38 +284,39 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.SeqType && type2 is MezzeType.SeqType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
-        // CASE 7a: Cross-unification between SeqType and TypeApplication("Seq", ...)
-        type1 is MezzeType.SeqType && type2 is MezzeType.TypeApplication && type2.constructor == "Seq" && type2.args.size == 1 ->
+        // CASE 7a: Cross-unification between SeqType and TypeApplication(Seq, ...)
+        // Uses BuiltinTypes.SEQ constant instead of hardcoded "Seq" string
+        type1 is MezzeType.SeqType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SEQ) && type2.args.size == 1 ->
             unify(type1.elementType, type2.args[0], typeDeclarations)
-        type1 is MezzeType.TypeApplication && type1.constructor == "Seq" && type1.args.size == 1 && type2 is MezzeType.SeqType ->
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SEQ) && type1.args.size == 1 && type2 is MezzeType.SeqType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
         // CASE 8: List type unification
         type1 is MezzeType.ListType && type2 is MezzeType.ListType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
-        // CASE 8a: Cross-unification between ListType and TypeApplication("List", ...)
-        type1 is MezzeType.ListType && type2 is MezzeType.TypeApplication && type2.constructor == "List" && type2.args.size == 1 ->
+        // CASE 8a: Cross-unification between ListType and TypeApplication(List, ...)
+        type1 is MezzeType.ListType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.LIST) && type2.args.size == 1 ->
             unify(type1.elementType, type2.args[0], typeDeclarations)
-        type1 is MezzeType.TypeApplication && type1.constructor == "List" && type1.args.size == 1 && type2 is MezzeType.ListType ->
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.LIST) && type1.args.size == 1 && type2 is MezzeType.ListType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
         // CASE 9: Set type unification
         type1 is MezzeType.SetType && type2 is MezzeType.SetType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
-        // CASE 9a: Cross-unification between SetType and TypeApplication("Set", ...)
-        type1 is MezzeType.SetType && type2 is MezzeType.TypeApplication && type2.constructor == "Set" && type2.args.size == 1 ->
+        // CASE 9a: Cross-unification between SetType and TypeApplication(Set, ...)
+        type1 is MezzeType.SetType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SET) && type2.args.size == 1 ->
             unify(type1.elementType, type2.args[0], typeDeclarations)
-        type1 is MezzeType.TypeApplication && type1.constructor == "Set" && type1.args.size == 1 && type2 is MezzeType.SetType ->
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SET) && type1.args.size == 1 && type2 is MezzeType.SetType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
         // CASE 9b: SortedMap type unification
         type1 is MezzeType.SortedMapType && type2 is MezzeType.SortedMapType ->
             unifySortedMaps(type1, type2, typeDeclarations)
 
-        // CASE 9c: Cross-unification between SortedMapType and TypeApplication("SortedMap", ...)
-        type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && type2.constructor == "SortedMap" && type2.args.size == 2 -> {
+        // CASE 9c: Cross-unification between SortedMapType and TypeApplication(SortedMap, ...)
+        type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_MAP) && type2.args.size == 2 -> {
             val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
             when (keyResult) {
                 is UnificationResult.Success -> {
@@ -328,7 +329,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
                 is UnificationResult.Failure -> keyResult
             }
         }
-        type1 is MezzeType.TypeApplication && type1.constructor == "SortedMap" && type1.args.size == 2 && type2 is MezzeType.SortedMapType -> {
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_MAP) && type1.args.size == 2 && type2 is MezzeType.SortedMapType -> {
             val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
             when (keyResult) {
                 is UnificationResult.Success -> {
@@ -346,18 +347,18 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.SortedSetType && type2 is MezzeType.SortedSetType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
-        // CASE 9e: Cross-unification between SortedSetType and TypeApplication("SortedSet", ...)
-        type1 is MezzeType.SortedSetType && type2 is MezzeType.TypeApplication && type2.constructor == "SortedSet" && type2.args.size == 1 ->
+        // CASE 9e: Cross-unification between SortedSetType and TypeApplication(SortedSet, ...)
+        type1 is MezzeType.SortedSetType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_SET) && type2.args.size == 1 ->
             unify(type1.elementType, type2.args[0], typeDeclarations)
-        type1 is MezzeType.TypeApplication && type1.constructor == "SortedSet" && type1.args.size == 1 && type2 is MezzeType.SortedSetType ->
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_SET) && type1.args.size == 1 && type2 is MezzeType.SortedSetType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
         // CASE 10: Map type unification
         type1 is MezzeType.MapType && type2 is MezzeType.MapType ->
             unifyMaps(type1, type2, typeDeclarations)
 
-        // CASE 10a: Cross-unification between MapType and TypeApplication("Map", ...)
-        type1 is MezzeType.MapType && type2 is MezzeType.TypeApplication && type2.constructor == "Map" && type2.args.size == 2 -> {
+        // CASE 10a: Cross-unification between MapType and TypeApplication(Map, ...)
+        type1 is MezzeType.MapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.MAP) && type2.args.size == 2 -> {
             val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
             when (keyResult) {
                 is UnificationResult.Success -> {
@@ -370,7 +371,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
                 is UnificationResult.Failure -> keyResult
             }
         }
-        type1 is MezzeType.TypeApplication && type1.constructor == "Map" && type1.args.size == 2 && type2 is MezzeType.MapType -> {
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.MAP) && type1.args.size == 2 && type2 is MezzeType.MapType -> {
             val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
             when (keyResult) {
                 is UnificationResult.Success -> {
@@ -896,8 +897,12 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
  * Unify two type applications.
  */
 private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
-    // Type constructors must match - unless one is an open variant
-    if (app1.constructor != app2.constructor) {
+    // Type constructors must match — check by hash first (stable across renames/aliases),
+    // then by name, then fall back to open variant expansion.
+    val constructorsMatch = app1.constructor == app2.constructor ||
+        (app1.typeHash != null && app2.typeHash != null && app1.typeHash == app2.typeHash)
+
+    if (!constructorsMatch) {
         // OPEN VARIANT HANDLING: If one type is an open variant, expand both and unify as variants
         // This allows open variants to accept constructors from other types
         val expanded1 = expandTypeApplicationToVariant(app1, typeDeclarations)
@@ -1524,3 +1529,17 @@ internal fun expandTypeApplication(
         }
     }
 }
+
+/**
+ * Check if a TypeApplication matches a built-in collection type by name.
+ *
+ * Uses the canonical BuiltinTypes constant for comparison, avoiding hardcoded
+ * string literals scattered throughout unification code.
+ *
+ * The typeHash on TypeApplication is not used here because built-in collection
+ * types (Seq, List, Map, Set, etc.) do not have parseable type declarations
+ * in .mz files, so they never get content hashes. The constructor name IS the
+ * stable identifier for these built-in types.
+ */
+private fun isBuiltinCollectionApp(app: MezzeType.TypeApplication, expectedConstructor: String): Boolean =
+    app.constructor == expectedConstructor

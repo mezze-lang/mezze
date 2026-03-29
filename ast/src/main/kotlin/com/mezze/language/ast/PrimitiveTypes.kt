@@ -127,4 +127,73 @@ object PrimitiveTypes {
         val primitiveType = nameToType[name] ?: return false
         return primitiveType == type
     }
+
+    // ========================================================================
+    // EXTENDED TYPE MATCHING (includes Ordering + Bool variant)
+    // ========================================================================
+
+    /**
+     * Extended name-to-type mapping that includes Ordering.
+     * Ordering is not a true primitive but has a dedicated MezzeType representation.
+     */
+    private val extendedNameToType: Map<String, MezzeType> = nameToType + mapOf(
+        "Ordering" to MezzeType.OrderingType
+    )
+
+    /**
+     * Check if a type annotation name matches a built-in MezzeType, including:
+     * - All primitive types (Int, Float, Str, Bool, Nat, Frac, Char, Bytes, ByteBuffer)
+     * - Ordering (dedicated MezzeType but not a true primitive)
+     * - Bool also matches VariantType with exactly {True, False} constructors (Bool variant pattern)
+     *
+     * This centralizes the pattern that was previously duplicated in 5+ files:
+     *   "Int" -> type is MezzeType.IntType
+     *   "Float" -> type is MezzeType.FloatType
+     *   ...
+     *   "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
+     *   "Ordering" -> type is MezzeType.OrderingType
+     *
+     * Returns null if the name is not a built-in type (caller should handle non-primitive types).
+     * Returns true/false if the name IS a built-in type and the match succeeded/failed.
+     */
+    fun matchesBuiltinType(name: String, type: MezzeType): Boolean? {
+        val builtinType = extendedNameToType[name] ?: return null
+        if (builtinType == type) return true
+        // Special case: Bool also matches the {True, False} variant pattern
+        if (builtinType is MezzeType.BoolType && isBoolVariant(type)) return true
+        return false
+    }
+
+    /**
+     * Check if a MezzeType is the Bool variant pattern: VariantType with exactly {True, False}
+     * constructors, both with no payload, and closed (no row variable).
+     */
+    fun isBoolVariant(type: MezzeType): Boolean {
+        if (type !is MezzeType.VariantType) return false
+        val constructors = type.constructors
+        return constructors.size == 2 &&
+               constructors.containsKey("True") && constructors["True"] == null &&
+               constructors.containsKey("False") && constructors["False"] == null &&
+               type.rowVar == null
+    }
+
+    // ========================================================================
+    // COLLECTION TYPE MATCHING
+    // ========================================================================
+
+    /**
+     * Check if a TypeApplication constructor name matches a built-in collection type.
+     * Uses BuiltinTypes constants to avoid hardcoded string comparisons.
+     *
+     * Returns true if the constructor name is a well-known collection type
+     * (Seq, List, Set, Map, SortedMap, SortedSet, Deque).
+     */
+    fun isBuiltinCollectionConstructor(constructorName: String): Boolean =
+        constructorName in BUILTIN_COLLECTION_NAMES
+
+    private val BUILTIN_COLLECTION_NAMES = setOf(
+        BuiltinTypes.SEQ, BuiltinTypes.LIST, BuiltinTypes.SET, BuiltinTypes.MAP,
+        BuiltinTypes.SORTED_MAP, BuiltinTypes.SORTED_SET, BuiltinTypes.DEQUE,
+        BuiltinTypes.NON_EMPTY_LIST
+    )
 }

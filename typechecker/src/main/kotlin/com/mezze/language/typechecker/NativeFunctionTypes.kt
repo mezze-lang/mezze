@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.types.BasicTypes
@@ -44,7 +45,7 @@ import com.mezze.language.typechecker.types.codec.JsonTypes
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(elementType))
 }
 
 /**
@@ -52,7 +53,7 @@ private fun optionType(elementType: MezzeType): MezzeType {
  * Note: Result takes value type first, then error type
  */
 private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Result", listOf(valueType, errorType))
+    return MezzeType.TypeApplication(BuiltinTypes.RESULT, listOf(valueType, errorType))
 }
 
 /**

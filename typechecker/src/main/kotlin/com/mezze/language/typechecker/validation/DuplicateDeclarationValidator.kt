@@ -71,11 +71,11 @@ object DuplicateDeclarationValidator {
      */
     private val BUILTIN_CONSTRUCTORS = mapOf(
         // Option type constructors
-        "Some" to "Option",
-        "None" to "Option",
+        BuiltinTypes.SOME to BuiltinTypes.OPTION,
+        BuiltinTypes.NONE to BuiltinTypes.OPTION,
         // Result type constructors
-        "Ok" to "Result",
-        "Err" to "Result"
+        BuiltinTypes.OK to BuiltinTypes.RESULT,
+        BuiltinTypes.ERR to BuiltinTypes.RESULT
         // Note: True/False are literals, not variant constructors
     )
 

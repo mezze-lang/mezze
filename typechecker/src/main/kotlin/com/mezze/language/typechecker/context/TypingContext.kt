@@ -22,7 +22,9 @@ data class TypingContext(
     private val abilityImplsByAbilityHash: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityDeclHash -> [implContentHash]
     // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
     private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
+    private val abilityOperationTypesByHash: Map<String, MezzeType> = emptyMap(),  // abilityDeclHash -> RecordType of operations
     private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
+    private val effectOperationTypesByHash: Map<String, MezzeType> = emptyMap(),   // effectDeclHash -> RecordType of operations
     // Dedicated map for performer associated types (replaces "${name}_performer" pattern)
     // Keyed by content hash for cross-module safety
     private val performerAssociatedTypes: Map<String, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
@@ -31,6 +33,9 @@ data class TypingContext(
     private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
     // Secondary index for anonymous methods: "TypeName" -> [methodName]
     private val anonymousImplMethodsByType: Map<String, List<String>> = emptyMap(),
+    // Hash-based secondary index for anonymous methods: "typeHash::methodName" -> method info
+    // Used when typeHash is available for stable cross-module resolution
+    private val anonymousImplMethodsByHash: Map<String, InherentMethodInfo> = emptyMap(),
     val parent: TypingContext? = null
 ) {
     /**
@@ -107,11 +112,12 @@ data class TypingContext(
      * Information about a method from an anonymous impl (`impl Type where { ... }`).
      */
     data class InherentMethodInfo(
-        val targetTypeName: String,     // e.g., "Int"
+        val targetTypeName: String,     // e.g., "Int" — for error messages and fallback
         val methodName: String,         // e.g., "to_float"
         val methodType: MezzeType,      // The function type of the method (without receiver)
         val implContentHash: String,    // Content hash of the impl declaration
-        val sourceModule: String? = null
+        val sourceModule: String? = null,
+        val targetTypeHash: String? = null  // Content hash of the target type declaration (stable across renames)
     )
 
     /**
@@ -293,6 +299,14 @@ data class TypingContext(
     }
 
     /**
+     * Get ability operation types by declaration hash.
+     * Preferred over name-based lookup — stable across renames/aliases.
+     */
+    fun getAbilityOperationTypeByHash(abilityDeclHash: String): MezzeType? {
+        return abilityOperationTypesByHash[abilityDeclHash] ?: parent?.getAbilityOperationTypeByHash(abilityDeclHash)
+    }
+
+    /**
      * Get effect operation types (the RecordType of its operations).
      * Used for qualified access like Log.write.
      */
@@ -301,10 +315,26 @@ data class TypingContext(
     }
 
     /**
+     * Get effect operation types by declaration hash.
+     * Preferred over name-based lookup — stable across renames/aliases.
+     */
+    fun getEffectOperationTypeByHash(effectDeclHash: String): MezzeType? {
+        return effectOperationTypesByHash[effectDeclHash] ?: parent?.getEffectOperationTypeByHash(effectDeclHash)
+    }
+
+    /**
      * Extend context with ability operation types.
      */
-    fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType): TypingContext {
-        return copy(abilityOperationTypes = abilityOperationTypes + (abilityName to operationType))
+    fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: String? = null): TypingContext {
+        val newHashIndex = if (abilityDeclHash != null) {
+            abilityOperationTypesByHash + (abilityDeclHash to operationType)
+        } else {
+            abilityOperationTypesByHash
+        }
+        return copy(
+            abilityOperationTypes = abilityOperationTypes + (abilityName to operationType),
+            abilityOperationTypesByHash = newHashIndex
+        )
     }
 
     /**
@@ -329,8 +359,16 @@ data class TypingContext(
     /**
      * Extend context with effect operation types.
      */
-    fun extendWithEffectOperationType(effectName: String, operationType: MezzeType): TypingContext {
-        return copy(effectOperationTypes = effectOperationTypes + (effectName to operationType))
+    fun extendWithEffectOperationType(effectName: String, operationType: MezzeType, effectDeclHash: String? = null): TypingContext {
+        val newHashIndex = if (effectDeclHash != null) {
+            effectOperationTypesByHash + (effectDeclHash to operationType)
+        } else {
+            effectOperationTypesByHash
+        }
+        return copy(
+            effectOperationTypes = effectOperationTypes + (effectName to operationType),
+            effectOperationTypesByHash = newHashIndex
+        )
     }
 
     // ========================================================================
@@ -344,6 +382,15 @@ data class TypingContext(
     fun findAnonymousMethod(typeName: String, methodName: String): InherentMethodInfo? {
         val key = "$typeName::$methodName"
         return anonymousImplMethods[key] ?: parent?.findAnonymousMethod(typeName, methodName)
+    }
+
+    /**
+     * Find an anonymous impl method by type hash and method name.
+     * Preferred over name-based lookup — stable across renames/aliases.
+     */
+    fun findAnonymousMethodByHash(typeHash: String, methodName: String): InherentMethodInfo? {
+        val key = "$typeHash::$methodName"
+        return anonymousImplMethodsByHash[key] ?: parent?.findAnonymousMethodByHash(typeHash, methodName)
     }
 
     /**
@@ -377,9 +424,17 @@ data class TypingContext(
     fun extendWithAnonymousMethod(info: InherentMethodInfo): TypingContext {
         val key = "${info.targetTypeName}::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
+        // Also update hash-based index if typeHash is available
+        val newHashIndex = if (info.targetTypeHash != null) {
+            val hashKey = "${info.targetTypeHash}::${info.methodName}"
+            anonymousImplMethodsByHash + (hashKey to info)
+        } else {
+            anonymousImplMethodsByHash
+        }
         return copy(
             anonymousImplMethods = anonymousImplMethods + (key to info),
-            anonymousImplMethodsByType = anonymousImplMethodsByType + (info.targetTypeName to (existingMethods + info.methodName))
+            anonymousImplMethodsByType = anonymousImplMethodsByType + (info.targetTypeName to (existingMethods + info.methodName)),
+            anonymousImplMethodsByHash = newHashIndex
         )
     }
 
@@ -426,9 +481,12 @@ data class TypingContext(
             abilityImplsByName = emptyMap(),
             abilityImplsByAbilityHash = emptyMap(),
             abilityOperationTypes = emptyMap(),
+            abilityOperationTypesByHash = emptyMap(),
             effectOperationTypes = emptyMap(),
+            effectOperationTypesByHash = emptyMap(),
             performerAssociatedTypes = emptyMap(),
             performerAssociatedTypesByName = emptyMap(),
+            anonymousImplMethodsByHash = emptyMap(),
             parent = this
         )
     }

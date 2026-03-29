@@ -174,9 +174,7 @@ class ContextBuilder {
             // Only suppress duplicates from prelude injection (stdlib performer types)
             // Re-throw user code duplicates
             val msg = e.message ?: ""
-            val preludeTypes = setOf("Int", "Float", "Nat", "Frac", "Bool", "Str", "Char",
-                "Option", "Result", "Seq", "List", "Map", "Set", "Deque", "Bytes",
-                "SortedMap", "SortedSet", "NonEmptyList")
+            val preludeTypes = PrimitiveTypes.allNames + BuiltinTypes.coreTypeNames
             val isPrelude = preludeTypes.any { msg.contains("'$it'") && msg.contains("performer") }
             if (!isPrelude) throw e
         }
@@ -811,7 +809,7 @@ class ContextBuilder {
 
                 // Create a variant type with this constructor
                 // For Result patterns, we need both Ok and Err constructors
-                if (constructorName == "Err" || constructorName == "Ok") {
+                if (constructorName == BuiltinTypes.ERR || constructorName == BuiltinTypes.OK) {
                     // This is a Result type - create Result 'val 'error
                     // CRITICAL: Use the SAME type variable from associatedTypes
                     // This ensures constraint propagation works - when the operation
@@ -820,20 +818,20 @@ class ContextBuilder {
                     val valType = MezzeType.VarType(TypeVar.fresh())
 
                     MezzeType.TypeApplication(
-                        constructor = "Result",
+                        constructor = BuiltinTypes.RESULT,
                         args = listOf(valType, errorType)
                     )
-                } else if (constructorName == "None") {
+                } else if (constructorName == BuiltinTypes.NONE) {
                     // This is Option None - create Option 'a
                     MezzeType.TypeApplication(
-                        constructor = "Option",
+                        constructor = BuiltinTypes.OPTION,
                         args = listOf(MezzeType.VarType(TypeVar.fresh()))
                     )
-                } else if (constructorName == "Some") {
+                } else if (constructorName == BuiltinTypes.SOME) {
                     // This is Option Some - create Option with the payload type
                     val innerType = payloadType ?: MezzeType.VarType(TypeVar.fresh())
                     MezzeType.TypeApplication(
-                        constructor = "Option",
+                        constructor = BuiltinTypes.OPTION,
                         args = listOf(innerType)
                     )
                 } else {
@@ -1522,41 +1520,41 @@ class ContextBuilder {
         }
 
         // Register Option type if not already defined
-        if (!typeDecls.containsKey("Option")) {
+        if (!typeDecls.containsKey(BuiltinTypes.OPTION)) {
             val somePayload = RecordTypeAnnotation(
-                listOf(RecordTypeEntry("val", IdentifierTypeAnnotation("a")))
+                listOf(RecordTypeEntry(BuiltinTypes.VAL_FIELD, IdentifierTypeAnnotation("a")))
             )
             val optionDef = VariantDefinition(
                 listOf(
-                    VariantConstructorDef("Some", somePayload),
-                    VariantConstructorDef("None", null)
+                    VariantConstructorDef(BuiltinTypes.SOME, somePayload),
+                    VariantConstructorDef(BuiltinTypes.NONE, null)
                 ),
                 false  // closed variant
             )
-            typeDecls["Option"] = TypeDeclaration(
-                name = "Option",
+            typeDecls[BuiltinTypes.OPTION] = TypeDeclaration(
+                name = BuiltinTypes.OPTION,
                 typeParams = listOf("a"),
                 definition = optionDef
             )
         }
 
         // Register Result type if not already defined
-        if (!typeDecls.containsKey("Result")) {
+        if (!typeDecls.containsKey(BuiltinTypes.RESULT)) {
             val okPayload = RecordTypeAnnotation(
-                listOf(RecordTypeEntry("val", IdentifierTypeAnnotation("a")))
+                listOf(RecordTypeEntry(BuiltinTypes.VAL_FIELD, IdentifierTypeAnnotation("a")))
             )
             val errPayload = RecordTypeAnnotation(
-                listOf(RecordTypeEntry("error", IdentifierTypeAnnotation("e")))
+                listOf(RecordTypeEntry(BuiltinTypes.ERROR_FIELD, IdentifierTypeAnnotation("e")))
             )
             val resultDef = VariantDefinition(
                 listOf(
-                    VariantConstructorDef("Ok", okPayload),
-                    VariantConstructorDef("Err", errPayload)
+                    VariantConstructorDef(BuiltinTypes.OK, okPayload),
+                    VariantConstructorDef(BuiltinTypes.ERR, errPayload)
                 ),
                 false  // closed variant
             )
-            typeDecls["Result"] = TypeDeclaration(
-                name = "Result",
+            typeDecls[BuiltinTypes.RESULT] = TypeDeclaration(
+                name = BuiltinTypes.RESULT,
                 typeParams = listOf("a", "e"),
                 definition = resultDef
             )

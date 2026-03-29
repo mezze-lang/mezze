@@ -2112,29 +2112,21 @@ class ExpressionConstraintGenerator {
 
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> constraintType is MezzeType.IntType
-                    "Float" -> constraintType is MezzeType.FloatType
-                    "Str" -> constraintType is MezzeType.StringType
-                    "Bool" -> constraintType is MezzeType.BoolType || isBoolVariant(constraintType)
-                    "Nat" -> constraintType is MezzeType.NatType
-                    "Frac" -> constraintType is MezzeType.FracType
-                    "Char" -> constraintType is MezzeType.CharType
-                    "Bytes" -> constraintType is MezzeType.BytesType
-                    "ByteBuffer" -> constraintType is MezzeType.ByteBufferType
-                    "Ordering" -> constraintType is MezzeType.OrderingType
-                    else -> {
-                        // Type variable in annotation (e.g., 'a) - always matches
-                        if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
-                            true
-                        } else {
-                            // Type constructor - match by name
-                            when (constraintType) {
-                                is MezzeType.TypeApplication -> constraintType.constructor == annotation.name && constraintType.args.isEmpty()
-                                is MezzeType.RecordType -> constraintType.typeName == annotation.name
-                                is MezzeType.VariantType -> constraintType.typeName == annotation.name
-                                else -> false
-                            }
+                // Check if annotation refers to a built-in type (primitives + Ordering)
+                val builtinMatch = PrimitiveTypes.matchesBuiltinType(annotation.name, constraintType)
+                if (builtinMatch != null) {
+                    builtinMatch
+                } else {
+                    // Type variable in annotation (e.g., 'a) - always matches
+                    if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                        true
+                    } else {
+                        // Type constructor - match by name
+                        when (constraintType) {
+                            is MezzeType.TypeApplication -> constraintType.constructor == annotation.name && constraintType.args.isEmpty()
+                            is MezzeType.RecordType -> constraintType.typeName == annotation.name
+                            is MezzeType.VariantType -> constraintType.typeName == annotation.name
+                            else -> false
                         }
                     }
                 }
@@ -2149,22 +2141,22 @@ class ExpressionConstraintGenerator {
                         }
                     }
                     is MezzeType.SeqType -> {
-                        annotation.constructor == "Seq" &&
+                        annotation.constructor == BuiltinTypes.SEQ &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
                     }
                     is MezzeType.ListType -> {
-                        annotation.constructor == "List" &&
+                        annotation.constructor == BuiltinTypes.LIST &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
                     }
                     is MezzeType.SetType -> {
-                        annotation.constructor == "Set" &&
+                        annotation.constructor == BuiltinTypes.SET &&
                         annotation.args.size == 1 &&
                         typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
                     }
                     is MezzeType.MapType -> {
-                        annotation.constructor == "Map" &&
+                        annotation.constructor == BuiltinTypes.MAP &&
                         annotation.args.size == 2 &&
                         typeMatchesAnnotationBidirectional(constraintType.keyType, annotation.args[0]) &&
                         typeMatchesAnnotationBidirectional(constraintType.valueType, annotation.args[1])
@@ -2273,15 +2265,6 @@ class ExpressionConstraintGenerator {
         return implTypeName == prefix ||                           // Exact match: "Seq"
                implTypeName.startsWith("${prefix}_") ||            // Element suffix: "Seq_Int"
                implTypeName.startsWith("${prefix}<")               // Generic syntax: "Seq<Int>"
-    }
-
-    /**
-     * Check if a type is a Bool variant (True/False constructors).
-     */
-    private fun isBoolVariant(type: MezzeType): Boolean {
-        if (type !is MezzeType.VariantType) return false
-        val constructors = type.constructors.keys
-        return constructors.size == 2 && "True" in constructors && "False" in constructors
     }
 
     // ========================================================================

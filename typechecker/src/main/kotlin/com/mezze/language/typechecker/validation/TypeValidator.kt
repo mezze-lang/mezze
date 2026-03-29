@@ -712,12 +712,12 @@ class TypeValidator(
                     for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
                         extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.SeqType && annotation.constructor == "Seq") {
+                } else if (concreteType is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ) {
                     // Handle Seq type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.ListType && annotation.constructor == "List") {
+                } else if (concreteType is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST) {
                     // Handle List type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
@@ -3013,18 +3013,12 @@ class TypeValidator(
                     if (existing != null) existing == type
                     else { typeVarBindings[annotation.name] = type; true }
                 }
-                else when (annotation.name) {
-                    "Int" -> type is MezzeType.IntType
-                    "Float" -> type is MezzeType.FloatType
-                    "Str" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BoolType
-                    "Nat" -> type is MezzeType.NatType
-                    "Frac" -> type is MezzeType.FracType
-                    "Char" -> type is MezzeType.CharType
-                    "Bytes" -> type is MezzeType.BytesType
-                    "ByteBuffer" -> type is MezzeType.ByteBufferType
-                    "Ordering" -> type is MezzeType.OrderingType
-                    else -> {
+                else {
+                    // Check if annotation refers to a built-in type (primitives + Ordering)
+                    val builtinMatch = PrimitiveTypes.matchesBuiltinType(annotation.name, type)
+                    if (builtinMatch != null) {
+                        builtinMatch
+                    } else {
                         // Check by type name
                         when (type) {
                             is MezzeType.RecordType -> type.typeName == annotation.name
@@ -3046,16 +3040,16 @@ class TypeValidator(
                             typeMatchesAnnotation(argType, argAnnotation, typeVars, typeVarBindings)
                         }
                     }
-                    type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
+                    type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
-                    type is MezzeType.ListType && annotation.constructor == "List" -> {
+                    type is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
-                    type is MezzeType.SetType && annotation.constructor == "Set" -> {
+                    type is MezzeType.SetType && annotation.constructor == BuiltinTypes.SET -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
-                    type is MezzeType.MapType && annotation.constructor == "Map" -> {
+                    type is MezzeType.MapType && annotation.constructor == BuiltinTypes.MAP -> {
                         annotation.args.size == 2 &&
                         typeMatchesAnnotation(type.keyType, annotation.args[0], typeVars, typeVarBindings) &&
                         typeMatchesAnnotation(type.valueType, annotation.args[1], typeVars, typeVarBindings)

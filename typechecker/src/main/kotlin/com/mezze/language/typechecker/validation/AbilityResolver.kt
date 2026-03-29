@@ -288,7 +288,7 @@ class AbilityResolver(
     ): AbilityCheckResult {
         // Handle well-known built-in types
         when (type.constructor) {
-            "Option", "Result" -> {
+            BuiltinTypes.OPTION, BuiltinTypes.RESULT -> {
                 return when {
                     WellKnownHashes.isEq(abilityHash) -> {
                         // Option/Result have Eq if their type args have Eq
@@ -599,12 +599,12 @@ class AbilityResolver(
                     for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
                         extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.SeqType && annotation.constructor == "Seq") {
+                } else if (concreteType is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ) {
                     // Handle Seq type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
                     }
-                } else if (concreteType is MezzeType.ListType && annotation.constructor == "List") {
+                } else if (concreteType is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST) {
                     // Handle List type specially
                     annotation.args.firstOrNull()?.let { elementAnnotation ->
                         extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
@@ -664,18 +664,12 @@ class AbilityResolver(
                         true
                     }
                 }
-                else when (annotation.name) {
-                    "Int" -> type is MezzeType.IntType
-                    "Float" -> type is MezzeType.FloatType
-                    "Str" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
-                    "Nat" -> type is MezzeType.NatType
-                    "Frac" -> type is MezzeType.FracType
-                    "Char" -> type is MezzeType.CharType
-                    "Bytes" -> type is MezzeType.BytesType
-                    "ByteBuffer" -> type is MezzeType.ByteBufferType
-                    "Ordering" -> type is MezzeType.OrderingType
-                    else -> {
+                else {
+                    // Check if annotation refers to a built-in type (primitives + Ordering)
+                    val builtinMatch = PrimitiveTypes.matchesBuiltinType(annotation.name, type)
+                    if (builtinMatch != null) {
+                        builtinMatch
+                    } else {
                         val typeDecl = typeDeclarations[annotation.name]
                         if (typeDecl != null) {
                             typeMatchesDeclaration(type, typeDecl)
@@ -726,10 +720,10 @@ class AbilityResolver(
                             false
                         }
                     }
-                    type is MezzeType.SeqType && annotation.constructor == "Seq" -> {
+                    type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
-                    type is MezzeType.ListType && annotation.constructor == "List" -> {
+                    type is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST -> {
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
                     }
                     else -> false
@@ -783,9 +777,4 @@ class AbilityResolver(
         }
     }
 
-    private fun isBoolVariant(type: MezzeType): Boolean {
-        if (type !is MezzeType.VariantType) return false
-        val constructors = type.constructors.keys
-        return constructors.size == 2 && constructors.contains("True") && constructors.contains("False")
-    }
 }

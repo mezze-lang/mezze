@@ -1,12 +1,13 @@
 package com.mezze.language.typechecker.types.collections
 
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
 
 /**
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return MezzeType.TypeApplication(BuiltinTypes.OPTION, listOf(elementType))
 }
 
 /**
