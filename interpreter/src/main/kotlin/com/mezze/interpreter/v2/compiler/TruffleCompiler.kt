@@ -370,14 +370,37 @@ class TruffleCompiler(
         val argRecord = node.arg
         if (argRecord !is MakeRecordIR) return null
 
-        // Extract the receiver (left operand) and the 'r' field (right operand)
+        // Extract the receiver (left operand)
         val receiverNode = compileNode(fn.record, source)
+
+        // Unary operators: pattern is CallIndirect(ReadField(x, "neg"), MakeRecord({it = x}))
+        // The "it" field contains the operand. Compile to native function call with the
+        // correct argument record.
+        val itField = argRecord.fields.find { it.name == "it" }
+        if (itField != null) {
+            when (opName) {
+                "neg" -> {
+                    // -x → __native_int_neg {n = x} (or __native_float_neg for Float)
+                    val nativeArg = compileNode(MakeRecordIR(
+                        listOf(FieldIR("n", itField.value)), node.src), source)
+                    return NativeDispatch.create("__native_int_neg", nativeArg)
+                }
+                "not" -> {
+                    // !x → __native_bool_not {b = x}
+                    val nativeArg = compileNode(MakeRecordIR(
+                        listOf(FieldIR("b", itField.value)), node.src), source)
+                    return NativeDispatch.create("__native_bool_not", nativeArg)
+                }
+            }
+        }
+
+        // Binary operators: extract 'r' field (right operand)
         val rightField = argRecord.fields.find { it.name == "r" }
         val rightNode = rightField?.let { compileNode(it.value, source) }
 
         if (rightNode == null) return null
 
-        // Map operator name to inline node
+        // Map binary operator name to inline node
         return when (opName) {
             "add" -> com.mezze.interpreter.v2.nodes.inline.DirectAddNode.create(receiverNode, rightNode)
             "sub" -> com.mezze.interpreter.v2.nodes.inline.DirectSubtractNode.create(receiverNode, rightNode)
