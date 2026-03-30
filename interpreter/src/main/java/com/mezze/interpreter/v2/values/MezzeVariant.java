@@ -123,9 +123,25 @@ public final class MezzeVariant implements TruffleObject {
 
         public String getConstructorName(int tag) {
             if (isDynamic) {
-                return dynamicNames.get(tag);
+                // With hashCode-based tags, we can't use tag as list index.
+                // Reverse lookup from nameToTagMap.
+                for (var entry : nameToTagMap.entrySet()) {
+                    if (entry.getValue() == tag) {
+                        return entry.getKey();
+                    }
+                }
+                return "Unknown(" + tag + ")";
             }
-            return constructorNames[tag];
+            if (tag >= 0 && tag < constructorNames.length) {
+                return constructorNames[tag];
+            }
+            // Fallback for hashCode-based tags in static registries
+            for (var entry : nameToTagMap.entrySet()) {
+                if (entry.getValue() == tag) {
+                    return entry.getKey();
+                }
+            }
+            return "Unknown(" + tag + ")";
         }
 
         /**

@@ -123,10 +123,14 @@ class Resolver {
                         ResolvedReadCapture(binding.index, kind, hash, loc)
                     }
                     is MonoBinding.Function -> {
-                        when (val ref = binding.ref) {
-                            is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
-                            is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
-                        }
+                        // A Function binding used as a standalone expression (not being called).
+                        // For ByHash: allocate a local slot and read from it.
+                        // The function body was already compiled as a top-level MonoFunction
+                        // and will be available in the frame at runtime.
+                        // NOTE: ByHash used in MonoCall context is handled separately at line 139.
+                        val kind = typeToSlotKind(expr.type)
+                        val slot = ctx.getOrAllocLocal(expr.name, kind)
+                        ResolvedReadLocal(slot, kind, hash, loc)
                     }
                 }
             }
