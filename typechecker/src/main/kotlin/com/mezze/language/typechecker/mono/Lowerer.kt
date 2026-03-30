@@ -183,7 +183,7 @@ class Lowerer {
                             for (f in p.fields) {
                                 fieldNames.add(f.fieldName)
                                 val slot = (f.pattern as? ResolvedVarPattern)?.slot ?: -1
-                                if (slot >= 0) fieldSlots.add(slot)
+                                fieldSlots.add(slot)
                             }
                         }
                         is ResolvedVarPattern -> fieldSlots.add(p.slot)
@@ -193,8 +193,8 @@ class Lowerer {
                 PatternIR.Variant(pattern.tag, "", fieldNames, fieldSlots)
             }
             is ResolvedRecordPattern -> PatternIR.Record(
-                pattern.fields.map { "field" },
-                pattern.fields.mapNotNull { f -> (f.pattern as? ResolvedVarPattern)?.slot },
+                pattern.fields.map { f -> f.fieldName },
+                pattern.fields.map { f -> (f.pattern as? ResolvedVarPattern)?.slot ?: -1 },
                 pattern.isOpen
             )
             is ResolvedSeqPattern -> PatternIR.Wildcard() // TODO

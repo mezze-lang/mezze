@@ -510,19 +510,26 @@ class Resolver {
                 val payload = pattern.payload?.let { resolvePattern(it, ctx) }
                 ResolvedVariantPattern(tag, payload, pattern.loc)
             }
-            is MonoRecordPattern -> ResolvedRecordPattern(
-                pattern.fields.map { f ->
-                    val nested = f.pattern?.let { resolvePattern(it, ctx) }
-                    if (nested == null) {
-                        val kind = SlotKind.OBJECT
-                        val slot = ctx.getOrAllocLocal(f.name, kind)
-                        ResolvedPatternField(f.name, 0, ResolvedVarPattern(slot, kind, pattern.loc))
-                    } else {
-                        ResolvedPatternField(f.name, 0, nested)
-                    }
-                },
-                pattern.isOpen, pattern.loc
-            )
+            is MonoRecordPattern -> {
+                // Derive field types from the record pattern's type when available
+                val recordType = pattern.type as? MezzeType.RecordType
+                ResolvedRecordPattern(
+                    pattern.fields.map { f ->
+                        val nested = f.pattern?.let { resolvePattern(it, ctx) }
+                        if (nested == null) {
+                            // No rename — bind field name directly.
+                            // Use the field's actual type for correct slot kind.
+                            val fieldType = recordType?.fields?.get(f.name)
+                            val kind = if (fieldType != null) typeToSlotKind(fieldType) else SlotKind.OBJECT
+                            val slot = ctx.getOrAllocLocal(f.name, kind)
+                            ResolvedPatternField(f.name, 0, ResolvedVarPattern(slot, kind, pattern.loc))
+                        } else {
+                            ResolvedPatternField(f.name, 0, nested)
+                        }
+                    },
+                    pattern.isOpen, pattern.loc
+                )
+            }
             is MonoSeqPattern -> ResolvedSeqPattern(
                 pattern.elements.map { resolvePattern(it, ctx) },
                 pattern.rest?.let { ctx.getOrAllocLocal(it, SlotKind.OBJECT) },
