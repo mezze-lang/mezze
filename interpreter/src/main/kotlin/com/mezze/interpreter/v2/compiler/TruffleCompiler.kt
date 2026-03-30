@@ -54,8 +54,8 @@ class TruffleCompiler(
             frameDescriptor,
             bodyNode,
             ir.name,
-            ir.paramSlots.size,
-            ir.captureSlots.size,
+            ir.captureSlots.size,   // closureCount — captures come before params in the frame
+            ir.paramSlots.size,     // parameterCount
             IntArray(0)  // ability slot requirements — empty for monomorphized code
         )
     }

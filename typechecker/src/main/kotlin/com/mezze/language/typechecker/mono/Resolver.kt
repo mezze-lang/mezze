@@ -133,9 +133,17 @@ class Resolver {
                             val kind = typeToSlotKind(expr.type)
                             ResolvedReadLocal(existingSlot, kind, hash, loc)
                         } else {
-                            when (val ref = binding.ref) {
-                                is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
-                                is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
+                            // Try capture from parent scope
+                            val kind = typeToSlotKind(expr.type)
+                            val bindingHash = (binding.ref as? MonoFunctionRef.ByHash)?.hash?.hex
+                            val captureIdx = ctx.getOrCreateCapture(expr.name, bindingHash, kind)
+                            if (captureIdx != null) {
+                                ResolvedReadCapture(captureIdx, kind, hash, loc)
+                            } else {
+                                when (val ref = binding.ref) {
+                                    is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
+                                    is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
+                                }
                             }
                         }
                     }
@@ -150,7 +158,23 @@ class Resolver {
                     fn is MonoVar && fn.binding is MonoBinding.Function -> {
                         val ref = (fn.binding as MonoBinding.Function).ref
                         when (ref) {
-                            is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
+                            is MonoFunctionRef.ByHash -> {
+                                val localSlot = ctx.findLocal(fn.name)
+                                if (localSlot != null) {
+                                    val kind = typeToSlotKind(fn.type)
+                                    val readFn = ResolvedReadLocal(localSlot, kind, hash, loc)
+                                    ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                                } else {
+                                    val kind = typeToSlotKind(fn.type)
+                                    val captureIdx = ctx.getOrCreateCapture(fn.name, ref.hash.hex, kind)
+                                    if (captureIdx != null) {
+                                        val readFn = ResolvedReadCapture(captureIdx, kind, hash, loc)
+                                        ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                                    } else {
+                                        ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
+                                    }
+                                }
+                            }
                             is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, resolvedArg, hash, loc)
                         }
                     }
@@ -163,30 +187,31 @@ class Resolver {
             }
 
             is MonoLambda -> {
-                val innerCtx = SlotAllocator()
+                val innerCtx = SlotAllocator(parent = ctx)
                 for (param in expr.params) {
                     innerCtx.allocParam(param.name, typeToSlotKind(param.type))
                 }
                 val resolvedBody = resolveExpr(expr.body, innerCtx)
                 val fnHash = computeHash("lambda_${hash.hex}")
 
-                // Extract lambda body as a separate ResolvedFunction
+                val resolvedCaptures = innerCtx.getCaptures()
+
                 extractedLambdas.add(ResolvedFunction(
                     hash = fnHash,
                     name = "lambda",
                     qualifiedName = "lambda",
                     params = innerCtx.getParams(),
                     locals = innerCtx.getLocals(),
-                    captures = emptyList(),
+                    captures = resolvedCaptures,
                     body = resolvedBody,
                     isPublic = false,
                     loc = expr.loc
                 ))
 
-                val captures = expr.captures.map { c ->
-                    ResolvedCaptureRead(0, typeToSlotKind(c.type))
+                val captureReads = resolvedCaptures.map { c ->
+                    ResolvedCaptureRead(c.sourceIndex, c.kind)
                 }
-                ResolvedMakeLambda(fnHash, captures, hash, loc)
+                ResolvedMakeLambda(fnHash, captureReads, hash, loc)
             }
 
             is MonoRecord -> ResolvedMakeRecord(
@@ -255,6 +280,7 @@ class Resolver {
                         is MonoStatement.Let -> {
                             val kind = typeToSlotKind(stmt.type)
                             val slot = ctx.getOrAllocLocal(stmt.name, kind)
+                            ctx.setLocalHash(stmt.name, stmt.contentHash.hex)
                             ResolvedStmt.Let(slot, kind, stmt.name, stmt.contentHash, resolveExpr(stmt.value, ctx), stmt.loc)
                         }
                         is MonoStatement.Expr -> ResolvedStmt.Expr(resolveExpr(stmt.expr, ctx), stmt.loc)
@@ -293,10 +319,18 @@ class Resolver {
     // Slot allocation
     // ========================================================================
 
-    private class SlotAllocator {
+    private class SlotAllocator(
+        /** Parent scope for capture resolution */
+        val parent: SlotAllocator? = null
+    ) {
         private val params = mutableListOf<ResolvedSlot>()
         private val locals = mutableListOf<ResolvedSlot>()
         private val localsByName = mutableMapOf<String, Int>()
+        /** Track which content hash each local was defined with */
+        private val localHashByName = mutableMapOf<String, String>()
+        /** Captures from parent scope */
+        private val capturesList = mutableListOf<ResolvedCaptureSlot>()
+        private val capturesByKey = mutableMapOf<String, Int>()  // "name:hash" → capture index
 
         fun allocParam(name: String, kind: SlotKind): Int {
             val slot = params.size
@@ -312,11 +346,44 @@ class Resolver {
             return slot
         }
 
+        /** Register the content hash for a local (from Let statement) */
+        fun setLocalHash(name: String, hash: String) {
+            localHashByName[name] = hash
+        }
+
         /** Find existing local slot by name, returns null if not allocated */
         fun findLocal(name: String): Int? = localsByName[name]
 
+        /**
+         * Find or create a capture from the parent scope.
+         * Uses name+hash to avoid collisions (e.g., local "length" vs imported "length").
+         * Returns capture index, or null if not found in parent.
+         */
+        fun getOrCreateCapture(name: String, bindingHash: String?, kind: SlotKind): Int? {
+            // Key includes hash to avoid name collisions
+            val key = "$name:${bindingHash ?: "local"}"
+            capturesByKey[key]?.let { return it }
+
+            // Find in parent by name AND verify hash matches
+            val parentSlot = parent?.findLocal(name)
+            if (parentSlot != null) {
+                val parentHash = parent?.localHashByName?.get(name)
+                // Only capture if hash matches (or binding has no hash = local value)
+                if (bindingHash == null || parentHash == null || parentHash == bindingHash) {
+                    val captureIdx = capturesList.size
+                    capturesList.add(ResolvedCaptureSlot(
+                        sourceIndex = parentSlot, targetIndex = captureIdx, kind = kind, name = name
+                    ))
+                    capturesByKey[key] = captureIdx
+                    return captureIdx
+                }
+            }
+            return null
+        }
+
         fun getParams(): List<ResolvedSlot> = params.toList()
         fun getLocals(): List<ResolvedSlot> = locals.toList()
+        fun getCaptures(): List<ResolvedCaptureSlot> = capturesList.toList()
     }
 
     // ========================================================================
