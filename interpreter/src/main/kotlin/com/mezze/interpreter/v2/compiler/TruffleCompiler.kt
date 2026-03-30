@@ -164,22 +164,29 @@ class TruffleCompiler(
 
                 val branches = node.cases.mapIndexed { idx, case ->
                     val bodyNode = compileNode(case.body, source)
+                    val guardNode = case.guard?.let { compileNode(it, source) }
                     when (val pat = case.pattern) {
                         is PatternIR.Wildcard -> {
                             wildcardIndex = idx
-                            if (pat.slot >= 0) {
+                            if (guardNode != null) {
+                                MatchBranchNode.wildcardWithGuard(
+                                    if (pat.slot >= 0) pat.slot else -1, bodyNode, guardNode, emptyArray())
+                            } else if (pat.slot >= 0) {
                                 MatchBranchNode.wildcard(pat.slot, bodyNode)
                             } else {
                                 MatchBranchNode.wildcardNoBinding(bodyNode)
                             }
                         }
                         is PatternIR.Variant -> {
-                            MatchBranchNode.variantPatternWithFieldNames(
-                                pat.tag,
-                                pat.fieldNames.toTypedArray(),
-                                pat.fieldSlots.toIntArray(),
-                                bodyNode
-                            )
+                            if (guardNode != null) {
+                                MatchBranchNode.variantPatternWithGuard(
+                                    pat.tag, pat.fieldNames.toTypedArray(),
+                                    pat.fieldSlots.toIntArray(), bodyNode, guardNode, emptyArray())
+                            } else {
+                                MatchBranchNode.variantPatternWithFieldNames(
+                                    pat.tag, pat.fieldNames.toTypedArray(),
+                                    pat.fieldSlots.toIntArray(), bodyNode)
+                            }
                         }
                         is PatternIR.Literal -> {
                             val v = pat.value
@@ -190,15 +197,26 @@ class TruffleCompiler(
                                 is StringLitIR -> v.value
                                 else -> 0L
                             }
-                            MatchBranchNode.literalPattern(litValue, bodyNode)
+                            if (guardNode != null) {
+                                MatchBranchNode.literalPatternWithGuard(litValue, bodyNode, guardNode, emptyArray())
+                            } else {
+                                MatchBranchNode.literalPattern(litValue, bodyNode)
+                            }
                         }
                         is PatternIR.Record -> {
-                            MatchBranchNode.recordPattern(
-                                pat.fieldNames.toTypedArray(),
-                                pat.fieldSlots.toIntArray(),
-                                pat.isOpen,
-                                bodyNode
-                            )
+                            if (guardNode != null) {
+                                MatchBranchNode.recordPatternWithGuard(
+                                    pat.fieldNames.toTypedArray(),
+                                    pat.fieldSlots.toIntArray(),
+                                    pat.isOpen,
+                                    bodyNode, guardNode, emptyArray())
+                            } else {
+                                MatchBranchNode.recordPattern(
+                                    pat.fieldNames.toTypedArray(),
+                                    pat.fieldSlots.toIntArray(),
+                                    pat.isOpen,
+                                    bodyNode)
+                            }
                         }
                     }
                 }.toTypedArray()
