@@ -262,31 +262,69 @@ class Resolver {
                 ResolvedMakeLambda(fnHash, captureReads, hash, loc)
             }
 
-            is MonoRecord -> ResolvedMakeRecord(
-                expr.entries.mapNotNull { entry ->
+            is MonoRecord -> {
+                // Collect explicit field names (these override spread fields)
+                val explicitFields = expr.entries
+                    .filterIsInstance<MonoRecordEntry.Field>()
+                    .map { it.name }
+                    .toSet()
+
+                val resolvedFields = mutableListOf<ResolvedFieldEntry>()
+                for (entry in expr.entries) {
                     when (entry) {
-                        is MonoRecordEntry.Field -> ResolvedFieldEntry(entry.name, resolveExpr(entry.value, ctx))
-                        is MonoRecordEntry.Spread -> null // TODO: expand spreads
+                        is MonoRecordEntry.Field ->
+                            resolvedFields.add(ResolvedFieldEntry(entry.name, resolveExpr(entry.value, ctx)))
+                        is MonoRecordEntry.Spread -> {
+                            // Expand spread: for each field in the spread record's type that isn't
+                            // explicitly overridden, emit a field access on the resolved spread expr.
+                            val spreadType = entry.expr.type
+                            if (spreadType is RecordType) {
+                                val resolvedSpread = resolveExpr(entry.expr, ctx)
+                                for ((fieldName, _) in spreadType.fields) {
+                                    if (fieldName !in explicitFields) {
+                                        val fieldAccess = ResolvedFieldAccess(resolvedSpread, fieldName, -1, hash, loc)
+                                        resolvedFields.add(ResolvedFieldEntry(fieldName, fieldAccess))
+                                    }
+                                }
+                            }
+                            // If not a RecordType, skip (shouldn't happen with well-typed code)
+                        }
                     }
-                },
-                hash, loc
-            )
+                }
+                ResolvedMakeRecord(resolvedFields, hash, loc)
+            }
             is MonoFieldAccess -> ResolvedFieldAccess(
                 resolveExpr(expr.record, ctx),
                 expr.field,
                 expr.fieldIndex,
                 hash, loc
             )
-            is MonoRecordUpdate -> ResolvedRecordUpdate(
-                resolveExpr(expr.record, ctx),
-                expr.updates.mapNotNull { entry ->
+            is MonoRecordUpdate -> {
+                val explicitUpdateFields = expr.updates
+                    .filterIsInstance<MonoRecordEntry.Field>()
+                    .map { it.name }
+                    .toSet()
+                val resolvedUpdates = mutableListOf<ResolvedFieldEntry>()
+                for (entry in expr.updates) {
                     when (entry) {
-                        is MonoRecordEntry.Field -> ResolvedFieldEntry(entry.name, resolveExpr(entry.value, ctx))
-                        is MonoRecordEntry.Spread -> null
+                        is MonoRecordEntry.Field ->
+                            resolvedUpdates.add(ResolvedFieldEntry(entry.name, resolveExpr(entry.value, ctx)))
+                        is MonoRecordEntry.Spread -> {
+                            val spreadType = entry.expr.type
+                            if (spreadType is RecordType) {
+                                val resolvedSpread = resolveExpr(entry.expr, ctx)
+                                for ((fieldName, _) in spreadType.fields) {
+                                    if (fieldName !in explicitUpdateFields) {
+                                        val fieldAccess = ResolvedFieldAccess(resolvedSpread, fieldName, -1, hash, loc)
+                                        resolvedUpdates.add(ResolvedFieldEntry(fieldName, fieldAccess))
+                                    }
+                                }
+                            }
+                        }
                     }
-                },
-                hash, loc
-            )
+                }
+                ResolvedRecordUpdate(resolveExpr(expr.record, ctx), resolvedUpdates, hash, loc)
+            }
 
             is MonoVariantConstruct -> {
                 val tag = expr.tag.hashCode() and 0x7FFFFFFF // Simple tag assignment

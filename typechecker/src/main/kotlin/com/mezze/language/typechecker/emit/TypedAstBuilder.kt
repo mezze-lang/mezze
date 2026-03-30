@@ -192,23 +192,9 @@ class TypedAstBuilder(
             decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
 
             // For each field, create a separate TypedLetDecl with field access
-            for (entry in pattern.entries) {
-                val fieldName = entry.name
-                val fieldType = when (type) {
-                    is MezzeType.RecordType -> type.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
-                    else -> MezzeType.VarType(TypeVar("field_$fieldName"))
-                }
-                val destrBinding = resolveBinding(destrName, null)
-                val destrVar = TypedVar(destrName, destrBinding, type, loc)
-                val fieldAccess = TypedFieldAccess(destrVar, fieldName, -1, fieldType, loc)
-                val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
-                val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
-                val isPublic = decl.visibility == ParsedVisibility.PUBLIC
-                decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
-                if (isPublic) {
-                    exports[fieldName] = ExportEntry(fieldName, fieldHash, fieldType, ExportKind.FUNCTION)
-                }
-            }
+            // Handles renames ({ x as renamed }) and nested patterns ({ inner: { x, y } })
+            val isPublic = decl.visibility == ParsedVisibility.PUBLIC
+            emitRecordDestructureDeclFields(pattern.entries, destrName, type, loc, isPublic, decls, exports)
             return
         }
 
@@ -760,19 +746,8 @@ class TypedAstBuilder(
                                 stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
 
                                 // For each field in the pattern, create a field access let
-                                for (field in pattern.entries) {
-                                    val fieldName = field.name
-                                    val fieldType = when (resolvedType) {
-                                        is MezzeType.RecordType -> resolvedType.fields[field.name] ?: MezzeType.VarType(TypeVar("field_${field.name}"))
-                                        else -> MezzeType.VarType(TypeVar("field_${field.name}"))
-                                    }
-                                    identifierContext[fieldName] = fieldType
-                                    val destrBinding = resolveBinding(destrName, null)
-                                    val destrVar = TypedVar(destrName, destrBinding, resolvedType, stmt.loc)
-                                    val fieldAccess = TypedFieldAccess(destrVar, field.name, -1, fieldType, stmt.loc)
-                                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
-                                    stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, stmt.loc))
-                                }
+                                // Handles renames ({ x as renamed }) and nested patterns ({ inner: { x, y } })
+                                emitRecordDestructureFields(pattern.entries, destrName, resolvedType, stmt.loc, stmts)
                             } else {
                                 val name = when (pattern) {
                                     is ParsedVariablePattern -> pattern.name
@@ -1275,6 +1250,130 @@ class TypedAstBuilder(
                 type = binding.type,
                 kind = ExportKind.FUNCTION
             )
+        }
+    }
+
+    // ========================================================================
+    // Record destructure helpers
+    // ========================================================================
+
+    /**
+     * Emit let-bindings for record destructuring entries in a do-block.
+     * Handles:
+     * - Punning: `{ x }` → `let x = parent.x`
+     * - Rename: `{ x as renamed }` → `let renamed = parent.x`
+     * - Nested: `{ inner: { x, y } }` → `let __inner = parent.inner; let x = __inner.x; let y = __inner.y`
+     */
+    private fun emitRecordDestructureFields(
+        entries: List<ParsedRecordPatternEntry>,
+        parentVarName: String,
+        parentType: MezzeType,
+        loc: Loc,
+        stmts: MutableList<TypedStatement>
+    ) {
+        for (field in entries) {
+            val fieldName = field.name  // The record field name
+            val fieldType = when (parentType) {
+                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
+                else -> MezzeType.VarType(TypeVar("field_$fieldName"))
+            }
+            val parentBinding = resolveBinding(parentVarName, null)
+            val parentVar = TypedVar(parentVarName, parentBinding, parentType, loc)
+            val fieldAccess = TypedFieldAccess(parentVar, fieldName, -1, fieldType, loc)
+
+            when (val p = field.pattern) {
+                null -> {
+                    // Punning: { x } means { x = x }
+                    identifierContext[fieldName] = fieldType
+                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
+                    stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
+                }
+                is ParsedVariablePattern -> {
+                    // Rename: { x as renamed }
+                    val bindingName = p.name
+                    identifierContext[bindingName] = fieldType
+                    val fieldHash = computeHash("do_let_$bindingName:${typeToString(fieldType)}")
+                    stmts.add(TypedStatement.Let(bindingName, fieldHash, fieldType, fieldAccess, loc))
+                }
+                is ParsedRecordPattern -> {
+                    // Nested: { inner: { x, y } }
+                    val nestedVarName = "__destr_${fieldName}_${stmts.size}"
+                    identifierContext[nestedVarName] = fieldType
+                    val nestedHash = computeHash("do_let_$nestedVarName:${typeToString(fieldType)}")
+                    stmts.add(TypedStatement.Let(nestedVarName, nestedHash, fieldType, fieldAccess, loc))
+                    emitRecordDestructureFields(p.entries, nestedVarName, fieldType, loc, stmts)
+                }
+                else -> {
+                    // Other patterns (wildcard, etc.) — bind with field name
+                    identifierContext[fieldName] = fieldType
+                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
+                    stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
+                }
+            }
+        }
+    }
+
+    /**
+     * Emit top-level TypedLetDecls for record destructuring entries.
+     * Handles renames and nested patterns, analogous to [emitRecordDestructureFields] for do-blocks.
+     */
+    private fun emitRecordDestructureDeclFields(
+        entries: List<ParsedRecordPatternEntry>,
+        parentVarName: String,
+        parentType: MezzeType,
+        loc: Loc,
+        isPublic: Boolean,
+        decls: MutableList<TypedDecl>,
+        exports: MutableMap<String, ExportEntry>
+    ) {
+        for (entry in entries) {
+            val fieldName = entry.name
+            val fieldType = when (parentType) {
+                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
+                else -> MezzeType.VarType(TypeVar("field_$fieldName"))
+            }
+            val destrBinding = resolveBinding(parentVarName, null)
+            val destrVar = TypedVar(parentVarName, destrBinding, parentType, loc)
+            val fieldAccess = TypedFieldAccess(destrVar, fieldName, -1, fieldType, loc)
+
+            when (val p = entry.pattern) {
+                null -> {
+                    // Punning: { x }
+                    val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
+                    val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                    decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
+                    if (isPublic) {
+                        exports[fieldName] = ExportEntry(fieldName, fieldHash, fieldType, ExportKind.FUNCTION)
+                    }
+                }
+                is ParsedVariablePattern -> {
+                    // Rename: { x as renamed }
+                    val bindingName = p.name
+                    val fieldHash = computeHash("let_$bindingName:${typeToString(fieldType)}")
+                    val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                    decls.add(TypedLetDecl(fieldHash, bindingName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
+                    if (isPublic) {
+                        exports[bindingName] = ExportEntry(bindingName, fieldHash, fieldType, ExportKind.FUNCTION)
+                    }
+                }
+                is ParsedRecordPattern -> {
+                    // Nested: { inner: { x, y } }
+                    val nestedVarName = "__destructured_${fieldName}_${decls.size}"
+                    val nestedHash = computeHash("let_$nestedVarName:${typeToString(fieldType)}")
+                    val nestedScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                    decls.add(TypedLetDecl(nestedHash, nestedVarName, emptyList(), fieldAccess, nestedScheme, false, loc))
+                    emitRecordDestructureDeclFields(p.entries, nestedVarName, fieldType, loc, isPublic, decls, exports)
+                }
+                else -> {
+                    // Other patterns — bind with field name
+                    val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
+                    val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                    decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
+                    if (isPublic) {
+                        exports[fieldName] = ExportEntry(fieldName, fieldHash, fieldType, ExportKind.FUNCTION)
+                    }
+                }
+            }
         }
     }
 
