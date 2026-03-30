@@ -273,7 +273,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
             Object result = bodyNode.execute(frame);
             lastResultStore.set(result);
+            captureGlobalContext();
             return MezzeUnit.INSTANCE;
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        private void captureGlobalContext() {
+            // Capture all global variables registered by WriteLocalWithContextNode.
+            // This enables tests using runAndGetContext() to read variable values.
+            try {
+                MezzeContext context = MezzeContext.get(this);
+                Map<String, Object> globals = context.getAllGlobals();
+                if (globals != null && !globals.isEmpty()) {
+                    lastContextStore.set(globals);
+                }
+            } catch (Exception e) {
+                // No context available
+            }
         }
     }
 

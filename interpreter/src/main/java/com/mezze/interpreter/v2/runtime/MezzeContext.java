@@ -77,6 +77,14 @@ public final class MezzeContext {
         globals.put(contentHash, value);
     }
 
+    /**
+     * Get all global definitions. Used by test infrastructure to capture variable context.
+     */
+    @TruffleBoundary
+    public Map<String, Object> getAllGlobals() {
+        return new HashMap<>(globals);
+    }
+
     @TruffleBoundary
     public Object lookupGlobal(String contentHash) {
         return globals.get(contentHash);
