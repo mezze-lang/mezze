@@ -130,12 +130,22 @@ class Resolver {
                         // function references to work via CallDirect.
                         val existingSlot = ctx.findLocal(expr.name)
                         if (existingSlot != null) {
+                            // Same scope — read from local slot
                             val kind = typeToSlotKind(expr.type)
                             ResolvedReadLocal(existingSlot, kind, hash, loc)
                         } else {
-                            when (val ref = binding.ref) {
-                                is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
-                                is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
+                            // Try parent scope capture (for cross-scope references in lambdas)
+                            val kind = typeToSlotKind(expr.type)
+                            val captureIdx = ctx.getOrCreateCapture(expr.name, kind)
+                            if (captureIdx != null) {
+                                // Found in parent — read from capture slot
+                                ResolvedReadCapture(captureIdx, kind, hash, loc)
+                            } else {
+                                // Not in any local scope — use hash-based call
+                                when (val ref = binding.ref) {
+                                    is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
+                                    is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
+                                }
                             }
                         }
                     }
@@ -150,7 +160,29 @@ class Resolver {
                     fn is MonoVar && fn.binding is MonoBinding.Function -> {
                         val ref = (fn.binding as MonoBinding.Function).ref
                         when (ref) {
-                            is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
+                            is MonoFunctionRef.ByHash -> {
+                                // If the function was defined as a local let binding (same scope),
+                                // read the closure from the local slot and invoke indirectly.
+                                // This matches the v1 path: ReadLocal(slot) → InvokeNode(closure, arg).
+                                // For cross-scope references (no local slot), use CallDirect.
+                                val localSlot = ctx.findLocal(fn.name)
+                                if (localSlot != null) {
+                                    // Same scope — read closure from local slot, invoke
+                                    val kind = typeToSlotKind(fn.type)
+                                    val readFn = ResolvedReadLocal(localSlot, kind, hash, loc)
+                                    ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                                } else {
+                                    // Try capture from parent scope
+                                    val kind = typeToSlotKind(fn.type)
+                                    val captureIdx = ctx.getOrCreateCapture(fn.name, kind)
+                                    if (captureIdx != null) {
+                                        val readFn = ResolvedReadCapture(captureIdx, kind, hash, loc)
+                                        ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                                    } else {
+                                        ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
+                                    }
+                                }
+                            }
                             is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, resolvedArg, hash, loc)
                         }
                     }
@@ -163,12 +195,16 @@ class Resolver {
             }
 
             is MonoLambda -> {
-                val innerCtx = SlotAllocator()
+                // Create inner scope with parent reference for capture resolution
+                val innerCtx = SlotAllocator(parent = ctx)
                 for (param in expr.params) {
                     innerCtx.allocParam(param.name, typeToSlotKind(param.type))
                 }
                 val resolvedBody = resolveExpr(expr.body, innerCtx)
                 val fnHash = computeHash("lambda_${hash.hex}")
+
+                // Collect captures detected during body resolution
+                val resolvedCaptures = innerCtx.getCaptures()
 
                 // Extract lambda body as a separate ResolvedFunction
                 extractedLambdas.add(ResolvedFunction(
@@ -177,16 +213,17 @@ class Resolver {
                     qualifiedName = "lambda",
                     params = innerCtx.getParams(),
                     locals = innerCtx.getLocals(),
-                    captures = emptyList(),
+                    captures = resolvedCaptures,
                     body = resolvedBody,
                     isPublic = false,
                     loc = expr.loc
                 ))
 
-                val captures = expr.captures.map { c ->
-                    ResolvedCaptureRead(0, typeToSlotKind(c.type))
+                // Build capture reads from parent scope slots
+                val captureReads = resolvedCaptures.map { c ->
+                    ResolvedCaptureRead(c.sourceIndex, c.kind)
                 }
-                ResolvedMakeLambda(fnHash, captures, hash, loc)
+                ResolvedMakeLambda(fnHash, captureReads, hash, loc)
             }
 
             is MonoRecord -> ResolvedMakeRecord(
@@ -293,10 +330,16 @@ class Resolver {
     // Slot allocation
     // ========================================================================
 
-    private class SlotAllocator {
+    private class SlotAllocator(
+        /** Parent scope for capture resolution */
+        val parent: SlotAllocator? = null
+    ) {
         private val params = mutableListOf<ResolvedSlot>()
         private val locals = mutableListOf<ResolvedSlot>()
         private val localsByName = mutableMapOf<String, Int>()
+        /** Captures from parent scope */
+        val capturesList = mutableListOf<ResolvedCaptureSlot>()
+        private val capturesByName = mutableMapOf<String, Int>()
 
         fun allocParam(name: String, kind: SlotKind): Int {
             val slot = params.size
@@ -315,8 +358,25 @@ class Resolver {
         /** Find existing local slot by name, returns null if not allocated */
         fun findLocal(name: String): Int? = localsByName[name]
 
+        /** Check if name is a param */
+        fun findParam(name: String): Int? = params.firstOrNull { it.name == name }?.index
+
+        /**
+         * Find or create a capture for a variable from the parent scope.
+         * Returns the capture index, or null if not found in parent.
+         */
+        fun getOrCreateCapture(name: String, kind: SlotKind): Int? {
+            capturesByName[name]?.let { return it }
+            val parentSlot = parent?.findLocal(name) ?: parent?.findParam(name) ?: return null
+            val captureIdx = capturesList.size
+            capturesList.add(ResolvedCaptureSlot(sourceIndex = parentSlot, targetIndex = captureIdx, kind = kind, name = name))
+            capturesByName[name] = captureIdx
+            return captureIdx
+        }
+
         fun getParams(): List<ResolvedSlot> = params.toList()
         fun getLocals(): List<ResolvedSlot> = locals.toList()
+        fun getCaptures(): List<ResolvedCaptureSlot> = capturesList.toList()
     }
 
     // ========================================================================
