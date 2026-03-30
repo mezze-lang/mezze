@@ -111,8 +111,22 @@ class Resolver {
                 when (val binding = expr.binding) {
                     is MonoBinding.Local -> {
                         val kind = typeToSlotKind(expr.type)
-                        val slot = ctx.getOrAllocLocal(expr.name, kind)
-                        ResolvedReadLocal(slot, kind, hash, loc)
+                        val existingSlot = ctx.findLocal(expr.name)
+                        if (existingSlot != null) {
+                            ResolvedReadLocal(existingSlot, kind, hash, loc)
+                        } else if (ctx.parent != null && ctx.findParam(expr.name) == null) {
+                            // Inside a lambda, NOT a param in this scope — try capture
+                            val captureIdx = ctx.getOrCreateCapture(expr.name, null, kind)
+                            if (captureIdx != null) {
+                                ResolvedReadCapture(captureIdx, kind, hash, loc)
+                            } else {
+                                val slot = ctx.getOrAllocLocal(expr.name, kind)
+                                ResolvedReadLocal(slot, kind, hash, loc)
+                            }
+                        } else {
+                            val slot = ctx.getOrAllocLocal(expr.name, kind)
+                            ResolvedReadLocal(slot, kind, hash, loc)
+                        }
                     }
                     is MonoBinding.Param -> {
                         val kind = typeToSlotKind(expr.type)
@@ -122,12 +136,8 @@ class Resolver {
                         val kind = typeToSlotKind(expr.type)
                         ResolvedReadCapture(binding.index, kind, hash, loc)
                     }
-                    is MonoBinding.Function -> {
-                        // If the variable was previously allocated as a local (from a Let statement
-                        // in the same block), read from the local slot. Otherwise, call via hash.
-                        // This handles value bindings (let rec = {...}) correctly by reading from
-                        // the slot where the Let wrote the value, while still allowing cross-scope
-                        // function references to work via CallDirect.
+                    is MonoBinding.FunctionRef -> {
+                        // Lambda/function reference: check local slot first, then capture, then CallDirect
                         val existingSlot = ctx.findLocal(expr.name)
                         if (existingSlot != null) {
                             val kind = typeToSlotKind(expr.type)
@@ -147,6 +157,23 @@ class Resolver {
                             }
                         }
                     }
+                    is MonoBinding.ValueRef -> {
+                        // Non-lambda value reference: check local slot first, then capture, then CallDirect
+                        // CallDirect with UnitLit calls the function that evaluates and returns the value
+                        val existingSlot = ctx.findLocal(expr.name)
+                        if (existingSlot != null) {
+                            val kind = typeToSlotKind(expr.type)
+                            ResolvedReadLocal(existingSlot, kind, hash, loc)
+                        } else {
+                            val kind = typeToSlotKind(expr.type)
+                            val captureIdx = ctx.getOrCreateCapture(expr.name, binding.hash.hex, kind)
+                            if (captureIdx != null) {
+                                ResolvedReadCapture(captureIdx, kind, hash, loc)
+                            } else {
+                                ResolvedCallDirect(binding.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -155,8 +182,8 @@ class Resolver {
                 val fn = expr.function
                 // Debug removed
                 when {
-                    fn is MonoVar && fn.binding is MonoBinding.Function -> {
-                        val ref = (fn.binding as MonoBinding.Function).ref
+                    fn is MonoVar && fn.binding is MonoBinding.FunctionRef -> {
+                        val ref = (fn.binding as MonoBinding.FunctionRef).ref
                         when (ref) {
                             is MonoFunctionRef.ByHash -> {
                                 val localSlot = ctx.findLocal(fn.name)
@@ -176,6 +203,27 @@ class Resolver {
                                 }
                             }
                             is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, resolvedArg, hash, loc)
+                        }
+                    }
+                    fn is MonoVar && fn.binding is MonoBinding.ValueRef -> {
+                        // Values aren't callable — but this can happen with HOFs passing values.
+                        // Read the value and try indirect call (the value might be a closure at runtime).
+                        val valueHash = (fn.binding as MonoBinding.ValueRef).hash
+                        val localSlot = ctx.findLocal(fn.name)
+                        if (localSlot != null) {
+                            val kind = typeToSlotKind(fn.type)
+                            val readFn = ResolvedReadLocal(localSlot, kind, hash, loc)
+                            ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                        } else {
+                            val kind = typeToSlotKind(fn.type)
+                            val captureIdx = ctx.getOrCreateCapture(fn.name, valueHash.hex, kind)
+                            if (captureIdx != null) {
+                                val readFn = ResolvedReadCapture(captureIdx, kind, hash, loc)
+                                ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
+                            } else {
+                                // Call the value's function to get it, then invoke indirectly
+                                ResolvedCallDirect(valueHash, resolvedArg, expr.isTailCall, hash, loc)
+                            }
                         }
                     }
                     else -> {
@@ -353,6 +401,9 @@ class Resolver {
 
         /** Find existing local slot by name, returns null if not allocated */
         fun findLocal(name: String): Int? = localsByName[name]
+
+        /** Find existing param by name */
+        fun findParam(name: String): Int? = params.firstOrNull { it.name == name }?.index
 
         /**
          * Find or create a capture from the parent scope.

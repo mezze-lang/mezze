@@ -235,13 +235,13 @@ class Monomorphizer {
                 expr.loc
             )
             is TypedVar -> {
-                val monoBinding = convertBinding(expr.binding, worklist, processed)
+                val monoBinding = convertBinding(expr.binding, globalDecls, worklist, processed)
                 MonoVar(expr.name, monoBinding, expr.type, expr.loc)
             }
             is TypedLambda -> MonoLambda(
                 expr.params.map { p -> MonoParam(p.name, p.type, p.loc) },
                 convertExpr(expr.body, globalDecls, worklist, processed),
-                expr.captures.map { c -> MonoCapture(c.name, c.type, convertBinding(c.source, worklist, processed)) },
+                expr.captures.map { c -> MonoCapture(c.name, c.type, convertBinding(c.source, globalDecls, worklist, processed)) },
                 expr.type,
                 expr.loc
             )
@@ -389,6 +389,7 @@ class Monomorphizer {
 
     private fun convertBinding(
         binding: BindingRef,
+        globalDecls: Map<Hash, TypedLetDecl>,
         worklist: ArrayDeque<Hash>,
         processed: Set<Hash>
     ): MonoBinding {
@@ -400,9 +401,16 @@ class Monomorphizer {
                 if (binding.hash !in processed) {
                     worklist.add(binding.hash)
                 }
-                MonoBinding.Function(MonoFunctionRef.ByHash(binding.hash))
+                // Check if the declaration's value is a lambda — if so, it's a function ref
+                // (creates closure); otherwise it's a value ref (read directly)
+                val decl = globalDecls[binding.hash]
+                if (decl != null && decl.value is TypedLambda) {
+                    MonoBinding.FunctionRef(MonoFunctionRef.ByHash(binding.hash))
+                } else {
+                    MonoBinding.ValueRef(binding.hash)
+                }
             }
-            is BindingRef.Native -> MonoBinding.Function(MonoFunctionRef.Native(binding.name))
+            is BindingRef.Native -> MonoBinding.FunctionRef(MonoFunctionRef.Native(binding.name))
         }
     }
 

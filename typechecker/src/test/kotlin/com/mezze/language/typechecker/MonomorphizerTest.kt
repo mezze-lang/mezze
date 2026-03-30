@@ -85,12 +85,18 @@ let main = { } -> helper { x = 42 }
             walkMonoExpr(fn.body) { expr ->
                 if (expr is MonoVar) {
                     val binding = expr.binding
-                    if (binding is MonoBinding.Function) {
-                        val ref = binding.ref
-                        assertTrue(
-                            ref is MonoFunctionRef.ByHash || ref is MonoFunctionRef.Native,
-                            "Expected ByHash or Native, got $ref"
-                        )
+                    when (binding) {
+                        is MonoBinding.FunctionRef -> {
+                            val ref = binding.ref
+                            assertTrue(
+                                ref is MonoFunctionRef.ByHash || ref is MonoFunctionRef.Native,
+                                "Expected ByHash or Native, got $ref"
+                            )
+                        }
+                        is MonoBinding.ValueRef -> {
+                            assertNotEquals(Hash.ZERO, binding.hash, "ValueRef should have non-zero hash")
+                        }
+                        else -> {} // Local, Param, Capture are fine
                     }
                 }
             }

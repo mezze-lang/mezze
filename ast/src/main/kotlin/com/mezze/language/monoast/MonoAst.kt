@@ -118,7 +118,10 @@ sealed interface MonoBinding {
     @Serializable data class Local(val depth: Int, val index: Int) : MonoBinding
     @Serializable data class Param(val index: Int) : MonoBinding
     @Serializable data class Capture(val index: Int) : MonoBinding
-    @Serializable data class Function(val ref: MonoFunctionRef) : MonoBinding
+    /** Lambda/function reference — creates closure when evaluated */
+    @Serializable data class FunctionRef(val ref: MonoFunctionRef) : MonoBinding
+    /** Non-lambda value reference — read directly (not callable) */
+    @Serializable data class ValueRef(val hash: Hash) : MonoBinding
 }
 
 /**
