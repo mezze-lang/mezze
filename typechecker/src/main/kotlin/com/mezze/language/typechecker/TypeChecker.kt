@@ -678,10 +678,8 @@ class TypeChecker(
                     val lowered = lowerer.lower(resolved)
                     loweredFns = lowered.functions
                 } catch (pipelineEx: Exception) {
-                    // Pipeline best-effort — log to debug file
-                    try { java.io.File("/tmp/tc_pipeline_error.txt").appendText(
-                        "Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}\n${pipelineEx.stackTraceToString().take(500)}\n---\n"
-                    ) } catch (_: Exception) {}
+                    // Pipeline best-effort — log failure to stderr
+                    System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
                 // Use validationProgram (has inferredType from SubstitutionApplier) for module export
