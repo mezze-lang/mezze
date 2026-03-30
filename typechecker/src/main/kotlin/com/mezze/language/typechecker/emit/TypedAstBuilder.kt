@@ -176,6 +176,42 @@ class TypedAstBuilder(
         decls: MutableList<TypedDecl>,
         exports: MutableMap<String, ExportEntry>
     ) {
+        // Check for record destructuring pattern: let { a, b, c } = expr
+        if (!decl.isSimpleBinding && decl.pattern is ParsedRecordPattern) {
+            val pattern = decl.pattern as ParsedRecordPattern
+            val destrName = "__destructured_${decls.size}"
+            val loc = decl.loc
+            val rawType = constraintResults[destrName]?.let { substitution.apply(it.type) }
+                ?: constraintResults["__destructured__"]?.let { substitution.apply(it.type) }
+                ?: MezzeType.VarType(TypeVar("unknown"))
+            val type = closeGeneratedRowVars(rawType)
+            val value = buildExpr(decl.value, file, type)
+
+            val destrHash = computeHash("let_$destrName:${typeToString(type)}")
+            val scheme = V2TypeScheme(emptyList(), emptyList(), type)
+            decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
+
+            // For each field, create a separate TypedLetDecl with field access
+            for (entry in pattern.entries) {
+                val fieldName = entry.name
+                val fieldType = when (type) {
+                    is MezzeType.RecordType -> type.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
+                    else -> MezzeType.VarType(TypeVar("field_$fieldName"))
+                }
+                val destrBinding = resolveBinding(destrName, null)
+                val destrVar = TypedVar(destrName, destrBinding, type, loc)
+                val fieldAccess = TypedFieldAccess(destrVar, fieldName, -1, fieldType, loc)
+                val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
+                val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
+                val isPublic = decl.visibility == ParsedVisibility.PUBLIC
+                decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
+                if (isPublic) {
+                    exports[fieldName] = ExportEntry(fieldName, fieldHash, fieldType, ExportKind.FUNCTION)
+                }
+            }
+            return
+        }
+
         val name = if (decl.isSimpleBinding) decl.variableName else "__destructured__"
         val loc = decl.loc
 
@@ -705,23 +741,57 @@ class TypedAstBuilder(
                 for (stmt in expr.statements) {
                     when (stmt) {
                         is ParsedStatement.Let -> {
-                            val name = when (val p = stmt.pattern) {
-                                is ParsedVariablePattern -> p.name
-                                else -> "__pattern__"
+                            val pattern = stmt.pattern
+                            if (pattern is com.mezze.language.parsedast.ParsedRecordPattern) {
+                                // Desugar record destructuring:
+                                // let { a, b, c } = record →
+                                //   let __destr = record
+                                //   let a = __destr.a
+                                //   let b = __destr.b
+                                //   let c = __destr.c
+                                val destrName = "__destr_${stmts.size}"
+                                val valueType = stmt.typeAnnotation
+                                    ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
+                                    ?: MezzeType.VarType(TypeVar("let_destr"))
+                                val value = buildExpr(stmt.value, file, valueType)
+                                val resolvedType = substitution.apply(value.type)
+                                identifierContext[destrName] = resolvedType
+                                val destrHash = computeHash("do_let_$destrName:${typeToString(resolvedType)}")
+                                stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
+
+                                // For each field in the pattern, create a field access let
+                                for (field in pattern.entries) {
+                                    val fieldName = field.name
+                                    val fieldType = when (resolvedType) {
+                                        is MezzeType.RecordType -> resolvedType.fields[field.name] ?: MezzeType.VarType(TypeVar("field_${field.name}"))
+                                        else -> MezzeType.VarType(TypeVar("field_${field.name}"))
+                                    }
+                                    identifierContext[fieldName] = fieldType
+                                    val destrBinding = resolveBinding(destrName, null)
+                                    val destrVar = TypedVar(destrName, destrBinding, resolvedType, stmt.loc)
+                                    val fieldAccess = TypedFieldAccess(destrVar, field.name, -1, fieldType, stmt.loc)
+                                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
+                                    stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, stmt.loc))
+                                }
+                            } else {
+                                val name = when (pattern) {
+                                    is ParsedVariablePattern -> pattern.name
+                                    else -> "__pattern__"
+                                }
+                                val valueType = stmt.typeAnnotation
+                                    ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
+                                    ?: MezzeType.VarType(TypeVar("let_$name"))
+                                val value = buildExpr(stmt.value, file, valueType)
+                                val resolvedType = substitution.apply(value.type)
+
+                                // Register binding for later references in this block
+                                identifierContext[name] = resolvedType
+
+                                // Use v1 content hash if available, otherwise compute
+                                val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
+                                val contentHash = if (v1LetHash != null) Hash.fromV1(v1LetHash) else computeHash("do_let_$name:${typeToString(resolvedType)}")
+                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                             }
-                            val valueType = stmt.typeAnnotation
-                                ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                                ?: MezzeType.VarType(TypeVar("let_$name"))
-                            val value = buildExpr(stmt.value, file, valueType)
-                            val resolvedType = substitution.apply(value.type)
-
-                            // Register binding for later references in this block
-                            identifierContext[name] = resolvedType
-
-                            // Use v1 content hash if available, otherwise compute
-                            val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                            val contentHash = if (v1LetHash != null) Hash.fromV1(v1LetHash) else computeHash("do_let_$name:${typeToString(resolvedType)}")
-                            stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                         }
                         is ParsedStatement.Expr -> {
                             val exprTyped = buildExpr(stmt.expr, file)
