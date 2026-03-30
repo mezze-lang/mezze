@@ -14,6 +14,9 @@ import com.mezze.language.typedast.Hash
  */
 class Lowerer {
 
+    /** Counter for allocating temp local slots for nested pattern extraction */
+    private var nextTempSlot = 0
+
     fun lower(resolvedModule: ResolvedModule): LoweredModule {
         val fileTable = buildFileTable(resolvedModule)
         val functions = resolvedModule.functions.map { fn ->
@@ -32,7 +35,13 @@ class Lowerer {
 
     private fun lowerFunction(fn: ResolvedFunction, fileTable: FileTable): FunctionIR {
         val fileIndex = fileTable.files.indexOf(fn.loc.file).coerceAtLeast(0)
+        // Reset temp slot counter — locals start after fn.locals, temps are appended
+        nextTempSlot = fn.locals.size
         val body = lowerExpr(fn.body, fileTable)
+        // Collect extra temp slots that were allocated during lowering
+        val extraTempCount = nextTempSlot - fn.locals.size
+        val allLocalSlots = fn.locals.map { it.kind } + List(extraTempCount) { SlotKind.OBJECT }
+        val allLocalNames = fn.locals.map { it.name } + List(extraTempCount) { "__temp_$it" }
 
         return FunctionIR(
             hash = fn.hash,
@@ -40,8 +49,8 @@ class Lowerer {
             qualifiedName = fn.qualifiedName,
             paramSlots = fn.params.map { it.kind },
             paramNames = fn.params.map { it.name },
-            localSlots = fn.locals.map { it.kind },
-            localNames = fn.locals.map { it.name },
+            localSlots = allLocalSlots,
+            localNames = allLocalNames,
             captureSlots = fn.captures.map { it.kind },
             captureNames = fn.captures.map { it.name },
             body = body,
@@ -49,6 +58,9 @@ class Lowerer {
             sourceSection = locToSourceInfo(fn.loc, fileTable)
         )
     }
+
+    /** Allocate a temp local slot (used for nested pattern extraction) */
+    private fun allocTempSlot(): Int = nextTempSlot++
 
     private fun lowerExpr(expr: ResolvedExpr, ft: FileTable): NodeIR {
         val src = locToSourceInfo(expr.loc, ft)
@@ -107,11 +119,30 @@ class Lowerer {
             is ResolvedMatch -> MatchIR(
                 lowerExpr(expr.scrutinee, ft),
                 expr.cases.map { c ->
+                    val extractions = mutableListOf<StmtIR>()
+                    val pattern = lowerPattern(c.pattern, ft, extractions)
+                    var body = lowerExpr(c.body, ft)
+                    var guard = c.guard?.let { lowerExpr(it, ft) }
+
+                    // If there are nested pattern extractions, wrap guard and body
+                    if (extractions.isNotEmpty()) {
+                        val extractionSrc = locToSourceInfo(c.loc, ft)
+                        if (guard != null) {
+                            // Extractions must run BEFORE the guard
+                            val guardStmts = extractions.toList() + listOf(StmtIR.Expr(guard, extractionSrc))
+                            guard = BlockIR(guardStmts.dropLast(1), guardStmts.last().let {
+                                (it as StmtIR.Expr).node
+                            }, extractionSrc)
+                        }
+                        // Wrap body: extractions + body
+                        body = BlockIR(extractions.toList(), body, extractionSrc)
+                    }
+
                     CaseIR(
-                        pattern = lowerPattern(c.pattern, ft),
+                        pattern = pattern,
                         bindings = c.slotBindings.map { b -> BindingIR(b.slot, b.kind) },
-                        guard = c.guard?.let { lowerExpr(it, ft) },
-                        body = lowerExpr(c.body, ft),
+                        guard = guard,
+                        body = body,
                         src = locToSourceInfo(c.loc, ft)
                     )
                 },
@@ -169,7 +200,15 @@ class Lowerer {
     // Helpers
     // ========================================================================
 
-    private fun lowerPattern(pattern: ResolvedPattern, ft: FileTable): PatternIR {
+    /**
+     * Lower a pattern, collecting extraction statements for nested record patterns.
+     *
+     * For nested patterns like `Some { val = { x = px, y = py } }`, we:
+     * 1. Allocate a temp slot for the intermediate record (`val`)
+     * 2. Add extraction statements: `tempSlot.x → slot_for_px`, `tempSlot.y → slot_for_py`
+     * 3. Return PatternIR with the temp slot as the field slot
+     */
+    private fun lowerPattern(pattern: ResolvedPattern, ft: FileTable, extractions: MutableList<StmtIR>): PatternIR {
         return when (pattern) {
             is ResolvedWildcardPattern -> PatternIR.Wildcard()
             is ResolvedVarPattern -> PatternIR.Wildcard(pattern.slot) // Var patterns are wildcards that bind
@@ -182,7 +221,7 @@ class Lowerer {
                         is ResolvedRecordPattern -> {
                             for (f in p.fields) {
                                 fieldNames.add(f.fieldName)
-                                val slot = (f.pattern as? ResolvedVarPattern)?.slot ?: -1
+                                val slot = resolveFieldSlot(f, ft, extractions)
                                 fieldSlots.add(slot)
                             }
                         }
@@ -192,12 +231,74 @@ class Lowerer {
                 }
                 PatternIR.Variant(pattern.tag, "", fieldNames, fieldSlots)
             }
-            is ResolvedRecordPattern -> PatternIR.Record(
-                pattern.fields.map { f -> f.fieldName },
-                pattern.fields.map { f -> (f.pattern as? ResolvedVarPattern)?.slot ?: -1 },
-                pattern.isOpen
-            )
+            is ResolvedRecordPattern -> {
+                val names = mutableListOf<String>()
+                val slots = mutableListOf<Int>()
+                for (f in pattern.fields) {
+                    names.add(f.fieldName)
+                    slots.add(resolveFieldSlot(f, ft, extractions))
+                }
+                PatternIR.Record(names, slots, pattern.isOpen)
+            }
             is ResolvedSeqPattern -> PatternIR.Wildcard() // TODO
+        }
+    }
+
+    /**
+     * Resolve a pattern field to a slot index, handling nested record patterns.
+     * - VarPattern: return the var's slot directly
+     * - RecordPattern (nested): allocate a temp slot, generate extraction code
+     * - null pattern (punning): the field was already resolved to a VarPattern by Resolver
+     */
+    private fun resolveFieldSlot(
+        field: ResolvedPatternField,
+        ft: FileTable,
+        extractions: MutableList<StmtIR>
+    ): Int {
+        val subPattern = field.pattern
+        return when (subPattern) {
+            is ResolvedVarPattern -> subPattern.slot
+            is ResolvedRecordPattern -> {
+                // Nested record pattern: allocate temp slot, generate extraction code
+                val tempSlot = allocTempSlot()
+                val dummySrc = SourceInfo(0, 0, 0, 0, 0)
+                // For each field in the nested record, generate: tempSlot.fieldName → targetSlot
+                emitNestedRecordExtractions(tempSlot, subPattern, ft, extractions)
+                tempSlot
+            }
+            else -> -1
+        }
+    }
+
+    /**
+     * Emit extraction statements for a nested record pattern.
+     * Reads each field from the temp slot's record and writes to the target slot.
+     * Handles arbitrarily deep nesting via recursion.
+     */
+    private fun emitNestedRecordExtractions(
+        tempSlot: Int,
+        recordPattern: ResolvedRecordPattern,
+        ft: FileTable,
+        extractions: MutableList<StmtIR>
+    ) {
+        val dummySrc = SourceInfo(0, 0, 0, 0, 0)
+        for (f in recordPattern.fields) {
+            val fieldAccess = ReadFieldIR(ReadLocalIR(tempSlot, SlotKind.OBJECT, dummySrc), f.fieldName, -1, dummySrc)
+            when (val fp = f.pattern) {
+                is ResolvedVarPattern -> {
+                    // Write field value directly to the binding slot
+                    extractions.add(StmtIR.Let(fp.slot, fp.kind, f.fieldName,
+                        Hash.fromV1("temp_extract"), fieldAccess, dummySrc))
+                }
+                is ResolvedRecordPattern -> {
+                    // Doubly nested: allocate another temp slot
+                    val innerTempSlot = allocTempSlot()
+                    extractions.add(StmtIR.Let(innerTempSlot, SlotKind.OBJECT, "__nested_${f.fieldName}",
+                        Hash.fromV1("temp_extract"), fieldAccess, dummySrc))
+                    emitNestedRecordExtractions(innerTempSlot, fp, ft, extractions)
+                }
+                else -> {} // Skip unsupported patterns
+            }
         }
     }
 
