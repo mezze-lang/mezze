@@ -49,7 +49,7 @@ tasks.test {
         showStandardStreams = true
     }
 
-    maxParallelForks = 1
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
@@ -79,7 +79,7 @@ tasks.register<Test>("testV2") {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = true
     }
-    maxParallelForks = 1
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")

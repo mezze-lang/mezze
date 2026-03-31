@@ -71,6 +71,8 @@ public final class MezzeTestHelper {
 
             context.eval(source);
 
+            }
+
             return MezzeLanguage.getLastExecutionResult();
         } finally {
             context.close(true);
