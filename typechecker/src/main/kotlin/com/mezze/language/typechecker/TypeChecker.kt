@@ -220,14 +220,7 @@ class TypeChecker(
         val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
         val hasUserImports = hasImports(program)
 
-        // Use PrecompiledStdlib for no-import tests (fastest path)
-        val stdlib = try { PrecompiledStdlib } catch (_: Exception) { null }
-
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && stdlib != null) {
-            importContext = stdlib.preludeImportContext
-            // Re-merge from scratch each time to get fresh TypeVar context
-            mergeImportContext(parentContext, stdlib.preludeImportContext)
-        } else if (hasUserImports || shouldInjectPrelude) {
+        val enhancedContext = if (hasUserImports || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
                 parentContext,
