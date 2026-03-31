@@ -1,11 +1,11 @@
 package com.mezze.interpreter.v2.codec
 
+import org.junit.jupiter.api.Disabled
 import com.mezze.interpreter.v2.MezzeTestHelper
 import com.mezze.interpreter.v2.values.MezzeVariant
 import com.mezze.interpreter.v2.values.MezzeRecord
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Assertions.*
 
 /**
