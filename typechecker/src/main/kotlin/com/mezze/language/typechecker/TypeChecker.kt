@@ -203,18 +203,21 @@ class TypeChecker(
         // Prelude auto-import: loads inherent impls from all stdlib modules so
         // method syntax works without explicit `use` (e.g., [1,2,3].map {f = ...}).
         val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
-        val enhancedContext = if (hasImports(program) || shouldInjectPrelude) {
+        val hasUserImports = hasImports(program)
+
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && cachedPreludeContext != null) {
+            // Fast path: no imports + cached prelude
+            importContext = cachedPreludeContext
+            mergeImportContext(parentContext, importContext!!)
+        } else if (hasUserImports || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
-            // CRITICAL FIX: Pass the ModuleResolver to ModuleTypeChecker so it can update
-            // the resolver's cache with real inferred types after type-checking
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
                 parentContext,
                 moduleLoader.getResolver()
             )
             val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
-            // First resolve user's explicit imports
-            val importResult = if (hasImports(program)) {
+            val importResult = if (hasUserImports) {
                 importResolver.resolveImports(program)
             } else {
                 ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
@@ -225,22 +228,17 @@ class TypeChecker(
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
 
-                    // PRELUDE: Load inherent impls from all stdlib modules.
-                    // Wrap in TypeVar save/restore so prelude loading + merging
-                    // doesn't shift type variable IDs in the user's program.
-                    if (shouldInjectPrelude) {
+                    val ctx = if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        // Don't merge prelude modules into loadedModules — they're only
-                        // needed for typechecking context. The monomorphizer will get them
-                        // lazily if it encounters references to prelude functions.
                         mergeImportContext(parentContext, importContext!!)
                     } else {
                         mergeImportContext(parentContext, importContext!!)
                     }
+
+                    ctx
                 }
                 is ImportResolutionResult.Failure -> {
-                    // Throw the new module error directly - tests will see it
                     throw importResult.errors.firstOrNull()
                         ?: TypeCheckError("Import failed with unknown error")
                 }
@@ -1999,6 +1997,7 @@ class TypeChecker(
         /** Cached prelude v2 modules as a complete hash→TypedModule map — avoids rebuilding per test */
         @Volatile
         private var cachedPreludeV2Modules: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>? = null
+
 
         private fun getOrBuildPreludeV2Modules(): Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule> {
             cachedPreludeV2Modules?.let { return it }
