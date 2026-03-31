@@ -577,9 +577,56 @@ class TypeChecker(
                     }
                 }
 
-                // Run SubstitutionApplier for VALIDATION ONLY — fills in inferredType
-                // so the validator can check patterns, variants, exhaustiveness, etc.
-                // The output is NOT used for the pipeline — TypedAstBuilder produces the real output.
+                // V2 Pipeline FIRST: TypedAST → Mono → Resolve → Lower → TruffleIR
+                // If this succeeds, skip the expensive v1 SubstitutionApplier entirely.
+                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
+                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
+                try {
+                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
+                        substitution = substitution,
+                        constraintResults = globallyResolvedConstraintResults,
+                        abilityImpls = context.getAllAbilityImpls(),
+                        typeDeclarations = allTypeDeclarations,
+                        abilityDeclarations = allAbilityDeclarations,
+                        effectDeclarations = allEffectDeclarations,
+                        performerToEffect = buildResult.performerToEffect,
+                        importContext = importContext,
+                        identifierContentHashes = context.getContentHashes(),
+                        implDeclarations = buildResult.implDeclarations,
+                        tailCallLocations = tailCallLocations,
+                        mustBeOpenRowVars = mustBeOpenRowVars,
+                        methodCallResolutions = allMethodCallResolutions
+                    )
+                    val typed = builder.build(parsedModule)
+                    emittedTypedModule = typed
+
+                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
+                    val allModules = mapOf(wrapped.hash to wrapped)
+                    val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
+                    val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
+                    val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
+                    loweredFns = lowered.functions
+                } catch (pipelineEx: Exception) {
+                    System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
+                }
+
+                // Fast path: v2 pipeline succeeded → skip v1 SubstitutionApplier + Validator
+                if (loweredFns != null && loweredFns.isNotEmpty()) {
+                    return TypeCheckResult.Success(
+                        program = desugaredProgram,
+                        substitution = substitution,
+                        monomorphicInstances = emptyMap(),
+                        importContext = importContext,
+                        warnings = warnings,
+                        loadedModules = loadedModules,
+                        abilityImpls = context.getAllAbilityImpls(),
+                        programBeforeContinuations = null,
+                        typedModule = emittedTypedModule,
+                        loweredFunctions = loweredFns
+                    )
+                }
+
+                // Slow path: v2 pipeline failed — run v1 SubstitutionApplier + Validator
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,
@@ -608,10 +655,9 @@ class TypeChecker(
                     }
                     applier.applyToProgram(programWithCodecImpls)
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    // Re-throw type check errors — these are real validation failures
                     throw e
                 } catch (_: Exception) {
-                    desugaredProgram  // Fallback: validate without types
+                    desugaredProgram
                 }
 
                 val validationResult = validator.validate(validationProgram, globallyResolvedConstraintResults, substitution)
@@ -629,58 +675,6 @@ class TypeChecker(
                     }
                 }
 
-                // TypedAST → EntryFunctionBuilder → Mono → Resolve → Lower pipeline
-                var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
-                var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
-                try {
-                    // Stage 1: TypedAST — built from ParsedAST + Substitution (no v1 Program)
-                    val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
-                        substitution = substitution,
-                        constraintResults = globallyResolvedConstraintResults,
-                        abilityImpls = context.getAllAbilityImpls(),
-                        typeDeclarations = allTypeDeclarations,
-                        abilityDeclarations = allAbilityDeclarations,
-                        effectDeclarations = allEffectDeclarations,
-                        performerToEffect = buildResult.performerToEffect,
-                        importContext = importContext,
-                        identifierContentHashes = context.getContentHashes(),
-                        implDeclarations = buildResult.implDeclarations,
-                        tailCallLocations = tailCallLocations,
-                        mustBeOpenRowVars = mustBeOpenRowVars,
-                        methodCallResolutions = allMethodCallResolutions
-                    )
-                    val typed = builder.build(parsedModule)
-                    emittedTypedModule = typed
-
-                    // Stage 1.5: Wrap top-level into entry function
-                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
-
-                    // Stage 1b: Build allModules — only entry module.
-                    // Stdlib modules are loaded at runtime by ModuleLoadingNode (v1 path).
-                    // The monomorphizer only needs to process the user's code.
-                    val allModules = mapOf(wrapped.hash to wrapped)
-                    // Stage 2: Monomorphize
-                    val mono = com.mezze.language.typechecker.mono.Monomorphizer()
-                    val monoModule = mono.monomorphize(wrapped, allModules)
-
-                    // Stage 3: Resolve
-                    val resolver = com.mezze.language.typechecker.mono.Resolver()
-                    val resolved = resolver.resolve(monoModule)
-
-                    // Stage 4: Lower to TruffleIR
-                    val lowerer = com.mezze.language.typechecker.mono.Lowerer()
-                    val lowered = lowerer.lower(resolved)
-                    loweredFns = lowered.functions
-                } catch (pipelineEx: Exception) {
-                    // Pipeline best-effort — log failure to stderr
-                    System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
-                }
-
-                // Use validationProgram (has inferredType from SubstitutionApplier) for module export
-                // resolution — this ensures imported function types are concrete (e.g., {n: Int} -> Str
-                // for int::to_str) rather than VarType placeholders.
-                // Filter out generated codec impls (prepended by SubstitutionApplier) to avoid
-                // polluting module exports with auto-derived Encode/Decode impls.
                 val programForExport = if (generatedCodecImpls.isNotEmpty() && validationProgram !== desugaredProgram) {
                     val codecCount = generatedCodecImpls.size
                     Program(items = validationProgram.items.drop(codecCount))
