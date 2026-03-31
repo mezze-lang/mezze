@@ -1,55 +1,52 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.*
 import java.nio.file.Paths
 
 /**
- * Singleton that precomputes and holds all stdlib/prelude data.
+ * Singleton that precomputes all stdlib/prelude data once at first access.
  *
- * Computed once at first access (class load). Every TypeChecker instance
- * and every interpreter test reuses these immutable results — no per-test
- * import resolution, no per-test mergeImportContext, no per-test ModuleLoader.
+ * Contains:
+ * - CompiledModuleInterface: immutable type signatures ready to inject into any TypingContext
+ * - Loaded TypedModules: for the v2 pipeline (monomorphizer needs them)
+ * - V2 TypedModules: pre-converted for monomorphizer
+ *
+ * Unlike caching ModuleImportContext or TypingContext directly,
+ * CompiledModuleInterface.mergeInto() is safe to call multiple times
+ * because it creates fresh TypeVars on each instantiation.
  */
 object PrecompiledStdlib {
 
-    /** The prelude ModuleImportContext (ability impls only, no bindings) */
+    /** Compiled prelude interface — immutable, safe to reuse across compilations */
+    val compiledPrelude: CompiledModuleInterface
+
+    /** Raw prelude import context (for merging with user imports) */
     val preludeImportContext: ModuleImportContext
 
-    /** The loaded v1 TypedModules for all prelude/stdlib modules */
+    /** Loaded v1 TypedModules for all prelude modules */
     val loadedModules: Map<String, TypedModule>
 
-    /** The base TypingContext with native functions + all prelude bindings merged in.
-     *  Tests extend this with their own user imports. */
-    val enhancedContext: TypingContext
-
-    /** The v2 TypedModules for monomorphizer, keyed by hash */
+    /** Pre-converted v2 TypedModules for monomorphizer */
     val v2Modules: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>
 
     init {
-        // Build everything once
         val tc = TypeChecker()
-        val parentContext = tc.parentContext
-
         val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
         val moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
         val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
-            parentContext,
+            tc.parentContext,
             moduleLoader.getResolver()
         )
         val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
-        // Load prelude modules
-        val preludeCtx = tc.loadPreludeModulesPublic(importResolver)
-        preludeImportContext = preludeCtx
-
-        // Get loaded modules from the prelude loading
+        // Load prelude (this also populates ModuleTypeChecker.globalCache)
+        preludeImportContext = tc.loadPreludeModulesPublic(importResolver)
         loadedModules = tc.getCachedPreludeLoadedModules() ?: emptyMap()
 
-        // Merge prelude into the base context — this is the expensive step we're caching
-        enhancedContext = tc.mergeImportContextPublic(parentContext, preludeCtx)
+        // Build the compiled interface from the import context
+        compiledPrelude = CompiledModuleInterface.fromImportContext(preludeImportContext)
 
-        // Build v2 modules for monomorphizer
+        // Build v2 modules
         val adapter = TypeCheckerV2()
         val v2 = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
         for ((path, v1Module) in loadedModules) {
