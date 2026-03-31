@@ -75,7 +75,7 @@ tasks.register<Test>("testV2") {
     classpath = sourceSets["test"].runtimeClasspath
     testLogging {
         events("started", "passed", "skipped", "failed")
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.SHORT
         showStandardStreams = true
     }
     maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)

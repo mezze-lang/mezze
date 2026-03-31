@@ -227,6 +227,10 @@ class TypeChecker(
             // FAST PATH: no user imports, precompiled prelude available
             // mergeInto creates fresh TypeVars — safe across compilations
             importContext = precompiled.preludeImportContext
+            // Ensure prelude loaded modules are available for v2 pipeline (monomorphizer needs them)
+            if (cachedPreludeLoadedModules == null) {
+                cachedPreludeLoadedModules = precompiled.loadedModules
+            }
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
             // Reuse cached ModuleLoader/ImportResolver when available — avoids per-test
@@ -625,7 +629,7 @@ class TypeChecker(
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
 
                     // Build allModules: entry + user imports + prelude (all cached)
-                    val preludeV2 = getOrBuildPreludeV2Modules()
+                    val preludeV2 = try { PrecompiledStdlib.v2Modules } catch (_: Exception) { getOrBuildPreludeV2Modules() }
                     val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
                     allModules.putAll(preludeV2)
                     allModules[wrapped.hash] = wrapped

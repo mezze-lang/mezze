@@ -537,6 +537,25 @@ class Monomorphizer {
             concreteType is MezzeType.VariantType && targetType is MezzeType.TypeApplication &&
                 concreteType.constructors.size == 1 &&
                 concreteType.constructors.keys.first() == targetType.constructor -> true
+            // VariantType with multiple constructors matching TypeApplication by typeName or known aliases
+            concreteType is MezzeType.VariantType && targetType is MezzeType.TypeApplication -> {
+                // Match Option=[Some,None], Result=[Ok,Err], List=[Nil,Cons], Bool=[True,False]
+                val ctors = concreteType.constructors.keys.sorted().joinToString(",")
+                val knownAliases = mapOf(
+                    "None,Some" to "Option",
+                    "Err,Ok" to "Result",
+                    "Cons,Nil" to "List",
+                    "False,True" to "Bool"
+                )
+                concreteType.typeName == targetType.constructor ||
+                    knownAliases[ctors] == targetType.constructor
+            }
+            // SeqType matches TypeApplication("Seq")
+            concreteType is MezzeType.SeqType && targetType is MezzeType.TypeApplication &&
+                targetType.constructor == "Seq" -> true
+            // BytesType matches TypeApplication("Bytes")
+            concreteType is MezzeType.BytesType && targetType is MezzeType.TypeApplication &&
+                targetType.constructor == "Bytes" -> true
             // RecordType with typeName matching TypeApplication name
             concreteType is MezzeType.RecordType && targetType is MezzeType.TypeApplication &&
                 concreteType.typeName == targetType.constructor -> true
