@@ -29,17 +29,23 @@ object PrecompiledStdlib {
     /** Pre-converted v2 TypedModules for monomorphizer */
     val v2Modules: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>
 
+    /** Cached ModuleLoader — avoids per-test filesystem traversal (findProjectRoot) */
+    val moduleLoader: ModuleLoader
+
+    /** Cached ImportResolver — reuses moduleLoader and moduleTypeChecker */
+    val importResolver: ImportResolver
+
     init {
         val tc = TypeChecker()
         val projectRoot = Paths.get(System.getProperty("mezze.project.root", "."))
-        val moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
+        moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
         val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
             tc.parentContext,
             moduleLoader.getResolver()
         )
-        val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
+        importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
 
-        // Load prelude (this also populates ModuleTypeChecker.globalCache)
+        // Load prelude (also populates ModuleTypeChecker.globalCache + ModuleResolver.moduleCache)
         preludeImportContext = tc.loadPreludeModulesPublic(importResolver)
         loadedModules = tc.getCachedPreludeLoadedModules() ?: emptyMap()
 

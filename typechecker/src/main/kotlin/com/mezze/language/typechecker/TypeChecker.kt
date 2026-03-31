@@ -229,13 +229,18 @@ class TypeChecker(
             importContext = precompiled.preludeImportContext
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
-            // SLOW PATH: no precompiled stdlib available (first call or error)
-            val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
-            val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
-                parentContext,
-                moduleLoader.getResolver()
-            )
-            val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
+            // Reuse cached ModuleLoader/ImportResolver when available — avoids per-test
+            // filesystem traversal (findProjectRoot) and object creation overhead.
+            val importResolver = if (precompiled != null) {
+                precompiled.importResolver
+            } else {
+                val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
+                val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
+                    parentContext,
+                    moduleLoader.getResolver()
+                )
+                ImportResolver(moduleLoader, moduleTypeChecker)
+            }
 
             val importResult = if (hasUserImports) {
                 importResolver.resolveImports(program)
