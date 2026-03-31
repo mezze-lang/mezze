@@ -1,8 +1,6 @@
 package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.values.MezzeRecord;
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,12 +12,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * In V2, fractions are represented as MezzeRecord with "numerator" and "denominator" fields.
  */
 class FracIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // Helper to extract fraction components
     private static long getNumerator(Object result) {
         assertTrue(result instanceof MezzeRecord, "Expected MezzeRecord for fraction, got: " + result.getClass());

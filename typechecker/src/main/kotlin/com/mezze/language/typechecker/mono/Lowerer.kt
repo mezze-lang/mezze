@@ -288,13 +288,13 @@ class Lowerer {
                 is ResolvedVarPattern -> {
                     // Write field value directly to the binding slot
                     extractions.add(StmtIR.Let(fp.slot, fp.kind, f.fieldName,
-                        Hash.fromV1("temp_extract"), fieldAccess, dummySrc))
+                        Hash.ZERO, fieldAccess, dummySrc))
                 }
                 is ResolvedRecordPattern -> {
                     // Doubly nested: allocate another temp slot
                     val innerTempSlot = allocTempSlot()
                     extractions.add(StmtIR.Let(innerTempSlot, SlotKind.OBJECT, "__nested_${f.fieldName}",
-                        Hash.fromV1("temp_extract"), fieldAccess, dummySrc))
+                        Hash.ZERO, fieldAccess, dummySrc))
                     emitNestedRecordExtractions(innerTempSlot, fp, ft, extractions)
                 }
                 else -> {} // Skip unsupported patterns

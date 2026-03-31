@@ -8,12 +8,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests for collection equality (Eq ability) implementations.
  */
 class CollectionAbilitiesTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

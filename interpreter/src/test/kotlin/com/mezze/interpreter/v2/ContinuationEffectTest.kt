@@ -11,13 +11,6 @@ import org.junit.jupiter.api.assertDoesNotThrow
  * Migrated from V1 to V2 with unboxed values.
  */
 class ContinuationEffectTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-        com.mezze.language.typechecker.TypeChecker.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test

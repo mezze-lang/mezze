@@ -8,12 +8,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests for Bytes type and operations.
  */
 class BytesInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

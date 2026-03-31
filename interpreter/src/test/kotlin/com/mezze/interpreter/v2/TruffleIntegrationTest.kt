@@ -14,12 +14,6 @@ import org.graalvm.polyglot.PolyglotException
  * comparisons, and type checking.
  */
 class TruffleIntegrationTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Helper to extract fraction components (Frac is represented as MezzeRecord in V2)

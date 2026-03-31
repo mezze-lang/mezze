@@ -139,7 +139,6 @@ class CheckpointStrategyTest {
 
     @BeforeEach
     fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
         // Create a mock continuation for testing
         mockContinuation = ContinuationStateMachine(
             id = "test-continuation",

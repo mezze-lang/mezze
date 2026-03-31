@@ -9,12 +9,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests cover natural number operations and conversions.
  */
 class NatInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

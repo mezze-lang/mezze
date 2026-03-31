@@ -1,7 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,12 +19,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Equality (equals)
  */
 class MapIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========================================
     // Basic Operations
     // ========================================

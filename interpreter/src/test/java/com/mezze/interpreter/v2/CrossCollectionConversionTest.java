@@ -1,7 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,12 +23,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Edge cases (empty collections, duplicates, ordering)
  */
 class CrossCollectionConversionTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========================================
     // List Operations
     // ========================================

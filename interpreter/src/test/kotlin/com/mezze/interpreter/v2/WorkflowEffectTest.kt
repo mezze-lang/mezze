@@ -14,13 +14,6 @@ import com.mezze.datastructures.seq.MezzeSeq
  * - Restored and resumed
  */
 class WorkflowEffectTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-        com.mezze.language.typechecker.TypeChecker.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test

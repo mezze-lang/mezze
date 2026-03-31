@@ -23,12 +23,6 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class StructuredConcurrencyTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     // Common setup code - uses stdlib
     private val setupCode = """
         use std::collections::seq

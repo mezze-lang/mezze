@@ -2,8 +2,6 @@ package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeVariant;
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -13,12 +11,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Uses V2 unboxed values directly.
  */
 class NewtypeIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========== Basic Construction Tests ==========
 
     @Test

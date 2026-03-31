@@ -13,12 +13,6 @@ import org.junit.jupiter.api.Assertions.*
  * 3. Effect operations produce correct results with qualified imports
  */
 class QualifiedEffectImportInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================================================

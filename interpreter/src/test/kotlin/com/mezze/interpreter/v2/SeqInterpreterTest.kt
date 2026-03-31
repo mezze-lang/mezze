@@ -12,12 +12,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests use Mezze source code to exercise seq operations.
  */
 class SeqInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ==========================================================================

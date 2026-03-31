@@ -1,10 +1,8 @@
 package com.mezze.interpreter.v2;
 
 import com.mezze.language.parser.MezzeParser;
-import com.mezze.language.typechecker.ModuleResolver;
 import com.mezze.language.typechecker.TypeCheckError;
 import com.mezze.language.typechecker.TypeChecker;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,12 +12,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Uses V2 unboxed values directly.
  */
 class StringInterpolationIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     @Test
     void simpleStringInterpolation() {
         Object result = MezzeTestHelper.run("""

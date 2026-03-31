@@ -1,7 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -34,12 +32,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - symmetric_diff_maps: XOR of maps
  */
 class SetMapAdvancedOperationsTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========================================
     // Set: symmetric_difference
     // ========================================

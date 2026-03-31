@@ -9,12 +9,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests cover float operations, classification, and conversions.
  */
 class FloatInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

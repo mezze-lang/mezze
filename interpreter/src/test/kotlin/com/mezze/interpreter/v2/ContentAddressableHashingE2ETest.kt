@@ -4,8 +4,8 @@ import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -33,7 +33,6 @@ class ContentAddressableHashingE2ETest {
     fun setUp() {
         parser = MezzeParser()
         typeChecker = TypeChecker()
-        ModuleResolver.clearCache()
     }
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
@@ -76,7 +75,6 @@ class ContentAddressableHashingE2ETest {
         val result1 = typeChecker.typeCheck(program1, projectRoot)
 
         // Clear and run again
-        ModuleResolver.clearCache()
         val program2 = parser.parse(source)
         val result2 = typeChecker.typeCheck(program2, projectRoot)
 
@@ -105,7 +103,6 @@ class ContentAddressableHashingE2ETest {
         """.trimIndent()
 
         val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        ModuleResolver.clearCache()
         val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<LetBinding>()
@@ -136,7 +133,6 @@ class ContentAddressableHashingE2ETest {
         """.trimIndent()
 
         val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        ModuleResolver.clearCache()
         val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<LetBinding>()
@@ -322,7 +318,6 @@ class ContentAddressableHashingE2ETest {
         """.trimIndent()
 
         val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        ModuleResolver.clearCache()
         val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<TypeDeclaration>().first().contentHash

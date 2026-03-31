@@ -12,12 +12,6 @@ import org.junit.jupiter.api.BeforeEach
  * with nested polymorphic function calls.
  */
 class ListInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

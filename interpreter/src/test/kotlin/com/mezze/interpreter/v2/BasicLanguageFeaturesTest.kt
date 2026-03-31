@@ -11,12 +11,6 @@ import org.junit.jupiter.api.BeforeEach
  * Migrated from V1 interpreter tests.
  */
 class BasicLanguageFeaturesTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private fun runAndGetContext(source: String): Map<String, Any> {

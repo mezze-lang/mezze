@@ -17,12 +17,6 @@ import org.junit.jupiter.api.BeforeEach
  * Migrated from V1 to V2 with unboxed values.
  */
 class SeqPatternInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ==========================================================================

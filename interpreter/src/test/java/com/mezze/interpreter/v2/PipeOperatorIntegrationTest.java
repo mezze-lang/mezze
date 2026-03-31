@@ -2,7 +2,6 @@ package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
 import com.mezze.interpreter.v2.values.MezzeRecord;
-import com.mezze.language.typechecker.ModuleResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +17,6 @@ class PipeOperatorIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        ModuleResolver.clearCache();
         // Disable strict validation for pipe operator tests due to complex type inference issues
         System.setProperty("mezze.typecheck.strict", "false");
     }

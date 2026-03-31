@@ -9,12 +9,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests that the interpreter correctly evaluates if-let bindings.
  */
 class IfLetGuardInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test

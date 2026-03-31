@@ -15,12 +15,6 @@ import kotlin.test.assertFalse
  * In V2, fractions are represented as MezzeRecord with "numerator" and "denominator" fields.
  */
 class FracInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Helper to extract fraction components

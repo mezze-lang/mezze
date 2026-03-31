@@ -9,12 +9,6 @@ import org.junit.jupiter.api.BeforeEach
  * These test that `impl Type where { ... }` methods work end-to-end.
  */
 class AnonymousImplMethodTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

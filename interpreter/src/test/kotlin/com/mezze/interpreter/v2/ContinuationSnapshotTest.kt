@@ -12,13 +12,6 @@ import org.junit.jupiter.api.Assertions.*
  * to handle the complexity of closure restoration.
  */
 class ContinuationSnapshotTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-        com.mezze.language.typechecker.TypeChecker.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================================================

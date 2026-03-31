@@ -10,12 +10,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests for the userland Generator effect using suspend_and_resume.
  */
 class GeneratorEffectTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private fun assertSeqEquals(result: Any, expected: List<Any>) {

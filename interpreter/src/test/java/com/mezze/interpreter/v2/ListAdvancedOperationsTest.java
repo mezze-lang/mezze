@@ -1,7 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
@@ -22,12 +20,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Binary search operations (binary_search, lower_bound, upper_bound, equal_range)
  */
 class ListAdvancedOperationsTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========================================
     // Equality Operations
     // ========================================

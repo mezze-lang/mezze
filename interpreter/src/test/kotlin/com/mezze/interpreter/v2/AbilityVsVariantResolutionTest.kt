@@ -22,12 +22,6 @@ import org.junit.jupiter.api.Assertions.*
  * These tests verify that each type of construct works correctly at runtime.
  */
 class AbilityVsVariantResolutionTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ============================================================================

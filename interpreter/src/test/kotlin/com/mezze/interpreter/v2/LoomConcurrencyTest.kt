@@ -25,12 +25,6 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class LoomConcurrencyTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Common setup code - uses same field names as std::async

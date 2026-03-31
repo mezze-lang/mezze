@@ -15,12 +15,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Cross-module ability impls (e.g., Eq for Seq) are available everywhere
  */
 public class PreludeIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache();
-    }
-
     // ========================================
     // Arithmetic and equality work without imports
     // ========================================

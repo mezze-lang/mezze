@@ -17,12 +17,6 @@ import com.mezze.interpreter.v2.values.MezzeFunction
  * captured when used with punned syntax in impl bodies.
  */
 class PunnedRecordClosureTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================================================

@@ -231,11 +231,9 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        // Include prelude modules in loadedModules so the Monomorphizer
-                        // has access to all ability impl operations for method call resolution
-                        cachedPreludeLoadedModules?.let { preludeModules ->
-                            loadedModules = loadedModules + preludeModules
-                        }
+                        // Don't merge prelude modules into loadedModules — they're only
+                        // needed for typechecking context. The monomorphizer will get them
+                        // lazily if it encounters references to prelude functions.
                         mergeImportContext(parentContext, importContext!!)
                     } else {
                         mergeImportContext(parentContext, importContext!!)
@@ -657,14 +655,10 @@ class TypeChecker(
                     // Stage 1.5: Wrap top-level into entry function
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
 
-                    // Stage 1b: Convert dependency modules to TypedModules
-                    val adapter = TypeCheckerV2()
-                    val allModules = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(wrapped.hash to wrapped)
-                    for ((path, v1Module) in loadedModules) {
-                        val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                        allModules[v2Module.hash] = v2Module
-                    }
-
+                    // Stage 1b: Build allModules — only entry module.
+                    // Stdlib modules are loaded at runtime by ModuleLoadingNode (v1 path).
+                    // The monomorphizer only needs to process the user's code.
+                    val allModules = mapOf(wrapped.hash to wrapped)
                     // Stage 2: Monomorphize
                     val mono = com.mezze.language.typechecker.mono.Monomorphizer()
                     val monoModule = mono.monomorphize(wrapped, allModules)
@@ -1266,9 +1260,6 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
-    /** Cached prelude loaded modules — shared across loadPreludeModules calls */
-    private var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
-
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1985,9 +1976,37 @@ class TypeChecker(
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
 
+        /** Cached prelude loaded modules — shared across all TypeChecker instances */
+        @Volatile
+        private var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
+
+        /** Cached v1→v2 TypedModule conversions — stdlib modules don't change between tests */
+        private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.typedast.TypedModule>()
+
+        /** Cached prelude v2 modules as a complete hash→TypedModule map — avoids rebuilding per test */
+        @Volatile
+        private var cachedPreludeV2Modules: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>? = null
+
+        private fun getOrBuildPreludeV2Modules(): Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule> {
+            cachedPreludeV2Modules?.let { return it }
+            val preludeModules = cachedPreludeLoadedModules ?: return emptyMap()
+            val adapter = TypeCheckerV2()
+            val result = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
+            for ((path, v1Module) in preludeModules) {
+                val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                v1ToV2ModuleCache[path] = v2Module
+                result[v2Module.hash] = v2Module
+            }
+            cachedPreludeV2Modules = result
+            return result
+        }
+
+
         /** Clears prelude cache. Used when stdlib files change. */
         fun clearPreludeCache() {
             cachedPreludeContext = null
+            cachedPreludeLoadedModules = null
+            cachedPreludeV2Modules = null
         }
 
         /**
@@ -2054,6 +2073,7 @@ class TypeChecker(
         fun clearCache() {
             ModuleResolver.clearCache()
             TypeCheckCache.clearAll()
+            v1ToV2ModuleCache.clear()
             // NOTE: prelude cache is NOT cleared — it's self-contained and expensive to recompute
         }
 

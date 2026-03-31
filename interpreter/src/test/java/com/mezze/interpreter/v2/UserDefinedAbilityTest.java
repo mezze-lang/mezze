@@ -18,13 +18,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Run with: ./gradlew :interpreterv2:test --tests "*UserDefinedAbilityTest*"
  */
 public class UserDefinedAbilityTest {
-
-    @BeforeEach
-    void clearCaches() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache();
-        com.mezze.language.typechecker.TypeChecker.clearCache();
-    }
-
     // ========================
     // Basic Ability Declaration
     // ========================

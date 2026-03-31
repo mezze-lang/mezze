@@ -14,13 +14,6 @@ import com.mezze.interpreter.v2.values.MezzeRecord
  * like capture and resume to work across function boundaries.
  */
 class CrossFunctionStateMachineTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-        com.mezze.language.typechecker.TypeChecker.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================================================

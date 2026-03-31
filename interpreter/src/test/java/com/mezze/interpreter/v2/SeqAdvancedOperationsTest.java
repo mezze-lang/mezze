@@ -1,7 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -20,12 +18,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Multi-collection operations (zip3, zip4, zip_with, cartesian_product)
  */
 class SeqAdvancedOperationsTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     // ========================================
     // last_index_of - Find last index of element
     // ========================================

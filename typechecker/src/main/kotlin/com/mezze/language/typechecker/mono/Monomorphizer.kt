@@ -125,28 +125,9 @@ class Monomorphizer {
             monoFunctions.add(monoFn)
         }
 
-        // Also convert ability impl operation bodies to standalone functions
-        for (impl in globalAbilityImpls) {
-            for ((opName, opBody) in impl.operations) {
-                val opHash = computeOpHash(impl.hash, opName)
-                if (opHash !in processedFunctions) {
-                    processedFunctions.add(opHash)
-                    val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
-                    monoFunctions.add(MonoFunction(
-                        hash = opHash,
-                        name = "${impl.hash.hex.take(8)}.${opName}",
-                        originalName = opName,
-                        originalHash = impl.hash,
-                        params = extractParams(opBody),
-                        captures = emptyList(),
-                        body = monoBody,
-                        type = opBody.type,
-                        isPublic = false,
-                        loc = opBody.loc
-                    ))
-                }
-            }
-        }
+        // Ability impl operations are converted on-demand when referenced
+        // from the entry point's reachable functions (via tryResolveMethodCall).
+        // Don't eagerly convert ALL operations — that pulls in the entire stdlib.
 
         // Convert effect decls and performers
         val monoEffectDecls = globalEffectDecls.map { ed ->

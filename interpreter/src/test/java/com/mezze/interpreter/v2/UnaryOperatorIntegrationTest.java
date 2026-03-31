@@ -2,8 +2,6 @@ package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
 import com.mezze.interpreter.v2.values.MezzeRecord;
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -15,12 +13,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Uses V2 unboxed values directly.
  */
 class UnaryOperatorIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     private Map<String, Object> runAndGetContext(String source) {
         MezzeTestHelper.run(source);
         return MezzeLanguage.getLastExecutionContext();

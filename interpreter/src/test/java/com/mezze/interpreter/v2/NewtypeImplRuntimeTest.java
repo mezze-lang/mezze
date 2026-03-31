@@ -1,6 +1,5 @@
 package com.mezze.interpreter.v2;
 
-import com.mezze.language.typechecker.ModuleResolver;
 import com.mezze.language.typechecker.TypeChecker;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
@@ -18,9 +17,6 @@ class NewtypeImplRuntimeTest {
 
     @BeforeEach
     void setUp() {
-        ModuleResolver.clearCache();
-        TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
     }
 

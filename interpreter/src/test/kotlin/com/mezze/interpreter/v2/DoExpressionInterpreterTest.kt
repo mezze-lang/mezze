@@ -10,12 +10,6 @@ import com.mezze.interpreter.v2.values.MezzeRecord
  * Migrated from V1 to V2 with unboxed values.
  */
 class DoExpressionInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // TODO: These tests are commented out because do expressions need additional implementation

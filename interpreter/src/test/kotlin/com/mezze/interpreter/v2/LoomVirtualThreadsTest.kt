@@ -20,12 +20,6 @@ import java.util.concurrent.atomic.AtomicInteger
  * Migrated from V1 to V2. Uses Java's Thread.ofVirtual() directly.
  */
 class LoomVirtualThreadsTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun spawnVirtualThread(name: String, task: () -> Unit): Thread {
         return Thread.ofVirtual().name(name).start(task)
     }

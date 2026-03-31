@@ -5,7 +5,6 @@ import com.mezze.interpreter.v2.runtime.MezzeLanguage;
 import com.mezze.interpreter.v2.values.*;
 import com.mezze.language.ast.Program;
 import com.mezze.language.parser.MezzeParser;
-import com.mezze.language.typechecker.ModuleResolver;
 import com.mezze.language.typechecker.TypeChecker;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Engine;
@@ -56,10 +55,7 @@ public final class MezzeTestHelper {
 
         String sourcePath = root.resolve("__test__.mz").toString();
 
-        // Clear module cache for clean state
-        ModuleResolver.clearCache();
-        TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        // Keep module caches for performance — only clear execution state
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
@@ -77,9 +73,6 @@ public final class MezzeTestHelper {
 
             return MezzeLanguage.getLastExecutionResult();
         } finally {
-            // Use cancelIfExecuting=true for Go/Rust-style semantics:
-            // When the program exits, any fire-and-forget tasks are cancelled.
-            // This prevents "polyglot threads did not complete" errors.
             context.close(true);
         }
     }
@@ -101,10 +94,7 @@ public final class MezzeTestHelper {
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
 
-        // Clear module cache for clean state
-        ModuleResolver.clearCache();
-        TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        // Keep module caches for performance — only clear execution state
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
@@ -163,9 +153,7 @@ public final class MezzeTestHelper {
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
 
-        ModuleResolver.clearCache();
-        TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        // Keep module caches for performance — only clear execution state
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
 
         Program ast = parser.parse(sourceCode, true, null);
@@ -272,10 +260,7 @@ public final class MezzeTestHelper {
 
         String sourcePath = root.resolve("__test__.mz").toString();
 
-        // Clear module cache for clean state
-        ModuleResolver.clearCache();
-        TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
+        // Keep module caches for performance — only clear execution state
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 

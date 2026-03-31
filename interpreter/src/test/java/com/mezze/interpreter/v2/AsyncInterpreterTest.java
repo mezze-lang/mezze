@@ -1,7 +1,6 @@
 package com.mezze.interpreter.v2;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.BeforeEach;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -14,13 +13,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - OSThreadAsync for OS thread async
  */
 public class AsyncInterpreterTest {
-
-    @BeforeEach
-    void setup() {
-        // Clear caches before each test
-        com.mezze.language.typechecker.ModuleResolver.clearCache();
-    }
-
     // ==================== Coop (Cooperative) Tests ====================
     // Uses CoopAsync for deterministic, single-threaded execution
 

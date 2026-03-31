@@ -9,12 +9,6 @@ import org.junit.jupiter.api.BeforeEach
  * Tests cover arithmetic, utility functions, and conversions.
  */
 class IntInterpreterTest {
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // ========================================

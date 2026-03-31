@@ -12,12 +12,6 @@ import org.junit.jupiter.api.BeforeEach
 class RecordWithSeqDebugTest {
 
     private val parser = MezzeParser()
-
-    @BeforeEach
-    fun setUp() {
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-    }
-
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test

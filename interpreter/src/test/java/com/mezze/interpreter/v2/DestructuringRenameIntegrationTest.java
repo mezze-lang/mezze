@@ -1,8 +1,6 @@
 package com.mezze.interpreter.v2;
 
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
-import com.mezze.language.typechecker.ModuleResolver;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -25,12 +23,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Run with: ./gradlew :interpreter:test --tests "*DestructuringRenameIntegrationTest*"
  */
 class DestructuringRenameIntegrationTest {
-
-    @BeforeEach
-    void setUp() {
-        ModuleResolver.clearCache();
-    }
-
     private Map<String, Object> runAndGetContext(String source) {
         MezzeTestHelper.run(source);
         return MezzeLanguage.getLastExecutionContext();
