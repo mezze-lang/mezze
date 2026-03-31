@@ -540,6 +540,30 @@ class TypedAstBuilder(
             // ------------------------------------------------------------------
 
             is ParsedFunctionCall -> {
+                // Effect operation detection: Log.log { ... }, STM.read { ... }, etc.
+                // When a call targets EffectName.operation, emit TypedPerformOp instead of a regular call.
+                if (expr.function is ParsedMemberAccess) {
+                    val memberAccess = expr.function as ParsedMemberAccess
+                    val receiverName = when (val r = memberAccess.receiver) {
+                        is ParsedIdentifier -> r.localName
+                        is ParsedVariantConstruct -> r.constructor  // Variant/effect names like Log, STM, Async
+                        else -> null
+                    }
+                    if (receiverName != null) {
+                        // Check local + imported effect declarations by name
+                        val effectHash = effectDeclarations[receiverName]?.contentHash
+                            ?: importContext?.importedEffects?.get(receiverName)?.contentHash
+                        if (effectHash != null) {
+                            val opName = memberAccess.member
+                            val argExpr = buildExpr(expr.arguments, file)
+                            return TypedPerformOp(
+                                Hash.fromV1(effectHash), opName, argExpr,
+                                substitution.apply(contextType), loc
+                            )
+                        }
+                    }
+                }
+
                 // Method call resolution is handled by the Monomorphizer's tryResolveMethodCall.
                 // TypedAstBuilder emits TypedCall(TypedFieldAccess(receiver, method), args)
                 // and the Monomorphizer detects this pattern and resolves to direct ByHash call.
@@ -843,19 +867,13 @@ class TypedAstBuilder(
                 val qualifier = expr.operation.qualifier
 
                 // Resolve which effect this operation belongs to
-                val effectDecl = resolveEffectForOperation(opName, qualifier)
-                val effectHash = Hash.fromV1(effectDecl?.contentHash)
-
-                // Resolve return type from effect declaration
-                val opReturnType = effectDecl?.operations
-                    ?.find { it.name == opName }
-                    ?.returnType
-                    ?.let { substitution.apply(convertTypeAnnotationV1(it)) }
-                    ?: substitution.apply(contextType)
+                val effectName = qualifier?.segments?.lastOrNull() ?: opName
+                val effectHash = effectDeclarations[effectName]?.contentHash
+                    ?: importContext?.importedEffects?.values?.find { it.name == effectName }?.contentHash
 
                 val argExpr = buildExpr(expr.arguments, file)
 
-                TypedPerformOp(effectHash, opName, argExpr, opReturnType, loc)
+                TypedPerformOp(Hash.fromV1(effectHash), opName, argExpr, substitution.apply(contextType), loc)
             }
         }
     }
