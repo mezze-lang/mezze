@@ -409,6 +409,10 @@ class TruffleCompiler(
                         listOf(FieldIR("b", itField.value)), node.src), source)
                     return NativeDispatch.create("__native_bool_not", nativeArg)
                 }
+                "to_dbg_str" -> {
+                    // x.to_dbg_str {} → DirectInspectNode(x) (built-in Inspect ability)
+                    return com.mezze.interpreter.v2.nodes.inline.DirectInspectNode.create(compileNode(itField.value, source))
+                }
             }
         }
 

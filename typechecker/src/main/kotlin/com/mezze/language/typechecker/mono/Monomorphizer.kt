@@ -463,15 +463,21 @@ class Monomorphizer {
         // Get the receiver's type
         val receiverType = fn.record.type
 
-        // Skip method resolution for VarType (unknown) and primitive types.
-        // VarType: let TruffleCompiler's inline op detection handle it.
-        // Primitives: inline ops (DirectAddNode etc.) are faster and avoid lambda inlining
-        // which can cause variable name collisions in nested expressions.
+        // Skip method resolution for VarType — let TruffleCompiler handle it.
         if (receiverType is MezzeType.VarType) return null
-        if (receiverType is MezzeType.IntType || receiverType is MezzeType.FloatType ||
-            receiverType is MezzeType.StringType || receiverType is MezzeType.BoolType ||
-            receiverType is MezzeType.NatType || receiverType is MezzeType.CharType ||
-            receiverType is MezzeType.FracType) return null
+
+        // For primitive types, only skip methods that have TruffleCompiler inline ops.
+        // Methods like to_dbg_str, encode, abs etc. need ability impl resolution.
+        // Methods handled by TruffleCompiler inline ops on primitives — skip monomorphizer.
+        // Includes built-in ability methods (to_dbg_str from Inspect).
+        val inlineOpNames = setOf("add", "sub", "mul", "div", "mod", "eq", "neq",
+            "lt", "le", "gt", "ge", "neg", "not", "and", "or",
+            "to_dbg_str")
+        if (methodName in inlineOpNames &&
+            (receiverType is MezzeType.IntType || receiverType is MezzeType.FloatType ||
+             receiverType is MezzeType.StringType || receiverType is MezzeType.BoolType ||
+             receiverType is MezzeType.NatType || receiverType is MezzeType.CharType ||
+             receiverType is MezzeType.FracType)) return null
 
 
         // Try to find matching impl by receiver type.

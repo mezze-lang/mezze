@@ -601,7 +601,26 @@ class TypeChecker(
                     emittedTypedModule = typed
 
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
-                    val allModules = mapOf(wrapped.hash to wrapped)
+
+                    // Build allModules: entry + user imports + prelude (all cached)
+                    val preludeV2 = getOrBuildPreludeV2Modules()
+                    val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
+                    allModules.putAll(preludeV2)
+                    allModules[wrapped.hash] = wrapped
+                    if (loadedModules.isNotEmpty()) {
+                        val adapter = TypeCheckerV2()
+                        for ((path, v1Module) in loadedModules) {
+                            val cached = v1ToV2ModuleCache[path]
+                            if (cached != null) {
+                                allModules[cached.hash] = cached
+                            } else {
+                                val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                                v1ToV2ModuleCache[path] = v2Module
+                                allModules[v2Module.hash] = v2Module
+                            }
+                        }
+                    }
+
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
                     val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
