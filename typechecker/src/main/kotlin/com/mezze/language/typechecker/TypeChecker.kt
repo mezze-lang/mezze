@@ -106,8 +106,23 @@ import java.nio.file.Paths
  * ```
  */
 class TypeChecker(
-    private val parentContext: TypingContext = createInitialContext()
+    internal val parentContext: TypingContext = createInitialContext()
 ) {
+    /** Bridge for PrecompiledStdlib to call loadPreludeModules */
+    internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
+        return loadPreludeModules(importResolver, ModuleImportContext.empty())
+    }
+
+    /** Bridge for PrecompiledStdlib to call mergeImportContext */
+    internal fun mergeImportContextPublic(base: TypingContext, importCtx: ModuleImportContext): TypingContext {
+        return mergeImportContext(base, importCtx)
+    }
+
+    /** Bridge for PrecompiledStdlib to get cachedPreludeLoadedModules */
+    internal fun getCachedPreludeLoadedModules(): Map<String, com.mezze.language.typechecker.module.TypedModule>? {
+        return cachedPreludeLoadedModules
+    }
+
     // Transformer for converting perform blocks into state machines (for continuation support)
     private val continuationTransformer = ContinuationTransformer()
     // Detector for identifying code that uses continuations
@@ -205,10 +220,13 @@ class TypeChecker(
         val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
         val hasUserImports = hasImports(program)
 
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && cachedPreludeContext != null) {
-            // Fast path: no imports + cached prelude
-            importContext = cachedPreludeContext
-            mergeImportContext(parentContext, importContext!!)
+        // Use PrecompiledStdlib for no-import tests (fastest path)
+        val stdlib = try { PrecompiledStdlib } catch (_: Exception) { null }
+
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && stdlib != null) {
+            importContext = stdlib.preludeImportContext
+            // Re-merge from scratch each time to get fresh TypeVar context
+            mergeImportContext(parentContext, stdlib.preludeImportContext)
         } else if (hasUserImports || shouldInjectPrelude) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
@@ -235,7 +253,6 @@ class TypeChecker(
                     } else {
                         mergeImportContext(parentContext, importContext!!)
                     }
-
                     ctx
                 }
                 is ImportResolutionResult.Failure -> {
@@ -2014,11 +2031,35 @@ class TypeChecker(
         }
 
 
+        /** Cached prelude-enhanced TypingContext — the parentContext + all prelude bindings merged.
+         *  This is the expensive result of mergeImportContext(parentContext, preludeContext).
+         *  Keyed by parentContext identity since different TypeChecker instances may have different parents. */
+        @Volatile
+        private var cachedPreludeEnhancedContext: TypingContext? = null
+        @Volatile
+        private var cachedPreludeEnhancedContextParentId: Int = 0
+
+        internal fun getOrBuildPreludeEnhancedContext(parentContext: TypingContext): TypingContext? {
+            val parentId = System.identityHashCode(parentContext)
+            val cached = cachedPreludeEnhancedContext
+            if (cached != null && cachedPreludeEnhancedContextParentId == parentId) {
+                return cached
+            }
+            val preludeCtx = cachedPreludeContext ?: return null
+            // Use instance method via a temporary TypeChecker
+            val tc = TypeChecker()
+            val enhanced = tc.mergeImportContext(parentContext, preludeCtx)
+            cachedPreludeEnhancedContext = enhanced
+            cachedPreludeEnhancedContextParentId = parentId
+            return enhanced
+        }
+
         /** Clears prelude cache. Used when stdlib files change. */
         fun clearPreludeCache() {
             cachedPreludeContext = null
             cachedPreludeLoadedModules = null
             cachedPreludeV2Modules = null
+            cachedPreludeEnhancedContext = null
         }
 
         /**
