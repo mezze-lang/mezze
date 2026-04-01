@@ -521,6 +521,17 @@ class TypeCheckerV2 {
         val performerDecls = mutableListOf<TypedPerformerDecl>()
         val exports = mutableMapOf<String, ExportEntry>()
 
+        // Build name→contentHash lookup from this module's own bindings.
+        // Used to resolve function references in impl operation bodies where
+        // resolvedContentHash is null (SubstitutionApplier doesn't process impl bodies).
+        currentModuleBindingHashes = mutableMapOf<String, String>().also { map ->
+            for (item in program.items) {
+                if (item is LetBinding && item.isSimpleBinding && item.contentHash != null) {
+                    map[item.variableName] = item.contentHash!!
+                }
+            }
+        }
+
         for (item in program.items) {
             when (item) {
                 is LetBinding -> {
@@ -666,6 +677,9 @@ class TypeCheckerV2 {
     // v1 Expression → TypedExpr
     // ========================================================================
 
+    /** Name→hash lookup for resolving function references in impl bodies */
+    private var currentModuleBindingHashes: Map<String, String> = emptyMap()
+
     private fun v1ExprToTyped(expr: Expression, file: String): TypedExpr {
         val type = expr.inferredType ?: MezzeType.VarType(TypeVar("unknown"))
         val loc = v1LocFromExpr(expr, file)
@@ -691,8 +705,17 @@ class TypeCheckerV2 {
             is Identifier -> {
                 val binding = if (expr.resolvedContentHash != null) {
                     BindingRef.ByHash(v1HashToTypedHash(expr.resolvedContentHash))
+                } else if (expr.localName.startsWith("__native_")) {
+                    BindingRef.Native(expr.localName)
                 } else {
-                    BindingRef.Local(0, 0) // Fallback for unresolved
+                    // Try module-level binding lookup (for impl operation bodies where
+                    // SubstitutionApplier doesn't set resolvedContentHash)
+                    val moduleHash = currentModuleBindingHashes[expr.localName]
+                    if (moduleHash != null) {
+                        BindingRef.ByHash(v1HashToTypedHash(moduleHash))
+                    } else {
+                        BindingRef.Local(0, 0) // Lambda parameter or truly unresolved
+                    }
                 }
                 TypedVar(expr.localName, binding, type, loc)
             }
