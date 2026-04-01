@@ -312,7 +312,7 @@ class TruffleCompiler(
                     val handler = node.handlers.first()
                     val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
                     // Compile handler params as the handler value expression.
-                    // If params is null, fall back to looking up by effect hash in context.
+                    // If params is null, fall back to looking up by performer name in context.
                     val paramsIR = handler.params
                     val handlerNode: MezzeNode = if (paramsIR != null) {
                         compileNode(paramsIR, source)
