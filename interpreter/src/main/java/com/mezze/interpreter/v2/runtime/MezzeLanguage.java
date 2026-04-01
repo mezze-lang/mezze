@@ -519,12 +519,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 } else if (item instanceof com.mezze.language.ast.ImplDeclaration implDecl) {
                     // Register effect performers
                     String performerName = implDecl.getPerformerName();
+                    String contentHash = implDecl.getContentHash();
+                    // Try performer name first, then content hash (v1 converter stores handler
+                    // records by content hash, not performer name)
                     Integer slot = variableSlots.get(performerName);
+                    if (slot == null && contentHash != null) {
+                        slot = variableSlots.get(contentHash);
+                    }
                     if (slot != null) {
                         Object value = readSlotValue(moduleFrame, slot);
                         if (value != null) {
                             // Primary: Register by content hash for O(1) content-addressable lookup
-                            String contentHash = implDecl.getContentHash();
                             if (contentHash != null && !contentHash.isEmpty()) {
                                 context.defineGlobal(contentHash, value);
                             }

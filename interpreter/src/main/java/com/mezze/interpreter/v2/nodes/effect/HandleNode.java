@@ -212,6 +212,15 @@ public final class HandleNode extends MezzeNode {
     }
 
     /**
+     * Create a HandlerLookupNode that finds a handler by content hash.
+     * Tries local frame slot first, then falls back to context lookup.
+     * Used by TruffleCompiler for the v2 pipeline.
+     */
+    public static MezzeNode createHandlerLookup(int localSlot, String contentHash) {
+        return new HandlerLookupNode(localSlot, contentHash);
+    }
+
+    /**
      * Create a handle node for a statically resolved handler.
      * The handler is looked up by content hash from the frame slot or context.
      */
