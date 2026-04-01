@@ -144,7 +144,6 @@ public final class DynamicEffectCallNode extends MezzeNode {
         Object handler = null;
         if (effectContentHash != null && !effectContentHash.isEmpty()) {
             handler = context.getHandlerFor(effectContentHash);
-            try { new java.io.FileWriter("/tmp/v2_debug.txt", true).append("[DynEffectCall] effectHash=" + effectContentHash.substring(0, Math.min(20, effectContentHash.length())) + " found=" + (handler != null) + " op=" + operationName + "\n").close(); } catch (Exception ex) {}
         }
 
         // NO HANDLER AVAILABLE - Create suspended computation (LAZY EFFECTS)

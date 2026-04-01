@@ -986,12 +986,16 @@ class TypedAstBuilder(
     ): TypedHandlerRef {
         val performerName = handler.performer.localName
 
-        // Look up performer declaration for hash info
+        // Look up performer declaration for hash info — check local impls AND imported impls
         val implDecl = implDeclarations[performerName]
-        val performerHash = Hash.fromV1(implDecl?.contentHash)
+        val importedImpl = importContext?.importedImpls?.get(performerName)
+        val performerHash = Hash.fromV1(
+            implDecl?.contentHash ?: importedImpl?.contentHash
+        )
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
+            ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
         val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
         val effectHash = Hash.fromV1(effectDecl?.contentHash)

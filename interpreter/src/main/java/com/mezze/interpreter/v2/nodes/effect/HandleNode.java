@@ -79,10 +79,8 @@ final class HandlerLookupNode extends MezzeNode {
             handler = context.lookupGlobal(contentHash);
         }
         if (handler == null) {
-            try { new java.io.FileWriter("/tmp/v2_debug.txt", true).append("[HandlerLookup] NOT FOUND key=" + contentHash + "\n").close(); } catch (Exception ex) {}
             throw new RuntimeException("Handler not found for: " + contentHash);
         }
-        try { new java.io.FileWriter("/tmp/v2_debug.txt", true).append("[HandlerLookup] FOUND key=" + contentHash + " value=" + handler + " type=" + handler.getClass().getSimpleName() + "\n").close(); } catch (Exception ex) {}
         return handler;
     }
 }

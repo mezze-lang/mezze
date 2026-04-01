@@ -139,7 +139,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
-            return compileFunctionIR(loweredFunctions, projectRoot);
+            // Extract user import paths so ModuleLoadingNode loads them at runtime
+            List<String> userImports = extractImportedModules(ast);
+            return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
+                this, loweredFunctions, userImports, projectRoot
+            );
         }
 
         // TruffleIR not available — error
@@ -525,6 +529,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     Integer slot = variableSlots.get(performerName);
                     if (slot == null && contentHash != null) {
                         slot = variableSlots.get(contentHash);
+                    }
+                    // Also try with # prefix (v1 hash format)
+                    if (slot == null && contentHash != null) {
+                        slot = variableSlots.get("#" + contentHash);
                     }
                     if (slot != null) {
                         Object value = readSlotValue(moduleFrame, slot);
