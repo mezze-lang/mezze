@@ -121,6 +121,8 @@ sealed interface PatternIR {
     @Serializable data class Literal(val value: NodeIR) : PatternIR
     @Serializable data class Wildcard(val slot: Int = -1) : PatternIR
     @Serializable data class Record(val fieldNames: List<String>, val fieldSlots: List<Int>, val isOpen: Boolean) : PatternIR
+    /** Seq pattern: matches arrays by length and binds elements to slots. restSlot >= 0 for [x, ...rest] patterns */
+    @Serializable data class Seq(val elementSlots: List<Int>, val restSlot: Int = -1) : PatternIR
 }
 
 // Sequences

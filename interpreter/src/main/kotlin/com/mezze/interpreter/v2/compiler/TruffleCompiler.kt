@@ -203,6 +203,14 @@ class TruffleCompiler(
                                 MatchBranchNode.literalPattern(litValue, bodyNode)
                             }
                         }
+                        is PatternIR.Seq -> {
+                            MatchBranchNode.seqPattern(
+                                pat.elementSlots.toIntArray(),
+                                pat.restSlot,
+                                pat.restSlot >= 0,
+                                bodyNode
+                            )
+                        }
                         is PatternIR.Record -> {
                             if (guardNode != null) {
                                 MatchBranchNode.recordPatternWithGuard(

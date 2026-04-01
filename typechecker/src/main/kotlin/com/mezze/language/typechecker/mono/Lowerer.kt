@@ -240,7 +240,17 @@ class Lowerer {
                 }
                 PatternIR.Record(names, slots, pattern.isOpen)
             }
-            is ResolvedSeqPattern -> PatternIR.Wildcard() // TODO
+            is ResolvedSeqPattern -> {
+                // Seq pattern [x, y, ...rest]: check length and bind elements
+                val elementSlots = pattern.elements.map { elem ->
+                    when (elem) {
+                        is ResolvedVarPattern -> elem.slot
+                        is ResolvedWildcardPattern -> -1
+                        else -> -1
+                    }
+                }
+                PatternIR.Seq(elementSlots, pattern.restSlot ?: -1)
+            }
         }
     }
 
