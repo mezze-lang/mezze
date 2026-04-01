@@ -64,6 +64,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // Store variable slots for context capture
     private static final ThreadLocal<Map<String, Integer>> lastVariableSlots = new ThreadLocal<>();
 
+    // Shared parser and typechecker — created once, reused across all parse() calls.
+    // Both are stateless (no per-compilation mutable state in the instances themselves).
+    private static final MezzeParser sharedParser = new MezzeParser();
+    private static final TypeChecker sharedTypeChecker = new TypeChecker();
+
     // ThreadLocal for direct TruffleIR execution (bypasses parsing)
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<Path> directExecutionRoot = new ThreadLocal<>();
@@ -128,13 +133,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             projectRoot = Paths.get(".");
         }
 
-        // Parse
-        MezzeParser parser = new MezzeParser();
-        Program ast = parser.parse(sourceCode, true, null);
+        // Parse — reuse shared parser (stateless)
+        Program ast = sharedParser.parse(sourceCode, true, null);
 
-        // Type check — produces both v1 Program and TruffleIR (loweredFunctions)
-        TypeChecker typeChecker = new TypeChecker();
-        var typeCheckResult = typeChecker.typeCheck(ast, projectRoot, true, null);
+        // Type check — reuse shared typechecker (caches are in companion/static)
+        var typeCheckResult = sharedTypeChecker.typeCheck(ast, projectRoot, true, null);
 
         // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
