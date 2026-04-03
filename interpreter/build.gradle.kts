@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
+    implementation(project(":codebase"))
 
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
@@ -90,4 +91,17 @@ tasks.register<Test>("testV2") {
         "--add-modules=jdk.incubator.vector"
     )
     maxHeapSize = "2g"
+}
+
+// Compile stdlib to SQLite — produces build/stdlib-compiled.sqlite
+tasks.register<JavaExec>("compileStdlib") {
+    group = "build"
+    description = "Pre-compile stdlib modules to SQLite for faster runtime loading"
+    dependsOn("classes")
+
+    mainClass.set("com.mezze.language.codebase.StdlibCompilerCLI")
+    classpath = sourceSets["main"].runtimeClasspath
+    args = listOf("${project.layout.buildDirectory.get()}/stdlib-compiled.sqlite")
+
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
 }
