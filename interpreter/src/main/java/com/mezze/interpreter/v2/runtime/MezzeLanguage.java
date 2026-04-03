@@ -133,23 +133,21 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             projectRoot = Paths.get(".");
         }
 
-        // Parse — reuse shared parser (stateless)
+        // Parse via v1 parser (entry point), then typecheck which runs the v2 pipeline
+        // internally and produces TruffleIR (loweredFunctions).
+        // Note: The v1 parse() is only used as entry point — the typechecker's v2 pipeline
+        // (ParsedModule → TypedModule → Mono → Resolve → Lower) does the actual work.
+        // Full migration to V2PipelineRunner.tryCompile() blocked on closure factory issue.
         Program ast = sharedParser.parse(sourceCode, true, null);
-
-        // Type check — reuse shared typechecker (caches are in companion/static)
         var typeCheckResult = sharedTypeChecker.typeCheck(ast, projectRoot, true, null);
 
-        // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
-            // No import extraction needed — monomorphizer already pulled all
-            // reachable stdlib/dependency functions into the FunctionIR list
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
                 this, loweredFunctions, Collections.emptyList(), projectRoot
             );
         }
 
-        // TruffleIR not available — error
         throw new RuntimeException("TruffleIR not produced by typechecker. loweredFunctions is " +
             (loweredFunctions == null ? "null" : "empty (" + loweredFunctions.size() + ")") +
             ". typedModule is " + (typeCheckResult.getTypedModule() == null ? "null" : "present"));
