@@ -56,6 +56,9 @@ class TruffleCompiler(
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
+        // slotTypes must cover ALL frame slots (captures + params) so bindSlot
+        // can use typed writes for both closure values and unpacked record fields.
+        val allSlotTypes = (ir.captureSlots + ir.paramSlots).map { slotKindToInt(it) }.toIntArray()
         val rootNode = MezzeFunctionRootNode(
             language,
             frameDescriptor,
@@ -63,7 +66,7 @@ class TruffleCompiler(
             ir.name,
             ir.paramNames.toTypedArray(),
             IntArray(ir.captureSlots.size) { it },
-            ir.captureSlots.map { slotKindToInt(it) }.toIntArray()
+            allSlotTypes
         )
 
         // Attach source section for debugger/profiler integration (Chrome DevTools, VisualVM, etc.)

@@ -496,17 +496,59 @@ class Monomorphizer {
         }
 
         if (matchingEntry != null) {
-            // Found matching ability operation — emit direct call.
-            val opHash = matchingEntry.opHash
+            // Found matching ability operation — resolve to direct function call.
+            // The op body is typically: { it, ... } -> targetFn { field1 = it, field2 = ... }
+            // We inline the argument remapping and emit CallDirect(targetFn, remappedArgs).
+            val opBody = matchingEntry.opBody
 
-            // The argument is already wrapped by the TypedAstBuilder's MethodCallInfo
-            // path: {it=receiver, r=rightArg, ...}. Just convert it as-is.
+            // Try to extract a direct call from the op body lambda
+            if (opBody is TypedLambda && opBody.body is TypedCall) {
+                val innerCall = opBody.body as TypedCall
+                val innerFn = innerCall.function
+
+                if (innerFn is TypedVar && innerFn.binding is BindingRef.ByHash) {
+                    val targetHash = (innerFn.binding as BindingRef.ByHash).hash
+                    if (targetHash !in processed) {
+                        worklist.add(targetHash)
+                    }
+
+                    // Build remapped argument: substitute lambda param references
+                    // with the corresponding fields from the caller's argument.
+                    // e.g., op body = { it } -> is_some { opt = it }
+                    //   caller arg = { it = receiver }
+                    //   remapped = { opt = receiver }
+                    val paramNames = opBody.params.map { it.name }
+                    val callerArg = expr.arg  // the original TypedExpr arg (before conversion)
+
+                    // Extract caller arg fields for substitution
+                    val callerFields = mutableMapOf<String, TypedExpr>()
+                    if (callerArg is TypedRecord) {
+                        for (entry in callerArg.entries) {
+                            if (entry is TypedRecordEntry.Field) {
+                                callerFields[entry.name] = entry.value
+                            }
+                        }
+                    }
+
+                    // Build the remapped inner call argument by substituting param refs
+                    val innerArg = innerCall.arg
+                    val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
+
+                    if (remappedArg != null) {
+                        return MonoCall(
+                            MonoVar(innerFn.name, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(targetHash)), innerFn.type, innerFn.loc),
+                            remappedArg,
+                            expr.isTailCall,
+                            expr.type,
+                            expr.loc
+                        )
+                    }
+                }
+            }
+
+            // Fallback: inline the op body lambda (creates CallIndirect)
             val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
-
-            // Convert the operation body (lambda) and call it directly with wrappedArg.
-            // This invokes the lambda with {it=receiver, r=rightArg} which destructures
-            // into the lambda's params and executes the body.
-            val convertedOpBody = convertExpr(matchingEntry.opBody, globalDecls, worklist, processed)
+            val convertedOpBody = convertExpr(opBody, globalDecls, worklist, processed)
             return MonoCall(
                 convertedOpBody,
                 wrappedArg,
@@ -517,6 +559,52 @@ class Monomorphizer {
         }
 
         return null
+    }
+
+    /**
+     * Remap a record argument by substituting lambda param references with caller fields.
+     * e.g., innerArg = { opt = it }, paramNames = [it], callerFields = {it -> receiver}
+     * result = MonoRecord({ opt = convertExpr(receiver) })
+     * Returns null if the pattern doesn't match (non-record arg, complex expressions).
+     */
+    private fun remapRecordArg(
+        innerArg: TypedExpr,
+        paramNames: List<String>,
+        callerFields: Map<String, TypedExpr>,
+        globalDecls: Map<Hash, TypedLetDecl>,
+        worklist: ArrayDeque<Hash>,
+        processed: Set<Hash>
+    ): MonoExpr? {
+        if (innerArg !is TypedRecord) return null
+
+        val remappedEntries = mutableListOf<MonoRecordEntry>()
+        for (entry in innerArg.entries) {
+            when (entry) {
+                is TypedRecordEntry.Field -> {
+                    val value = entry.value
+                    if (value is TypedVar && value.name in paramNames) {
+                        // This field references a lambda param — substitute with caller field
+                        val callerValue = callerFields[value.name]
+                        if (callerValue != null) {
+                            remappedEntries.add(MonoRecordEntry.Field(
+                                entry.name,
+                                convertExpr(callerValue, globalDecls, worklist, processed)
+                            ))
+                        } else {
+                            return null  // param not found in caller arg
+                        }
+                    } else {
+                        // Not a simple param reference — convert as-is
+                        remappedEntries.add(MonoRecordEntry.Field(
+                            entry.name,
+                            convertExpr(value, globalDecls, worklist, processed)
+                        ))
+                    }
+                }
+                is TypedRecordEntry.Spread -> return null  // can't remap spread
+            }
+        }
+        return MonoRecord(remappedEntries, innerArg.type, innerArg.loc)
     }
 
     /** Check if a concrete type matches a target type from an ability impl */
