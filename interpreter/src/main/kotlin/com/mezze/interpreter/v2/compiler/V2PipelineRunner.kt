@@ -16,7 +16,7 @@ import com.mezze.language.typechecker.mono.Resolver
 import com.oracle.truffle.api.CallTarget
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
-import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.resolvedast.SlotKind
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 
@@ -98,14 +98,8 @@ object V2PipelineRunner {
         val compiledFunctions = mutableMapOf<String, CallTarget>()
 
         for (fn in lowered.functions) {
-            val cached = compiledFunctionCache[fn.hash.hex]
-            if (cached != null) {
-                compiledFunctions[fn.hash.hex] = cached
-            } else {
-                val rootNode = compiler.compile(fn)
-                compiledFunctions[fn.hash.hex] = rootNode.callTarget
-                compiledFunctionCache[fn.hash.hex] = rootNode.callTarget
-            }
+            val rootNode = compiler.compile(fn)
+            compiledFunctions[fn.hash.hex] = rootNode.callTarget
         }
 
         // Find the entry function (named __entry__ or main)
@@ -117,30 +111,10 @@ object V2PipelineRunner {
         val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
         val bodyNode = compiler.compileNode(mainFn.body, source)
 
-        // Extract imported module paths — prelude from _prelude.mz + user imports
-        val importedModules = loadPreludeModulePaths().toMutableList()
-        for (decl in parsed.decls) {
-            when (decl) {
-                is ParsedUseDecl -> {
-                    when (val path = decl.path) {
-                        is ParsedUsePath.Module -> importedModules.add(path.path.toString())
-                        is ParsedUsePath.Selective -> importedModules.add(path.modulePath.toString())
-                    }
-                }
-                is ParsedPubUseDecl -> {
-                    when (val path = decl.path) {
-                        is ParsedUsePath.Module -> importedModules.add(path.path.toString())
-                        is ParsedUsePath.Selective -> importedModules.add(path.modulePath.toString())
-                    }
-                }
-                else -> {}
-            }
-        }
-
-        // Wrap: ResultCapture(ModuleLoader(HashModuleLoader(body)))
+        // Wrap: ResultCapture(HashModuleLoader(body))
+        // No ModuleLoadingNode — monomorphizer inlines all reachable stdlib functions
         val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
-        val withModules = MezzeLanguage.createModuleLoadingNode(withV2Functions, importedModules, projectRoot)
-        val wrapped = MezzeLanguage.createResultCapturingNode(withModules)
+        val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 
         // Frame descriptor for the entry function
         val fdBuilder = FrameDescriptor.newBuilder()
@@ -167,11 +141,12 @@ object V2PipelineRunner {
      * Called from MezzeLanguage when the typechecker has already produced TruffleIR.
      */
     @JvmStatic
+    @JvmOverloads
     fun compileFromIR(
         language: MezzeLanguage,
         functions: List<com.mezze.language.truffleir.FunctionIR>,
-        importedModulePaths: List<String>,
-        projectRoot: Path
+        importedModulePaths: List<String> = emptyList(),
+        projectRoot: Path = Path.of(".")
     ): CallTarget {
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()
@@ -186,14 +161,8 @@ object V2PipelineRunner {
         val compiledFunctions = mutableMapOf<String, CallTarget>()
 
         for (fn in functions) {
-            val cached = compiledFunctionCache[fn.hash.hex]
-            if (cached != null) {
-                compiledFunctions[fn.hash.hex] = cached
-            } else {
-                val rootNode = compiler.compile(fn)
-                compiledFunctions[fn.hash.hex] = rootNode.callTarget
-                compiledFunctionCache[fn.hash.hex] = rootNode.callTarget
-            }
+            val rootNode = compiler.compile(fn)
+            compiledFunctions[fn.hash.hex] = rootNode.callTarget
         }
 
         // Find entry function
@@ -205,12 +174,10 @@ object V2PipelineRunner {
         val bodyNode = compiler.compileNode(mainFn.body, source)
 
         // HashModuleLoaderNode registers v2-compiled functions by hash
-        // ModuleLoadingNode loads stdlib native functions at runtime
+        // No ModuleLoadingNode needed — monomorphizer already pulled all reachable
+        // stdlib functions into the FunctionIR list. Native functions use NativeDispatch.
         val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
-        val importedModules = loadPreludeModulePaths().toMutableList()
-        importedModules.addAll(importedModulePaths)
-        val withModules = MezzeLanguage.createModuleLoadingNode(withV2Functions, importedModules, projectRoot)
-        val wrapped = MezzeLanguage.createResultCapturingNode(withModules)
+        val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 
         val fdBuilder = FrameDescriptor.newBuilder()
         for (i in mainFn.paramSlots.indices) {
@@ -231,39 +198,10 @@ object V2PipelineRunner {
         ).callTarget
     }
 
-    /**
-     * Load prelude module paths from _prelude.mz.
-     * Falls back to hardcoded list if file not found.
-     */
-    private fun loadPreludeModulePaths(): List<String> {
-        val source = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
-            ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
-        if (source != null) {
-            val parsed = MezzeParser().parseParsedModule(source, "_prelude.mz")
-            return parsed.decls.mapNotNull { decl ->
-                when (decl) {
-                    is ParsedUseDecl -> when (val path = decl.path) {
-                        is ParsedUsePath.Module -> path.path.toString()
-                        is ParsedUsePath.Selective -> path.modulePath.toString()
-                    }
-                    is ParsedPubUseDecl -> when (val path = decl.path) {
-                        is ParsedUsePath.Module -> path.path.toString()
-                        is ParsedUsePath.Selective -> path.modulePath.toString()
-                    }
-                    else -> null
-                }
-            }
-        }
-        // Fallback
-        return listOf(
-            "std::int", "std::float", "std::nat", "std::frac",
-            "std::bool", "std::str", "std::char",
-            "std::option", "std::result",
-            "std::collections::seq", "std::collections::list",
-            "std::collections::map", "std::collections::set",
-            "std::collections::deque", "std::collections::sorted_map",
-            "std::collections::sorted_set", "std::collections::nonemptylist",
-            "std::collections::bytes"
-        )
+    private fun slotKindToFrameKind(kind: SlotKind): FrameSlotKind = when (kind) {
+        SlotKind.LONG -> FrameSlotKind.Long
+        SlotKind.DOUBLE -> FrameSlotKind.Double
+        SlotKind.BOOLEAN -> FrameSlotKind.Boolean
+        SlotKind.OBJECT -> FrameSlotKind.Object
     }
 }

@@ -56,8 +56,12 @@ object PrecompiledStdlib {
         val adapter = TypeCheckerV2()
         val v2 = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
         for ((path, v1Module) in loadedModules) {
-            val v2Module = adapter.convertV1TypedModule(path, v1Module)
-            v2[v2Module.hash] = v2Module
+            try {
+                val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                v2[v2Module.hash] = v2Module
+            } catch (_: Exception) {
+                // Skip modules that can't be converted — they'll be handled on-demand
+            }
         }
         v2Modules = v2
     }

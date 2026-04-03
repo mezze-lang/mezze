@@ -42,21 +42,27 @@ class TruffleCompiler(
     }
 
     /**
-     * Compile a FunctionIR to a MezzeRootNode.
+     * Compile a FunctionIR to a root node.
+     * Uses MezzeFunctionRootNode which handles record argument unpacking —
+     * the single record arg is destructured into named parameter slots.
+     *
+     * If the body is MakeLambdaIR, unwrap it: use the inner function's body
+     * and frame descriptor instead. This avoids creating a closure wrapper
+     * that would return a MezzeFunction instead of executing the body.
      */
-    fun compile(ir: FunctionIR): MezzeRootNode {
+    fun compile(ir: FunctionIR): MezzeFunctionRootNode {
         val source = getOrCreateSource(ir.sourceFile)
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
-        return MezzeRootNode(
+        return MezzeFunctionRootNode(
             language,
             frameDescriptor,
             bodyNode,
             ir.name,
-            ir.captureSlots.size,   // closureCount — captures come before params in the frame
-            ir.paramSlots.size,     // parameterCount
-            IntArray(0)  // ability slot requirements — empty for monomorphized code
+            ir.paramNames.toTypedArray(),
+            IntArray(ir.captureSlots.size) { it },
+            ir.captureSlots.map { slotKindToInt(it) }.toIntArray()
         )
     }
 
@@ -96,12 +102,10 @@ class TruffleCompiler(
             is CallDirectIR -> {
                 val argNode = compileNode(node.arg, source)
                 if (node.isTailCall) {
-                    // Tail call — uses TailCallNode for TCO
-                    val fnNode = MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, UnitLiteralNode())
+                    val fnNode = MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, UnitLiteralNode(), true)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {
-                    // Direct call by content hash
-                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode)
+                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode, true)
                 }
             }
             is CallLocalIR -> {
@@ -324,7 +328,12 @@ class TruffleCompiler(
                     // This matches the v1 path where the handler record is in a frame slot keyed by impl hash.
                     val paramsIR = handler.params
                     val handlerNode: MezzeNode = if (paramsIR != null) {
-                        compileNode(paramsIR, source)
+                        // Parameterized handler: look up the impl function by hash and call it with params.
+                        // The impl function (registered by v1 ModuleLoadingNode) returns a handler record
+                        // with operation fields when called with the params record.
+                        val implLookup = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex)
+                        val paramsNode = compileNode(paramsIR, source)
+                        InvokeNode.create(implLookup, arrayOf(paramsNode))
                     } else {
                         // HandlerLookupNode: tries local slot first, then context by content hash.
                         // Using -1 for local slot (not available in v2 pipeline), so it falls
@@ -366,6 +375,9 @@ class TruffleCompiler(
     // ========================================================================
 
     private fun buildFrameDescriptor(ir: FunctionIR): FrameDescriptor {
+        // Use Illegal for all slots — ReadLocalNode/WriteLocalNode handle type specialization
+        // themselves. Using typed FrameSlotKind requires matching read/write kind to declaration,
+        // which isn't guaranteed when values flow through polymorphic paths.
         val builder = FrameDescriptor.newBuilder()
         for (i in ir.paramSlots.indices) {
             builder.addSlot(FrameSlotKind.Illegal, ir.paramNames.getOrElse(i) { "param_$i" }, null)
@@ -377,6 +389,13 @@ class TruffleCompiler(
             builder.addSlot(FrameSlotKind.Illegal, ir.captureNames.getOrElse(i) { "capture_$i" }, null)
         }
         return builder.build()
+    }
+
+    private fun slotKindToFrameKind(kind: SlotKind): FrameSlotKind = when (kind) {
+        SlotKind.LONG -> FrameSlotKind.Long
+        SlotKind.DOUBLE -> FrameSlotKind.Double
+        SlotKind.BOOLEAN -> FrameSlotKind.Boolean
+        SlotKind.OBJECT -> FrameSlotKind.Object
     }
 
     private fun slotKindToInt(kind: SlotKind): Int = when (kind) {

@@ -1,11 +1,11 @@
 package com.mezze.interpreter.v2.nodes;
 
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 import java.util.Map;
@@ -17,6 +17,9 @@ import java.util.Map;
  * This node registers them in the global context on first execution,
  * then runs the main body.
  *
+ * Closure factory functions (whose body is MakeLambdaIR) are registered as-is.
+ * MonomorphicCallNode evaluates them lazily on first call to get the actual closure.
+ *
  * No file I/O. No parsing. No typechecking at runtime.
  * Just: hash → CallTarget registration, then execute.
  */
@@ -25,7 +28,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
     @Child private MezzeNode bodyNode;
 
-    /** Pre-compiled functions from all dependency modules, keyed by content hash */
     @CompilationFinal(dimensions = 1)
     private final String[] functionHashes;
 
@@ -60,8 +62,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             String hash = functionHashes[i];
             CallTarget target = functionTargets[i];
             if (!context.hasGlobal(hash)) {
-                // Create a MezzeFunction and register by hash
-                var function = com.mezze.interpreter.v2.values.MezzeFunction.create(target, hash);
+                var function = MezzeFunction.create(target, hash);
                 context.defineGlobal(hash, function);
             }
         }

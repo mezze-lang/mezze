@@ -605,9 +605,12 @@ class TypeChecker(
 
                 // V2 Pipeline FIRST: TypedAST → Mono → Resolve → Lower → TruffleIR
                 // If this succeeds, skip the expensive v1 SubstitutionApplier entirely.
+                // Skip for stdlib modules — they don't need their own TruffleIR since the
+                // monomorphizer pulls reachable stdlib functions into the user module's IR.
+                val isStdlibModule = currentModulePath != null && currentModulePath.startsWith("std::")
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
-                try {
+                if (!isStdlibModule) try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
                         constraintResults = globallyResolvedConstraintResults,
@@ -629,7 +632,7 @@ class TypeChecker(
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
 
                     // Build allModules: entry + user imports + prelude (all cached)
-                    val preludeV2 = try { PrecompiledStdlib.v2Modules } catch (_: Exception) { getOrBuildPreludeV2Modules() }
+                    val preludeV2 = PrecompiledStdlib.v2Modules
                     val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
                     allModules.putAll(preludeV2)
                     allModules[wrapped.hash] = wrapped
@@ -2022,26 +2025,6 @@ class TypeChecker(
         /** Cached v1→v2 TypedModule conversions — stdlib modules don't change between tests */
         private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.typedast.TypedModule>()
 
-        /** Cached prelude v2 modules as a complete hash→TypedModule map — avoids rebuilding per test */
-        @Volatile
-        private var cachedPreludeV2Modules: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>? = null
-
-
-        private fun getOrBuildPreludeV2Modules(): Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule> {
-            cachedPreludeV2Modules?.let { return it }
-            val preludeModules = cachedPreludeLoadedModules ?: return emptyMap()
-            val adapter = TypeCheckerV2()
-            val result = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
-            for ((path, v1Module) in preludeModules) {
-                val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                v1ToV2ModuleCache[path] = v2Module
-                result[v2Module.hash] = v2Module
-            }
-            cachedPreludeV2Modules = result
-            return result
-        }
-
-
         /** Cached prelude-enhanced TypingContext — the parentContext + all prelude bindings merged.
          *  This is the expensive result of mergeImportContext(parentContext, preludeContext).
          *  Keyed by parentContext identity since different TypeChecker instances may have different parents. */
@@ -2069,7 +2052,6 @@ class TypeChecker(
         fun clearPreludeCache() {
             cachedPreludeContext = null
             cachedPreludeLoadedModules = null
-            cachedPreludeV2Modules = null
             cachedPreludeEnhancedContext = null
         }
 

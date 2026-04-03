@@ -16,6 +16,8 @@ class Lowerer {
 
     /** Counter for allocating temp local slots for nested pattern extraction */
     private var nextTempSlot = 0
+    /** Capture count for current function — used to offset param slots in frame */
+    private var currentCaptureCount = 0
 
     fun lower(resolvedModule: ResolvedModule): LoweredModule {
         val fileTable = buildFileTable(resolvedModule)
@@ -37,6 +39,7 @@ class Lowerer {
         val fileIndex = fileTable.files.indexOf(fn.loc.file).coerceAtLeast(0)
         // Reset temp slot counter — locals start after fn.locals, temps are appended
         nextTempSlot = fn.locals.size
+        currentCaptureCount = fn.captures.size
         val body = lowerExpr(fn.body, fileTable)
         // Collect extra temp slots that were allocated during lowering
         val extraTempCount = nextTempSlot - fn.locals.size
@@ -91,7 +94,11 @@ class Lowerer {
 
             is ResolvedReadLocal -> ReadLocalIR(expr.slot, expr.kind, src)
             is ResolvedWriteLocal -> WriteLocalIR(expr.slot, expr.kind, lowerExpr(expr.value, ft), src)
-            is ResolvedReadParam -> ReadArgIR(expr.index, expr.kind, src)
+            // Params are unpacked from record arg into frame slots by MezzeFunctionRootNode.
+            // Frame layout: params(0..P-1), locals(P..P+L-1), captures(P+L..P+L+C-1).
+            // For lambdas with captures, MezzeFunctionRootNode writes captures first then params,
+            // but buildFrameDescriptor puts params first. With 0 captures these are the same.
+            is ResolvedReadParam -> ReadLocalIR(expr.index, expr.kind, src)
             is ResolvedReadCapture -> ReadCaptureIR(expr.index, expr.kind, src)
 
             is ResolvedCallDirect -> CallDirectIR(expr.targetHash, lowerExpr(expr.arg, ft), expr.isTailCall, src)

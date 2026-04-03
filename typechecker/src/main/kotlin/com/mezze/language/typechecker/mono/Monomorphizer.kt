@@ -279,12 +279,22 @@ class Monomorphizer {
                 expr.type,
                 expr.loc
             )
-            is TypedVariantConstruct -> MonoVariantConstruct(
-                expr.tag,
-                expr.payload?.let { convertExpr(it, globalDecls, worklist, processed) },
-                expr.type,
-                expr.loc
-            )
+            is TypedVariantConstruct -> {
+                // Optimize Bool variant constructors to native booleans.
+                // True/False with no payload are always booleans regardless of type annotation.
+                if (expr.tag == "True" && expr.payload == null) {
+                    MonoBoolLit(true, MezzeType.BoolType, expr.loc)
+                } else if (expr.tag == "False" && expr.payload == null) {
+                    MonoBoolLit(false, MezzeType.BoolType, expr.loc)
+                } else {
+                    MonoVariantConstruct(
+                        expr.tag,
+                        expr.payload?.let { convertExpr(it, globalDecls, worklist, processed) },
+                        expr.type,
+                        expr.loc
+                    )
+                }
+            }
             is TypedIf -> MonoIf(
                 convertExpr(expr.condition, globalDecls, worklist, processed),
                 convertExpr(expr.thenBranch, globalDecls, worklist, processed),
@@ -487,10 +497,6 @@ class Monomorphizer {
 
         if (matchingEntry != null) {
             // Found matching ability operation — emit direct call.
-            // NOTE: Do NOT add opHash to worklist — the ability impl processing loop
-            // (after worklist processing) handles compilation of ability operations.
-            // Adding to worklist marks it as processed but the worklist can't compile it
-            // (it's not a let-binding), causing the impl loop to skip it.
             val opHash = matchingEntry.opHash
 
             // The argument is already wrapped by the TypedAstBuilder's MethodCallInfo
@@ -500,8 +506,6 @@ class Monomorphizer {
             // Convert the operation body (lambda) and call it directly with wrappedArg.
             // This invokes the lambda with {it=receiver, r=rightArg} which destructures
             // into the lambda's params and executes the body.
-            // Using inline lambda call instead of ByHash avoids the closure-return issue
-            // where CallDirectIR(opHash) returns a closure instead of executing the body.
             val convertedOpBody = convertExpr(matchingEntry.opBody, globalDecls, worklist, processed)
             return MonoCall(
                 convertedOpBody,

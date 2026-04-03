@@ -142,10 +142,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // Use TruffleIR path — the primary compilation path
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
-            // Extract user import paths so ModuleLoadingNode loads them at runtime
-            List<String> userImports = extractImportedModules(ast);
+            // No import extraction needed — monomorphizer already pulled all
+            // reachable stdlib/dependency functions into the FunctionIR list
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
-                this, loweredFunctions, userImports, projectRoot
+                this, loweredFunctions, Collections.emptyList(), projectRoot
             );
         }
 
