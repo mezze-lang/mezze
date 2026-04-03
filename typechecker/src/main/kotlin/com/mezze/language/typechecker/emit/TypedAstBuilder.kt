@@ -569,16 +569,27 @@ class TypedAstBuilder(
                 // and the Monomorphizer detects this pattern and resolves to direct ByHash call.
                 val methodInfo = methodCallResolutions[expr.loc]
                 if (methodInfo != null && expr.function is ParsedMemberAccess) {
-                    // Method-syntax call: x.neg {} or x.is_empty {}
-                    // Inject the receiver into the arguments, but let the normal function
-                    // resolution handle the function reference (it already resolves to the
-                    // correct native function or ability operation via the constraint solver).
+                    // Method-syntax call: x.is_some {} → resolved to direct function call.
+                    // The constraint solver already resolved the method to a concrete impl
+                    // operation with a content hash. Emit CallByHash instead of FieldAccess.
                     val memberAccess = expr.function as ParsedMemberAccess
                     val receiverExpr = buildExpr(memberAccess.receiver, file)
                     val argExpr = buildExpr(expr.arguments, file)
 
-                    // Build the function normally
-                    val fn = buildExpr(expr.function, file)
+                    // Build the function reference — use ByHash if available, fall back to field access
+                    val fn = if (methodInfo.methodHash != null) {
+                        // Direct call by hash — no field access, no lambda wrapper
+                        val hash = Hash.fromV1(methodInfo.methodHash!!)
+                        TypedVar(
+                            name = methodInfo.methodName,
+                            binding = BindingRef.ByHash(hash),
+                            type = substitution.apply(contextType),
+                            loc = memberAccess.loc
+                        )
+                    } else {
+                        // No hash — fall back to field access (Monomorphizer resolves later)
+                        buildExpr(expr.function, file)
+                    }
 
                     // Wrap the receiver into the arguments as the receiver field (e.g., "it")
                     val receiverFieldName = methodInfo.receiverFieldName
