@@ -30,7 +30,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object V2PipelineRunner {
 
-    // Cache converted v2 TypedModules by module path — stdlib doesn't change between tests
+    // Cache converted v2 TypedModules by content hash (module.hash.hex).
+    // Hash-based identity means the same module content at different paths shares one cache entry.
     private val typedModuleCache = ConcurrentHashMap<String, TypedModule>()
 
     // Cache compiled CallTargets by function hash
@@ -59,16 +60,17 @@ object V2PipelineRunner {
         // Stage 1.5: Wrap top-level code into single entry function
         entryTyped = EntryFunctionBuilder.wrapTopLevel(entryTyped)
 
-        // Stage 1b: Convert dependency modules to v2 TypedModules (cached)
+        // Stage 1b: Convert dependency modules to v2 TypedModules (cached by content hash)
         val allV2Modules = mutableMapOf(entryTyped.hash to entryTyped)
         val adapter = TypeCheckerV2()
         for ((path, v1Module) in v1LoadedModules) {
-            val cached = typedModuleCache[path]
+            val v2Module = adapter.convertV1TypedModule(path, v1Module)
+            val hashKey = v2Module.hash.hex
+            val cached = typedModuleCache[hashKey]
             if (cached != null) {
                 allV2Modules[cached.hash] = cached
             } else {
-                val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                typedModuleCache[path] = v2Module
+                typedModuleCache[hashKey] = v2Module
                 allV2Modules[v2Module.hash] = v2Module
             }
         }

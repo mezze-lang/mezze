@@ -639,12 +639,13 @@ class TypeChecker(
                     if (loadedModules.isNotEmpty()) {
                         val adapter = TypeCheckerV2()
                         for ((path, v1Module) in loadedModules) {
-                            val cached = v1ToV2ModuleCache[path]
+                            val v2Module = adapter.convertV1TypedModule(path, v1Module)
+                            val hashKey = v2Module.hash.hex
+                            val cached = v1ToV2ModuleCache[hashKey]
                             if (cached != null) {
                                 allModules[cached.hash] = cached
                             } else {
-                                val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                                v1ToV2ModuleCache[path] = v2Module
+                                v1ToV2ModuleCache[hashKey] = v2Module
                                 allModules[v2Module.hash] = v2Module
                             }
                         }
@@ -2022,7 +2023,8 @@ class TypeChecker(
         @Volatile
         private var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
 
-        /** Cached v1→v2 TypedModule conversions — stdlib modules don't change between tests */
+        /** Cached v1→v2 TypedModule conversions, keyed by content hash (module.hash.hex).
+         *  Hash-based identity means the same module content at different paths shares one cache entry. */
         private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.typedast.TypedModule>()
 
         /** Cached prelude-enhanced TypingContext — the parentContext + all prelude bindings merged.
