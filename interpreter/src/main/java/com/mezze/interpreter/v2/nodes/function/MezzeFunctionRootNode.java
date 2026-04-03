@@ -11,6 +11,7 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.api.source.SourceSection;
 
 /**
  * Function root node with record argument unpacking - MAXIMUM PERFORMANCE.
@@ -69,6 +70,10 @@ public final class MezzeFunctionRootNode extends RootNode {
     @CompilationFinal
     private final int abilityCount;
 
+    // Source section for debugger/profiler integration — set after construction by TruffleCompiler
+    @CompilationFinal
+    private SourceSection sourceSection;
+
     /**
      * Standard constructor without ability slots.
      */
@@ -108,6 +113,26 @@ public final class MezzeFunctionRootNode extends RootNode {
         this.closureCount = this.closureSlots.length;
         this.parameterCount = this.parameterNames.length;
         this.abilityCount = this.abilitySlots.length;
+    }
+
+    /**
+     * Set the source section for this root node. Called by TruffleCompiler after construction.
+     * Enables debuggers and profilers (e.g. Chrome DevTools) to show source locations in stack traces.
+     */
+    public void setSourceSection(SourceSection section) {
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        this.sourceSection = section;
+    }
+
+    @Override
+    public SourceSection getSourceSection() {
+        return sourceSection;
+    }
+
+    @Override
+    public boolean isInternal() {
+        // Functions with source sections are user-visible (not internal/framework)
+        return sourceSection == null;
     }
 
     private static final String[] EMPTY_STRINGS = new String[0];

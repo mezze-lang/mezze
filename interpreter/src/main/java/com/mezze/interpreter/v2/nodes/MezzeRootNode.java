@@ -9,6 +9,7 @@ import com.oracle.truffle.api.dsl.ReportPolymorphism;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.api.source.SourceSection;
 
 /**
  * Root node for Mezze functions - OPTIMIZED FOR JIT.
@@ -45,6 +46,10 @@ public final class MezzeRootNode extends RootNode {
     // Length = closureCount + parameterCount
     @CompilationFinal(dimensions = 1)
     private final int[] slotTypes;
+
+    // Source section for debugger/profiler integration — set after construction by TruffleCompiler
+    @CompilationFinal
+    private SourceSection sourceSection;
 
     public MezzeRootNode(
             MezzeLanguage language,
@@ -87,6 +92,26 @@ public final class MezzeRootNode extends RootNode {
             MezzeNode bodyNode
     ) {
         this(language, frameDescriptor, bodyNode, "anonymous", 0, 0, new int[0]);
+    }
+
+    /**
+     * Set the source section for this root node. Called by TruffleCompiler after construction.
+     * Enables debuggers and profilers (e.g. Chrome DevTools) to show source locations in stack traces.
+     */
+    public void setSourceSection(SourceSection section) {
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        this.sourceSection = section;
+    }
+
+    @Override
+    public SourceSection getSourceSection() {
+        return sourceSection;
+    }
+
+    @Override
+    public boolean isInternal() {
+        // Functions with source sections are user-visible (not internal/framework)
+        return sourceSection == null;
     }
 
     private static int[] createDefaultSlotTypes(int count) {

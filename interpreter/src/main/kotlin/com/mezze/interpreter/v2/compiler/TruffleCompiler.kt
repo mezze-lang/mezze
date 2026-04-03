@@ -21,6 +21,7 @@ import com.mezze.language.truffleir.*
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
 import com.oracle.truffle.api.source.Source
+import com.oracle.truffle.api.source.SourceSection
 
 /**
  * TruffleCompiler — converts TruffleIR (FunctionIR/NodeIR) to Truffle AST nodes.
@@ -55,7 +56,7 @@ class TruffleCompiler(
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
-        return MezzeFunctionRootNode(
+        val rootNode = MezzeFunctionRootNode(
             language,
             frameDescriptor,
             bodyNode,
@@ -64,6 +65,14 @@ class TruffleCompiler(
             IntArray(ir.captureSlots.size) { it },
             ir.captureSlots.map { slotKindToInt(it) }.toIntArray()
         )
+
+        // Attach source section for debugger/profiler integration (Chrome DevTools, VisualVM, etc.)
+        val section = createSourceSection(source, ir.sourceSection)
+        if (section != null) {
+            rootNode.setSourceSection(section)
+        }
+
+        return rootNode
     }
 
     /**
@@ -373,6 +382,31 @@ class TruffleCompiler(
     // ========================================================================
     // Helpers
     // ========================================================================
+
+    /**
+     * Create a SourceSection from SourceInfo for debugger/profiler integration.
+     * Returns null if the source info has invalid coordinates (e.g., synthetic nodes).
+     *
+     * Uses Source.createSection(startLine, startColumn, endLine, endColumn) which
+     * maps the function's source range so that Chrome DevTools and other Truffle
+     * tools can display source locations in stack traces and profiler output.
+     */
+    private fun createSourceSection(source: Source, info: SourceInfo): SourceSection? {
+        return try {
+            if (info.startLine <= 0 || info.startCol <= 0) return null
+            // Truffle's createSection uses 1-based lines and columns
+            // Calculate character length from line/column range
+            val startOffset = source.getLineStartOffset(info.startLine) + (info.startCol - 1)
+            val endLine = if (info.endLine > 0) info.endLine else info.startLine
+            val endCol = if (info.endCol > 0) info.endCol else info.startCol
+            val endOffset = source.getLineStartOffset(endLine) + (endCol - 1)
+            val length = (endOffset - startOffset).coerceAtLeast(1)
+            source.createSection(startOffset, length)
+        } catch (_: Exception) {
+            // Source may be empty or coordinates out of range for synthetic/generated code
+            null
+        }
+    }
 
     private fun buildFrameDescriptor(ir: FunctionIR): FrameDescriptor {
         // Use Illegal for all slots — ReadLocalNode/WriteLocalNode handle type specialization
