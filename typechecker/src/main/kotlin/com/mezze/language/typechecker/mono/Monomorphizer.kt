@@ -503,36 +503,42 @@ class Monomorphizer {
                 val innerCall = opBody.body as TypedCall
                 val innerFn = innerCall.function
 
-                if (innerFn is TypedVar && innerFn.binding is BindingRef.ByHash) {
-                    val targetHash = (innerFn.binding as BindingRef.ByHash).hash
-                    if (targetHash !in processed) {
-                        worklist.add(targetHash)
+                if (innerFn is TypedVar && (innerFn.binding is BindingRef.ByHash || innerFn.binding is BindingRef.Native)) {
+                    // Resolve the target function reference
+                    val monoFnRef = when (val binding = innerFn.binding) {
+                        is BindingRef.ByHash -> {
+                            if (binding.hash !in processed) worklist.add(binding.hash)
+                            MonoBinding.FunctionRef(MonoFunctionRef.ByHash(binding.hash))
+                        }
+                        is BindingRef.Native -> MonoBinding.FunctionRef(MonoFunctionRef.Native(binding.name))
+                        else -> null
                     }
 
-                    val paramNames = opBody.params.map { it.name }
-                    val callerArg = expr.arg
+                    if (monoFnRef != null) {
+                        val paramNames = opBody.params.map { it.name }
+                        val callerArg = expr.arg
 
-                    val callerFields = mutableMapOf<String, TypedExpr>()
-                    if (callerArg is TypedRecord) {
-                        for (entry in callerArg.entries) {
-                            if (entry is TypedRecordEntry.Field) {
-                                callerFields[entry.name] = entry.value
+                        val callerFields = mutableMapOf<String, TypedExpr>()
+                        if (callerArg is TypedRecord) {
+                            for (entry in callerArg.entries) {
+                                if (entry is TypedRecordEntry.Field) {
+                                    callerFields[entry.name] = entry.value
+                                }
                             }
                         }
-                    }
 
-                    val innerArg = innerCall.arg
-                    val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
+                        val innerArg = innerCall.arg
+                        val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
 
-                    if (remappedArg != null) {
-
-                        return MonoCall(
-                            MonoVar(innerFn.name, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(targetHash)), innerFn.type, innerFn.loc),
-                            remappedArg,
-                            expr.isTailCall,
-                            expr.type,
-                            expr.loc
-                        )
+                        if (remappedArg != null) {
+                            return MonoCall(
+                                MonoVar(innerFn.name, monoFnRef, innerFn.type, innerFn.loc),
+                                remappedArg,
+                                expr.isTailCall,
+                                expr.type,
+                                expr.loc
+                            )
+                        }
                     }
                 }
             }
