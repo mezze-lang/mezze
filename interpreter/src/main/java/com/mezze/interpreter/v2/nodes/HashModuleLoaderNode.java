@@ -91,21 +91,43 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
+        var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
 
+        // Pass 1: Register all functions by hash (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
             CallTarget target = functionTargets[i];
             if (!context.hasGlobal(hash)) {
                 var function = MezzeFunction.create(target, hash);
                 context.defineGlobal(hash, function);
-                // Also register by name for performer/handler lookup
                 if (i < functionNames.length && functionNames[i] != null) {
                     context.defineGlobal(functionNames[i], function);
                 }
             }
         }
 
-        // Pass 2: Construct performer records from compiled operation functions.
+        // Pass 2: Evaluate closure factories — call each function with empty record.
+        // Functions whose body is MakeLambdaIR return a MezzeFunction closure.
+        // Replace the raw wrapper with the closure in globals.
+        // This replicates what ModuleLoadingNode did: execute module code to get closures.
+        for (int i = 0; i < functionHashes.length; i++) {
+            String hash = functionHashes[i];
+            CallTarget target = functionTargets[i];
+            try {
+                Object result = target.call(new Object[] { emptyRecord });
+                if (result instanceof MezzeFunction closure) {
+                    // Replace raw wrapper with evaluated closure
+                    context.defineGlobal(hash, closure);
+                    if (i < functionNames.length && functionNames[i] != null) {
+                        context.defineGlobal(functionNames[i], closure);
+                    }
+                }
+            } catch (Exception e) {
+                // Not a closure factory or evaluation needs specific args — keep raw wrapper
+            }
+        }
+
+        // Pass 3: Construct performer records from compiled operation functions.
         // Each performer record is a MezzeRecord with operation functions as fields.
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
