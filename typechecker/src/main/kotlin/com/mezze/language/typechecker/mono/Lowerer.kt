@@ -30,15 +30,38 @@ class Lowerer {
                 lowerFunction(opFn, fileTable)
             }
         }
+        // Collect performer record info for runtime registration
+        val performerRecords = resolvedModule.effectHandlers.mapIndexed { idx, handler ->
+            // Get performer name from MonoPerformerDecl (matched by index)
+            val monoPerformer = if (idx < resolvedModule.effectHandlers.size) {
+                resolvedModule.effectHandlers.getOrNull(idx)
+            } else null
+            PerformerRecord(
+                performerHash = handler.performerHash.hex,
+                effectHash = handler.effectHash.hex,
+                operationHashes = handler.operations.map { it.hash.hex },
+                operationNames = handler.operations.map { it.qualifiedName.substringAfter("::") }
+            )
+        }
+
         return LoweredModule(
             fileTable = fileTable,
-            functions = functions + handlerFunctions
+            functions = functions + handlerFunctions,
+            performerRecords = performerRecords
         )
     }
 
     data class LoweredModule(
         val fileTable: FileTable,
-        val functions: List<FunctionIR>
+        val functions: List<FunctionIR>,
+        val performerRecords: List<PerformerRecord> = emptyList()
+    )
+
+    data class PerformerRecord(
+        val performerHash: String,
+        val effectHash: String,
+        val operationHashes: List<String>,
+        val operationNames: List<String>
     )
 
     private fun lowerFunction(fn: ResolvedFunction, fileTable: FileTable): FunctionIR {

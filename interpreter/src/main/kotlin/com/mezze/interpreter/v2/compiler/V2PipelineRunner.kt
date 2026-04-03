@@ -156,7 +156,8 @@ object V2PipelineRunner {
         language: MezzeLanguage,
         functions: List<com.mezze.language.truffleir.FunctionIR>,
         importedModulePaths: List<String> = emptyList(),
-        projectRoot: Path = Path.of(".")
+        projectRoot: Path = Path.of("."),
+        performerRecords: List<Array<String>> = emptyList()
     ): CallTarget {
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()
@@ -192,7 +193,8 @@ object V2PipelineRunner {
         }
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
-        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName)
+        val performerInfos = performerRecords.toTypedArray()
+        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName, performerInfos)
         val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 
         val fdBuilder = FrameDescriptor.newBuilder()

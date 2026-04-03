@@ -37,6 +37,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private final String[] functionNames;
 
+    /** Performer records: each entry is [performerHash, effectHash, op1Hash, op1Name, op2Hash, op2Name, ...] */
+    @CompilationFinal(dimensions = 1)
+    private final String[][] performerInfos;
+
     @CompilationFinal
     private boolean modulesLoaded = false;
 
@@ -52,9 +56,19 @@ public final class HashModuleLoaderNode extends MezzeNode {
             Map<String, CallTarget> compiledFunctions,
             Map<String, String> hashToName
     ) {
+        this(bodyNode, compiledFunctions, hashToName, null);
+    }
+
+    public HashModuleLoaderNode(
+            MezzeNode bodyNode,
+            Map<String, CallTarget> compiledFunctions,
+            Map<String, String> hashToName,
+            String[][] performerInfos
+    ) {
         this.bodyNode = bodyNode;
         this.functionHashes = compiledFunctions.keySet().toArray(new String[0]);
         this.functionTargets = compiledFunctions.values().toArray(new CallTarget[0]);
+        this.performerInfos = performerInfos != null ? performerInfos : new String[0][];
         if (hashToName != null) {
             this.functionNames = new String[functionHashes.length];
             for (int i = 0; i < functionHashes.length; i++) {
@@ -91,6 +105,45 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
+        // Pass 2: Construct performer records from compiled operation functions.
+        // Each performer record is a MezzeRecord with operation functions as fields.
+        for (String[] info : performerInfos) {
+            if (info.length < 2) continue;
+            String performerHash = info[0];
+            String effectHash = info[1];
+            // Remaining entries are pairs: [opHash, opName, opHash, opName, ...]
+            int opCount = (info.length - 2) / 2;
+            if (opCount > 0) {
+                constructPerformerRecord(context, performerHash, effectHash, info, opCount);
+            }
+        }
+
         modulesLoaded = true;
+    }
+
+    @CompilerDirectives.TruffleBoundary
+    private void constructPerformerRecord(MezzeContext context, String performerHash, String effectHash, String[] info, int opCount) {
+        String[] opNames = new String[opCount];
+        Object[] opValues = new Object[opCount];
+        for (int i = 0; i < opCount; i++) {
+            String opHash = info[2 + i * 2];
+            opNames[i] = info[2 + i * 2 + 1];
+            // Look up the compiled operation function
+            Object opFunc = context.lookupGlobal(opHash);
+            opValues[i] = opFunc != null ? opFunc : com.mezze.interpreter.v2.values.MezzeUnit.INSTANCE;
+        }
+        // Create performer record with operation functions as fields
+        var locations = new com.mezze.interpreter.v2.values.MezzeRecord.FieldLocation[opCount];
+        for (int i = 0; i < opCount; i++) {
+            locations[i] = new com.mezze.interpreter.v2.values.MezzeRecord.FieldLocation(
+                com.mezze.interpreter.v2.values.MezzeRecord.FieldLocation.StorageType.OBJECT, i);
+        }
+        var shape = new com.mezze.interpreter.v2.values.MezzeRecord.Shape(opNames, locations);
+        var record = com.mezze.interpreter.v2.values.MezzeRecord.withAllObjects(shape, opValues);
+        // Register under performer hash AND effect hash
+        context.defineGlobal(performerHash, record);
+        if (!effectHash.isEmpty()) {
+            context.defineGlobal(effectHash, record);
+        }
     }
 }

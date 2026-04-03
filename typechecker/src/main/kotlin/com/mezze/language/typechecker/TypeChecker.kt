@@ -147,7 +147,8 @@ class TypeChecker(
             val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
             val programBeforeContinuations: Program? = null,   // Program BEFORE StateMachine transform (for v2 emitter)
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // Stage 1: TypedAST
-            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null  // Stage 4: TruffleIR (after mono+resolve+lower)
+            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // Stage 4: TruffleIR (after mono+resolve+lower)
+            val loweredPerformers: List<Array<String>> = emptyList()  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
         ) : TypeCheckResult()
 
         /**
@@ -610,6 +611,7 @@ class TypeChecker(
                 val isStdlibModule = currentModulePath != null && currentModulePath.startsWith("std::")
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
+                var loweredPerformers: List<Array<String>> = emptyList()
                 if (!isStdlibModule) try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
@@ -655,6 +657,14 @@ class TypeChecker(
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
                     val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
                     loweredFns = lowered.functions
+                    loweredPerformers = lowered.performerRecords.map { pr ->
+                        val arr = mutableListOf(pr.performerHash, pr.effectHash)
+                        for (i in pr.operationHashes.indices) {
+                            arr.add(pr.operationHashes[i])
+                            arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
+                        }
+                        arr.toTypedArray()
+                    }
                 } catch (pipelineEx: Exception) {
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
@@ -671,7 +681,8 @@ class TypeChecker(
                         abilityImpls = context.getAllAbilityImpls(),
                         programBeforeContinuations = null,
                         typedModule = emittedTypedModule,
-                        loweredFunctions = loweredFns
+                        loweredFunctions = loweredFns,
+                        loweredPerformers = loweredPerformers
                     )
                 }
 
@@ -1883,7 +1894,8 @@ class TypeChecker(
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
-                    typedModule = result.typedModule
+                    typedModule = result.typedModule,
+                    performerRecords = result.loweredPerformers
                 )
             }
             is TypeCheckResult.Failure -> {

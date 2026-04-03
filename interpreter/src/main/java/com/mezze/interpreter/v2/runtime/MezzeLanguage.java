@@ -143,8 +143,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
+            var performers = typeCheckResult.getPerformerRecords();
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
-                this, loweredFunctions, Collections.emptyList(), projectRoot
+                this, loweredFunctions, Collections.emptyList(), projectRoot,
+                performers != null ? performers : Collections.emptyList()
             );
         }
 
