@@ -337,6 +337,18 @@ class SQLiteCodebase private constructor(
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
             )
         """.trimIndent())
+
+        // Pre-compiled stdlib table — stores TypedModules and FunctionIR blobs
+        // for stdlib functions so they don't need to be re-parsed/typechecked at runtime
+        stmt.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS stdlib_compiled (
+                hash TEXT PRIMARY KEY,
+                module_path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                blob BLOB NOT NULL
+            ) WITHOUT ROWID
+        """.trimIndent())
+        stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_stdlib_module ON stdlib_compiled(module_path)")
     }
 
     // ========================================================================
@@ -1006,5 +1018,90 @@ class SQLiteCodebase private constructor(
             originalName = getString("original_name"),
             kind = DefinitionKind.valueOf(getString("kind"))
         )
+    }
+
+    // ========================================================================
+    // STDLIB COMPILED (pre-compiled stdlib artifacts)
+    // ========================================================================
+
+    /**
+     * Store a pre-compiled stdlib artifact.
+     * @param hash Content hash of the artifact
+     * @param modulePath Module path (e.g., "std::str")
+     * @param kind "typed_module" or "function_ir"
+     * @param blob CBOR-serialized artifact
+     */
+    fun putStdlibCompiled(hash: String, modulePath: String, kind: String, blob: ByteArray) {
+        connection.prepareStatement("""
+            INSERT OR REPLACE INTO stdlib_compiled (hash, module_path, kind, blob)
+            VALUES (?, ?, ?, ?)
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, hash)
+            stmt.setString(2, modulePath)
+            stmt.setString(3, kind)
+            stmt.setBytes(4, blob)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Get a pre-compiled stdlib artifact by hash.
+     * @return The CBOR blob, or null if not found
+     */
+    fun getStdlibCompiled(hash: String): ByteArray? {
+        connection.prepareStatement("""
+            SELECT blob FROM stdlib_compiled WHERE hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, hash)
+            val rs = stmt.executeQuery()
+            return if (rs.next()) rs.getBytes("blob") else null
+        }
+    }
+
+    /**
+     * Get all pre-compiled artifacts for a module.
+     * @return List of (hash, kind, blob) triples
+     */
+    fun getStdlibCompiledForModule(modulePath: String): List<Triple<String, String, ByteArray>> {
+        connection.prepareStatement("""
+            SELECT hash, kind, blob FROM stdlib_compiled WHERE module_path = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, modulePath)
+            val rs = stmt.executeQuery()
+            val results = mutableListOf<Triple<String, String, ByteArray>>()
+            while (rs.next()) {
+                results.add(Triple(rs.getString("hash"), rs.getString("kind"), rs.getBytes("blob")))
+            }
+            return results
+        }
+    }
+
+    /**
+     * Get all pre-compiled artifacts of a specific kind.
+     */
+    fun getAllStdlibCompiled(kind: String): List<Pair<String, ByteArray>> {
+        connection.prepareStatement("""
+            SELECT hash, blob FROM stdlib_compiled WHERE kind = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, kind)
+            val rs = stmt.executeQuery()
+            val results = mutableListOf<Pair<String, ByteArray>>()
+            while (rs.next()) {
+                results.add(Pair(rs.getString("hash"), rs.getBytes("blob")))
+            }
+            return results
+        }
+    }
+
+    /**
+     * Check if a pre-compiled artifact exists.
+     */
+    fun hasStdlibCompiled(hash: String): Boolean {
+        connection.prepareStatement("""
+            SELECT 1 FROM stdlib_compiled WHERE hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, hash)
+            return stmt.executeQuery().next()
+        }
     }
 }
