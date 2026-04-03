@@ -348,7 +348,20 @@ class Monomorphizer {
                 expr.type,
                 expr.loc
             )
-            is TypedPerform -> MonoPerform(
+            is TypedPerform -> {
+                // Add performer hashes to worklist so they get compiled as FunctionIR
+                for (h in expr.handlers) {
+                    if (h.performerHash.hex.isNotEmpty() && h.performerHash !in processed) {
+                        worklist.add(h.performerHash)
+                    }
+                    // Also try to find performer by name in globalDecls
+                    for ((hash, decl) in globalDecls) {
+                        if (decl.name == h.performerName && hash !in processed) {
+                            worklist.add(hash)
+                        }
+                    }
+                }
+                MonoPerform(
                 expr.handlers.map { h ->
                     MonoHandlerRef(h.performerHash, h.effectHash, h.performerName, h.params?.let { convertExpr(it, globalDecls, worklist, processed) }, h.loc)
                 },
@@ -356,6 +369,7 @@ class Monomorphizer {
                 expr.type,
                 expr.loc
             )
+            }
             is TypedPerformOp -> MonoPerformOp(
                 expr.effectHash, expr.operationName,
                 convertExpr(expr.arg, globalDecls, worklist, processed),

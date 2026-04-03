@@ -94,6 +94,32 @@ final class HandlerLookupNode extends MezzeNode {
                 handler = context.lookupGlobal(performerName);
             }
         }
+        // If handler is a MezzeFunction (from HashModuleLoaderNode), evaluate it
+        // to get the performer record. Performer functions are closure factories
+        // that return a record with operation closures.
+        if (handler instanceof com.mezze.interpreter.v2.values.MezzeFunction fn) {
+            try {
+                Object result = fn.getCallTarget().call(
+                    new Object[] { com.mezze.interpreter.v2.values.MezzeRecord.empty() }
+                );
+                if (result instanceof com.mezze.interpreter.v2.values.MezzeFunction innerFn) {
+                    // Double-wrapped closure factory — evaluate again
+                    result = innerFn.getCallTarget().call(
+                        new Object[] { com.mezze.interpreter.v2.values.MezzeRecord.empty() }
+                    );
+                }
+                if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
+                    handler = result;
+                    // Cache the resolved record for next lookup
+                    if (performerName != null) {
+                        context.defineGlobal(performerName, handler);
+                    }
+                    context.defineGlobal(contentHash, handler);
+                }
+            } catch (Exception e) {
+                // Evaluation failed — keep looking
+            }
+        }
         if (handler == null) {
             throw new RuntimeException("Handler not found for: " + contentHash +
                 (performerName != null ? " (performer: " + performerName + ")" : ""));
