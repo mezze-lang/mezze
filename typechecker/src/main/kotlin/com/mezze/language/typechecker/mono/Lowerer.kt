@@ -58,13 +58,20 @@ class Lowerer {
             captureNames = fn.captures.map { it.name },
             body = body,
             sourceFile = fn.loc.file,
-            sourceSection = locToSourceInfo(fn.loc, fileTable)
+            sourceSection = locToSourceInfo(fn.loc, fileTable),
+            // ResolvedFunction doesn't carry type info (types are erased before Resolver).
+            // returnType populated when Resolver preserves types (future work).
+            returnType = null
         )
     }
 
     /** Allocate a temp local slot (used for nested pattern extraction) */
     private fun allocTempSlot(): Int = nextTempSlot++
 
+    // NOTE: typeTag on NodeIR variants (CallDirectIR, ReadLocalIR, ReadArgIR,
+    // MakeRecordIR, MakeVariantIR, MakeLambdaIR) is left as null here because
+    // ResolvedExpr doesn't carry type information — types are erased before the
+    // Resolver stage. typeTag populated when Resolver preserves types (future work).
     private fun lowerExpr(expr: ResolvedExpr, ft: FileTable): NodeIR {
         val src = locToSourceInfo(expr.loc, ft)
 

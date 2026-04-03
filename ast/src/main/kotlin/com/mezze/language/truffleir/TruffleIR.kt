@@ -7,7 +7,9 @@ import kotlinx.serialization.Serializable
 /**
  * TruffleIR — minimal serializable representation for execution.
  *
- * No abilities. No types. No generics. Just execution.
+ * No abilities. No generics. Just execution.
+ * Optional type annotations (returnType, typeTag) are carried through for
+ * later compilation stages but are not required — all default to null.
  * This is what gets serialized to SQLite and read by TruffleCompiler.
  */
 
@@ -46,7 +48,9 @@ data class FunctionIR(
     val captureNames: List<String>,
     val body: NodeIR,
     val sourceFile: String,
-    val sourceSection: SourceInfo
+    val sourceSection: SourceInfo,
+    /** Optional return type descriptor, populated when type info is available from Resolver */
+    val returnType: String? = null
 )
 
 // ============================================================================
@@ -75,13 +79,13 @@ sealed interface StringPartIR {
 }
 
 // Variables
-@Serializable data class ReadLocalIR(val slot: Int, val kind: SlotKind, override val src: SourceInfo) : NodeIR
+@Serializable data class ReadLocalIR(val slot: Int, val kind: SlotKind, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class WriteLocalIR(val slot: Int, val kind: SlotKind, val value: NodeIR, override val src: SourceInfo) : NodeIR
 @Serializable data class ReadCaptureIR(val index: Int, val kind: SlotKind, override val src: SourceInfo) : NodeIR
-@Serializable data class ReadArgIR(val index: Int, val kind: SlotKind, override val src: SourceInfo) : NodeIR
+@Serializable data class ReadArgIR(val index: Int, val kind: SlotKind, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 
 // Calls
-@Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+@Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 @Serializable data class CallNativeIR(val name: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR
 /** Indirect call — evaluate function expression, then invoke */
@@ -98,13 +102,13 @@ enum class InlineOp {
 }
 
 // Records
-@Serializable data class MakeRecordIR(val fields: List<FieldIR>, override val src: SourceInfo) : NodeIR
+@Serializable data class MakeRecordIR(val fields: List<FieldIR>, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class FieldIR(val name: String, val value: NodeIR)
 @Serializable data class ReadFieldIR(val record: NodeIR, val fieldName: String, val fieldIndex: Int, override val src: SourceInfo) : NodeIR
 @Serializable data class RecordUpdateIR(val record: NodeIR, val updates: List<FieldIR>, override val src: SourceInfo) : NodeIR
 
 // Variants
-@Serializable data class MakeVariantIR(val tag: Int, val tagName: String, val payload: NodeIR?, override val src: SourceInfo) : NodeIR
+@Serializable data class MakeVariantIR(val tag: Int, val tagName: String, val payload: NodeIR?, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class MatchIR(val scrutinee: NodeIR, val cases: List<CaseIR>, override val src: SourceInfo) : NodeIR
 @Serializable data class CaseIR(
     val pattern: PatternIR,
@@ -142,7 +146,7 @@ sealed interface PatternIR {
 }
 
 // Closures
-@Serializable data class MakeLambdaIR(val functionHash: Hash, val captures: List<CaptureIR>, override val src: SourceInfo) : NodeIR
+@Serializable data class MakeLambdaIR(val functionHash: Hash, val captures: List<CaptureIR>, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CaptureIR(val slot: Int, val kind: SlotKind)
 
 // Effects
