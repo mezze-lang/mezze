@@ -409,18 +409,18 @@ class TruffleCompiler(
     }
 
     private fun buildFrameDescriptor(ir: FunctionIR): FrameDescriptor {
-        // Use Illegal for all slots — ReadLocalNode/WriteLocalNode handle type specialization
-        // themselves. Using typed FrameSlotKind requires matching read/write kind to declaration,
-        // which isn't guaranteed when values flow through polymorphic paths.
+        // Declare typed slot kinds so Truffle/Graal can specialize frame access.
+        // ReadLocalNode/WriteLocalNode catch FrameSlotTypeException and fall back
+        // to getValue() if the runtime type doesn't match the declared kind.
         val builder = FrameDescriptor.newBuilder()
         for (i in ir.paramSlots.indices) {
-            builder.addSlot(FrameSlotKind.Illegal, ir.paramNames.getOrElse(i) { "param_$i" }, null)
+            builder.addSlot(slotKindToFrameKind(ir.paramSlots[i]), ir.paramNames.getOrElse(i) { "param_$i" }, null)
         }
         for (i in ir.localSlots.indices) {
-            builder.addSlot(FrameSlotKind.Illegal, ir.localNames.getOrElse(i) { "local_$i" }, null)
+            builder.addSlot(slotKindToFrameKind(ir.localSlots[i]), ir.localNames.getOrElse(i) { "local_$i" }, null)
         }
         for (i in ir.captureSlots.indices) {
-            builder.addSlot(FrameSlotKind.Illegal, ir.captureNames.getOrElse(i) { "capture_$i" }, null)
+            builder.addSlot(slotKindToFrameKind(ir.captureSlots[i]), ir.captureNames.getOrElse(i) { "capture_$i" }, null)
         }
         return builder.build()
     }
