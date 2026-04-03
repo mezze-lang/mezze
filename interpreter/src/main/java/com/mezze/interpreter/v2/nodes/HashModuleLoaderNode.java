@@ -109,14 +109,12 @@ public final class HashModuleLoaderNode extends MezzeNode {
         // Pass 2: Evaluate closure factories — call each function with empty record.
         // Functions whose body is MakeLambdaIR return a MezzeFunction closure.
         // Replace the raw wrapper with the closure in globals.
-        // This replicates what ModuleLoadingNode did: execute module code to get closures.
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
             CallTarget target = functionTargets[i];
             try {
                 Object result = target.call(new Object[] { emptyRecord });
                 if (result instanceof MezzeFunction closure) {
-                    // Replace raw wrapper with evaluated closure
                     context.defineGlobal(hash, closure);
                     if (i < functionNames.length && functionNames[i] != null) {
                         context.defineGlobal(functionNames[i], closure);
@@ -128,12 +126,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 3: Construct performer records from compiled operation functions.
-        // Each performer record is a MezzeRecord with operation functions as fields.
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
             String effectHash = info[1];
-            // Remaining entries are pairs: [opHash, opName, opHash, opName, ...]
             int opCount = (info.length - 2) / 2;
             if (opCount > 0) {
                 constructPerformerRecord(context, performerHash, effectHash, info, opCount);
