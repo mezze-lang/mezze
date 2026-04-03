@@ -44,6 +44,11 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilationFinal
     private boolean modulesLoaded = false;
 
+    /** Static cache of evaluated closures — shared across tests within same JVM.
+     *  Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers) */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> evaluatedClosureCache
+        = new java.util.concurrent.ConcurrentHashMap<>();
+
     public HashModuleLoaderNode(
             MezzeNode bodyNode,
             Map<String, CallTarget> compiledFunctions
@@ -93,7 +98,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
 
-        // Pass 1: Register all functions by hash (raw wrappers)
+        // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
             CallTarget target = functionTargets[i];
@@ -106,11 +111,20 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate closure factories — call each function with empty record.
-        // Functions whose body is MakeLambdaIR return a MezzeFunction closure.
-        // Replace the raw wrapper with the closure in globals.
+        // Pass 2: Evaluate closure factories and construct performer records.
+        // Uses static cache to avoid re-evaluating across tests.
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
+            // Check static cache first
+            Object cached = evaluatedClosureCache.get(hash);
+            if (cached != null) {
+                context.defineGlobal(hash, cached);
+                if (i < functionNames.length && functionNames[i] != null) {
+                    context.defineGlobal(functionNames[i], cached);
+                }
+                continue;
+            }
+            // Evaluate closure factory
             CallTarget target = functionTargets[i];
             try {
                 Object result = target.call(new Object[] { emptyRecord });
@@ -119,20 +133,28 @@ public final class HashModuleLoaderNode extends MezzeNode {
                     if (i < functionNames.length && functionNames[i] != null) {
                         context.defineGlobal(functionNames[i], closure);
                     }
+                    evaluatedClosureCache.put(hash, closure);
                 }
             } catch (Exception e) {
-                // Not a closure factory or evaluation needs specific args — keep raw wrapper
+                // Not a closure factory — keep raw wrapper
             }
         }
 
-        // Pass 3: Construct performer records from compiled operation functions.
+        // Pass 3: Construct performer records from evaluated closures.
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
             String effectHash = info[1];
             int opCount = (info.length - 2) / 2;
             if (opCount > 0) {
-                constructPerformerRecord(context, performerHash, effectHash, info, opCount);
+                // Check cache
+                Object cached = evaluatedClosureCache.get(performerHash);
+                if (cached instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
+                    context.defineGlobal(performerHash, cached);
+                    if (!effectHash.isEmpty()) context.defineGlobal(effectHash, cached);
+                } else {
+                    constructPerformerRecord(context, performerHash, effectHash, info, opCount);
+                }
             }
         }
 
@@ -143,11 +165,22 @@ public final class HashModuleLoaderNode extends MezzeNode {
     private void constructPerformerRecord(MezzeContext context, String performerHash, String effectHash, String[] info, int opCount) {
         String[] opNames = new String[opCount];
         Object[] opValues = new Object[opCount];
+        var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
         for (int i = 0; i < opCount; i++) {
             String opHash = info[2 + i * 2];
             opNames[i] = info[2 + i * 2 + 1];
-            // Look up the compiled operation function
+            // Look up the compiled operation function and evaluate to get closure
             Object opFunc = context.lookupGlobal(opHash);
+            if (opFunc instanceof MezzeFunction fn) {
+                try {
+                    Object result = fn.getCallTarget().call(new Object[] { emptyRecord });
+                    if (result instanceof MezzeFunction closure) {
+                        opFunc = closure;
+                    }
+                } catch (Exception e) {
+                    // Keep raw wrapper
+                }
+            }
             opValues[i] = opFunc != null ? opFunc : com.mezze.interpreter.v2.values.MezzeUnit.INSTANCE;
         }
         // Create performer record with operation functions as fields
@@ -158,8 +191,9 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
         var shape = new com.mezze.interpreter.v2.values.MezzeRecord.Shape(opNames, locations);
         var record = com.mezze.interpreter.v2.values.MezzeRecord.withAllObjects(shape, opValues);
-        // Register under performer hash AND effect hash
+        // Register under performer hash AND effect hash, and cache
         context.defineGlobal(performerHash, record);
+        evaluatedClosureCache.put(performerHash, record);
         if (!effectHash.isEmpty()) {
             context.defineGlobal(effectHash, record);
         }
