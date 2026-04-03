@@ -51,22 +51,24 @@ class TruffleCompiler(
      * and frame descriptor instead. This avoids creating a closure wrapper
      * that would return a MezzeFunction instead of executing the body.
      */
-    fun compile(ir: FunctionIR): MezzeFunctionRootNode {
+    fun compile(ir: FunctionIR): MezzeRootNode {
         val source = getOrCreateSource(ir.sourceFile)
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
-        // slotTypes must cover ALL frame slots (captures + params) so bindSlot
-        // can use typed writes for both closure values and unpacked record fields.
-        val allSlotTypes = (ir.captureSlots + ir.paramSlots).map { slotKindToInt(it) }.toIntArray()
-        val rootNode = MezzeFunctionRootNode(
+        // Use MezzeRootNode — doesn't try to unpack record args.
+        // Functions registered by HashModuleLoaderNode are evaluated with empty record
+        // to extract closures from MakeLambdaIR. MezzeRootNode tolerates this.
+        // The actual closures (from FunctionDefinitionNode) use MezzeFunctionRootNode
+        // which does proper record unpacking.
+        val rootNode = MezzeRootNode(
             language,
             frameDescriptor,
             bodyNode,
             ir.name,
-            ir.paramNames.toTypedArray(),
-            IntArray(ir.captureSlots.size) { it },
-            allSlotTypes
+            ir.captureSlots.size,
+            ir.paramSlots.size,
+            IntArray(0)
         )
 
         // Attach source section for debugger/profiler integration (Chrome DevTools, VisualVM, etc.)
