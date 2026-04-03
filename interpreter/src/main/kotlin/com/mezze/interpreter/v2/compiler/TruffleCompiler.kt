@@ -341,16 +341,12 @@ class TruffleCompiler(
                     val paramsIR = handler.params
                     val handlerNode: MezzeNode = if (paramsIR != null) {
                         // Parameterized handler: look up the impl function by hash and call it with params.
-                        // The impl function (registered by v1 ModuleLoadingNode) returns a handler record
-                        // with operation fields when called with the params record.
-                        val implLookup = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex)
+                        val implLookup = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
                         val paramsNode = compileNode(paramsIR, source)
                         InvokeNode.create(implLookup, arrayOf(paramsNode))
                     } else {
-                        // HandlerLookupNode: tries local slot first, then context by content hash.
-                        // Using -1 for local slot (not available in v2 pipeline), so it falls
-                        // back to context lookup where the v1 ModuleLoadingNode registered the impl.
-                        HandleNode.createHandlerLookup(-1, handler.handlerHash.hex)
+                        // HandlerLookupNode: tries content hash first, then performer name.
+                        HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
                     }
                     HandleNode(
                         -1,                     // no local slot

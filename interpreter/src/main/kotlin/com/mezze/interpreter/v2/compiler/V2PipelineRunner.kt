@@ -113,9 +113,17 @@ object V2PipelineRunner {
         val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
         val bodyNode = compiler.compileNode(mainFn.body, source)
 
+        // Build hash→name map for performer/handler lookup by name
+        val hashToName = mutableMapOf<String, String>()
+        for (fn in lowered.functions) {
+            if (fn.name != "lambda" && fn.name != "__entry__" && !fn.name.startsWith("__toplevel")) {
+                hashToName[fn.hash.hex] = fn.name
+            }
+        }
+
         // Wrap: ResultCapture(HashModuleLoader(body))
         // No ModuleLoadingNode — monomorphizer inlines all reachable stdlib functions
-        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
+        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName)
         val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 
         // Frame descriptor for the entry function
@@ -175,10 +183,16 @@ object V2PipelineRunner {
         val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
         val bodyNode = compiler.compileNode(mainFn.body, source)
 
-        // HashModuleLoaderNode registers v2-compiled functions by hash
-        // No ModuleLoadingNode needed — monomorphizer already pulled all reachable
-        // stdlib functions into the FunctionIR list. Native functions use NativeDispatch.
-        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions)
+        // Build hash→name map for performer/handler lookup by name
+        val hashToName = mutableMapOf<String, String>()
+        for (fn in functions) {
+            if (fn.name != "lambda" && fn.name != "__entry__" && !fn.name.startsWith("__toplevel")) {
+                hashToName[fn.hash.hex] = fn.name
+            }
+        }
+
+        // HashModuleLoaderNode registers v2-compiled functions by hash AND name
+        val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName)
         val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 
         val fdBuilder = FrameDescriptor.newBuilder()

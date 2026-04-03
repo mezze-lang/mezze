@@ -34,6 +34,9 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private final CallTarget[] functionTargets;
 
+    @CompilationFinal(dimensions = 1)
+    private final String[] functionNames;
+
     @CompilationFinal
     private boolean modulesLoaded = false;
 
@@ -41,9 +44,25 @@ public final class HashModuleLoaderNode extends MezzeNode {
             MezzeNode bodyNode,
             Map<String, CallTarget> compiledFunctions
     ) {
+        this(bodyNode, compiledFunctions, null);
+    }
+
+    public HashModuleLoaderNode(
+            MezzeNode bodyNode,
+            Map<String, CallTarget> compiledFunctions,
+            Map<String, String> hashToName
+    ) {
         this.bodyNode = bodyNode;
         this.functionHashes = compiledFunctions.keySet().toArray(new String[0]);
         this.functionTargets = compiledFunctions.values().toArray(new CallTarget[0]);
+        if (hashToName != null) {
+            this.functionNames = new String[functionHashes.length];
+            for (int i = 0; i < functionHashes.length; i++) {
+                this.functionNames[i] = hashToName.get(functionHashes[i]);
+            }
+        } else {
+            this.functionNames = new String[0];
+        }
     }
 
     @Override
@@ -58,14 +77,20 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
+
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
             CallTarget target = functionTargets[i];
             if (!context.hasGlobal(hash)) {
                 var function = MezzeFunction.create(target, hash);
                 context.defineGlobal(hash, function);
+                // Also register by name for performer/handler lookup
+                if (i < functionNames.length && functionNames[i] != null) {
+                    context.defineGlobal(functionNames[i], function);
+                }
             }
         }
+
         modulesLoaded = true;
     }
 }

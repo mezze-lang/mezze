@@ -7,6 +7,7 @@ import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedExceptio
 import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.mezze.interpreter.v2.values.MezzeVariant;
@@ -52,9 +53,17 @@ final class HandlerLookupNode extends MezzeNode {
     @CompilationFinal
     private final String contentHash;
 
+    @CompilationFinal
+    private final String performerName;
+
     HandlerLookupNode(int localSlot, String contentHash) {
+        this(localSlot, contentHash, null);
+    }
+
+    HandlerLookupNode(int localSlot, String contentHash, String performerName) {
         this.localSlot = localSlot;
         this.contentHash = contentHash;
+        this.performerName = performerName;
     }
 
     @Override
@@ -73,13 +82,21 @@ final class HandlerLookupNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
-        // Try local (EffectImplStorageNode uses defineLocal for performer name)
+        // Try by content hash (impl declaration hash)
         Object handler = context.lookupLocal(contentHash);
         if (handler == null) {
             handler = context.lookupGlobal(contentHash);
         }
+        // Try by performer name (WriteLocalWithContextNode registers by variable name)
+        if (handler == null && performerName != null) {
+            handler = context.lookupLocal(performerName);
+            if (handler == null) {
+                handler = context.lookupGlobal(performerName);
+            }
+        }
         if (handler == null) {
-            throw new RuntimeException("Handler not found for: " + contentHash);
+            throw new RuntimeException("Handler not found for: " + contentHash +
+                (performerName != null ? " (performer: " + performerName + ")" : ""));
         }
         return handler;
     }
@@ -162,7 +179,15 @@ public final class HandleNode extends MezzeNode {
     @CompilationFinal
     private boolean scopeSlotIsValid = false;
 
-    // For executing suspended computations
+    // Dynamic scope detection: when compile-time scope nodes aren't available
+    // (v2 pipeline), detect initialize_scope/finalize_scope on handler record at runtime
+    @CompilationFinal
+    private boolean dynamicScopeChecked = false;
+
+    @CompilationFinal
+    private boolean hasDynamicScope = false;
+
+    // For executing suspended computations and dynamic scope functions
     @Child
     private IndirectCallNode indirectCallNode;
 
@@ -216,6 +241,10 @@ public final class HandleNode extends MezzeNode {
      */
     public static MezzeNode createHandlerLookup(int localSlot, String contentHash) {
         return new HandlerLookupNode(localSlot, contentHash);
+    }
+
+    public static MezzeNode createHandlerLookup(int localSlot, String contentHash, String performerName) {
+        return new HandlerLookupNode(localSlot, contentHash, performerName);
     }
 
     /**
@@ -372,6 +401,7 @@ public final class HandleNode extends MezzeNode {
 
         // SCOPED EFFECTS: Execute initialize_scope if present
         Object scope = null;
+        boolean usedDynamicScope = false;
         if (hasInitializeScope && initializeScopeNode != null) {
             scope = initializeScopeNode.execute(frame);
 
@@ -382,6 +412,23 @@ public final class HandleNode extends MezzeNode {
 
             // Also register scope in context under the name "scope"
             registerScopeInContext(scope);
+        } else if (!hasInitializeScope && handler instanceof MezzeRecord handlerRecord) {
+            // Dynamic scope detection for v2 pipeline: check handler record for
+            // initialize_scope/finalize_scope fields at runtime
+            if (!dynamicScopeChecked) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                // Check both naming conventions: user-facing and internal double-underscore
+                hasDynamicScope = handlerRecord.getField("initialize_scope") instanceof MezzeFunction
+                    || handlerRecord.getField("__initialize_scope__") instanceof MezzeFunction;
+                dynamicScopeChecked = true;
+            }
+            if (hasDynamicScope) {
+                scope = callDynamicInitializeScope(handlerRecord);
+                if (scope != null) {
+                    registerScopeInContext(scope);
+                    usedDynamicScope = true;
+                }
+            }
         }
 
         Throwable bodyException = null;
@@ -421,6 +468,18 @@ public final class HandleNode extends MezzeNode {
                     // finalize_scope can call suspend_with to transform/return the collected values
                     // This is how Generator returns collected values: finalize_scope calls
                     // suspend_with {value = collected} and we capture that value here
+                    finalizeSuspendedValue = e.getSuspendedValue();
+                } catch (Throwable t) {
+                    finalizeException = t;
+                }
+            } else if (usedDynamicScope && handler instanceof MezzeRecord handlerRecord) {
+                // Dynamic finalize_scope for v2 pipeline
+                try {
+                    Object finalizeResult = callDynamicFinalizeScope(handlerRecord);
+                    if (finalizeResult instanceof MezzeContinuationSuspended suspended) {
+                        finalizeSuspendedValue = suspended.getSuspendedValue();
+                    }
+                } catch (ContinuationSuspendedException e) {
                     finalizeSuspendedValue = e.getSuspendedValue();
                 } catch (Throwable t) {
                     finalizeException = t;
@@ -622,6 +681,70 @@ public final class HandleNode extends MezzeNode {
         }
 
         context.popHandlers();
+    }
+
+    /**
+     * Dynamically call initialize_scope on a handler record.
+     * Used by v2 pipeline where scope nodes aren't available at compile time.
+     */
+    @TruffleBoundary
+    private Object callDynamicInitializeScope(MezzeRecord handlerRecord) {
+        Object initFn = handlerRecord.getField("initialize_scope");
+        if (initFn == null) {
+            initFn = handlerRecord.getField("__initialize_scope__");
+        }
+        if (!(initFn instanceof MezzeFunction func)) {
+            return null;
+        }
+        if (indirectCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            indirectCallNode = insert(IndirectCallNode.create());
+        }
+        // Call initialize_scope with {} (empty record) as argument
+        Object[] closureValues = func.getClosureValues();
+        int closureLength = closureValues.length;
+        // The empty record argument for {} -> ...
+        Object emptyRecord = MezzeRecord.empty();
+        Object[] fullArgs;
+        if (closureLength == 0) {
+            fullArgs = new Object[]{emptyRecord};
+        } else {
+            fullArgs = new Object[closureLength + 1];
+            System.arraycopy(closureValues, 0, fullArgs, 0, closureLength);
+            fullArgs[closureLength] = emptyRecord;
+        }
+        return indirectCallNode.call(func.getCallTarget(), fullArgs);
+    }
+
+    /**
+     * Dynamically call finalize_scope on a handler record.
+     * Used by v2 pipeline where scope nodes aren't available at compile time.
+     */
+    @TruffleBoundary
+    private Object callDynamicFinalizeScope(MezzeRecord handlerRecord) {
+        Object finalizeFn = handlerRecord.getField("finalize_scope");
+        if (finalizeFn == null) {
+            finalizeFn = handlerRecord.getField("__finalize_scope__");
+        }
+        if (!(finalizeFn instanceof MezzeFunction func)) {
+            return null;
+        }
+        if (indirectCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            indirectCallNode = insert(IndirectCallNode.create());
+        }
+        Object[] closureValues = func.getClosureValues();
+        int closureLength = closureValues.length;
+        Object emptyRecord = MezzeRecord.empty();
+        Object[] fullArgs;
+        if (closureLength == 0) {
+            fullArgs = new Object[]{emptyRecord};
+        } else {
+            fullArgs = new Object[closureLength + 1];
+            System.arraycopy(closureValues, 0, fullArgs, 0, closureLength);
+            fullArgs[closureLength] = emptyRecord;
+        }
+        return indirectCallNode.call(func.getCallTarget(), fullArgs);
     }
 
     /**

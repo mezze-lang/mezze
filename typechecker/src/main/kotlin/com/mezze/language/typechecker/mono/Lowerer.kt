@@ -24,9 +24,15 @@ class Lowerer {
         val functions = resolvedModule.functions.map { fn ->
             lowerFunction(fn, fileTable)
         }
+        // Include effect handler operations as standalone functions
+        val handlerFunctions = resolvedModule.effectHandlers.flatMap { handler ->
+            handler.operations.map { opFn ->
+                lowerFunction(opFn, fileTable)
+            }
+        }
         return LoweredModule(
             fileTable = fileTable,
-            functions = functions
+            functions = functions + handlerFunctions
         )
     }
 
