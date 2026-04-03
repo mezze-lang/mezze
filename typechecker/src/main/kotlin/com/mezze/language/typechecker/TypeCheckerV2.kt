@@ -759,9 +759,13 @@ class TypeCheckerV2 {
             is MatchExpression -> TypedMatch(
                 v1ExprToTyped(expr.expression, file),
                 expr.cases.map { c ->
+                    val patterns = c.patterns.map { v1PatternToTyped(it, file) }
+                    val bindings = c.patterns.flatMap { it.extractBindings() }.map { name ->
+                        PatternBinding(name, MezzeType.VarType(TypeVar(name)), loc)
+                    }
                     TypedCase(
-                        emptyList(), // patterns — would need TypedPattern conversion
-                        emptyList(),
+                        patterns,
+                        bindings,
                         c.guard?.let { v1ExprToTyped(it, file) },
                         v1ExprToTyped(c.expression, file),
                         loc
@@ -874,6 +878,46 @@ class TypeCheckerV2 {
                 def.constructor,
                 convertTypeAnnotation(def.wrappedType),
                 emptyList()
+            )
+        }
+    }
+
+    private fun v1PatternToTyped(pattern: Pattern, file: String): TypedPattern {
+        val unknownType = MezzeType.VarType(TypeVar("unknown"))
+        val loc = Loc(file, 1, 1, 1, 1)
+        return when (pattern) {
+            is WildcardPattern -> TypedWildcardPattern(unknownType, loc)
+            is VariablePattern -> TypedVarPattern(pattern.name, unknownType, loc)
+            is ConstructorPattern -> {
+                val payload = pattern.recordPattern?.let { v1PatternToTyped(it, file) }
+                TypedVariantPattern(pattern.constructor, payload, unknownType, loc)
+            }
+            is RecordPattern -> TypedRecordPattern(
+                pattern.entries.map { e ->
+                    TypedFieldPattern(e.name, e.pattern?.let { v1PatternToTyped(it, file) }, loc)
+                },
+                pattern.isOpen, unknownType, loc
+            )
+            is LiteralPattern -> {
+                val typedValue = when (val v = pattern.value) {
+                    is IntLiteralValue -> TypedIntLit(v.value, MezzeType.IntType, loc)
+                    is NatLiteralValue -> TypedIntLit(v.value, MezzeType.NatType, loc)
+                    is FloatLiteralValue -> TypedFloatLit(v.value, MezzeType.FloatType, loc)
+                    is StringLiteralValue -> TypedStringLit(
+                        listOf(TypedStringPart.Literal(v.value)), MezzeType.StringType, loc
+                    )
+                    is BooleanLiteralValue -> TypedBoolLit(v.value, MezzeType.BoolType, loc)
+                }
+                TypedLiteralPattern(typedValue, unknownType, loc)
+            }
+            is StringInterpolationPattern -> {
+                // String interpolation patterns — convert as wildcard for now
+                TypedWildcardPattern(unknownType, loc)
+            }
+            is SeqPattern -> TypedSeqPattern(
+                pattern.elements.map { v1PatternToTyped(it, file) },
+                pattern.restPattern,
+                unknownType, loc
             )
         }
     }

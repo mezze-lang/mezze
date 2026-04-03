@@ -496,9 +496,6 @@ class Monomorphizer {
         }
 
         if (matchingEntry != null) {
-            // Found matching ability operation — resolve to direct function call.
-            // The op body is typically: { it, ... } -> targetFn { field1 = it, field2 = ... }
-            // We inline the argument remapping and emit CallDirect(targetFn, remappedArgs).
             val opBody = matchingEntry.opBody
 
             // Try to extract a direct call from the op body lambda
@@ -512,15 +509,9 @@ class Monomorphizer {
                         worklist.add(targetHash)
                     }
 
-                    // Build remapped argument: substitute lambda param references
-                    // with the corresponding fields from the caller's argument.
-                    // e.g., op body = { it } -> is_some { opt = it }
-                    //   caller arg = { it = receiver }
-                    //   remapped = { opt = receiver }
                     val paramNames = opBody.params.map { it.name }
-                    val callerArg = expr.arg  // the original TypedExpr arg (before conversion)
+                    val callerArg = expr.arg
 
-                    // Extract caller arg fields for substitution
                     val callerFields = mutableMapOf<String, TypedExpr>()
                     if (callerArg is TypedRecord) {
                         for (entry in callerArg.entries) {
@@ -530,11 +521,11 @@ class Monomorphizer {
                         }
                     }
 
-                    // Build the remapped inner call argument by substituting param refs
                     val innerArg = innerCall.arg
                     val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
 
                     if (remappedArg != null) {
+
                         return MonoCall(
                             MonoVar(innerFn.name, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(targetHash)), innerFn.type, innerFn.loc),
                             remappedArg,
@@ -549,6 +540,7 @@ class Monomorphizer {
             // Fallback: inline the op body lambda (creates CallIndirect)
             val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
             val convertedOpBody = convertExpr(opBody, globalDecls, worklist, processed)
+
             return MonoCall(
                 convertedOpBody,
                 wrappedArg,

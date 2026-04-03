@@ -130,7 +130,8 @@ class Lowerer {
                 src
             )
 
-            is ResolvedMatch -> MatchIR(
+            is ResolvedMatch -> {
+                MatchIR(
                 lowerExpr(expr.scrutinee, ft),
                 expr.cases.map { c ->
                     val extractions = mutableListOf<StmtIR>()
@@ -162,6 +163,7 @@ class Lowerer {
                 },
                 src
             )
+            }
 
             is ResolvedIf -> IfIR(
                 lowerExpr(expr.cond, ft),

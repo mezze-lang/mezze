@@ -342,7 +342,8 @@ class Resolver {
                 hash, loc
             )
 
-            is MonoMatch -> ResolvedMatch(
+            is MonoMatch -> {
+                ResolvedMatch(
                 resolveExpr(expr.scrutinee, ctx),
                 expr.cases.map { c ->
                     ResolvedCase(
@@ -359,6 +360,7 @@ class Resolver {
                 },
                 hash, loc
             )
+            }
 
             is MonoBlock -> ResolvedBlock(
                 expr.statements.map { stmt ->
