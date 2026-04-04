@@ -672,10 +672,12 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 pipeline produces loweredFns for execution.
-                // V1 SubstitutionApplier + Validator still needed for error checking
-                // (52 tests depend on SubstitutionApplier catching type/ability/effect errors).
-                // TODO: Port SubstitutionApplier error checks to v2 pipeline, then remove v1 path.
+                // VALIDATION ONLY: SubstitutionApplier applies types to the program
+                // so the Validator can check pattern exhaustiveness (needs concrete types).
+                // The SubstitutionApplier result is NOT used for execution — only for validation.
+                // Execution uses v2 loweredFns from the pipeline above.
+                // TODO: Replace with lightweight type annotator that just sets inferredType
+                // on match expressions from constraint results. Then remove SubstitutionApplier.
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,
