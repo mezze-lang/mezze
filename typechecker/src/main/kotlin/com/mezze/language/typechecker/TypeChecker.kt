@@ -669,9 +669,44 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 pipeline succeeded — still run validator for error checking
-                // (pattern exhaustiveness, unreachable patterns, orphan rules, etc.)
+                // V2 pipeline succeeded — still run v1 validation for error checking.
+                // SubstitutionApplier catches ability/effect/type errors.
+                // Validator catches pattern/orphan/annotation errors.
                 if (loweredFns != null && loweredFns.isNotEmpty()) {
+                    // Run SubstitutionApplier just for error checking (discard result)
+                    try {
+                        val errorCheckApplier = SubstitutionApplier(
+                            substitution,
+                            globallyResolvedConstraintResults,
+                            buildResult.performerToEffect,
+                            mustBeOpenRowVars,
+                            mustBeOpenBindings,
+                            mustBeOpenTypes,
+                            context.getAllAbilityImpls(),
+                            allAbilityDeclarations,
+                            allEffectDeclarations,
+                            allTypeDeclarations,
+                            tailCallLocations,
+                            buildResult.implDeclarations,
+                            context.getContentHashes(),
+                            constraintGenerator.expressionGenerator.nestedBindingTypes
+                        )
+                        val importedImplBodies = importContext?.importedAbilityImpls
+                            ?.map { (hash, impl) -> hash to impl }
+                            ?.toMap() ?: emptyMap()
+                        errorCheckApplier.registerImportedImplBodies(importedImplBodies)
+                        val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
+                            Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
+                        } else {
+                            desugaredProgram
+                        }
+                        errorCheckApplier.applyToProgram(programWithCodecImpls)
+                    } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                        throw e  // Re-throw — this is a real type error
+                    } catch (_: Exception) {
+                        // Non-type errors during SubstitutionApplier are OK
+                    }
+
                     val v2ValidationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
                     if (v2ValidationResult is ValidationResult.Failure) {
                         // Filter out effect-related errors — v2 pipeline handles effects differently
