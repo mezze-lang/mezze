@@ -236,7 +236,10 @@ class TypeChecker(
         } else if (hasUserImports || shouldInjectPrelude) {
             // Reuse cached ModuleLoader/ImportResolver when available — avoids per-test
             // filesystem traversal (findProjectRoot) and object creation overhead.
-            val importResolver = if (precompiled != null) {
+            // Use precompiled ImportResolver only if the path matches the project root.
+            // Tests with custom temp directories need their own resolver.
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
+            val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
             } else {
                 val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
