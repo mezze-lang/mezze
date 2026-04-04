@@ -672,11 +672,10 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 pipeline produced TruffleIR — but still need v1 validation.
-                // Fall through to v1 SubstitutionApplier + Validator below.
-                // The v1 result is used for validation only; loweredFns is used for execution.
-
-                // v1 validation: SubstitutionApplier + Validator
+                // V2 pipeline produces loweredFns for execution.
+                // V1 SubstitutionApplier + Validator still needed for error checking
+                // (52 tests depend on SubstitutionApplier catching type/ability/effect errors).
+                // TODO: Port SubstitutionApplier error checks to v2 pipeline, then remove v1 path.
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,
