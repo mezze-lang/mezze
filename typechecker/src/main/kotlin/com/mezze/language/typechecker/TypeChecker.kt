@@ -669,14 +669,37 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // Fast path: v2 pipeline succeeded → skip v1 SubstitutionApplier + Validator
+                // V2 pipeline succeeded — still run validator for error checking
+                // (pattern exhaustiveness, unreachable patterns, orphan rules, etc.)
                 if (loweredFns != null && loweredFns.isNotEmpty()) {
+                    val v2ValidationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
+                    if (v2ValidationResult is ValidationResult.Failure) {
+                        // Filter out effect-related errors — v2 pipeline handles effects differently
+                        // (the desugaredProgram has raw perform expressions that the v1 SubstitutionApplier
+                        // would have transformed before validation)
+                        val nonEffectErrors = v2ValidationResult.errors.filter { error ->
+                            // Skip effect-related validation errors on v2 path — the desugaredProgram
+                            // has raw perform expressions that the v1 SubstitutionApplier would transform
+                            error !is com.mezze.language.typechecker.validation.ValidationError.TopLevelPerformedEffects &&
+                            error !is com.mezze.language.typechecker.validation.ValidationError.TopLevelExpressionPerformedEffects
+                        }
+                        if (nonEffectErrors.isNotEmpty()) {
+                            val firstError = nonEffectErrors.first()
+                            throw TypeCheckError(
+                                firstError.message(),
+                                firstError.location()
+                            )
+                        }
+                    }
+                    val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
+                        v2ValidationResult.warnings.map { TypeCheckWarning(message = it, sourceLocation = null) }
+                    } else emptyList()
                     return TypeCheckResult.Success(
                         program = desugaredProgram,
                         substitution = substitution,
                         monomorphicInstances = emptyMap(),
                         importContext = importContext,
-                        warnings = warnings,
+                        warnings = warnings + validationWarnings,
                         loadedModules = loadedModules,
                         abilityImpls = context.getAllAbilityImpls(),
                         programBeforeContinuations = null,
