@@ -657,6 +657,11 @@ class TypeChecker(
                     }
 
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
+
+                    // V2 validation: check pattern exhaustiveness and unreachable patterns
+                    // on the monomorphized AST where types are concrete.
+                    com.mezze.language.typechecker.mono.V2Validator().validate(monoModule)
+
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
                     val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
                     loweredFns = lowered.functions
@@ -672,10 +677,10 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // VALIDATION: Apply type substitution for pattern checking.
-                // SubstitutionApplier sets inferredType on all expressions so the Validator
-                // can check pattern exhaustiveness with concrete types.
-                // Only used for validation — execution uses v2 loweredFns.
+                // V2 validation done above (V2Validator on MonoAST).
+                // Still need SubstitutionApplier for type errors that the constraint solver
+                // doesn't catch (ability resolution, effect types, annotation mismatches).
+                // SubstitutionApplier output used for v1 Validator only, NOT for execution.
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,
