@@ -669,82 +669,11 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 pipeline succeeded — still run v1 validation for error checking.
-                // SubstitutionApplier catches ability/effect/type errors.
-                // Validator catches pattern/orphan/annotation errors.
-                if (loweredFns != null && loweredFns.isNotEmpty()) {
-                    // Run SubstitutionApplier just for error checking (discard result)
-                    try {
-                        val errorCheckApplier = SubstitutionApplier(
-                            substitution,
-                            globallyResolvedConstraintResults,
-                            buildResult.performerToEffect,
-                            mustBeOpenRowVars,
-                            mustBeOpenBindings,
-                            mustBeOpenTypes,
-                            context.getAllAbilityImpls(),
-                            allAbilityDeclarations,
-                            allEffectDeclarations,
-                            allTypeDeclarations,
-                            tailCallLocations,
-                            buildResult.implDeclarations,
-                            context.getContentHashes(),
-                            constraintGenerator.expressionGenerator.nestedBindingTypes
-                        )
-                        val importedImplBodies = importContext?.importedAbilityImpls
-                            ?.map { (hash, impl) -> hash to impl }
-                            ?.toMap() ?: emptyMap()
-                        errorCheckApplier.registerImportedImplBodies(importedImplBodies)
-                        val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
-                            Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
-                        } else {
-                            desugaredProgram
-                        }
-                        errorCheckApplier.applyToProgram(programWithCodecImpls)
-                    } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                        throw e  // Re-throw — this is a real type error
-                    } catch (_: Exception) {
-                        // Non-type errors during SubstitutionApplier are OK
-                    }
+                // V2 pipeline produced TruffleIR — but still need v1 validation.
+                // Fall through to v1 SubstitutionApplier + Validator below.
+                // The v1 result is used for validation only; loweredFns is used for execution.
 
-                    val v2ValidationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
-                    if (v2ValidationResult is ValidationResult.Failure) {
-                        // Filter out effect-related errors — v2 pipeline handles effects differently
-                        // (the desugaredProgram has raw perform expressions that the v1 SubstitutionApplier
-                        // would have transformed before validation)
-                        val nonEffectErrors = v2ValidationResult.errors.filter { error ->
-                            // Skip effect-related validation errors on v2 path — the desugaredProgram
-                            // has raw perform expressions that the v1 SubstitutionApplier would transform
-                            error !is com.mezze.language.typechecker.validation.ValidationError.TopLevelPerformedEffects &&
-                            error !is com.mezze.language.typechecker.validation.ValidationError.TopLevelExpressionPerformedEffects
-                        }
-                        if (nonEffectErrors.isNotEmpty()) {
-                            val firstError = nonEffectErrors.first()
-                            throw TypeCheckError(
-                                firstError.message(),
-                                firstError.location()
-                            )
-                        }
-                    }
-                    val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
-                        v2ValidationResult.warnings.map { TypeCheckWarning(message = it, sourceLocation = null) }
-                    } else emptyList()
-                    return TypeCheckResult.Success(
-                        program = desugaredProgram,
-                        substitution = substitution,
-                        monomorphicInstances = emptyMap(),
-                        importContext = importContext,
-                        warnings = warnings + validationWarnings,
-                        loadedModules = loadedModules,
-                        abilityImpls = context.getAllAbilityImpls(),
-                        programBeforeContinuations = null,
-                        typedModule = emittedTypedModule,
-                        loweredFunctions = loweredFns,
-                        loweredPerformers = loweredPerformers
-                    )
-                }
-
-                // Slow path: v2 pipeline failed — run v1 SubstitutionApplier + Validator
+                // v1 validation: SubstitutionApplier + Validator
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,
@@ -810,7 +739,8 @@ class TypeChecker(
                     abilityImpls = context.getAllAbilityImpls(),
                     programBeforeContinuations = null,
                     typedModule = emittedTypedModule,
-                    loweredFunctions = loweredFns
+                    loweredFunctions = loweredFns,
+                    loweredPerformers = loweredPerformers
                 )
             }
         }
