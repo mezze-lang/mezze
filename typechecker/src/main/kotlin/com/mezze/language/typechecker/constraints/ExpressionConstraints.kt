@@ -2655,7 +2655,8 @@ class ExpressionConstraintGenerator {
             usedVariables = bodyResult.usedVariables,
             unusedVariables = bodyResult.unusedVariables,
             patternWarnings = bodyResult.patternWarnings,
-            referencedBindings = bodyResult.referencedBindings
+            referencedBindings = bodyResult.referencedBindings,
+            methodCallResolutions = bodyResult.methodCallResolutions
         )
     }
 
@@ -3180,7 +3181,8 @@ class ExpressionConstraintGenerator {
             undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
             tailCalls = tailCalls,
-            referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
+            referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
+            methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
         )
     }
 
@@ -3224,6 +3226,9 @@ class ExpressionConstraintGenerator {
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
         // Track pattern-related warnings (e.g., float literal patterns)
         val patternWarnings = mutableListOf<String>()
+        // Track method call resolutions from sub-expressions (scrutinee + case bodies)
+        val methodCallResolutions = mutableMapOf<com.mezze.language.parsedast.Loc, ConstraintResult.MethodCallInfo>()
+        methodCallResolutions.putAll(scrutineeResult.methodCallResolutions)
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         referencedBindings.addAll(scrutineeResult.referencedBindings)
@@ -3383,6 +3388,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
             referencedBindings.addAll(caseBodyResult.referencedBindings)
+            methodCallResolutions.putAll(caseBodyResult.methodCallResolutions)
 
             // Check for unused pattern bindings
             // Variables starting with _ are intentionally unused (convention)
@@ -3437,7 +3443,8 @@ class ExpressionConstraintGenerator {
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
             patternWarnings = patternWarnings,
-            referencedBindings = referencedBindings
+            referencedBindings = referencedBindings,
+            methodCallResolutions = methodCallResolutions
         )
     }
 
@@ -3470,6 +3477,8 @@ class ExpressionConstraintGenerator {
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         // Track used variables for unused variable warnings
         val usedVars = mutableSetOf<String>()
+        // Track method call resolutions from sub-expressions
+        val methodCallResolutions = mutableMapOf<com.mezze.language.parsedast.Loc, ConstraintResult.MethodCallInfo>()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()
@@ -3501,6 +3510,7 @@ class ExpressionConstraintGenerator {
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
+                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
 
                     // CRITICAL: If there's a type annotation, add equality constraint to unify
                     // the expression type with the annotated type. This ensures type variables
@@ -3626,6 +3636,7 @@ class ExpressionConstraintGenerator {
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
+                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
                 }
             }
         }
@@ -3650,6 +3661,7 @@ class ExpressionConstraintGenerator {
         tailCalls.addAll(resultResult.tailCalls)
         referencedBindings.addAll(resultResult.referencedBindings)
         usedVars.addAll(resultResult.usedVariables)
+        methodCallResolutions.putAll(resultResult.methodCallResolutions)
 
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
@@ -3682,7 +3694,8 @@ class ExpressionConstraintGenerator {
             undefinedVariables = undefinedVars,
             tailCalls = tailCalls,
             usedVariables = usedVars,
-            referencedBindings = referencedBindings
+            referencedBindings = referencedBindings,
+            methodCallResolutions = methodCallResolutions
         )
     }
 
@@ -4027,7 +4040,8 @@ class ExpressionConstraintGenerator {
             performed = true,  // Mark that effects were performed
             undefinedVariables = exprResult.undefinedVariables,
             usedVariables = exprResult.usedVariables,
-            referencedBindings = exprResult.referencedBindings
+            referencedBindings = exprResult.referencedBindings,
+            methodCallResolutions = exprResult.methodCallResolutions
         )
     }
 
