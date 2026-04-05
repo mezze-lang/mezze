@@ -111,7 +111,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate closure factories and construct performer records.
+        // Pass 2: Evaluate closure factories.
         // Uses static cache to avoid re-evaluating across tests.
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
@@ -136,7 +136,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
                     evaluatedClosureCache.put(hash, closure);
                 }
             } catch (Exception e) {
-                // Not a closure factory — keep raw wrapper
+                // Not a closure factory or depends on unavailable captures
             }
         }
 

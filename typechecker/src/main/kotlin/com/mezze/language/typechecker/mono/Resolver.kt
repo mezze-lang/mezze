@@ -36,13 +36,13 @@ class Resolver {
                 effectHash = pd.effectHash,
                 performerHash = pd.hash,
                 params = emptyList(),
-                operations = pd.operations.values.mapIndexed { idx, body ->
+                operations = pd.operations.entries.mapIndexed { idx, (opName, body) ->
                     val ctx = SlotAllocator()
                     val resolvedBody = resolveExpr(body, ctx)
                     ResolvedFunction(
                         hash = computeHash("${pd.hash.hex}_op_$idx"),
-                        name = "handler_op_$idx",
-                        qualifiedName = "${pd.name}::op_$idx",
+                        name = opName,
+                        qualifiedName = "${pd.name}::$opName",
                         params = ctx.getParams(),
                         locals = ctx.getLocals(),
                         captures = emptyList(),
