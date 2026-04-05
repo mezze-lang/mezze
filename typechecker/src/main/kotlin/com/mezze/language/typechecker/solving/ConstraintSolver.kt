@@ -20,8 +20,8 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
  * - PHASE 1: Build context (ContextBuilder)
  * - PHASE 2: Generate constraints (ConstraintGenerator)
  * - PHASE 3: Solve constraints (ConstraintSolver) ← WE ARE HERE
- * - PHASE 4: Validate types (TypeValidator)
- * - PHASE 5: Apply substitution (SubstitutionApplier)
+ * - PHASE 4: Emit TypedAST + V2 Pipeline (TypedAstBuilder, Monomorphizer, Resolver, Lowerer)
+ * - PHASE 5: Validate types (TypeValidator, V2Validator)
  *
  * The solver takes a list of constraints and finds a substitution
  * that satisfies all of them (or reports an error if impossible).

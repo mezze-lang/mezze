@@ -523,7 +523,7 @@ class TypeCheckerV2 {
 
         // Build name→contentHash lookup from this module's own bindings.
         // Used to resolve function references in impl operation bodies where
-        // resolvedContentHash is null (SubstitutionApplier doesn't process impl bodies).
+        // resolvedContentHash is null.
         currentModuleBindingHashes = mutableMapOf<String, String>().also { map ->
             for (item in program.items) {
                 if (item is LetBinding && item.isSimpleBinding && item.contentHash != null) {
@@ -709,7 +709,7 @@ class TypeCheckerV2 {
                     BindingRef.Native(expr.localName)
                 } else {
                     // Try module-level binding lookup (for impl operation bodies where
-                    // SubstitutionApplier doesn't set resolvedContentHash)
+                    // resolvedContentHash is not set)
                     val moduleHash = currentModuleBindingHashes[expr.localName]
                     if (moduleHash != null) {
                         BindingRef.ByHash(v1HashToTypedHash(moduleHash))

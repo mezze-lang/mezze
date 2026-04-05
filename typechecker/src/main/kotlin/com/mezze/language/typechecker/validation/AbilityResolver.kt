@@ -521,7 +521,7 @@ class AbilityResolver(
             val formatAbility = if (abilityName == "Encode" || abilityName == "EncodeRepr") "Format" else "DecodeFormat"
             val formatImpls = context.getAbilityImpls(formatAbility)
             if (formatImpls.isNotEmpty()) {
-                // This will be auto-derived by SubstitutionApplier/CodecGenerator
+                // This will be auto-derived by CodecGenerator
                 return AbilityCheckResult.Satisfied("Auto-derived from $formatAbility impl")
             }
         }

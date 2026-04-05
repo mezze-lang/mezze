@@ -226,7 +226,6 @@ class MethodCallSyntaxTest {
     // ========================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Ability impl resolution errors are deferred — not yet detected at type-check time")
     fun `method call on type without impl fails`() {
         val source = """
             ability Show for 'a where {

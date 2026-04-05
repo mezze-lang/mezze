@@ -19,7 +19,7 @@ import com.mezze.language.typechecker.solving.closeGeneratedRowVars
  * TypedAstBuilder — walks ParsedModule + Substitution + ConstraintResults
  * and directly produces TypedModule (from the typedast package).
  *
- * This is the replacement for both SubstitutionApplier AND TypedAstEmitter.
+ * This is the primary type resolution pass.
  * It reads from ParsedAST (not v1 AST) and has no dependency on the v1 AST types.
  *
  * Key design:
@@ -58,7 +58,7 @@ class TypedAstBuilder(
      * Local identifier type context — populated as we process let-bindings.
      *
      * Maps binding name → MezzeType (after substitution applied).
-     * This mirrors SubstitutionApplier.identifierContext, but for ParsedAST.
+     * Populated as we process let-bindings in order.
      */
     private val identifierContext = mutableMapOf<String, MezzeType>()
 
@@ -911,7 +911,17 @@ class TypedAstBuilder(
         val bindings = case.patterns.flatMap { p -> p.extractBindings() }.map { name ->
             PatternBinding(name, MezzeType.VarType(TypeVar(name)), case.loc)
         }
-        val guard = case.guard?.let { buildExpr(it, file, MezzeType.BoolType) }
+        // If-let bindings make patterns conditional (they can fail to match).
+        // Represent as a guard so V2Validator treats the pattern as non-exhaustive.
+        val caseGuard = case.guard
+        val guard = if (caseGuard != null) {
+            buildExpr(caseGuard, file, MezzeType.BoolType)
+        } else if (case.ifLetBindings.isNotEmpty()) {
+            // Synthetic guard — marks this case as conditional
+            TypedBoolLit(true, MezzeType.BoolType, case.loc)
+        } else {
+            null
+        }
         val body = buildExpr(case.body, file, contextType)
         return TypedCase(patterns, bindings, guard, body, case.loc)
     }

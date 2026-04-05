@@ -10,11 +10,12 @@ import com.mezze.language.typechecker.TypeCheckError
  * V2 pattern validator — checks pattern exhaustiveness and unreachable patterns
  * on the MonoAST where types are concrete (after monomorphization).
  *
- * Replaces the v1 TypeValidator's pattern checking which required
- * SubstitutionApplier to set inferredType on v1 MatchExpression nodes.
+ * Checks pattern exhaustiveness and unreachable patterns on the MonoAST
+ * where types are concrete (after monomorphization).
  */
-class V2Validator {
-
+class V2Validator(
+    private val typeDeclarations: Map<String, com.mezze.language.ast.TypeDeclaration> = emptyMap()
+) {
     private val errors = mutableListOf<TypeCheckError>()
 
     fun validate(module: MonoModule) {
@@ -97,15 +98,29 @@ class V2Validator {
     private fun validateMatch(match: MonoMatch) {
         val scrutineeType = match.scrutinee.type
 
-        // Skip exhaustiveness for unresolved types (VarType, TypeApplication)
+        // Resolve scrutinee type to a VariantType for exhaustiveness checking
         val variantType = when (scrutineeType) {
             is MezzeType.BoolType -> MezzeType.VariantType(
                 constructors = mapOf("True" to null, "False" to null),
                 rowVar = null
             )
             is MezzeType.VariantType -> scrutineeType
+            is MezzeType.TypeApplication -> {
+                // Expand TypeApplication to VariantType using type declarations
+                val typeDecl = typeDeclarations[scrutineeType.constructor]
+                val definition = typeDecl?.definition
+                if (definition is com.mezze.language.ast.VariantDefinition) {
+                    MezzeType.VariantType(
+                        constructors = definition.constructors.associate { ctor ->
+                            ctor.name to ctor.dataType?.let { MezzeType.VarType(com.mezze.language.ast.TypeVar("payload")) }
+                        },
+                        rowVar = if (definition.isOpen) com.mezze.language.ast.RowVar("_open") else null
+                    )
+                } else {
+                    return // Not a variant type — skip
+                }
+            }
             is MezzeType.VarType -> return // Unresolved type variable — skip
-            is MezzeType.TypeApplication -> return // Unexpanded type alias — skip
             else -> return // Non-variant — skip exhaustiveness
         }
 
@@ -140,7 +155,7 @@ class V2Validator {
             val missing = allConstructors - coveredConstructors
             if (missing.isNotEmpty()) {
                 errors.add(TypeCheckError(
-                    "Non-exhaustive match: missing constructor(s) ${missing.joinToString(", ")}",
+                    "Non-exhaustive match. Missing case(s): ${missing.joinToString(", ")}",
                     match.loc.toSL()
                 ))
             }
@@ -148,14 +163,14 @@ class V2Validator {
 
         if (isOpen && !hasWildcard && !hasGuardedWildcard) {
             errors.add(TypeCheckError(
-                "Non-exhaustive match on open variant type: requires a wildcard (_) pattern",
+                "Non-exhaustive match. Missing case(s): _ (wildcard required for open variant)",
                 match.loc.toSL()
             ))
         }
 
         if (!hasWildcard && coveredConstructors.isEmpty() && hasGuardedWildcard) {
             errors.add(TypeCheckError(
-                "Non-exhaustive match: all patterns have guards, add a wildcard pattern",
+                "Non-exhaustive match. Missing case(s): all patterns have guards, add a wildcard pattern",
                 match.loc.toSL()
             ))
         }
@@ -177,7 +192,7 @@ class V2Validator {
                 // If only guarded constructors cover the gap, still non-exhaustive
                 if (stillMissing.isEmpty() && guardedOnly.isNotEmpty()) {
                     errors.add(TypeCheckError(
-                        "Non-exhaustive match: constructor(s) ${guardedOnly.joinToString(", ")} only covered with guards. Add a wildcard pattern.",
+                        "Non-exhaustive match. Missing case(s): ${guardedOnly.joinToString(", ")} (only covered with guards)",
                         match.loc.toSL()
                     ))
                 }
@@ -203,13 +218,17 @@ class V2Validator {
 
             when (val pattern = case.pattern) {
                 is MonoVariantPattern -> {
-                    if (case.guard == null && pattern.tag in seenConstructors) {
+                    // A variant pattern with a specific payload (record/literal) only partially
+                    // covers the constructor — a subsequent pattern for the same tag is reachable.
+                    val isFullCoverage = pattern.payload == null ||
+                        pattern.payload is MonoWildcardPattern || pattern.payload is MonoVarPattern
+                    if (case.guard == null && isFullCoverage && pattern.tag in seenConstructors) {
                         errors.add(TypeCheckError(
                             "Unreachable pattern: constructor '${pattern.tag}' already matched above",
                             case.loc.toSL()
                         ))
                     }
-                    if (case.guard == null) seenConstructors.add(pattern.tag)
+                    if (case.guard == null && isFullCoverage) seenConstructors.add(pattern.tag)
                 }
                 is MonoWildcardPattern, is MonoVarPattern -> {
                     if (case.guard == null) {
@@ -234,7 +253,7 @@ class V2Validator {
     }
 
     private fun Loc.toSL(): SourceLocation? {
-        return if (file == "<unknown>") null
+        return if (file == "<unknown>" && startLine == 1 && startCol == 1) null
         else SourceLocation(startLine, startCol, file)
     }
 }

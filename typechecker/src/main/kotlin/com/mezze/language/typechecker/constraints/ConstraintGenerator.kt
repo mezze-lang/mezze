@@ -543,9 +543,8 @@ class ConstraintGenerator(
                             // Polymorphic bindings will be instantiated at use sites
                             currentContext = currentContext.extendAll(contextBindings)
 
-                            // CRITICAL FIX: Update results map with types that have ability constraints and effects
-                            // SubstitutionApplier reads from this map, so we need the types with constraints here
-                            // This ensures ability constraints make it to the final LetBinding.inferredType
+                            // CRITICAL FIX: Update results map with types that have ability constraints and effects.
+                            // TypedAstBuilder and TypeValidator read from this map.
                             for ((bindingName, solvedType) in solvedBindingsWithEffects) {
                                 if (results.containsKey(bindingName)) {
                                     val existingResult = results[bindingName]!!

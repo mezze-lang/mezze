@@ -10,8 +10,8 @@ import com.mezze.language.typechecker.util.StringDistance
  * - PHASE 1: Build context (ContextBuilder)
  * - PHASE 2: Generate constraints (ConstraintGenerator)
  * - PHASE 3: Solve constraints (ConstraintSolver)
- * - PHASE 4: Validate types (TypeValidator) ← WE ARE HERE
- * - PHASE 5: Apply substitution (SubstitutionApplier)
+ * - PHASE 4: Emit TypedAST + V2 Pipeline (TypedAstBuilder, Monomorphizer, Resolver, Lowerer)
+ * - PHASE 5: Validate types (TypeValidator, V2Validator) ← WE ARE HERE
  *
  * Validation catches errors that can only be detected after type inference:
  * - Ability constraints not satisfied (e.g., trying to + on non-numeric types)

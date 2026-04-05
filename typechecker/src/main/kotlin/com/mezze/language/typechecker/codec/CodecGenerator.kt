@@ -416,11 +416,11 @@ class CodecGenerator {
     /**
      * Get the Format ability identifier (was EncodeFormat).
      * This returns just "Format" - the ability name itself.
-     * When used in a member access like Format.encode_int, the SubstitutionApplier
-     * will resolve this to the correct implementation based on the format type in scope.
+     * When used in a member access like Format.encode_int, the typechecker
+     * resolves this to the correct implementation based on the format type in scope.
      */
     private fun encodeFormatImpl(formatType: MezzeType): Identifier {
-        // Return the ability name - SubstitutionApplier will resolve to the correct impl
+        // Return the ability name — resolved to the correct impl during type checking
         return id("Format")
     }
 
@@ -596,11 +596,11 @@ class CodecGenerator {
 
     /**
      * Generate a direct EncodeFormat impl method call for a value of the given type.
-     * Uses the EncodeFormat ability identifier which SubstitutionApplier resolves to the
-     * correct implementation using content hash lookup.
+     * Uses the EncodeFormat ability identifier which is resolved to the correct
+     * implementation using content hash lookup.
      *
-     * IMPORTANT: For complex types (records, variants, etc.), this generates Encode.encode calls
-     * with inferredType set on the arguments so SubstitutionApplier can resolve the correct impl.
+     * For complex types (records, variants, etc.), generates Encode.encode calls
+     * with inferredType set on the arguments for ability resolution.
      */
     private fun generateDirectEncodeCall(formatType: MezzeType, type: MezzeType, valueExpr: Expression, fieldName: String): Expression {
         val pathExpr = appendPath(id("path"), fieldName)
@@ -647,10 +647,9 @@ class CodecGenerator {
                 call(member(formatImpl, "encode_string"), record("val" to toStrCall, "path" to pathExpr))
             }
             // For complex types, generate a typed Encode.encode call
-            // SubstitutionApplier will resolve this to the correct impl using content hash
             is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                // Use typed ability call - SubstitutionApplier resolves by type
+                // Use typed ability call — resolved by type
                 typedEncodeCall(type, valueExpr)
             }
             else -> {
@@ -662,8 +661,7 @@ class CodecGenerator {
 
     /**
      * Create a typed encode call using method-call syntax: value.encode_repr { fmt, config }.
-     * The receiver (valueExpr) has its inferredType set so SubstitutionApplier can resolve
-     * the correct implementation via resolveMethodCallByReceiverType.
+     * The receiver (valueExpr) has its inferredType set for ability resolution.
      */
     private fun typedEncodeCall(dataType: MezzeType, valueExpr: Expression): FunctionCall {
         // Create a copy of valueExpr with inferredType set so dispatch works
@@ -687,7 +685,7 @@ class CodecGenerator {
             function = MemberAccess(
                 receiver = typedReceiver,
                 member = "encode_repr",
-                inferredType = null  // Will be resolved by SubstitutionApplier
+                inferredType = null  // Resolved during type checking
             ),
             arguments = argsRecord
         )
@@ -713,8 +711,8 @@ class CodecGenerator {
      * Generate a direct DecodeFormat impl record lookup and method call for a value of the given type.
      * Similar to generateDirectEncodeCall but for decoding.
      *
-     * IMPORTANT: For complex types (records, variants, etc.), this generates Decode.decode calls
-     * with inferredType set on the arguments so SubstitutionApplier can resolve the correct impl.
+     * For complex types (records, variants, etc.), generates Decode.decode calls
+     * with inferredType set on the arguments for ability resolution.
      */
     private fun generateDirectDecodeCall(formatType: MezzeType, type: MezzeType, valueExpr: Expression, fieldName: String): Expression {
         val pathExpr = appendPath(id("path"), fieldName)
@@ -769,11 +767,9 @@ class CodecGenerator {
                 )
             }
             // For complex types, call Decode.decode and let ability resolution find the impl
-            // This allows the SubstitutionApplier to resolve the correct impl by content hash
             is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                // Use Decode.decode ability call - SubstitutionApplier will resolve to correct impl
-                // CRITICAL: Set inferredType on the arguments record so ability resolution works
+                // Use Decode.decode ability call — resolved by content hash
                 typedDecodeCall(type, valueExpr)
             }
             else -> {
@@ -788,8 +784,7 @@ class CodecGenerator {
      * The receiver (valueExpr) is the serialized representation.
      *
      * Note: For Decode, dispatch is on the TARGET type (from return type Result 'a DecodeError),
-     * not the receiver type. The return type is set on the FunctionCall so SubstitutionApplier
-     * can determine the target type for auto-derivation.
+     * not the receiver type. The return type is set on the FunctionCall for auto-derivation.
      */
     private fun typedDecodeCall(targetType: MezzeType, valueExpr: Expression): FunctionCall {
         // Create the arguments record (no val field - repr data is the receiver)
@@ -1608,14 +1603,12 @@ class CodecGenerator {
                 )
             }
             // For complex types, generate a typed Decode.decode call
-            // SubstitutionApplier will resolve this to the correct impl using content hash
             is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
             is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                // Use typed ability call - SubstitutionApplier resolves by type
+                // Use typed ability call — resolved by type
                 typedDecodeCall(type, valueExpr)
             }
             else -> {
-                // For unknown types, also use typed ability call
                 typedDecodeCall(type, valueExpr)
             }
         }
@@ -1678,7 +1671,7 @@ class CodecGenerator {
                 }
             }
 
-            // Use typed ability call - SubstitutionApplier will resolve to content hash
+            // Use typed ability call — resolved by content hash
             match(
                 member(id("variant_info"), "payload"),
                 matchCase(

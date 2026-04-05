@@ -221,7 +221,6 @@ class ModuleTypeChecker(
             return when (result) {
                 is TypeChecker.TypeCheckResult.Success -> {
                     // Create typed module — use original program for structure
-                    // (result.program may be empty in new pipeline)
                     val moduleProgram = if (result.program.items.isNotEmpty()) result.program else module.program
                     val typedModule = TypedModule(
                         modulePath = module.modulePath,
@@ -357,45 +356,25 @@ class ModuleTypeChecker(
     ): Map<String, ExportedItem> {
         val updatedExports = mutableMapOf<String, ExportedItem>()
 
-        // Build maps of names to inferred types and content hashes from the program
         val inferredTypes = mutableMapOf<String, MezzeType>()
         val contentHashes = mutableMapOf<String, String>()
 
         for (item in typedProgram.items) {
             when (item) {
                 is LetBinding -> {
-                    item.inferredType?.let { type ->
-                        inferredTypes[item.variableName] = type
-                    }
-                    item.contentHash?.let { hash ->
-                        contentHashes[item.variableName] = hash
-                    }
+                    item.inferredType?.let { inferredTypes[item.variableName] = it }
+                    item.contentHash?.let { contentHashes[item.variableName] = it }
                 }
-                is TypeDeclaration -> {
-                    item.inferredType?.let { type ->
-                        inferredTypes[item.name] = type
-                    }
-                }
-                is EffectDeclaration -> {
-                    item.inferredType?.let { type ->
-                        inferredTypes[item.name] = type
-                    }
-                }
+                is TypeDeclaration -> item.inferredType?.let { inferredTypes[item.name] = it }
+                is EffectDeclaration -> item.inferredType?.let { inferredTypes[item.name] = it }
                 is ImplDeclaration -> {
-                    item.inferredType?.let { type ->
-                        inferredTypes[item.performerName] = type
-                    }
-                    item.contentHash?.let { hash ->
-                        contentHashes[item.performerName] = hash
-                    }
+                    item.inferredType?.let { inferredTypes[item.performerName] = it }
+                    item.contentHash?.let { contentHashes[item.performerName] = it }
                 }
-                else -> {
-                    // Other items don't contribute to exports
-                }
+                else -> {}
             }
         }
 
-        // Update exports with inferred types and content hashes
         for ((name, export) in exports) {
             val inferredType = inferredTypes[export.originalName]
             val contentHash = contentHashes[export.originalName]

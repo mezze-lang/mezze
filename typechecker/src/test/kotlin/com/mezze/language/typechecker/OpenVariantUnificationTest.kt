@@ -171,15 +171,8 @@ class OpenVariantUnificationTest {
         """.trimIndent())
     }
 
-    // TODO: This test documents a known limitation. Custom constructors with imported
-    // open variant types don't work because the type alias expansion doesn't have access
-    // to the imported type declaration during unification. This works when the type is
-    // defined in the same file (see `open variant allows custom constructors` test).
-    @org.junit.jupiter.api.Disabled("Known limitation: custom constructors with imported open variant types")
     @Test
     fun `Log log with custom variant should typecheck since LogLevel is open`() {
-        // Since LogLevel is open, custom levels should work
-        // Currently fails - need to fix type alias expansion for imported types
         assertTypeChecks("""
             use std::effects::log::{Log, Console}
 

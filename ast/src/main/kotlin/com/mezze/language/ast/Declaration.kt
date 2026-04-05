@@ -95,10 +95,19 @@ data class TypeCheckResult(
 ) {
     /** Get inferred type of a top-level binding by name */
     fun getVariableType(name: String): MezzeType? {
-        return typedModule?.decls
+        // Primary: TypedModule (v2 pipeline)
+        val v2Type = typedModule?.decls
             ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
             ?.find { it.name == name }
             ?.scheme?.type
+        if (v2Type != null && v2Type !is MezzeType.VarType) return v2Type
+        // Fallback: program bindings with inferredType (set from constraintResults + substitution)
+        val programType = program.items
+            .filterIsInstance<LetBinding>()
+            .find { it.isSimpleBinding && it.variableName == name }
+            ?.inferredType
+        if (programType != null && programType !is MezzeType.VarType) return programType
+        return v2Type
     }
 
     /**

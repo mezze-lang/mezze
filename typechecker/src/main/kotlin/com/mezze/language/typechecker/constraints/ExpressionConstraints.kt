@@ -60,7 +60,7 @@ class ExpressionConstraintGenerator {
     /**
      * Types of let bindings inside do blocks, collected during constraint generation.
      * Keyed by binding name, value is the type variable (before substitution).
-     * The SubstitutionApplier uses these to resolve types of nested bindings
+     * Used to resolve types of nested bindings
      * that don't have inferredType set on their expressions (e.g., effect calls).
      */
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
@@ -1398,6 +1398,7 @@ class ExpressionConstraintGenerator {
         is MezzeType.TypeApplication -> type.constructor
         is MezzeType.RecordType -> type.typeName
         is MezzeType.VariantType -> type.typeName
+            ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
         else -> null
     }
 
@@ -3525,7 +3526,7 @@ class ExpressionConstraintGenerator {
                         else -> t
                     }
 
-                    // Record nested binding types for SubstitutionApplier
+                    // Record nested binding types for type resolution
                     val variableNames = stmt.pattern.extractBindings()
                     for (varName in variableNames) {
                         nestedBindingTypes[varName] = bindingType

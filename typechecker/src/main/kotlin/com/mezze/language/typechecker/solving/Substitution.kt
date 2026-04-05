@@ -379,7 +379,7 @@ data class Substitution(
  *
  * @param mustBeOpenRowVars Row variables that must stay open (from wildcard patterns etc.)
  *
- * This matches the behavior of SubstitutionApplier.closeGeneratedRowVars.
+ * Closes generated row variables that should not remain open.
  */
 fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = emptySet()): MezzeType = when (type) {
     is MezzeType.RecordType -> {

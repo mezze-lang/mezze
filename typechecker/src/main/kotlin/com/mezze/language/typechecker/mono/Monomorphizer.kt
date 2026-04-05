@@ -304,14 +304,18 @@ class Monomorphizer {
             )
             is TypedMatch -> MonoMatch(
                 convertExpr(expr.scrutinee, globalDecls, worklist, processed),
-                expr.cases.map { c ->
-                    MonoCase(
-                        convertPattern(c.patterns.firstOrNull()),
-                        c.bindings.map { b -> MonoPatternBinding(b.name, b.type) },
-                        c.guard?.let { convertExpr(it, globalDecls, worklist, processed) },
-                        convertExpr(c.body, globalDecls, worklist, processed),
-                        c.loc
-                    )
+                expr.cases.flatMap { c ->
+                    val bindings = c.bindings.map { b -> MonoPatternBinding(b.name, b.type) }
+                    val guard = c.guard?.let { convertExpr(it, globalDecls, worklist, processed) }
+                    val body = convertExpr(c.body, globalDecls, worklist, processed)
+                    // Flatten or-patterns: Red | Blue -> body  becomes two MonoCases
+                    if (c.patterns.size <= 1) {
+                        listOf(MonoCase(convertPattern(c.patterns.firstOrNull()), bindings, guard, body, c.loc))
+                    } else {
+                        c.patterns.map { p ->
+                            MonoCase(convertPattern(p), bindings, guard, body, c.loc)
+                        }
+                    }
                 },
                 expr.type,
                 expr.loc

@@ -215,8 +215,7 @@ class ConstructorResolutionTest {
 
     @Test
     fun `test user-defined effect is resolved as EffectReference`() {
-        // Since SubstitutionApplier no longer sets resolution on v1 AST,
-        // we verify that the effect is correctly resolved by checking that type checking succeeds
+        // Verify that the effect is correctly resolved by checking that type checking succeeds
         // and the effect declaration exists in the result.
         val result = typeCheckAndGetResult("""
             effect Counter where {

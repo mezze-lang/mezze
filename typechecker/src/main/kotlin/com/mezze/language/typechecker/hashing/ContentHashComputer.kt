@@ -308,7 +308,5 @@ object ContentHashComputer {
     }
 
     // Note: updateResolvedAbilitiesWithHashes and buildImplRefToHashMap were removed.
-    // Since content hashes are now computed in Phase 0.5 (before SubstitutionApplier),
-    // and SubstitutionApplier sets implementationHash directly, we no longer need
-    // a separate pass to update resolved abilities.
+    // Content hashes are computed in Phase 0.5 before validation.
 }

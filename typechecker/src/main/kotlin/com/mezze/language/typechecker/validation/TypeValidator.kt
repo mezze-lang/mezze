@@ -21,8 +21,8 @@ import com.mezze.language.typechecker.WellKnownHashes
  * - PHASE 1: Build context (ContextBuilder)
  * - PHASE 2: Generate constraints (ConstraintGenerator)
  * - PHASE 3: Solve constraints (ConstraintSolver)
- * - PHASE 4: Validate types (TypeValidator) ← WE ARE HERE
- * - PHASE 5: Apply substitution (SubstitutionApplier)
+ * - PHASE 4: Emit TypedAST + V2 Pipeline (TypedAstBuilder, Monomorphizer, Resolver, Lowerer)
+ * - PHASE 5: Validate types (TypeValidator, V2Validator) ← WE ARE HERE
  *
  * Validation checks:
  * - Ability constraints are satisfied
@@ -545,7 +545,7 @@ class TypeValidator(
                 val formatAbility = if (abilityName == "Encode" || abilityName == "EncodeRepr") "Format" else "DecodeFormat"
                 val hasFormatImpl = context.getAllAbilityImpls().any { it.value.abilityName == formatAbility }
                 if (hasFormatImpl) {
-                    // This will be auto-derived by SubstitutionApplier/CodecGenerator
+                    // This will be auto-derived by CodecGenerator
                     continue
                 }
             }
@@ -2009,9 +2009,8 @@ class TypeValidator(
                 // Validate let statements in do-block
                 for (stmt in expr.statements) {
                     if (stmt is LetStatement) {
-                        // TODO: inferredType on nested expressions is set by SubstitutionApplier
-                        // which no longer runs. Skipping pattern validation when null — constraint
-                        // solver catches most type errors for these nested cases.
+                        // inferredType may be null on nested expressions.
+                        // Skip pattern validation when null — V2Validator handles these on MonoAST.
                         val exprType = stmt.expression.inferredType
                         if (exprType != null) {
                             val scrutineeType = substitution.apply(exprType)
@@ -2072,11 +2071,10 @@ class TypeValidator(
                 errors.addAll(scrutineeErrors)
 
                 // Validate match exhaustiveness
-                // Get the scrutinee type and check if all constructors are covered.
-                // TODO: inferredType on nested match scrutinee expressions is set by SubstitutionApplier
-                // which no longer runs. Exhaustiveness is skipped when null — constraint solver
-                // catches most type errors for nested match cases.
+                // Get the scrutinee type. Try inferredType first,
+                // fall back to inferring from constructor patterns in the match cases.
                 val scrutineeType = expr.expression.inferredType
+                    ?: inferScrutineeTypeFromPatterns(expr, typeDeclarations)
 
                 if (scrutineeType != null) {
                     val finalScrutineeType = substitution.apply(scrutineeType)
@@ -2180,8 +2178,7 @@ class TypeValidator(
         substitution: Substitution
     ): List<ValidationError> {
         // Get the inferred type for the expression.
-        // TODO: inferredType on nested variant construction expressions is set by SubstitutionApplier
-        // which no longer runs. Validation is skipped when null — constraint solver catches most errors.
+        // inferredType may be null on nested expressions — skip when null.
         val inferredType = variantExpr.inferredType
 
         if (inferredType == null) {
@@ -2228,9 +2225,9 @@ class TypeValidator(
     /**
      * Infer scrutinee type from constructor patterns in match expression.
      *
-     * This is a workaround for the fact that SubstitutionApplier doesn't set
-     * inferredType on nested expressions. We look at the constructor patterns
-     * and find the type declaration that contains those constructors.
+     * Infers the scrutinee type from constructor patterns when inferredType is not
+     * available on the expression. Looks at the constructor patterns and finds
+     * the type declaration that contains those constructors.
      */
     private fun inferScrutineeTypeFromPatterns(
         matchExpr: MatchExpression,
@@ -2729,8 +2726,7 @@ class TypeValidator(
             val fieldValue = fieldEntry?.value ?: continue
 
             // Get the type of the field value.
-            // TODO: inferredType on nested field values is set by SubstitutionApplier which no longer
-            // runs. Fall back to constructTypeFromExpression; skip this field if both return null.
+            // inferredType may be null — fall back to constructTypeFromExpression; skip if both null.
             val fieldType = fieldValue.inferredType ?: constructTypeFromExpression(fieldValue) ?: continue
 
             result[assocTypeName] = fieldType
@@ -2785,9 +2781,7 @@ class TypeValidator(
 
         val errorValue = errorEntry?.value ?: return null
 
-        // TODO: inferredType on nested error value expressions is set by SubstitutionApplier which
-        // no longer runs. Fall back to constructTypeFromExpression for variant constructions.
-        // If inferredType is already set, use it
+        // inferredType may be null — fall back to constructTypeFromExpression.
         if (errorValue.inferredType != null) {
             return errorValue.inferredType
         }
@@ -2812,14 +2806,12 @@ class TypeValidator(
     /**
      * Construct a MezzeType from an expression when inferredType is not available.
      *
-     * This is used for expressions inside function definitions that haven't been
-     * processed by SubstitutionApplier yet.
+     * This is used for expressions where inferredType is not available.
      */
     private fun constructTypeFromExpression(expr: Expression?): MezzeType? {
         if (expr == null) return null
 
-        // TODO: inferredType on expressions is set by SubstitutionApplier which no longer runs.
-        // When available, use it; otherwise reconstruct the type structurally.
+        // When inferredType is available, use it; otherwise reconstruct structurally.
         if (expr.inferredType != null) {
             return expr.inferredType
         }

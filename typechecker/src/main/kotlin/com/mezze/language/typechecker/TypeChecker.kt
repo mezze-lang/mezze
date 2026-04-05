@@ -4,7 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.NativeFunctionTypes
-import com.mezze.language.typechecker.application.SubstitutionApplier
+
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ConstraintGenerator
 import com.mezze.language.typechecker.constraints.ConstraintResult
@@ -60,23 +60,17 @@ import java.nio.file.Paths
  * - What: Solve constraints using unification
  * - Files: ConstraintSolver.kt, Unification.kt, Substitution.kt
  *
- * **PHASE 4: Apply Substitution**
- * - Input: Program, Substitution
- * - Output: Program (with inferred types!)
- * - What: Update AST with final types
- * - File: SubstitutionApplier.kt
+ * **PHASE 4: Emit TypedAST + V2 Pipeline**
+ * - Input: ParsedModule, Substitution, ConstraintResults
+ * - Output: TypedModule → MonoModule → ResolvedModule → TruffleIR
+ * - What: Build typed AST, monomorphize, resolve, lower to TruffleIR
+ * - Files: TypedAstBuilder.kt, Monomorphizer.kt, Resolver.kt, Lowerer.kt
  *
  * **PHASE 5: Validate Types**
- * - Input: Program (typed), Substitution, Constraints
+ * - Input: Program (desugared), Substitution, Constraints
  * - Output: ValidationResult
  * - What: Check abilities, effects, exhaustiveness, variant constructors
- * - Files: TypeValidator.kt, AbilityResolver.kt, EffectValidator.kt
- *
- * **PHASE 6: Monomorphization**
- * - Input: Program (typed)
- * - Output: Program (with resolved call sites) + Map<String, LetBinding>
- * - What: Generate specialized versions of polymorphic functions
- * - Files: MonomorphizationEngine.kt, InstanceGenerator.kt, CallSiteUpdater.kt
+ * - Files: TypeValidator.kt, V2Validator.kt
  *
  * ## Design Principles:
  * - Pure functions (no mutation!)
@@ -288,7 +282,6 @@ class TypeChecker(
 
         // PHASE 0.6: Compute Content Hashes for Declarations
         // Compute hashes BEFORE building context so AbilityImplInfo.contentHash is populated.
-        // This allows SubstitutionApplier to use content hashes directly instead of mangled lookup keys.
         // Pass importContext so effect/ability hashes can be resolved for local impls referencing them
         val hashedProgram = computeDeclarationHashes(resolvedProgram, importContext)
 
@@ -552,7 +545,7 @@ class TypeChecker(
                 // CRITICAL FIX: Apply global substitution to constraint results
                 // The per-binding solves in ConstraintGenerator may have left type variables unsolved,
                 // but the global solve has the complete substitution. We need to update the constraint
-                // results with the globally solved types before passing to SubstitutionApplier.
+                // results with the globally solved types before passing to TypedAstBuilder and TypeValidator.
 
 
                 // Need a ConstraintGenerator instance to call addAbilityConstraintsToFunctionType
@@ -578,7 +571,7 @@ class TypeChecker(
                         acc + r.methodCallResolutions
                     }
 
-                // PHASE 4: Validate Constraints (SubstitutionApplier removed — TypedAstBuilder replaces it)
+                // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
                     allTypeDeclarations,
@@ -607,14 +600,14 @@ class TypeChecker(
                     }
                 }
 
-                // V2 Pipeline FIRST: TypedAST → Mono → Resolve → Lower → TruffleIR
-                // If this succeeds, skip the expensive v1 SubstitutionApplier entirely.
+                // V2 Pipeline: TypedAST → Mono → Resolve → Lower → TruffleIR
                 // Skip for stdlib modules — they don't need their own TruffleIR since the
                 // monomorphizer pulls reachable stdlib functions into the user module's IR.
                 val isStdlibModule = currentModulePath != null && currentModulePath.startsWith("std::")
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                 var loweredPerformers: List<Array<String>> = emptyList()
+                var v2MonoModule: com.mezze.language.monoast.MonoModule? = null
                 if (!isStdlibModule) try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
@@ -658,9 +651,10 @@ class TypeChecker(
 
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
 
-                    // V2 validation: check pattern exhaustiveness and unreachable patterns
-                    // on the monomorphized AST where types are concrete.
-                    com.mezze.language.typechecker.mono.V2Validator().validate(monoModule)
+                    // V2 validation: pattern exhaustiveness and unreachable on MonoAST.
+                    // Stored for running AFTER the pipeline try-catch so validation errors
+                    // are not confused with pipeline crashes.
+                    v2MonoModule = monoModule
 
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
                     val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
@@ -674,88 +668,61 @@ class TypeChecker(
                         arr.toTypedArray()
                     }
                 } catch (pipelineEx: Exception) {
-                    System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
+                    System.err.println("V2 pipeline: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 fast path — return with loweredFns if v2 pipeline succeeded
-                if (loweredFns != null && loweredFns.isNotEmpty()) {
-                    return TypeCheckResult.Success(
-                        program = desugaredProgram,
-                        substitution = substitution,
-                        monomorphicInstances = emptyMap(),
-                        importContext = importContext,
-                        warnings = warnings,
-                        loadedModules = loadedModules,
-                        abilityImpls = context.getAllAbilityImpls(),
-                        programBeforeContinuations = null,
-                        typedModule = emittedTypedModule,
-                        loweredFunctions = loweredFns,
-                        loweredPerformers = loweredPerformers
-                    )
+                // V2 validation on MonoAST (pattern exhaustiveness, unreachable patterns).
+                // Runs outside pipeline try-catch so validation errors propagate as TypeCheckError.
+                if (v2MonoModule != null) {
+                    com.mezze.language.typechecker.mono.V2Validator(allTypeDeclarations).validate(v2MonoModule)
                 }
 
-                // V1 fallback
-                val validationProgram = try {
-                    val applier = SubstitutionApplier(
-                        substitution,
-                        globallyResolvedConstraintResults,
-                        buildResult.performerToEffect,
-                        mustBeOpenRowVars,
-                        mustBeOpenBindings,
-                        mustBeOpenTypes,
-                        context.getAllAbilityImpls(),
-                        allAbilityDeclarations,
-                        allEffectDeclarations,
-                        allTypeDeclarations,
-                        tailCallLocations,
-                        buildResult.implDeclarations,
-                        context.getContentHashes(),
-                        constraintGenerator.expressionGenerator.nestedBindingTypes
-                    )
-                    val importedImplBodies = importContext?.importedAbilityImpls
-                        ?.map { (hash, impl) -> hash to impl }
-                        ?.toMap() ?: emptyMap()
-                    applier.registerImportedImplBodies(importedImplBodies)
-                    val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
-                        Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
-                    } else {
-                        desugaredProgram
+                // Validation: TypeValidator for abilities/effects/annotations,
+                // Pattern checks handled by V2Validator (on MonoAST) + TypeValidator fallback.
+                // Top-level effects: constraint solver wraps performed bindings in SuspendedType.
+                // Ability constraints, annotations, effect declarations: TypeValidator.
+                val v2ValidationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
+                if (v2ValidationResult is ValidationResult.Failure) {
+                    val mapped = v2ValidationResult.errors.map { error ->
+                        TypeCheckError(phase = "Validation", message = error.message(), sourceLocation = error.location())
                     }
-                    applier.applyToProgram(programWithCodecImpls)
-                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    throw e
-                } catch (_: Exception) {
-                    desugaredProgram
+                    return TypeCheckResult.Failure(mapped)
                 }
 
-                val validationResult = validator.validate(validationProgram, globallyResolvedConstraintResults, substitution)
-                when (validationResult) {
-                    is ValidationResult.Failure -> {
-                        val errors = validationResult.errors.map { error ->
-                            TypeCheckError(phase = "Validation", message = error.message(), sourceLocation = error.location())
+                // Set inferredType on program bindings so downstream consumers
+                // (module exports, tests) can access resolved types.
+                val typedItems = desugaredProgram.items.map { item ->
+                    when (item) {
+                        is LetBinding -> {
+                            if (item.inferredType != null) return@map item
+                            // Try simple binding name, then destructured pattern key
+                            val key = if (item.isSimpleBinding) item.variableName else null
+                            val resolved = key?.let { globallyResolvedConstraintResults[it] }?.let { cr ->
+                                substitution.apply(cr.type)
+                            }
+                            if (resolved != null) item.copy(inferredType = resolved) else item
                         }
-                        return TypeCheckResult.Failure(errors)
-                    }
-                    is ValidationResult.Success -> {
-                        validationResult.warnings.forEach { msg ->
-                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                        is ImplDeclaration -> {
+                            if (item.inferredType != null) return@map item
+                            val resolved = globallyResolvedConstraintResults[item.performerName]?.let { cr ->
+                                substitution.apply(cr.type)
+                            }
+                            if (resolved != null) item.copy(inferredType = resolved) else item
                         }
+                        else -> item
                     }
                 }
+                val typedProgram = Program(items = typedItems)
 
-                val programForExport = if (generatedCodecImpls.isNotEmpty() && validationProgram !== desugaredProgram) {
-                    val codecCount = generatedCodecImpls.size
-                    Program(items = validationProgram.items.drop(codecCount))
-                } else {
-                    validationProgram
-                }
-
+                val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
+                    v2ValidationResult.warnings.map { TypeCheckWarning(message = it, sourceLocation = null) }
+                } else emptyList()
                 return TypeCheckResult.Success(
-                    program = programForExport,
+                    program = typedProgram,
                     substitution = substitution,
                     monomorphicInstances = emptyMap(),
                     importContext = importContext,
-                    warnings = warnings,
+                    warnings = warnings + validationWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     programBeforeContinuations = null,
@@ -1079,44 +1046,33 @@ class TypeChecker(
             .filterNotNull()
             .toSet()
 
-        // PHASE 4: Apply Substitution
-        val applier = SubstitutionApplier(
-            substitution,
-            globallyResolvedConstraintResults,
-            buildResult.performerToEffect,
-            mustBeOpenRowVars,
-            mustBeOpenBindings,
-            mustBeOpenTypes,
-            context.getAllAbilityImpls(),
-            allAbilityDeclarations,
-            allEffectDeclarations,
-            allTypeDeclarations,
-            tailCallLocations,
-            buildResult.implDeclarations,
-            context.getContentHashes()  // Content hashes for identifier resolution
-        )
+        // PHASE 4: Set inferredType on program bindings from constraint results + substitution
         val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
             Program(items = generatedCodecImpls.values.toList() + desugaredProgram.items)
         } else {
             desugaredProgram
         }
-        val typedProgram = try {
-            applier.applyToProgram(programWithCodecImpls)
-        } catch (e: Exception) {
-            // If substitution application fails, return partial program
-            allErrors.add(TypeCheckError(
-                phase = "Substitution",
-                message = e.message ?: "Failed to apply substitution",
-                sourceLocation = null
-            ))
-            return TypeCheckResultWithRecovery(
-                program = programWithCodecImpls,
-                errors = allErrors,
-                partialSubstitution = substitution,
-                importContext = importContext,
-                warnings = allWarnings
-            )
+        val typedItems = programWithCodecImpls.items.map { item ->
+            when (item) {
+                is LetBinding -> {
+                    if (item.inferredType != null) return@map item
+                    val key = if (item.isSimpleBinding) item.variableName else null
+                    val resolved = key?.let { globallyResolvedConstraintResults[it] }?.let { cr ->
+                        substitution.apply(cr.type)
+                    }
+                    if (resolved != null) item.copy(inferredType = resolved) else item
+                }
+                is ImplDeclaration -> {
+                    if (item.inferredType != null) return@map item
+                    val resolved = globallyResolvedConstraintResults[item.performerName]?.let { cr ->
+                        substitution.apply(cr.type)
+                    }
+                    if (resolved != null) item.copy(inferredType = resolved) else item
+                }
+                else -> item
+            }
         }
+        val typedProgram = Program(items = typedItems)
 
         // PHASE 5: Validation (only if no errors so far to avoid cascading errors)
         if (allErrors.isEmpty()) {
@@ -1563,7 +1519,7 @@ class TypeChecker(
      * is populated when ContextBuilder processes the declarations.
      *
      * Note: This only computes hashes for declarations that exist in the source.
-     * Generated codec impls get their hashes computed inline in SubstitutionApplier.
+     * Generated codec impls get their hashes computed inline in CodecGenerator.
      *
      * @param importContext The import context containing imported effects/abilities with content hashes
      */
