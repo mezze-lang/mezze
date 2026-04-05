@@ -98,8 +98,6 @@ class V2Validator {
         val scrutineeType = match.scrutinee.type
 
         // Skip exhaustiveness for unresolved types (VarType, TypeApplication)
-        // These appear in stdlib functions pulled into the module by the monomorphizer
-        // that reference types not fully specialized for this compilation unit.
         val variantType = when (scrutineeType) {
             is MezzeType.BoolType -> MezzeType.VariantType(
                 constructors = mapOf("True" to null, "False" to null),

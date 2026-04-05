@@ -677,10 +677,24 @@ class TypeChecker(
                     System.err.println("Pipeline error: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 validation done above (V2Validator on MonoAST).
-                // Still need SubstitutionApplier for type errors that the constraint solver
-                // doesn't catch (ability resolution, effect types, annotation mismatches).
-                // SubstitutionApplier output used for v1 Validator only, NOT for execution.
+                // V2 fast path — return with loweredFns if v2 pipeline succeeded
+                if (loweredFns != null && loweredFns.isNotEmpty()) {
+                    return TypeCheckResult.Success(
+                        program = desugaredProgram,
+                        substitution = substitution,
+                        monomorphicInstances = emptyMap(),
+                        importContext = importContext,
+                        warnings = warnings,
+                        loadedModules = loadedModules,
+                        abilityImpls = context.getAllAbilityImpls(),
+                        programBeforeContinuations = null,
+                        typedModule = emittedTypedModule,
+                        loweredFunctions = loweredFns,
+                        loweredPerformers = loweredPerformers
+                    )
+                }
+
+                // V1 fallback
                 val validationProgram = try {
                     val applier = SubstitutionApplier(
                         substitution,

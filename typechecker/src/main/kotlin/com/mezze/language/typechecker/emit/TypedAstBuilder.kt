@@ -511,6 +511,13 @@ class TypedAstBuilder(
                 // Determine parameter types
                 val params = buildLambdaParams(expr.params, contextType, loc)
 
+                // Push param types into identifierContext so body can resolve them
+                val savedContext = mutableMapOf<String, MezzeType?>()
+                for (param in params) {
+                    savedContext[param.name] = identifierContext[param.name]
+                    identifierContext[param.name] = param.type
+                }
+
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
                     is MezzeType.FunctionType -> substitution.apply(ct.returnType)
@@ -518,6 +525,12 @@ class TypedAstBuilder(
                 }
 
                 val body = buildExpr(expr.body, file, returnType)
+
+                // Restore previous context
+                for ((name, prevType) in savedContext) {
+                    if (prevType != null) identifierContext[name] = prevType
+                    else identifierContext.remove(name)
+                }
 
                 // Function type: param record type → body type
                 val paramRecordType = when (val ct = substitution.apply(contextType)) {
@@ -1050,8 +1063,8 @@ class TypedAstBuilder(
             return MezzeType.VarType(TypeVar("unknown"))
         }
 
-        // 1. Local context
-        identifierContext[name]?.let { return it }
+        // 1. Local context (apply substitution to resolve type variables)
+        identifierContext[name]?.let { return substitution.apply(it) }
 
         // 2. Constraint results (top-level bindings)
         constraintResults[name]?.let { result ->
