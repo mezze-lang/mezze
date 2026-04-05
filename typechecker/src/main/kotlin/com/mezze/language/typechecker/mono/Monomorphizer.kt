@@ -545,6 +545,16 @@ class Monomorphizer {
                             }
                         }
 
+                        // If caller didn't inject the receiver (methodCallResolutions didn't
+                        // propagate to TypedAstBuilder), inject it from the TypedFieldAccess
+                        // receiver expression. The first param of the impl method is the receiver.
+                        // Only do this when callerFields is empty (no explicit args) to avoid
+                        // breaking legitimate field-access-then-call patterns.
+                        if (fn is TypedFieldAccess && callerFields.isEmpty()) {
+                            val receiverParamName = paramNames.firstOrNull() ?: "it"
+                            callerFields[receiverParamName] = fn.record
+                        }
+
                         val innerArg = innerCall.arg
                         val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
 

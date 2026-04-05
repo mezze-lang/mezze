@@ -337,19 +337,11 @@ class TruffleCompiler(
                 if (node.handlers.isNotEmpty()) {
                     val handler = node.handlers.first()
                     val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
-                    // Compile handler params as the handler value expression.
-                    // If params is null, use HandlerLookupNode which checks local slot + context by content hash.
-                    // This matches the v1 path where the handler record is in a frame slot keyed by impl hash.
-                    val paramsIR = handler.params
-                    val handlerNode: MezzeNode = if (paramsIR != null) {
-                        // Parameterized handler: look up the impl function by hash and call it with params.
-                        val implLookup = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
-                        val paramsNode = compileNode(paramsIR, source)
-                        InvokeNode.create(implLookup, arrayOf(paramsNode))
-                    } else {
-                        // HandlerLookupNode: tries content hash first, then performer name.
-                        HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
-                    }
+                    // HandlerLookupNode: tries content hash first, then performer name.
+                    // For both parameterized and non-parameterized handlers, lookup returns
+                    // either a MezzeRecord (performer record) or MezzeFunction (closure factory).
+                    // HandlerLookupNode handles MezzeFunction → MezzeRecord evaluation internally.
+                    val handlerNode: MezzeNode = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
                     HandleNode(
                         -1,                     // no local slot
                         arrayOf(handler.effectHash.hex),  // effect hashes for context registration
