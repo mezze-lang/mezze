@@ -75,7 +75,9 @@ data class ParsedTypeDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Content hash — populated by typechecker, not parser */
+    val contentHash: String? = null
 ) : ParsedDecl
 
 @Serializable
@@ -151,7 +153,9 @@ data class ParsedAbilityDecl(
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Content hash — populated by typechecker, not parser */
+    val contentHash: String? = null
 ) : ParsedDecl
 
 /**
@@ -210,7 +214,9 @@ data class ParsedImplAbilityDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Content hash — populated by typechecker, not parser */
+    val contentHash: String? = null
 ) : ParsedDecl {
     val isInherent: Boolean get() = target is ParsedImplTarget.Inherent
 }
@@ -250,7 +256,9 @@ data class ParsedEffectDecl(
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Content hash — populated by typechecker, not parser */
+    val contentHash: String? = null
 ) : ParsedDecl
 
 /**
@@ -289,7 +297,9 @@ data class ParsedPerformerDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Content hash — populated by typechecker, not parser */
+    val contentHash: String? = null
 ) : ParsedDecl
 
 /**
