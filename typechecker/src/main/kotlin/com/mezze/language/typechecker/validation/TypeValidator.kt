@@ -55,6 +55,20 @@ class TypeValidator(
      *
      * Returns Success with warnings, or Failure with errors.
      */
+    /**
+     * Validate using ParsedModule (v2 entry point).
+     * Bridges internally to v1 Program for now.
+     */
+    fun validate(
+        module: com.mezze.language.parsedast.ParsedModule,
+        constraintResults: Map<String, ConstraintResult>,
+        substitution: Substitution
+    ): ValidationResult {
+        val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
+        return validate(program, constraintResults, substitution)
+    }
+
+    @Deprecated("Use validate(ParsedModule, ...) instead")
     fun validate(
         program: Program,
         constraintResults: Map<String, ConstraintResult>,

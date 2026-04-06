@@ -678,7 +678,7 @@ class TypeChecker(
                 // Pattern checks handled by V2Validator (on MonoAST) + TypeValidator fallback.
                 // Top-level effects: constraint solver wraps performed bindings in SuspendedType.
                 // Ability constraints, annotations, effect declarations: TypeValidator.
-                val v2ValidationResult = validator.validate(desugaredProgram, globallyResolvedConstraintResults, substitution)
+                val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
                     val mapped = v2ValidationResult.errors.map { error ->
                         TypeCheckError(phase = "Validation", message = error.message(), sourceLocation = error.location())
