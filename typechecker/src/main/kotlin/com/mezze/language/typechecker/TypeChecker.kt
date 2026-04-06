@@ -850,10 +850,11 @@ class TypeChecker(
         val desugaredProgram = desugarPipeExpressions(hashedProgram)
 
         // PHASE 1: Build Context
+        val parsedModuleForRecovery = MezzeParser().programToParsedModule(desugaredProgram, "<recovery>")
         val contextBuilder = ContextBuilder()
         val buildResult = try {
             contextBuilder.build(
-                program = desugaredProgram,
+                module = parsedModuleForRecovery,
                 parentContext = enhancedContext,
                 importedImpls = importContext?.importedImpls ?: emptyMap(),
                 importedAbilities = importContext?.importedAbilities ?: emptyMap(),

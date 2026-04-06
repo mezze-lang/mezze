@@ -360,9 +360,8 @@ class ContextBuilder {
      * Existing callers in TypeChecker.kt pass a v1 Program (with content hashes
      * already computed by Phase 0.6). This overload preserves the old behaviour
      * while the call-sites are migrated incrementally.
-     *
-     * TODO: Remove once all callers pass ParsedModule instead of Program.
      */
+    @Deprecated("Use build(module: ParsedModule, ...) instead")
     fun build(
         program: Program,
         parentContext: TypingContext = TypingContext.empty,
