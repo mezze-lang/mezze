@@ -23,6 +23,19 @@ import com.mezze.language.typechecker.hashing.ContentHashComputer
  */
 object DuplicateDeclarationValidator {
     /**
+     * Validate all duplicate declarations in a ParsedModule.
+     * This is the preferred entry point. Converts to v1 Program internally
+     * since the validation logic operates on v1 types.
+     *
+     * @param module The parsed module to validate
+     * @throws TypeCheckError if any duplicate declarations are found
+     */
+    fun validateParsedModule(module: com.mezze.language.parsedast.ParsedModule) {
+        val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
+        validateProgram(program)
+    }
+
+    /**
      * Validate all duplicate declarations in a program.
      * This should be called BEFORE context building.
      *

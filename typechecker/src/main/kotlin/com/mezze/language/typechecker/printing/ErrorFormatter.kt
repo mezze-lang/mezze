@@ -4,7 +4,6 @@ import com.mezze.language.ast.SourceLocation
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.module.ModuleError
 import com.mezze.language.typechecker.module.ModuleTypeCheckResult
-import com.mezze.language.typechecker.monomorphization.MonomorphizationError
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.validation.ValidationError
 
@@ -188,50 +187,6 @@ object ErrorFormatter {
             is ModuleError.PrivateExport -> formatModulePrivateExportError(error)
             is ModuleError.InternalModuleAccess -> formatModuleInternalModuleAccessError(error)
         }
-    }
-
-    /**
-     * Format monomorphization error.
-     */
-    fun formatMonomorphizationError(
-        error: MonomorphizationError,
-        sourceCode: String? = null
-    ): String {
-        return buildString {
-            appendLine("❌ Type Error [Monomorphization]")
-            appendLine("━".repeat(50))
-
-            // Location
-            if (error.sourceLocation != null) {
-                val fileInfo = error.sourceLocation.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.sourceLocation.line}:${error.sourceLocation.column}")
-            }
-
-            // Source code context
-            if (sourceCode != null && error.sourceLocation != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.sourceLocation))
-            }
-
-            // Error message
-            appendLine()
-            appendLine("Error: ${error.message}")
-
-            // Function info
-            if (error.functionName != null) {
-                appendLine()
-                appendLine("Function: ${error.functionName}")
-                if (error.typeArgs.isNotEmpty()) {
-                    appendLine("Type arguments: ${error.typeArgs.entries.joinToString { "${it.key} = ${TypeDiffPrinter.formatType(it.value)}" }}")
-                }
-            }
-
-            // Suggestions
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Check that the function is defined and accessible")
-            appendLine("   - Verify that type arguments are concrete (not type variables)")
-            appendLine("   - Ensure monomorphization is enabled")
-        }.trim()
     }
 
     // ========================================================================

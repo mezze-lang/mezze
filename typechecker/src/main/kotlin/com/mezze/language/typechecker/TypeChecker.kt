@@ -15,8 +15,6 @@ import com.mezze.language.typechecker.context.collectFreeTypeVars
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.module.*
-import com.mezze.language.typechecker.monomorphization.MonomorphizationEngine
-import com.mezze.language.typechecker.monomorphization.MonomorphizationResult
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.solving.Substitution
 import com.mezze.language.typechecker.validation.TypeValidator
@@ -32,22 +30,28 @@ import java.nio.file.Paths
  *
  * This is the new, clean architecture for the Mezze type checker!
  *
- * ## 7-Phase Architecture:
+ * ## Phase Architecture:
  *
  * **PHASE 0: Module Resolution** (optional - only if imports present)
- * - Input: Program with UseDeclaration/PubUseDeclaration
+ * - Input: Program with UseDeclaration/PubUseDeclaration (or ParsedModule with ParsedUseDecl)
  * - Output: ModuleImportContext + TypedModules
  * - What: Load and type-check imported modules
  * - Files: ModuleLoader.kt, ImportResolver.kt, ModuleTypeChecker.kt
  *
+ * **PHASE 0.5-0.7: V1 Preprocessing** (on v1 Program)
+ * - Resolve cross-module ability impls (0.5)
+ * - Compute content hashes (0.6)
+ * - Desugar pipe expressions (0.7)
+ * - Convert to ParsedModule for subsequent phases
+ *
  * **PHASE 1: Build Context**
- * - Input: Program (+ optional ModuleImportContext)
+ * - Input: ParsedModule (+ optional ModuleImportContext)
  * - Output: TypingContext (immutable!)
  * - What: Build immutable context from type/ability/effect declarations
  * - File: ContextBuilder.kt
  *
  * **PHASE 2: Generate Constraints**
- * - Input: Program, TypingContext
+ * - Input: ParsedModule, TypingContext
  * - Output: List<Constraint>
  * - What: Generate type constraints without solving them
  * - Files: ConstraintGenerator.kt, ExpressionConstraints.kt, PatternConstraints.kt
@@ -60,12 +64,12 @@ import java.nio.file.Paths
  *
  * **PHASE 4: Emit TypedAST + V2 Pipeline**
  * - Input: ParsedModule, Substitution, ConstraintResults
- * - Output: TypedModule → MonoModule → ResolvedModule → TruffleIR
+ * - Output: TypedModule -> MonoModule -> ResolvedModule -> TruffleIR
  * - What: Build typed AST, monomorphize, resolve, lower to TruffleIR
  * - Files: TypedAstBuilder.kt, Monomorphizer.kt, Resolver.kt, Lowerer.kt
  *
  * **PHASE 5: Validate Types**
- * - Input: Program (desugared), Substitution, Constraints
+ * - Input: ParsedModule, Substitution, Constraints
  * - Output: ValidationResult
  * - What: Check abilities, effects, exhaustiveness, variant constructors
  * - Files: TypeValidator.kt, V2Validator.kt
@@ -125,16 +129,16 @@ class TypeChecker(
          * Type checking succeeded.
          */
         data class Success(
-            val program: Program,                              // Program with inferred types AND continuation transforms
+            val program: Program,                              // V1 Program with inferred types (kept for backward compat; prefer typedModule)
             val substitution: Substitution,
             val monomorphicInstances: Map<String, LetBinding>,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
             val loadedModules: Map<String, TypedModule> = emptyMap(),
             val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
-            val programBeforeContinuations: Program? = null,   // Program BEFORE StateMachine transform (for v2 emitter)
-            val typedModule: com.mezze.language.typedast.TypedModule? = null,       // Stage 1: TypedAST
-            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // Stage 4: TruffleIR (after mono+resolve+lower)
+            val programBeforeContinuations: Program? = null,   // V1 Program BEFORE StateMachine transform (legacy, used as fallback)
+            val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
+            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
             val loweredPerformers: List<Array<String>> = emptyList()  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
         ) : TypeCheckResult()
 
@@ -167,20 +171,6 @@ class TypeChecker(
         val sourceLocation: SourceLocation? = null
     )
 
-    /**
-     * Result of type checking with error recovery.
-     * Contains partial type information even when there are errors.
-     */
-    data class TypeCheckResultWithRecovery(
-        val program: Program?,                              // Program with partial type info (null if parsing failed)
-        val errors: List<TypeCheckError>,                   // All errors collected
-        val partialSubstitution: Substitution?,             // Partial substitution if solving partially succeeded
-        val importContext: ModuleImportContext? = null,     // Resolved imports for IDE support
-        val warnings: List<TypeCheckWarning> = emptyList()
-    ) {
-        val hasErrors: Boolean get() = errors.isNotEmpty()
-        val isSuccess: Boolean get() = errors.isEmpty()
-    }
 
     /**
      * Check a program through all 7 phases.
@@ -733,8 +723,8 @@ class TypeChecker(
     /**
      * Type-check a ParsedModule directly (v2 entry point).
      *
-     * This is the preferred entry point. Internally bridges to checkProgram
-     * via v1 Program conversion until all phases are migrated to v2.
+     * This is the preferred entry point. Converts to v1 Program internally
+     * and delegates to checkProgram which handles all phases.
      */
     fun checkParsedModule(
         module: com.mezze.language.parsedast.ParsedModule,
@@ -756,6 +746,15 @@ class TypeChecker(
     private fun hasImports(program: Program): Boolean {
         return program.items.any { item ->
             item is UseDeclaration || item is PubUseDeclaration
+        }
+    }
+
+    /**
+     * Check if a ParsedModule has import declarations.
+     */
+    private fun hasImportsParsed(module: ParsedModule): Boolean {
+        return module.decls.any { decl ->
+            decl is com.mezze.language.parsedast.ParsedUseDecl || decl is com.mezze.language.parsedast.ParsedPubUseDecl
         }
     }
 
@@ -1318,6 +1317,7 @@ class TypeChecker(
     @JvmOverloads
     /**
      * Type check a ParsedModule (v2 entry point).
+     * Converts to v1 Program and delegates to typeCheck(Program).
      */
     fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
         val program = MezzeParser().parsedModuleToProgram(module)
@@ -1397,25 +1397,24 @@ class TypeChecker(
         currentPath: Path = Paths.get("."),
         enablePrelude: Boolean = false
     ): ParsedModuleCheckResult {
-        // Convert ParsedModule → v1 Program for the existing typechecker
-        val adapter = TypeCheckerV2()
-        val v1Program = adapter.parsedModuleToV1(module)
+        // Convert ParsedModule to v1 Program for the existing typechecker
+        val v1Program = MezzeParser().parsedModuleToProgram(module)
 
         // Run the full typechecker
         val result = checkProgram(v1Program, currentPath, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
-                // Emit from program BEFORE continuation transformation
-                // StateMachineExpression is a v1-only IR that the v2 pipeline can't handle
-                val emitProgram = result.programBeforeContinuations ?: result.program
-                val typedModule = com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
-                    emitProgram,
-                    result.monomorphicInstances,
-                    result.importContext,
-                    module.path,
-                    result.abilityImpls
-                )
+                // Use the TypedModule already emitted by the v2 pipeline (TypedAstBuilder)
+                // inside checkProgram. Falls back to legacy TypedAstEmitter only if v2 failed.
+                val typedModule = result.typedModule
+                    ?: com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
+                        result.programBeforeContinuations ?: result.program,
+                        result.monomorphicInstances,
+                        result.importContext,
+                        module.path,
+                        result.abilityImpls
+                    )
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
             }
             is TypeCheckResult.Failure -> {

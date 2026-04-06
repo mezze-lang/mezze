@@ -21,6 +21,18 @@ import com.mezze.language.ast.*
 object ContentHashValidator {
 
     /**
+     * Validate content hashes in a ParsedModule after typechecking.
+     * Converts to v1 Program internally since the validation logic operates on v1 types.
+     *
+     * @param module The type-checked parsed module
+     * @return List of validation errors (empty if all checks pass)
+     */
+    fun validate(module: com.mezze.language.parsedast.ParsedModule): List<ValidationError> {
+        val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
+        return validate(program)
+    }
+
+    /**
      * Validate content hashes in a program after typechecking.
      *
      * @param program The type-checked program

@@ -182,7 +182,7 @@ sealed class ModuleTypeCheckResult {
  */
 data class TypedModule(
     val modulePath: String,                           // Module path
-    val program: Program,                             // Type-checked AST (with inferred types)
+    val program: Program,                             // Type-checked AST (with inferred types) — v1 compat, use v2TypedModule instead
     val exports: Map<String, ExportedItem>,           // Exports with complete types
     val context: TypingContext,                       // Module-specific typing context
     val substitution: Substitution,                   // Type substitution from inference
@@ -190,7 +190,9 @@ data class TypedModule(
     val dependencyGraph: com.mezze.language.typechecker.dependencies.DependencyGraph =
         com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY,  // Dependencies between definitions
     /** V2 TypedModule emitted by TypedAstBuilder — used by monomorphizer */
-    val v2TypedModule: com.mezze.language.typedast.TypedModule? = null
+    val v2TypedModule: com.mezze.language.typedast.TypedModule? = null,
+    /** V2 ParsedModule — the primary AST representation. Use instead of program when possible. */
+    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 )
 
 // ============================================================================

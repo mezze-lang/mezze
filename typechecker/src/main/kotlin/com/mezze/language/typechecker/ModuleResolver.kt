@@ -52,6 +52,15 @@ data class ProgramIndex(
         private val syntheticLoc = Loc(file = "<index>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
 
         /**
+         * Build an index from a ParsedModule (v2 AST).
+         * Populates v2 fields directly and converts to v1 for remaining fields.
+         */
+        fun build(module: ParsedModule): ProgramIndex {
+            val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
+            return build(program)
+        }
+
+        /**
          * Build an index from a program (v1 AST — converts to v2 types).
          * Called once during module loading, all subsequent lookups are O(1).
          */
