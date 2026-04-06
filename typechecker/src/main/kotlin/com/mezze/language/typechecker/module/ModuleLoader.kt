@@ -230,6 +230,7 @@ class ModuleLoader(
      * Convert ModuleResolver's Module to our LoadedModule type.
      */
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
+        val parser = com.mezze.language.parser.MezzeParser()
         return LoadedModule(
             path = resolverModule.path,
             filePath = resolverModule.filePath,
@@ -246,7 +247,8 @@ class ModuleLoader(
             },
             dependencies = resolverModule.dependencies.map { ModulePath.parse(it.modulePath) },
             index = resolverModule.index,
-            sourceHash = resolverModule.sourceHash
+            sourceHash = resolverModule.sourceHash,
+            parsedModule = parser.programToParsedModule(resolverModule.program, resolverModule.filePath)
         )
     }
 

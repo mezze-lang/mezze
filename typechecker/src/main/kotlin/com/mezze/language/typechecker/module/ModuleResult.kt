@@ -53,11 +53,13 @@ sealed class ModuleLoadResult {
 data class LoadedModule(
     val path: ModulePath,              // Structured module path
     val filePath: String,              // Physical file path
-    val program: Program,              // Parsed AST
+    val program: Program,              // Parsed AST (v1 — kept for backward compat during migration)
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
     val dependencies: List<ModulePath>, // Module dependencies as structured paths
     val index: ProgramIndex = ProgramIndex.EMPTY,  // Pre-computed index for O(1) declaration lookups
-    val sourceHash: String? = null      // Content hash of source for cache validation
+    val sourceHash: String? = null,     // Content hash of source for cache validation
+    /** V2 ParsedModule — the primary AST. Program field is derived from this. */
+    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 ) {
     /** Legacy accessor for module path as string. Use path.fullPath instead. */
     val modulePath: String get() = path.fullPath
