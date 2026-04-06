@@ -67,7 +67,9 @@ class ContextBuilder {
         /** Maps performer names to the set of effects they ADD (not handle) */
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
         /** Maps performer names to their ImplDeclaration (for content hash lookup) */
-        val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
+        val implDeclarations: Map<String, ImplDeclaration> = emptyMap(),
+        /** ParsedModule with impl declarations resolved (ParsedPerformerDecl for abilities → ParsedImplAbilityDecl) */
+        val resolvedModule: ParsedModule? = null
     )
 
     /**
@@ -123,6 +125,8 @@ class ContextBuilder {
 
         val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers
         val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()  // ability impls
+        // Track which ParsedPerformerDecl were converted to ability impls (by identity)
+        val convertedPerformerDecls = mutableMapOf<ParsedPerformerDecl, ParsedImplAbilityDecl>()
 
         // First, add explicitly parsed ability impls (compute content hashes if needed)
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
@@ -164,7 +168,9 @@ class ContextBuilder {
                 // Compute content hash via v1 conversion
                 val v1 = parsedImplAbilityDeclToV1(converted, file)
                 val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1)
-                resolvedAbilityImplDecls.add(converted.copy(contentHash = hash.toFullHexString()))
+                val withHash = converted.copy(contentHash = hash.toFullHexString())
+                resolvedAbilityImplDecls.add(withHash)
+                convertedPerformerDecls[perfDecl] = withHash
             } else {
                 // Real effect performer
                 resolvedImplDecls.add(parsedPerformerDeclToV1(perfDecl, file))
@@ -339,6 +345,20 @@ class ContextBuilder {
         val implDeclarationsMap = (implDecls.associateBy { it.performerName }) +
             v1ImportedImpls.mapValues { (_, impl) -> impl }
 
+        // Build resolvedModule: replace converted ParsedPerformerDecl with ParsedImplAbilityDecl
+        val resolvedMod = if (convertedPerformerDecls.isEmpty()) {
+            module
+        } else {
+            val resolvedDecls = module.decls.map { decl ->
+                if (decl is ParsedPerformerDecl) {
+                    convertedPerformerDecls[decl] ?: decl
+                } else {
+                    decl
+                }
+            }
+            ParsedModule(module.path, resolvedDecls)
+        }
+
         return BuildResult(
             context = ctx,
             typeDeclarations = typeDecls,
@@ -347,7 +367,8 @@ class ContextBuilder {
             performerToEffect = performerToEffectMap,
             performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
-            implDeclarations = implDeclarationsMap
+            implDeclarations = implDeclarationsMap,
+            resolvedModule = resolvedMod
         )
     }
 

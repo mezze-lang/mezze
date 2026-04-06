@@ -38,11 +38,7 @@ import java.nio.file.Paths
  * - What: Load and type-check imported modules
  * - Files: ModuleLoader.kt, ImportResolver.kt, ModuleTypeChecker.kt
  *
- * **PHASE 0.5-0.7: V1 Preprocessing** (on v1 Program)
- * - Resolve cross-module ability impls (0.5)
- * - Compute content hashes (0.6)
- * - Desugar pipe expressions (0.7)
- * - Convert to ParsedModule for subsequent phases
+ * **PHASE 0.5-0.7: DELETED** (previously v1 preprocessing — now handled by parser/ContextBuilder)
  *
  * **PHASE 1: Build Context**
  * - Input: ParsedModule (+ optional ModuleImportContext)
@@ -182,11 +178,33 @@ class TypeChecker(
      */
     @Deprecated("Prefer checkParsedModule(ParsedModule, ...) — v1 Program overload kept for backward compat")
     fun checkProgram(program: Program, currentPath: Path = Paths.get("."), currentModulePath: String? = null, enablePrelude: Boolean = false): TypeCheckResult {
+        // Desugar pipe expressions in v1 Program before converting (the parser desugars pipes
+        // during parsing, but v1 Programs constructed programmatically may still have them)
+        @Suppress("DEPRECATION")
+        val desugared = desugarPipeExpressions(program)
+        // Convert v1 Program to ParsedModule and delegate to the real implementation
+        val parsedModule = MezzeParser().programToParsedModule(desugared, currentModulePath ?: "<unknown>")
+        return checkParsedModule(parsedModule, currentPath, currentModulePath, enablePrelude)
+    }
+
+    /**
+     * Type-check a ParsedModule directly (v2 entry point).
+     *
+     * This is the REAL implementation. Uses the v2 pipeline directly:
+     * ParsedModule -> Phase 0 (import resolution) -> Phase 1-5 (all v2).
+     * Phases 0.5-0.7 (v1 preprocessing) are skipped since the parser
+     * and ContextBuilder handle pipe desugaring, impl resolution, and hashing.
+     */
+    fun checkParsedModule(
+        module: com.mezze.language.parsedast.ParsedModule,
+        currentPath: Path = Paths.get("."),
+        currentModulePath: String? = null,
+        enablePrelude: Boolean = false
+    ): TypeCheckResult {
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
 
         // Initialize TypeCheckCache in memory mode if not already initialized with SQLite
-        // (SQLite persistence is initialized from CLI/CodebaseHelper when in project mode)
         if (!TypeCheckCache.hasPersistence()) {
             TypeCheckCache.initializeInMemory()
         }
@@ -194,28 +212,20 @@ class TypeChecker(
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<String, TypedModule> = emptyMap()
-        // Prelude auto-import: loads inherent impls from all stdlib modules so
-        // method syntax works without explicit `use` (e.g., [1,2,3].map {f = ...}).
         val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
-        val hasUserImports = hasImports(program)
+        val hasUserImports = hasImportsParsed(module)
 
         // Try to use PrecompiledStdlib for fast prelude injection
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
 
         val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null) {
             // FAST PATH: no user imports, precompiled prelude available
-            // mergeInto creates fresh TypeVars — safe across compilations
             importContext = precompiled.preludeImportContext
-            // Ensure prelude loaded modules are available for v2 pipeline (monomorphizer needs them)
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
-            // Reuse cached ModuleLoader/ImportResolver when available — avoids per-test
-            // filesystem traversal (findProjectRoot) and object creation overhead.
-            // Use precompiled ImportResolver only if the path matches the project root.
-            // Tests with custom temp directories need their own resolver.
             val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
             val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
@@ -228,8 +238,9 @@ class TypeChecker(
                 ImportResolver(moduleLoader, moduleTypeChecker)
             }
 
+            // Use v2 overload for ParsedModule import resolution
             val importResult = if (hasUserImports) {
-                importResolver.resolveImports(program)
+                importResolver.resolveImports(module)
             } else {
                 ImportResolutionResult.Success(ModuleImportContext.empty(), emptyMap())
             }
@@ -257,30 +268,14 @@ class TypeChecker(
             parentContext
         }
 
-        // PHASE 0.5: Resolve cross-module ability impls
-        // The parser's resolveImplDeclarations only handles same-file abilities.
-        // When an ability is imported from another module, its impl is parsed as ImplDeclaration
-        // (effect impl). Convert those to ImplAbilityDeclaration using import context.
-        // Must happen BEFORE content hash computation so new ImplAbilityDeclarations get hashed.
-        val resolvedProgram = resolveImplDeclarationsWithImports(program, importContext)
-
-        // PHASE 0.6: Compute Content Hashes for Declarations
-        // Compute hashes BEFORE building context so AbilityImplInfo.contentHash is populated.
-        // Pass importContext so effect/ability hashes can be resolved for local impls referencing them
-        val hashedProgram = computeDeclarationHashes(resolvedProgram, importContext)
-
-        // PHASE 0.7: Desugar PipeExpressions
-        // Convert PipeExpression nodes to FunctionCall by replacing PipePlaceholder with piped value.
-        // This must happen before constraint generation since the typechecker doesn't know about pipes.
-        val desugaredProgram = desugarPipeExpressions(hashedProgram)
-
-        // Convert to ParsedModule for new pipeline stages
-        val parsedModule = MezzeParser().programToParsedModule(desugaredProgram, currentModulePath ?: "<unknown>")
+        // Phases 0.5-0.7 (resolveImplDeclarationsWithImports, computeDeclarationHashes,
+        // desugarPipeExpressions) are SKIPPED — ContextBuilder.build(ParsedModule) handles
+        // impl resolution, TypedAstBuilder handles hashing, and the parser desugars pipes.
 
         // PHASE 1: Build Context (reads ParsedModule)
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
-            module = parsedModule,
+            module = module,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap(),
@@ -290,14 +285,16 @@ class TypeChecker(
         )
         val context = buildResult.context
 
+        // Use the resolved module (where ParsedPerformerDecl for abilities are replaced with ParsedImplAbilityDecl)
+        val parsedModule = buildResult.resolvedModule ?: module
+
         // Build type aliases for pretty printing (include imported types)
-        cachedTypeAliases = buildTypeAliases(desugaredProgram, contextBuilder, importContext)
+        cachedTypeAliases = buildTypeAliasesFromParsedModule(parsedModule, contextBuilder, importContext)
 
         // PHASE 2: Generate Constraints
-        // Include both local ability declarations AND imported ability declarations
         val abilityNames = buildResult.abilityDeclarations.keys +
             (importContext?.importedAbilities?.keys ?: emptySet())
-        // Include both local effect declarations AND imported effect declarations
+
         val effectNames = buildResult.effectDeclarations.keys +
             (importContext?.importedEffects?.keys ?: emptySet())
 
@@ -308,17 +305,12 @@ class TypeChecker(
             )
         }
 
-        // Merge local and imported effect declarations
         val allEffectDeclarations = buildResult.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
 
-        // Merge local and imported type declarations
-        // CRITICAL: Imported types must be available for TypeApplication expansion (e.g., Continuation)
         val allTypeDeclarations = buildResult.typeDeclarations +
             (importContext?.importedTypes ?: emptyMap())
 
-        // CRITICAL: Merge local ability declarations with imported abilities
-        // Include imported abilities with both simple names and qualified names (module::Ability)
         val importedAbilities = importContext?.importedAbilities ?: emptyMap()
         val allAbilityDeclarations = buildResult.abilityDeclarations + importedAbilities
 
@@ -337,7 +329,7 @@ class TypeChecker(
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
         val perBindingSubstitution = programConstraintResult.perBindingSubstitution
 
-        // Check for per-binding solve errors (e.g., type mismatches in variant payloads)
+        // Check for per-binding solve errors
         if (perBindingSolveErrors.isNotEmpty()) {
             val errors = perBindingSolveErrors.map { error ->
                 TypeCheckError(
@@ -350,7 +342,6 @@ class TypeChecker(
         }
 
         // Check for undefined variables BEFORE solving constraints
-        // (If we wait until validation, constraint solving might fail first on those type variables)
         val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
         if (undefinedVars.isNotEmpty()) {
             val validator = TypeValidator(
@@ -361,18 +352,14 @@ class TypeChecker(
             )
             val allVariables = context.getAllBindings()
             val errors = undefinedVars.map { undefinedVar ->
-                // Special case: Check if this is an ability or effect being used as a value
-                // Use allAbilityDeclarations and allEffectDeclarations which include imports
                 val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
                 val isUserDefinedAbility = allAbilityDeclarations.containsKey(undefinedVar.name)
                 val isEffect = allEffectDeclarations.containsKey(undefinedVar.name)
 
-                // Check if this matches any ability operation name (including imported abilities)
                 val matchingAbilityOp = allAbilityDeclarations.entries.firstOrNull { (_, ability) ->
                     ability.operations.any { it.name == undefinedVar.name }
                 }
 
-                // Check if this matches any effect operation name (including imported effects)
                 val matchingEffectOp = allEffectDeclarations.entries.firstOrNull { (_, effect) ->
                     effect.operations.any { it.name == undefinedVar.name }
                 }
@@ -384,17 +371,14 @@ class TypeChecker(
                     "Effect '${undefinedVar.name}' cannot be used as a value. " +
                     "Did you mean to access an operation like ${undefinedVar.name}.operation_name?"
                 } else if (matchingAbilityOp != null) {
-                    // User wrote "show" instead of "Show.show"
                     val abilityName = matchingAbilityOp.key
                     "Undefined variable: ${undefinedVar.name}. " +
                     "Did you mean to call an ability method? Use: $abilityName.${undefinedVar.name}"
                 } else if (matchingEffectOp != null) {
-                    // User wrote "println" instead of "Log.println"
                     val effectName = matchingEffectOp.key
                     "Undefined variable: ${undefinedVar.name}. " +
                     "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
                 } else {
-                    // Check if this is a qualified name (module::function) referring to a private item
                     val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar, loadedModules, importContext)
 
                     if (privateItemMessage != null) {
@@ -432,7 +416,7 @@ class TypeChecker(
             return TypeCheckResult.Failure(errors)
         }
 
-        // Collect unused variable warnings (these are warnings, not errors)
+        // Collect unused variable warnings
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
             TypeCheckWarning(
                 message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
@@ -440,35 +424,22 @@ class TypeChecker(
             )
         }
 
-        // Collect pattern-related warnings (e.g., float literal patterns)
-        // Convert string warnings to structured warnings (these don't have locations yet)
         val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
             TypeCheckWarning(message = warningMsg, sourceLocation = null)
         }
 
-        // Collect all constraints from all bindings (including ability constraints and associated type constraints)
-        // IMPORTANT: Filter out HasConstructor and HasField constraints!
-        // These structural constraints are already solved during per-binding constraint solving
-        // in ConstraintGenerator (Algorithm W). Re-solving them globally causes issues:
-        // - Type variables that were correctly extended to merged variants get re-processed
-        // - Different bindings' structural constraints can interfere with each other
-        // - The variant extensions done per-binding are lost when global solve creates new variants
         val allConstraints = constraintResults.values.flatMap { it.constraints }
             .filter { constraint ->
                 constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
             } + constraintResults.values.flatMap { it.abilityConstraints } +
               constraintResults.values.flatMap { it.associatedTypeConstraints }
 
-
         // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, allTypeDeclarations, allAbilityDeclarations)
         val solveResult = solver.solve(allConstraints)
 
-        // Check if solving failed
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
-                // Convert solver errors to type check errors
-                // CRITICAL: Extract sourceLocation from the constraint that failed
                 val errors = solveResult.errors.map { error ->
                     TypeCheckError(
                         phase = "Constraint Solving",
@@ -479,24 +450,14 @@ class TypeChecker(
                 return TypeCheckResult.Failure(errors)
             }
             is ConstraintSolver.SolveResult.Success -> {
-                // Continue to validation
-                // Compose global substitution with per-binding substitution for bidirectional inference.
-                // The per-binding substitution contains HasField/HasConstructor bindings from TopLevelExpression
-                // that enable type inference from usage sites (e.g., val.name binding the type variable).
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
-                // Convert solver string warnings to structured warnings
                 val warnings = solveResult.warnings.map { msg ->
                     TypeCheckWarning(message = msg, sourceLocation = null)
                 }.toMutableList()
 
-                // Add unused variable warnings (already structured with source locations)
                 warnings.addAll(unusedVarWarnings)
-
-                // Add pattern-related warnings
                 warnings.addAll(patternWarnings)
 
-                // Retrieve generated codec implementations (auto-derived Encode/Decode)
-                // Compute content hashes for these generated impls immediately
                 val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
                     if (impl.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl)
@@ -507,49 +468,23 @@ class TypeChecker(
                 }
 
                 val resolvedAbilities = solveResult.resolvedAbilityConstraints
-                // CRITICAL: Merge per-binding mustBeOpenRowVars with global solver's results
-                // The per-binding solves resolved MustBeOpen constraints to row variables,
-                // but the global solver doesn't have access to these because HasConstructor
-                // constraints were filtered out. We need both sets.
                 val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
                 val mustBeOpenBindings = solveResult.mustBeOpenBindings
                 val mustBeOpenTypes = solveResult.mustBeOpenTypes
 
-                // NOTE: We do NOT filter out ability constraints on concrete types!
-                // The old typechecker keeps ALL constraints for code generation (monomorphization).
-                // Constraints are only filtered if they are on polymorphic types with type variables.
-                // See OldTypeChecker.kt:10770-10803 removeRedundantAbilityConstraints()
-                //
-                // Ability constraints on concrete types (like NumMul Int) are needed for:
-                // 1. Resolving which implementation to use during code generation
-                // 2. Multi-parameter abilities validation
-                //
-                // We only keep constraints that implementations were validated during constraint solving.
-
-                // CRITICAL FIX: Apply global substitution to constraint results
-                // The per-binding solves in ConstraintGenerator may have left type variables unsolved,
-                // but the global solve has the complete substitution. We need to update the constraint
-                // results with the globally solved types before passing to TypedAstBuilder and TypeValidator.
-
-
-                // Need a ConstraintGenerator instance to call addAbilityConstraintsToFunctionType
                 val tempGenerator = ConstraintGenerator.create(buildResult.typeDeclarations)
 
                 val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
-                    // Apply global substitution to get the final type
                     val resolvedType = substitution.apply(result.type)
-                    // Add ability constraints to FunctionType
                     val typeWithAbilities = tempGenerator.addAbilityConstraintsToFunctionType(resolvedType, result.abilityConstraints, substitution)
                     result.copy(type = typeWithAbilities)
                 }
 
-                // TCO: Collect all tail call locations from constraint results
                 val tailCallLocations = constraintResults.values
                     .flatMap { it.tailCalls }
                     .filterNotNull()
                     .toSet()
 
-                // Collect method call resolutions from all constraint results
                 val allMethodCallResolutions = constraintResults.values
                     .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo>()) { acc, r ->
                         acc + r.methodCallResolutions
@@ -563,11 +498,9 @@ class TypeChecker(
                     buildResult.implDeclarations
                 )
 
-                // Validate the constraints (like HasConstructor) — keep with early return on failure
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
                 when (constraintValidation) {
                     is ValidationResult.Failure -> {
-                        // Convert validation errors to type check errors
                         val errors = constraintValidation.errors.map { error ->
                             TypeCheckError(
                                 phase = "Validation",
@@ -584,9 +517,7 @@ class TypeChecker(
                     }
                 }
 
-                // V2 Pipeline: TypedAST → Mono → Resolve → Lower → TruffleIR
-                // Skip for stdlib modules — they don't need their own TruffleIR since the
-                // monomorphizer pulls reachable stdlib functions into the user module's IR.
+                // V2 Pipeline: TypedAST -> Mono -> Resolve -> Lower -> TruffleIR
                 val isStdlibModule = currentModulePath != null && currentModulePath.startsWith("std::")
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
@@ -614,11 +545,10 @@ class TypeChecker(
                     System.err.println("V2 TypedAstBuilder (${currentModulePath}): ${emitEx::class.simpleName}: ${emitEx.message}")
                 }
 
-                // Phase 2: Mono → Resolve → Lower (entry module only)
+                // Phase 2: Mono -> Resolve -> Lower (entry module only)
                 if (!isStdlibModule && emittedTypedModule != null) try {
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(emittedTypedModule!!)
 
-                    // Build allModules: entry + user imports + prelude (all v2 TypedAST)
                     val preludeV2 = PrecompiledStdlib.v2Modules
                     val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
                     allModules.putAll(preludeV2)
@@ -634,7 +564,6 @@ class TypeChecker(
 
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
 
-                    // V2 validation: pattern exhaustiveness and unreachable on MonoAST.
                     v2MonoModule = monoModule
 
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
@@ -652,16 +581,11 @@ class TypeChecker(
                     System.err.println("V2 pipeline: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 validation on MonoAST (pattern exhaustiveness, unreachable patterns).
-                // Runs outside pipeline try-catch so validation errors propagate as TypeCheckError.
+                // V2 validation on MonoAST
                 if (v2MonoModule != null) {
                     com.mezze.language.typechecker.mono.V2Validator(allTypeDeclarations).validate(v2MonoModule)
                 }
 
-                // Validation: TypeValidator for abilities/effects/annotations,
-                // Pattern checks handled by V2Validator (on MonoAST) + TypeValidator fallback.
-                // Top-level effects: constraint solver wraps performed bindings in SuspendedType.
-                // Ability constraints, annotations, effect declarations: TypeValidator.
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
                     val mapped = v2ValidationResult.errors.map { error ->
@@ -670,13 +594,14 @@ class TypeChecker(
                     return TypeCheckResult.Failure(mapped)
                 }
 
-                // Set inferredType on program bindings so downstream consumers
-                // (module exports, tests) can access resolved types.
-                val typedItems = desugaredProgram.items.map { item ->
+                // Build a v1 Program with inferredType and content hashes for backward compat
+                val v1ProgramRaw = MezzeParser().parsedModuleToProgram(parsedModule)
+                // Compute content hashes on the v1 Program (needed by extractExports and downstream)
+                val v1Program = ContentHashComputer.computeHashes(v1ProgramRaw).program
+                val typedItems = v1Program.items.map { item ->
                     when (item) {
                         is LetBinding -> {
                             if (item.inferredType != null) return@map item
-                            // Try simple binding name, then destructured pattern key
                             val key = if (item.isSimpleBinding) item.variableName else null
                             val resolved = key?.let { globallyResolvedConstraintResults[it] }?.let { cr ->
                                 substitution.apply(cr.type)
@@ -714,51 +639,9 @@ class TypeChecker(
         }
     }
 
-    /**
-     * Type-check a ParsedModule directly (v2 entry point).
-     *
-     * This is the preferred entry point. Internally bridges to checkProgram
-     * via v1 Program conversion until all phases are migrated to v2.
-     */
-    /**
-     * Type-check a ParsedModule directly (v2 entry point).
-     *
-     * This is the preferred entry point. Uses the v2 pipeline directly:
-     * ParsedModule -> Phase 0 (import resolution) -> Phase 1-5 (all v2).
-     * Phases 0.5-0.7 (v1 preprocessing) are skipped since the parser
-     * and ContextBuilder handle pipe desugaring, impl resolution, and hashing.
-     *
-     * Falls back to checkProgram for the v1 bridge (needed for prelude loading
-     * and the typed program output) until the full pipeline is v2.
-     */
-    fun checkParsedModule(
-        module: com.mezze.language.parsedast.ParsedModule,
-        currentPath: Path = Paths.get("."),
-        currentModulePath: String? = null,
-        enablePrelude: Boolean = false
-    ): TypeCheckResult {
-        // TODO: Once Phase 0 import resolution is fully v2, remove this v1 bridge.
-        // For now, convert to v1 Program because checkProgram still handles
-        // prelude loading and v1 typed program output for downstream consumers.
-        @Suppress("DEPRECATION")
-        val program = MezzeParser().parsedModuleToProgram(module)
-        @Suppress("DEPRECATION")
-        return checkProgram(program, currentPath, currentModulePath, enablePrelude)
-    }
-
     // ========================================================================
     // HELPER METHODS
     // ========================================================================
-
-    /**
-     * Check if a program has import declarations.
-     */
-    @Deprecated("Use hasImportsParsed(ParsedModule) instead")
-    private fun hasImports(program: Program): Boolean {
-        return program.items.any { item ->
-            item is UseDeclaration || item is PubUseDeclaration
-        }
-    }
 
     /**
      * Check if a ParsedModule has import declarations.
@@ -1030,182 +913,6 @@ class TypeChecker(
         return context
     }
 
-    /**
-     * Compute content hashes for all declarations in a program.
-     * This is done early (Phase 0.5) so that AbilityImplInfo.contentHash
-     * is populated when ContextBuilder processes the declarations.
-     *
-     * Note: This only computes hashes for declarations that exist in the source.
-     * Generated codec impls get their hashes computed inline in CodecGenerator.
-     *
-     * @param importContext The import context containing imported effects/abilities with content hashes
-     */
-    @Deprecated("V1 pipeline only — v2 uses ParsedASTHasher and TypedAstBuilder for hashing")
-    private fun computeDeclarationHashes(
-        program: Program,
-        importContext: ModuleImportContext? = null
-    ): Program {
-        // Maps for resolving references by name (temporary, for populating resolvedContentHash)
-        // These are keyed by the LOCAL NAME (e.g., "Log"), not qualified strings
-        val effectHashByName = mutableMapOf<String, String>()
-        val abilityHashByName = mutableMapOf<String, String>()
-
-        // Initialize from imported effects/abilities - extract hash from each declaration
-        // Store under the ORIGINAL name (the actual effect/ability name, not the import key)
-        importContext?.importedEffects?.values?.forEach { decl ->
-            decl.contentHash?.let { hash ->
-                effectHashByName[decl.name] = hash
-            }
-        }
-        importContext?.importedAbilities?.values?.forEach { decl ->
-            decl.contentHash?.let { hash ->
-                abilityHashByName[decl.name] = hash
-            }
-        }
-
-        // PASS 1: Compute all declaration hashes and build lookup maps
-        val pass1Items = program.items.map { item ->
-            when (item) {
-                is ImplAbilityDeclaration -> {
-                    if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(item)
-                        item.copy(contentHash = hash.toFullHexString())
-                    } else {
-                        item  // Already has hash (e.g., from import)
-                    }
-                }
-                is ImplDeclaration -> {
-                    if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(item)
-                        item.copy(contentHash = hash.toFullHexString())
-                    } else {
-                        item
-                    }
-                }
-                is LetBinding -> {
-                    if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(item)
-                        item.copy(contentHash = hash.toFullHexString())
-                    } else {
-                        item
-                    }
-                }
-                is TypeDeclaration -> {
-                    if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashTypeDeclaration(item)
-                        item.copy(contentHash = hash.toFullHexString())
-                    } else {
-                        item
-                    }
-                }
-                is EffectDeclaration -> {
-                    val hashStr: String = if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashEffectDeclaration(item)
-                        hash.toFullHexString()
-                    } else {
-                        item.contentHash!!
-                    }
-                    effectHashByName[item.name] = hashStr
-                    if (item.contentHash == null) {
-                        item.copy(contentHash = hashStr)
-                    } else {
-                        item
-                    }
-                }
-                is AbilityDeclaration -> {
-                    val hashStr: String = if (item.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(item)
-                        hash.toFullHexString()
-                    } else {
-                        item.contentHash!!
-                    }
-                    abilityHashByName[item.name] = hashStr
-                    if (item.contentHash == null) {
-                        item.copy(contentHash = hashStr)
-                    } else {
-                        item
-                    }
-                }
-                // Items without content hash
-                is TopLevelExpression, is UseDeclaration, is PubUseDeclaration -> item
-            }
-        }
-
-        // PASS 2: Populate resolvedContentHash on QualifiedRefs within impls
-        val updatedItems = pass1Items.map { item ->
-            when (item) {
-                is ImplDeclaration -> {
-                    // Resolve effect reference to its content hash using the local name
-                    // (e.g., "Log" from "log::Log" or just "Log" for unqualified)
-                    val effectHash = effectHashByName[item.effect.localName]
-                    if (effectHash != null && item.effect.resolvedContentHash == null) {
-                        item.copy(effect = item.effect.withResolvedHash(effectHash))
-                    } else {
-                        item
-                    }
-                }
-                is ImplAbilityDeclaration -> {
-                    // Resolve ability reference to its content hash using the local name
-                    val abilityRef = item.abilityRef
-                    val abilityHash = item.abilityName?.let { abilityHashByName[it] }
-                    if (abilityHash != null && abilityRef != null && abilityRef.resolvedContentHash == null) {
-                        item.copy(target = ImplTarget.Named(abilityRef.withResolvedHash(abilityHash)))
-                    } else {
-                        item
-                    }
-                }
-                else -> item
-            }
-        }
-
-        return Program(items = updatedItems)
-    }
-
-    /**
-     * Populate content hashes in UseDeclaration items from import resolution.
-     * This enables the interpreter to use content-hash based lookups for imports.
-     */
-    private fun populateImportContentHashes(
-        program: Program,
-        importContext: ModuleImportContext?
-    ): Program {
-        if (importContext == null) return program
-
-        val importedBindings = importContext.importedBindings
-        val importedTypes = importContext.importedTypes
-        val importedAbilities = importContext.importedAbilities
-        val importedEffects = importContext.importedEffects
-        val importedImpls = importContext.importedImpls
-
-        val updatedItems = program.items.map { item ->
-            when (item) {
-                is UseDeclaration -> {
-                    when (val path = item.path) {
-                        is SelectivePath -> {
-                            val updatedItems = path.items.map { importItem ->
-                                val localName = importItem.alias ?: importItem.name
-                                // Try to find content hash from imported bindings
-                                val contentHash = importedBindings[localName]?.contentHash
-                                    ?: importedTypes[localName]?.contentHash
-                                    ?: importedAbilities[localName]?.contentHash
-                                    ?: importedEffects[localName]?.contentHash
-                                    ?: importedImpls[localName]?.contentHash
-                                if (contentHash != null) {
-                                    importItem.copy(contentHash = contentHash)
-                                } else {
-                                    importItem
-                                }
-                            }
-                            item.copy(path = path.copy(items = updatedItems))
-                        }
-                        is ModulePath -> item  // Module path imports don't have per-item hashes
-                    }
-                }
-                else -> item
-            }
-        }
-        return Program(items = updatedItems)
-    }
 
     /**
      * Convert a TypeAnnotation to a string for ability impl key.
@@ -1230,24 +937,23 @@ class TypeChecker(
         return cachedTypeAliases
     }
 
+
     /**
-     * Build type aliases from type declarations.
-     * Called during type checking to populate the cache.
-     * Includes both local type declarations and imported types.
+     * Build type aliases from a ParsedModule (v2 path).
+     * Same as buildTypeAliases but reads from ParsedModule instead of v1 Program.
      */
-    private fun buildTypeAliases(
-        program: Program,
+    private fun buildTypeAliasesFromParsedModule(
+        module: ParsedModule,
         contextBuilder: ContextBuilder,
         importContext: ModuleImportContext?
     ): Map<String, TypeAliasInfo> {
         val result = mutableMapOf<String, TypeAliasInfo>()
 
-        // Helper function to add a type declaration to the result
-        fun addTypeDeclaration(item: TypeDeclaration) {
-            // Convert the type definition to a MezzeType
-            val definitionType = when (val def = item.definition) {
+        fun addParsedTypeDecl(typeDecl: com.mezze.language.parsedast.ParsedTypeDecl) {
+            // Convert to v1 TypeDeclaration for the existing helper
+            val v1TypeDecl = contextBuilder.parsedTypeDeclToV1(typeDecl)
+            val definitionType = when (val def = v1TypeDecl.definition) {
                 is VariantDefinition -> {
-                    // Build VariantType from constructors
                     val constructors = def.constructors.associate { ctor ->
                         val dataType = ctor.dataType?.let { contextBuilder.convertTypeAnnotation(it) }
                         ctor.name to dataType
@@ -1255,42 +961,40 @@ class TypeChecker(
                     MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = if (def.isOpen) RowVar.fresh() else null,
-                        typeName = item.name  // Track the type alias name
+                        typeName = v1TypeDecl.name
                     )
                 }
                 is RecordDefinition -> {
-                    // Build RecordType from fields
                     val fields = def.fields.associate { field ->
                         field.name to contextBuilder.convertTypeAnnotation(field.type)
                     }
                     MezzeType.RecordType(
                         fields = fields,
                         rowVar = if (def.isOpen) RowVar.fresh() else null,
-                        typeName = item.name  // Track the type alias name
+                        typeName = v1TypeDecl.name
                     )
                 }
                 else -> null
             }
-
             if (definitionType != null) {
-                result[item.name] = TypeAliasInfo(
-                    name = item.name,
-                    typeParams = item.typeParams,
+                result[v1TypeDecl.name] = TypeAliasInfo(
+                    name = v1TypeDecl.name,
+                    typeParams = v1TypeDecl.typeParams,
                     definition = definitionType
                 )
             }
         }
 
-        // Add local type declarations
-        for (item in program.items) {
-            if (item is TypeDeclaration) {
-                addTypeDeclaration(item)
+        // Add local type declarations from ParsedModule
+        for (decl in module.decls) {
+            if (decl is com.mezze.language.parsedast.ParsedTypeDecl) {
+                addParsedTypeDecl(decl)
             }
         }
 
-        // Add imported type declarations (v2 ParsedTypeDecl → convert to v1 for addTypeDeclaration)
+        // Add imported type declarations
         importContext?.importedTypes?.values?.forEach { typeDecl ->
-            addTypeDeclaration(contextBuilder.parsedTypeDeclToV1(typeDecl))
+            addParsedTypeDecl(typeDecl)
         }
 
         return result
@@ -1355,8 +1059,35 @@ class TypeChecker(
      * Converts to v1 Program and delegates to typeCheck(Program).
      */
     fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
-        val program = MezzeParser().parsedModuleToProgram(module)
-        return typeCheck(program, currentPath, enablePrelude, modulePath)
+        // Reset type variable counter for consistent naming (old behavior)
+        com.mezze.language.ast.TypeVar.resetCounter()
+
+        // Delegate directly to checkParsedModule (the real v2 implementation)
+        val result = checkParsedModule(module, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
+
+        return when (result) {
+            is TypeCheckResult.Success -> {
+                val resolvedImports = buildResolvedImports(result.importContext)
+                val structuredWarnings = result.warnings.map { warning ->
+                    com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
+                }
+                com.mezze.language.ast.TypeCheckResult(
+                    program = result.program,
+                    resolvedImports = resolvedImports,
+                    warnings = structuredWarnings,
+                    importedAbilities = emptyMap(),
+                    importedEffects = emptyMap(),
+                    loweredFunctions = result.loweredFunctions ?: emptyList(),
+                    typedModule = result.typedModule,
+                    performerRecords = result.loweredPerformers
+                )
+            }
+            is TypeCheckResult.Failure -> {
+                val error = result.errors.firstOrNull()
+                    ?: throw TypeCheckError("Type checking failed with unknown error")
+                throw TypeCheckError(error.message, error.sourceLocation)
+            }
+        }
     }
 
     @Deprecated("Use typeCheck(ParsedModule, ...) instead — v1 Program overload kept for backward compat")
@@ -1432,15 +1163,11 @@ class TypeChecker(
         currentPath: Path = Paths.get("."),
         enablePrelude: Boolean = false
     ): ParsedModuleCheckResult {
-        // Convert ParsedModule to v1 Program for the existing typechecker
-        val v1Program = MezzeParser().parsedModuleToProgram(module)
-
-        // Run the full typechecker
-        val result = checkProgram(v1Program, currentPath, enablePrelude = enablePrelude)
+        // Call the 4-param checkParsedModule directly (the real v2 implementation)
+        val result = checkParsedModule(module, currentPath, currentModulePath = null, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
-                // Use the TypedModule emitted by the v2 pipeline (TypedAstBuilder)
                 val typedModule = result.typedModule
                     ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
@@ -1742,79 +1469,6 @@ class TypeChecker(
         )
     }
 
-    /**
-     * Resolve ImplDeclarations that reference imported abilities (not effects) into ImplAbilityDeclarations.
-     *
-     * The parser's resolveImplDeclarations only handles same-file ability names. When an ability
-     * is imported from another module, its impl is still parsed as ImplDeclaration (effect impl syntax).
-     * This step converts those to ImplAbilityDeclaration using the import context.
-     */
-    @Deprecated("V1 pipeline only — v2 ContextBuilder.build(ParsedModule) handles impl resolution")
-    private fun resolveImplDeclarationsWithImports(
-        program: Program,
-        importContext: ModuleImportContext?
-    ): Program {
-        if (importContext == null) return program
-
-        val importedAbilities = importContext.importedAbilities
-        val importedEffects = importContext.importedEffects
-        val localAbilityNames = program.items.filterIsInstance<AbilityDeclaration>().map { it.name }.toSet()
-        val localEffectNames = program.items.filterIsInstance<EffectDeclaration>().map { it.name }.toSet()
-
-        // Build lookup sets for both qualified and unqualified names
-        val allAbilityNames = localAbilityNames + importedAbilities.keys +
-            importedAbilities.values.map { it.name }.toSet()
-        val allEffectNames = localEffectNames + importedEffects.keys +
-            importedEffects.values.map { it.name }.toSet()
-
-        var changed = false
-        val resolvedItems = program.items.map { item ->
-            if (item is ImplDeclaration) {
-                // Build the full reference name (e.g., "serializer::Serializable" or just "Show")
-                val fullRefName = if (item.effect.isQualified) {
-                    "${item.effect.qualifier!!.fullPath}::${item.effect.localName}"
-                } else {
-                    item.effect.localName
-                }
-                val localName = item.effect.localName
-
-                // Check if this references an ability (by qualified name, unqualified name, or local name)
-                val isAbility = fullRefName in allAbilityNames ||
-                    localName in allAbilityNames
-                val isEffect = fullRefName in allEffectNames ||
-                    localName in allEffectNames
-
-                if (isAbility && !isEffect) {
-                    changed = true
-                    val targetType = IdentifierTypeAnnotation(item.performerName)
-                    ImplAbilityDeclaration(
-                        target = ImplTarget.Named(item.effect),
-                        targetTypes = listOf(targetType),
-                        forallVars = emptyList(),
-                        associatedTypeBindings = item.associatedTypeBindings,
-                        operations = item.operations.map { op ->
-                            val paramType = op.paramType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
-                            val returnType = op.returnType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() }
-                            ImplAbilityOperation(
-                                name = op.name,
-                                paramType = paramType,
-                                returnType = returnType,
-                                implementation = op.implementation
-                            )
-                        },
-                        inferredType = null,
-                        sourceLocation = item.sourceLocation
-                    )
-                } else {
-                    item
-                }
-            } else {
-                item
-            }
-        }
-
-        return if (changed) program.copy(items = resolvedItems) else program
-    }
 
     private fun desugarPipeInProgramItem(item: ProgramItem): ProgramItem {
         return when (item) {
