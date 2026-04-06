@@ -56,7 +56,7 @@ sealed interface ValidationError {
             if (requiredBy != null) {
                 append(" (needed for $requiredBy)")
             }
-            append(". To enable this, implement: impl $abilityName $typeName where { ... }")
+            append(". To enable this, implement: impl $abilityName for $typeName where { ... }")
         }
 
         override fun location() = sourceLocation
@@ -401,7 +401,7 @@ sealed interface ValidationError {
             if (context != null) {
                 append(" in $context")
             }
-            append(". You need to define: impl $abilityName $typeName where { ... }")
+            append(". You need to define: impl $abilityName for $typeName where { ... }")
         }
 
         override fun location() = sourceLocation

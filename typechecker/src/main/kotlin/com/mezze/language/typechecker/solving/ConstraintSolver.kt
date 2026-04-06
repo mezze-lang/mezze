@@ -2290,7 +2290,7 @@ class ConstraintSolver(
                     "NumMod" -> "%"
                     else -> abilityName
                 }
-                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName $primaryType where { ... }"
+                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }"
             }
             "Eq" -> "Cannot compare $typeNames for equality. To enable this, implement: impl Eq $primaryType where { ... }"
             "Ord" -> "Cannot compare $typeNames for ordering. To enable this, implement: impl Ord $primaryType where { ... } (requires Eq)"
@@ -2298,7 +2298,7 @@ class ConstraintSolver(
             "Hash" -> "Cannot hash $typeNames. To enable this, implement: impl Hash $primaryType where { ... }"
             "Default" -> "No default value for $typeNames. To enable this, implement: impl Default $primaryType where { ... }"
             "Parse" -> "Cannot parse into $typeNames. To enable this, implement: impl Parse $primaryType where { ... }"
-            "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert $typeNames where { ... }"
+            "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert for $typeNames where { ... }"
             "Decode", "DecodeRepr" -> {
                 // Special handling for Decode/DecodeRepr - check if the data type is a type variable
                 val dataType = typeArgs.getOrNull(1)
@@ -2324,7 +2324,7 @@ class ConstraintSolver(
                     "Cannot encode $typeNames. Ensure the format implements Format and the data type is serializable."
                 }
             }
-            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName $primaryType where { ... }"
+            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }"
         }
     }
 
