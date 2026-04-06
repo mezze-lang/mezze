@@ -318,13 +318,13 @@ data class ProgramIndex(
 data class Module(
     val path: ModulePath,
     val filePath: String,
-    @Deprecated("Use parsedModule instead — v1 Program kept for backward compat during migration")
-    val program: Program,
+    @Deprecated("Use parsedModule instead — v1 Program kept temporarily for backward compat")
+    val program: Program = Program(emptyList()),
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
     val sourceHash: String? = null,
     val index: ProgramIndex = ProgramIndex.EMPTY,
-    /** V2 ParsedModule — the primary AST. Use instead of program when possible. */
+    /** V2 ParsedModule — the primary AST. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 ) {
     /** Legacy accessor for module name as string. Use path.fullPath instead. */
@@ -796,35 +796,27 @@ class ModuleResolver(
             loadingStack.add(modulePath)
 
             try {
-                // Parse the module with file name for better error messages
-                // Create fresh parser for thread safety
-                // Parse to both ParsedModule (new) and v1 Program (still needed for some consumers)
+                // Parse module directly to v2 ParsedModule — no v1 Program needed
                 val parser = MezzeParser()
                 val parsedModule = parser.parseParsedModule(source, file = filePath.toString())
-                val program = parser.parse(source, file = filePath.toString())
 
-                // Compute content hashes on v1 Program (needed for ProgramIndex and dependencies)
-                val hashResult = ContentHashComputer.computeHashes(program)
-                val typedProgram = hashResult.program
-
-                // Extract exports from ParsedModule (no v1 Program dependency for exports)
+                // Extract exports from ParsedModule (v2 path)
                 val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
                 if (parsedExports.isEmpty() && parsedModule.decls.isNotEmpty()) {
                     java.io.File("/tmp/empty_exports.txt").appendText("Module $modulePath: ${parsedModule.decls.size} decls but 0 exports. Decl types: ${parsedModule.decls.map { it::class.simpleName }}\n")
                 }
 
-                // Extract dependencies
-                val dependencies = extractDependencies(typedProgram)
+                // Extract dependencies from ParsedModule (v2 path)
+                val dependencies = extractDependenciesFromParsedModule(parsedModule)
 
-                // Build program index for O(1) declaration lookups
-                val programIndex = ProgramIndex.build(typedProgram)
+                // Build program index for O(1) declaration lookups (v2 path)
+                val programIndex = ProgramIndex.build(parsedModule)
 
                 // Create module representation
                 val structuredPath = ModulePath.parse(modulePath)
                 val module = Module(
                     path = structuredPath,
                     filePath = filePath.toString(),
-                    program = typedProgram,
                     exports = parsedExports,
                     dependencies = dependencies,
                     sourceHash = sourceHash,
@@ -855,10 +847,9 @@ class ModuleResolver(
         return Module(
             path = ModulePath.parse(modulePath),
             filePath = "built-in",
-            program = Program(emptyList()),
             exports = emptyMap(),
             dependencies = emptyList(),
-            sourceHash = null,  // Built-in modules have no source hash
+            sourceHash = null,
             index = ProgramIndex.EMPTY
         )
     }
@@ -1621,33 +1612,46 @@ class ModuleResolver(
     /**
      * Extract module dependencies from use declarations
      */
-    @Deprecated("Operates on v1 Program — should be migrated to ParsedModule")
-    private fun extractDependencies(program: Program): List<ModuleDependency> {
+    /**
+     * Extract module dependencies from a ParsedModule's use declarations.
+     */
+    private fun extractDependenciesFromParsedModule(module: ParsedModule): List<ModuleDependency> {
         val dependencies = mutableListOf<ModuleDependency>()
-        
-        for (item in program.items) {
-            when (item) {
-                is UseDeclaration -> {
+
+        for (decl in module.decls) {
+            when (decl) {
+                is ParsedUseDecl -> {
+                    val v1Path = parsedUsePathToV1(decl.path)
                     dependencies.add(ModuleDependency(
-                        modulePath = pathToString(item.path),
-                        usePath = item.path,
-                        alias = item.alias
+                        modulePath = pathToString(v1Path),
+                        usePath = v1Path,
+                        alias = decl.alias
                     ))
                 }
-                is PubUseDeclaration -> {
+                is ParsedPubUseDecl -> {
+                    val v1Path = parsedUsePathToV1(decl.path)
                     dependencies.add(ModuleDependency(
-                        modulePath = pathToString(item.path),
-                        usePath = item.path,
-                        alias = item.alias
+                        modulePath = pathToString(v1Path),
+                        usePath = v1Path,
+                        alias = decl.alias
                     ))
                 }
-                else -> {
-                    // Other items don't create dependencies
-                }
+                else -> { /* Other items don't create dependencies */ }
             }
         }
-        
+
         return dependencies
+    }
+
+    /** Convert v2 ParsedUsePath to v1 UsePath (for dependency extraction) */
+    private fun parsedUsePathToV1(path: ParsedUsePath): UsePath {
+        return when (path) {
+            is ParsedUsePath.Module -> ModulePath(path.path.segments)
+            is ParsedUsePath.Selective -> SelectivePath(
+                module = path.modulePath.segments,
+                items = path.items.map { ImportItem(name = it.name, alias = it.alias) }
+            )
+        }
     }
     
     /**
@@ -1773,25 +1777,9 @@ class ModuleResolver(
      */
     @Deprecated("Use updateModuleExportsV2(ParsedModule) instead — v1 overload kept for backward compat")
     fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, MezzeType>? = null) {
-        // Skip update if program is empty (new pipeline returns empty v1 Program)
         if (typedProgram.items.isEmpty()) return
-        DebugLogger.debug(Category.ModuleResolver) { "updateModuleExports: modulePath=$modulePath, ${typedProgram.items.size} items" }
-
-        if (DebugLogger.isCategoryEnabled(Category.ModuleResolver)) {
-            // Check if identifiers are qualified
-            typedProgram.items.forEach { item ->
-                if (item is LetBinding) {
-                    DebugLogger.debug(Category.ModuleResolver) {
-                        "LetBinding '${item.variableName}' expression type: ${item.expression.javaClass.simpleName}"
-                    }
-                    // Check for identifiers in the expression
-                    checkIdentifiersInExpression(item.expression, "  ")
-                }
-            }
-        }
 
         val module = getFromCache(modulePath)
-        // Rebuild index with the new typed program
         @Suppress("DEPRECATION")
         val updatedIndex = ProgramIndex.build(typedProgram)
 
@@ -1803,12 +1791,10 @@ class ModuleResolver(
                 index = updatedIndex
             )
         } else {
-            // Module not in cache yet, create it
-            // Note: sourceHash will be null here since we don't have access to the source
-            // This path is typically used when type-checking imported modules
+            @Suppress("DEPRECATION")
             Module(
                 path = ModulePath.parse(modulePath),
-                filePath = "", // Will be updated if needed
+                filePath = "",
                 program = typedProgram,
                 exports = extractExports(typedProgram, modulePath, typeContext),
                 dependencies = emptyList(),
@@ -1817,8 +1803,6 @@ class ModuleResolver(
             )
         }
         putInCache(modulePath, updatedModule)
-
-        DebugLogger.debug(Category.ModuleResolver) { "Cached module with ${updatedModule.exports.size} exports" }
     }
 
     /**
@@ -1880,7 +1864,6 @@ class ModuleResolver(
             val newModule = Module(
                 path = ModulePath.parse(modulePath),
                 filePath = "",
-                program = Program(emptyList()),
                 exports = updatedExports,
                 dependencies = emptyList(),
                 sourceHash = null,

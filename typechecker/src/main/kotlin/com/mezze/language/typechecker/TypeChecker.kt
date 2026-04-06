@@ -666,8 +666,8 @@ class TypeChecker(
         // Load prelude module list from _prelude.mz (compiler-internal, not user-importable)
         val preludeSource = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
             ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
-        val syntheticProgram = if (preludeSource != null) {
-            MezzeParser().parse(preludeSource)
+        val syntheticModule = if (preludeSource != null) {
+            MezzeParser().parseParsedModule(preludeSource, file = "<prelude>")
         } else {
             // Fallback: hardcoded list if _prelude.mz not found
             val preludeModules = listOf(
@@ -680,10 +680,11 @@ class TypeChecker(
                 listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
                 listOf("std", "collections", "bytes"),
             )
-            Program(items = preludeModules.map { UseDeclaration(path = ModulePath(it)) })
+            val syntheticProgram = Program(items = preludeModules.map { UseDeclaration(path = ModulePath(it)) })
+            MezzeParser().programToParsedModule(syntheticProgram, "<prelude>")
         }
 
-        val result = importResolver.resolveImports(syntheticProgram)
+        val result = importResolver.resolveImports(syntheticModule)
         val preludeContext = when (result) {
             is ImportResolutionResult.Success -> {
                 // Import inherent impls for method syntax + named ability impls for
@@ -795,23 +796,7 @@ class TypeChecker(
             return false
         }
 
-        // Fallback: v1 Program (for backward compat with preloaded modules)
-        @Suppress("DEPRECATION")
-        val program = module.program
-        for (item in program.items) {
-            when (item) {
-                is LetBinding -> {
-                    if (item.isSimpleBinding && item.variableName == itemName) return true
-                }
-                is TypeDeclaration -> if (item.name == itemName) return true
-                is AbilityDeclaration -> if (item.name == itemName) return true
-                is EffectDeclaration -> if (item.name == itemName) return true
-                is ImplDeclaration -> if (item.performerName == itemName) return true
-                is ImplAbilityDeclaration -> {}
-                is UseDeclaration, is PubUseDeclaration, is TopLevelExpression -> {}
-            }
-        }
-
+        // No parsedModule available — item not found
         return false
     }
 
@@ -1432,7 +1417,6 @@ class TypeChecker(
                 // needs NumAdd for Int, which isn't available during standalone module validation).
                 val typedModule = com.mezze.language.typechecker.module.TypedModule(
                     modulePath = modulePath,
-                    program = program,
                     exports = emptyMap(),  // Actual exports are in ModuleResolver
                     context = TypingContext.empty,
                     substitution = com.mezze.language.typechecker.solving.Substitution()

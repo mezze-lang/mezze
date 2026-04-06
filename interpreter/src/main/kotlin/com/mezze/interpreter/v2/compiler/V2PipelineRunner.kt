@@ -9,7 +9,6 @@ import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
 import com.mezze.language.typedast.*
 import com.mezze.language.typechecker.TypeChecker
-import com.mezze.language.typechecker.TypeCheckerV2
 import com.mezze.language.typechecker.mono.Lowerer
 import com.mezze.language.typechecker.mono.Monomorphizer
 import com.mezze.language.typechecker.mono.Resolver
@@ -60,11 +59,10 @@ object V2PipelineRunner {
         // Stage 1.5: Wrap top-level code into single entry function
         entryTyped = EntryFunctionBuilder.wrapTopLevel(entryTyped)
 
-        // Stage 1b: Convert dependency modules to v2 TypedModules (cached by content hash)
+        // Stage 1b: Collect v2 TypedModules from loaded dependencies (already available from v2 pipeline)
         val allV2Modules = mutableMapOf(entryTyped.hash to entryTyped)
-        val adapter = TypeCheckerV2()
         for ((path, v1Module) in v1LoadedModules) {
-            val v2Module = adapter.convertV1TypedModule(path, v1Module)
+            val v2Module = v1Module.v2TypedModule ?: continue  // Skip modules without v2 TypedModule
             val hashKey = v2Module.hash.hex
             val cached = typedModuleCache[hashKey]
             if (cached != null) {

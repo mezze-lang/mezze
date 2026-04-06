@@ -1,7 +1,6 @@
 package com.mezze.language.codebase
 
 import com.mezze.language.typechecker.PrecompiledStdlib
-import com.mezze.language.typechecker.TypeCheckerV2
 import com.mezze.language.typechecker.mono.Lowerer
 import com.mezze.language.typechecker.mono.Monomorphizer
 import com.mezze.language.typechecker.mono.Resolver
@@ -41,13 +40,13 @@ object StdlibCompiler {
 
         // For each stdlib module, run the monomorphizer pipeline to get FunctionIR
         // We compile each module as if it were the entry point
-        val adapter = TypeCheckerV2()
         val allModules = HashMap(v2Modules)
 
         for ((path, v1Module) in loadedModules) {
             try {
-                val v2Module = allModules.values.find { it.path == path }
-                    ?: adapter.convertV1TypedModule(path, v1Module).also { allModules[it.hash] = it }
+                val v2Module = v1Module.v2TypedModule
+                    ?: allModules.values.find { it.path == path }
+                    ?: continue  // Skip modules without a v2 TypedModule
 
                 val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(v2Module)
                 val mono = Monomorphizer().monomorphize(wrapped, allModules)

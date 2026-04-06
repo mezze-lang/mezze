@@ -229,10 +229,9 @@ class ModuleLoader(
     /**
      * Convert ModuleResolver's Module to our LoadedModule type.
      */
-    @Suppress("DEPRECATION")
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
         // Prefer the parsedModule stored on the resolver Module (set during loadModule).
-        // Only fall back to converting v1 Program → ParsedModule when not available.
+        @Suppress("DEPRECATION")
         val parsedModule = resolverModule.parsedModule
             ?: com.mezze.language.parser.MezzeParser().programToParsedModule(
                 resolverModule.program, resolverModule.filePath
@@ -240,7 +239,6 @@ class ModuleLoader(
         return LoadedModule(
             path = resolverModule.path,
             filePath = resolverModule.filePath,
-            program = resolverModule.program,
             exports = resolverModule.exports.mapValues { (_, exportedItem) ->
                 ExportedItem(
                     name = exportedItem.name,
@@ -248,7 +246,7 @@ class ModuleLoader(
                     mezzeType = exportedItem.mezzeType,
                     originalName = exportedItem.originalName,
                     visibility = exportedItem.visibility,
-                    contentHash = exportedItem.contentHash  // Already non-null from ModuleResolver
+                    contentHash = exportedItem.contentHash
                 )
             },
             dependencies = resolverModule.dependencies.map { ModulePath.parse(it.modulePath) },

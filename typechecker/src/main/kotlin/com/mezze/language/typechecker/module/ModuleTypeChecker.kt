@@ -194,7 +194,7 @@ class ModuleTypeChecker(
             // global cache retains the typed module. Sync them so importers see all impls.
             val typeContext = cached.typeContext
 
-            // Update v1 ModuleResolver cache if the cached program is non-empty
+            // Sync resolver cache with typed module data
             @Suppress("DEPRECATION")
             val cachedProgram = cached.program
             if (cachedProgram.items.isNotEmpty()) {
@@ -203,7 +203,6 @@ class ModuleTypeChecker(
                     cached.modulePath, cachedProgram, typeContext
                 )
             }
-            // Also store the parsedModule in the resolver cache for v2 consumers
             val cachedParsedModule = cached.parsedModule ?: module.parsedModule
             if (cachedParsedModule != null) {
                 moduleResolver?.updateModuleExportsV2(
@@ -226,58 +225,52 @@ class ModuleTypeChecker(
             // Build context for this module
             val moduleContext = buildModuleContext(importContext)
 
-            // Type-check the module using TypeChecker
-            // Use the module's file path parent directory for import resolution
+            // Type-check the module using TypeChecker (v2 path — always uses ParsedModule)
             val typeChecker = TypeChecker.withContext(moduleContext)
             val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
-            // Prefer ParsedModule (v2) if available, fall back to v1 Program
-            @Suppress("DEPRECATION")
-            val result = if (module.parsedModule != null) {
-                typeChecker.checkParsedModule(module.parsedModule!!, modulePath, module.modulePath)
-            } else {
-                typeChecker.checkProgram(module.program, modulePath, module.modulePath)
-            }
+            val parsedModule = module.parsedModule
+                ?: throw IllegalStateException("LoadedModule for '${module.modulePath}' has no parsedModule")
+            val result = typeChecker.checkParsedModule(parsedModule, modulePath, module.modulePath)
 
             return when (result) {
                 is TypeChecker.TypeCheckResult.Success -> {
-                    // Create typed module — use original program for structure
+                    // Build type context from result.program (v1 Program built by checkParsedModule
+                    // with content hashes and inferred types). Also try v2 TypedModule.
                     @Suppress("DEPRECATION")
-                    val moduleProgram = if (result.program.items.isNotEmpty()) result.program else module.program
+                    val typeContext = buildTypeContextFromV1Program(result.program)
+                        .ifEmpty { buildTypeContextFromTypedModule(result.typedModule) }
 
-                    // Build type context once — reused for exports and resolver updates
-                    val typeContext = if (moduleProgram.items.isNotEmpty())
-                        buildTypeContextFromProgram(moduleProgram) else emptyMap()
+                    // Update exports with inferred types from type context
+                    val updatedExports = if (typeContext.isNotEmpty()) {
+                        module.exports.mapValues { (_, export) ->
+                            val inferredType = typeContext[export.originalName]
+                            if (inferredType != null) export.copy(mezzeType = inferredType) else export
+                        }
+                    } else module.exports
 
+                    @Suppress("DEPRECATION")
                     val typedModule = TypedModule(
                         modulePath = module.modulePath,
-                        program = moduleProgram,
-                        exports = if (moduleProgram.items.isNotEmpty())
-                            updateExportsWithTypes(module.exports, moduleProgram)
-                            else module.exports,
+                        program = result.program,
+                        exports = updatedExports,
                         context = moduleContext,
                         substitution = result.substitution,
                         v2TypedModule = result.typedModule,
-                        parsedModule = module.parsedModule,
+                        parsedModule = parsedModule,
                         typeContext = typeContext
                     )
 
                     // Cache the result in GLOBAL cache (thread-safe)
                     putInGlobalCache(module.modulePath, typedModule)
 
-                    // Update ModuleResolver's cache with real inferred types and ProgramIndex.
-                    // The v1 updateModuleExports rebuilds the ProgramIndex from the typed program
-                    // (which has cross-module ability impls resolved and content hashes computed).
-                    // Then updateModuleExportsV2 overlays the parsedModule for v2 consumers.
+                    // Update ModuleResolver's cache with inferred types
+                    @Suppress("DEPRECATION")
+                    val moduleProgram = result.program
                     if (moduleProgram.items.isNotEmpty()) {
-                        moduleResolver?.let { resolver ->
-                            @Suppress("DEPRECATION")
-                            resolver.updateModuleExports(module.modulePath, moduleProgram, typeContext)
-                            // Also store the parsedModule in the resolver cache for v2 path
-                            if (module.parsedModule != null) {
-                                resolver.updateModuleExportsV2(module.modulePath, module.parsedModule!!, typeContext)
-                            }
-                        }
+                        @Suppress("DEPRECATION")
+                        moduleResolver?.updateModuleExports(module.modulePath, moduleProgram, typeContext)
                     }
+                    moduleResolver?.updateModuleExportsV2(module.modulePath, parsedModule, typeContext)
 
                     ModuleTypeCheckResult.Success(typedModule)
                 }
@@ -340,87 +333,48 @@ class ModuleTypeChecker(
     }
 
     /**
-     * Build type context from a typed program.
-     *
-     * This extracts all inferred types from the program into a map
-     * that can be passed to ModuleResolver.updateModuleExports().
+     * Build type context from a v1 Program (which has inferredType and contentHash set).
      */
-    private fun buildTypeContextFromProgram(typedProgram: Program): Map<String, MezzeType> {
+    private fun buildTypeContextFromV1Program(program: Program): Map<String, MezzeType> {
+        if (program.items.isEmpty()) return emptyMap()
         val typeContext = mutableMapOf<String, MezzeType>()
-
-        for (item in typedProgram.items) {
+        for (item in program.items) {
             when (item) {
-                is LetBinding -> {
-                    item.inferredType?.let { type ->
-                        typeContext[item.variableName] = type
-                    }
-                }
-                is TypeDeclaration -> {
-                    item.inferredType?.let { type ->
-                        typeContext[item.name] = type
-                    }
-                }
-                is EffectDeclaration -> {
-                    item.inferredType?.let { type ->
-                        typeContext[item.name] = type
-                    }
-                }
-                is ImplDeclaration -> {
-                    item.inferredType?.let { type ->
-                        typeContext[item.performerName] = type
-                    }
-                }
-                else -> {
-                    // Other items don't contribute to type context
-                }
+                is LetBinding -> item.inferredType?.let { typeContext[item.variableName] = it }
+                is TypeDeclaration -> item.inferredType?.let { typeContext[item.name] = it }
+                is EffectDeclaration -> item.inferredType?.let { typeContext[item.name] = it }
+                is ImplDeclaration -> item.inferredType?.let { typeContext[item.performerName] = it }
+                else -> {}
             }
         }
-
         return typeContext
     }
 
     /**
-     * Update module exports with inferred types and content hashes.
-     *
-     * After type-checking, we update the export types with
-     * the actual inferred types from the typed program.
+     * Build type context from a v2 TypedModule.
+     * Extracts inferred types from TypedLetDecl declarations.
      */
-    private fun updateExportsWithTypes(
-        exports: Map<String, ExportedItem>,
-        typedProgram: Program
-    ): Map<String, ExportedItem> {
-        val updatedExports = mutableMapOf<String, ExportedItem>()
-
-        val inferredTypes = mutableMapOf<String, MezzeType>()
-        val contentHashes = mutableMapOf<String, String>()
-
-        for (item in typedProgram.items) {
-            when (item) {
-                is LetBinding -> {
-                    item.inferredType?.let { inferredTypes[item.variableName] = it }
-                    item.contentHash?.let { contentHashes[item.variableName] = it }
+    private fun buildTypeContextFromTypedModule(typedModule: com.mezze.language.typedast.TypedModule?): Map<String, MezzeType> {
+        if (typedModule == null) return emptyMap()
+        val typeContext = mutableMapOf<String, MezzeType>()
+        for (decl in typedModule.decls) {
+            when (decl) {
+                is com.mezze.language.typedast.TypedLetDecl -> {
+                    typeContext[decl.name] = decl.scheme.type
                 }
-                is TypeDeclaration -> item.inferredType?.let { inferredTypes[item.name] = it }
-                is EffectDeclaration -> item.inferredType?.let { inferredTypes[item.name] = it }
-                is ImplDeclaration -> {
-                    item.inferredType?.let { inferredTypes[item.performerName] = it }
-                    item.contentHash?.let { contentHashes[item.performerName] = it }
+                is com.mezze.language.typedast.TypedEffectDecl -> {
+                    // Effects don't have a single MezzeType but we can skip for now
                 }
-                else -> {}
+                is com.mezze.language.typedast.TypedPerformerDecl -> {
+                    // Performers don't have a single inferred type in v2
+                }
+                else -> { /* Other decl types don't contribute to type context */ }
             }
         }
-
-        for ((name, export) in exports) {
-            val inferredType = inferredTypes[export.originalName]
-            val contentHash = contentHashes[export.originalName]
-            updatedExports[name] = export.copy(
-                mezzeType = inferredType ?: export.mezzeType,
-                contentHash = contentHash ?: export.contentHash
-            )
-        }
-
-        return updatedExports
+        return typeContext
     }
+
+    // updateExportsWithTypes(Program) deleted — v2 path uses ModuleResolver.updateModuleExportsV2
 
     /**
      * Get a cached module (if available) from the global cache.

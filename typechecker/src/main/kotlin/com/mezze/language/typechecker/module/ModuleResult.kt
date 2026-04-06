@@ -53,17 +53,19 @@ sealed class ModuleLoadResult {
 data class LoadedModule(
     val path: ModulePath,              // Structured module path
     val filePath: String,              // Physical file path
-    @Deprecated("Use parsedModule instead — v1 Program kept for backward compat during migration")
-    val program: Program,              // Parsed AST (v1 — kept for backward compat during migration)
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
     val dependencies: List<ModulePath>, // Module dependencies as structured paths
     val index: ProgramIndex = ProgramIndex.EMPTY,  // Pre-computed index for O(1) declaration lookups
     val sourceHash: String? = null,     // Content hash of source for cache validation
-    /** V2 ParsedModule — the primary AST. Program field is derived from this. */
+    /** V2 ParsedModule — the primary AST. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 ) {
     /** Legacy accessor for module path as string. Use path.fullPath instead. */
     val modulePath: String get() = path.fullPath
+
+    /** Deprecated: always returns empty Program. Use parsedModule instead. */
+    @Deprecated("Use parsedModule instead — v1 Program removed")
+    val program: Program get() = Program(emptyList())
 }
 
 /**
@@ -183,8 +185,8 @@ sealed class ModuleTypeCheckResult {
  */
 data class TypedModule(
     val modulePath: String,                           // Module path
-    @Deprecated("Use v2TypedModule instead — v1 Program kept for backward compat during migration")
-    val program: Program,
+    @Deprecated("Use v2TypedModule instead — v1 Program kept temporarily for backward compat")
+    val program: Program = Program(emptyList()),
     val exports: Map<String, ExportedItem>,           // Exports with complete types
     val context: TypingContext,                       // Module-specific typing context
     val substitution: Substitution,                   // Type substitution from inference
@@ -192,7 +194,7 @@ data class TypedModule(
         com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY,  // Dependencies between definitions
     /** V2 TypedModule emitted by TypedAstBuilder — used by monomorphizer */
     val v2TypedModule: com.mezze.language.typedast.TypedModule? = null,
-    /** V2 ParsedModule — the primary AST representation. Use instead of program when possible. */
+    /** V2 ParsedModule — the primary AST representation. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
     /** Extracted type context: name → inferred MezzeType. Built once at type-check time. */
     val typeContext: Map<String, MezzeType> = emptyMap()

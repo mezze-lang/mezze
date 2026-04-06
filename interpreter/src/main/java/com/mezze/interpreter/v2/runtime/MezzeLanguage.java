@@ -470,7 +470,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
                 // Type-check the synthetic program — this loads and typechecks the module
                 var typeChecker = new TypeChecker();
-                var result = typeChecker.typeCheck(syntheticProgram,
+                // Convert v1 Program to ParsedModule for the v2 typeCheck entry point
+                var parsedModule = new com.mezze.language.parser.MezzeParser().programToParsedModule(
+                    syntheticProgram, modulePath);
+                var result = typeChecker.typeCheck(parsedModule,
                     projectRoot != null ? projectRoot : Paths.get("."));
 
                 // Now the module should be in the cache

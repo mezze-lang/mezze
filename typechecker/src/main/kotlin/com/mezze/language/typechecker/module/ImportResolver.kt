@@ -60,67 +60,6 @@ class ImportResolver(
     private val typeChecker: ModuleTypeChecker? = null  // Optional, for type-checking imports
 ) {
     /**
-     * Resolve all imports in a program.
-     *
-     * This finds all UseDeclaration and PubUseDeclaration,
-     * loads the referenced modules, and builds an import context.
-     *
-     * @param program The program to process
-     * @return ImportResolutionResult (Success or Failure)
-     */
-    @Deprecated("Use resolveImports(ParsedModule) instead — v1 Program overload kept for TypeChecker.checkProgram compat")
-    fun resolveImports(program: Program): ImportResolutionResult {
-        val errors = mutableListOf<ModuleError>()
-        var importContext = ModuleImportContext.empty()
-        val loadedModules = mutableMapOf<String, TypedModule>()
-
-        // Find all import declarations
-        val useDeclarations = program.items.filterIsInstance<UseDeclaration>()
-        val pubUseDeclarations = program.items.filterIsInstance<PubUseDeclaration>()
-
-        // Process regular imports
-        for (use in useDeclarations) {
-            val result = processUseDeclaration(use, isPublic = false)
-            when (result) {
-                is ProcessResult.Success -> {
-                    importContext = importContext.merge(result.context)
-                    result.module?.let { loadedModules[it.modulePath] = it }
-                }
-                is ProcessResult.Failure -> {
-                    errors.addAll(result.errors)
-                }
-            }
-        }
-
-        // Process re-exports
-        for (pubUse in pubUseDeclarations) {
-            val result = processUseDeclaration(
-                UseDeclaration(pubUse.path, pubUse.alias),
-                isPublic = true
-            )
-            when (result) {
-                is ProcessResult.Success -> {
-                    importContext = importContext.merge(result.context)
-                    result.module?.let { loadedModules[it.modulePath] = it }
-                }
-                is ProcessResult.Failure -> {
-                    errors.addAll(result.errors)
-                }
-            }
-        }
-
-        // Return result
-        return if (errors.isEmpty()) {
-            ImportResolutionResult.Success(
-                importContext = importContext,
-                loadedModules = loadedModules
-            )
-        } else {
-            ImportResolutionResult.Failure(errors)
-        }
-    }
-
-    /**
      * Resolve imports from a ParsedModule (v2 AST entry point).
      * Converts v2 use decls to v1 UseDeclaration and delegates.
      */

@@ -202,10 +202,8 @@ class MezzeTextDocumentService(
         // If there are parse errors, still try to type check the partial AST
         // This allows showing both parse errors and any type errors in successfully parsed code
 
-        // Step 2: Type check with multi-error recovery
+        // Step 2: Type check using v2 pipeline
         try {
-            // Use workspace root for module resolution (where Mezze.toml is located)
-            // Fall back to file's parent directory if no workspace root is set
             val workspaceRoot = server.getWorkspaceRoot()
             val projectRoot = if (workspaceRoot != null) {
                 Paths.get(workspaceRoot)
@@ -213,57 +211,46 @@ class MezzeTextDocumentService(
                 filePath?.parent ?: Paths.get(".")
             }
 
-            // Use checkProgramWithRecovery to get ALL errors and partial type info
-            val recoveryResult = typeChecker.checkProgramWithRecovery(ast, projectRoot)
+            // Convert parsed Program to ParsedModule and use v2 checkParsedModule
+            val parsedModule = com.mezze.language.parser.MezzeParser().programToParsedModule(
+                ast ?: Program(emptyList()), fileName ?: "<lsp>"
+            )
+            val result = typeChecker.checkParsedModule(parsedModule, projectRoot, null)
 
-            // Get type aliases for pretty printing (available even with errors)
             typeAliases = typeChecker.getTypeAliases()
 
-            // Collect all errors as diagnostics
-            recoveryResult.errors.forEach { error ->
-                diagnostics.add(createDiagnosticFromRecoveryError(error))
-            }
+            when (result) {
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
+                    // Collect warnings
+                    result.warnings.forEach { warning ->
+                        val line = warning.sourceLocation?.line?.minus(1) ?: 0
+                        val column = warning.sourceLocation?.column?.minus(1) ?: 0
+                        diagnostics.add(createDiagnostic(
+                            message = warning.message,
+                            severity = DiagnosticSeverity.Warning,
+                            line = line,
+                            column = column
+                        ))
+                    }
 
-            // Collect warnings with proper source locations
-            recoveryResult.warnings.forEach { warning ->
-                val line = warning.sourceLocation?.line?.minus(1) ?: 0  // LSP uses 0-based lines
-                val column = warning.sourceLocation?.column?.minus(1) ?: 0  // LSP uses 0-based columns
-                diagnostics.add(createDiagnostic(
-                    message = warning.message,
-                    severity = DiagnosticSeverity.Warning,
-                    line = line,
-                    column = column
-                ))
-            }
-
-            // Create TypeCheckResult from partial results (even if there are errors)
-            // This allows hover/completion to work on successfully checked items
-            val program = recoveryResult.program
-            if (program != null) {
-                typeCheckResult = TypeCheckResult(
-                    program = program,
-                    resolvedImports = buildResolvedImports(recoveryResult.importContext),
-                    importedAbilities = recoveryResult.importContext?.importedAbilities ?: emptyMap(),
-                    importedEffects = recoveryResult.importContext?.importedEffects ?: emptyMap()
-                )
-
-                // Cache for dot-completion (survives subsequent parse errors)
-                lastSuccessfulResult[uri] = typeCheckResult!!
-
-                // Populate codebase if in project mode and no errors
-                if (recoveryResult.errors.isEmpty()) {
-                    projectCodebase?.let { codebase ->
-                        try {
-                            CodebasePopulator.populate(
-                                codebase = codebase,
-                                mainProgram = program,
-                                modules = emptyMap(),  // Modules stored separately when type-checked
-                                mainModulePath = null  // Per-file analysis, no module path
-                            )
-                            server.logInfo("Populated codebase with ${program.items.size} items")
-                        } catch (e: Exception) {
-                            server.logError("Failed to populate codebase: ${e.message}")
-                        }
+                    typeCheckResult = TypeCheckResult(
+                        program = result.program,
+                        resolvedImports = buildResolvedImports(result.importContext),
+                        importedAbilities = emptyMap(),
+                        importedEffects = emptyMap()
+                    )
+                    lastSuccessfulResult[uri] = typeCheckResult!!
+                }
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    result.errors.forEach { error ->
+                        val line = error.sourceLocation?.line?.minus(1) ?: 0
+                        val column = error.sourceLocation?.column?.minus(1) ?: 0
+                        diagnostics.add(createDiagnostic(
+                            message = error.message,
+                            severity = DiagnosticSeverity.Error,
+                            line = line,
+                            column = column
+                        ))
                     }
                 }
             }
