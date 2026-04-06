@@ -403,7 +403,7 @@ class ImportResolver(
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
+        val abilityImpls = mutableMapOf<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         // Content-hash indexed maps for O(1) lookup
         val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
@@ -586,7 +586,7 @@ class ImportResolver(
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
+        val abilityImpls = mutableMapOf<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         // Content-hash indexed maps for O(1) lookup
         val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()

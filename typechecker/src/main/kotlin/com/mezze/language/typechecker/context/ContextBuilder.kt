@@ -122,12 +122,18 @@ class ContextBuilder {
             importedEffects.values.map { it.name }.toSet()
 
         val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers
-        val resolvedAbilityImplDecls = mutableListOf<ImplAbilityDeclaration>()  // ability impls
+        val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()  // ability impls
 
-        // First, add explicitly parsed ability impls
-        resolvedAbilityImplDecls.addAll(
-            module.decls.filterIsInstance<ParsedImplAbilityDecl>().map { parsedImplAbilityDeclToV1(it, file) }
-        )
+        // First, add explicitly parsed ability impls (compute content hashes if needed)
+        for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
+            if (impl.contentHash != null) {
+                resolvedAbilityImplDecls.add(impl)
+            } else {
+                val v1 = parsedImplAbilityDeclToV1(impl, file)
+                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1)
+                resolvedAbilityImplDecls.add(impl.copy(contentHash = hash.toFullHexString()))
+            }
+        }
 
         // Then resolve ParsedPerformerDecl: ability impl or effect performer?
         for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
@@ -136,26 +142,28 @@ class ContextBuilder {
             val isEffect = refName in allEffectNames
 
             if (isAbility && !isEffect) {
-                // This is actually an ability impl, convert it
-                val v1Perf = parsedPerformerDeclToV1(perfDecl, file)
-                val targetType = IdentifierTypeAnnotation(v1Perf.performerName)
-                val converted = ImplAbilityDeclaration(
-                    target = ImplTarget.Named(v1Perf.effect),
-                    targetTypes = listOf(targetType),
+                // This is actually an ability impl, convert it to ParsedImplAbilityDecl
+                val converted = ParsedImplAbilityDecl(
+                    target = ParsedImplTarget.Named(perfDecl.effect),
+                    targetTypes = listOf(ParsedNamedType(perfDecl.performerName, perfDecl.loc)),
                     forallVars = emptyList(),
-                    associatedTypeBindings = v1Perf.associatedTypeBindings,
-                    operations = v1Perf.operations.map { op ->
-                        ImplAbilityOperation(
+                    associatedTypeBindings = perfDecl.associatedTypeBindings,
+                    operations = perfDecl.operations.map { op ->
+                        ParsedImplOp(
                             name = op.name,
-                            paramType = op.paramType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() },
-                            returnType = op.returnType?.takeUnless { it is RecordTypeAnnotation && it.entries.isEmpty() },
+                            paramType = op.paramType?.takeUnless { it is ParsedRecordType && it.entries.isEmpty() },
+                            returnType = op.returnType?.takeUnless { it is ParsedRecordType && it.entries.isEmpty() },
                             implementation = op.implementation,
-                            abilityConstraints = emptyList()
+                            abilityConstraints = emptyList(),
+                            loc = op.loc
                         )
                     },
+                    loc = perfDecl.loc,
                     contentHash = null
                 )
-                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(converted)
+                // Compute content hash via v1 conversion
+                val v1 = parsedImplAbilityDeclToV1(converted, file)
+                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1)
                 resolvedAbilityImplDecls.add(converted.copy(contentHash = hash.toFullHexString()))
             } else {
                 // Real effect performer
@@ -174,7 +182,8 @@ class ContextBuilder {
         val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
         val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
         val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
-        val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + abilityImplDecls + letDecls
+        val v1AbilityImplsForValidation = abilityImplDecls.map { parsedImplAbilityDeclToV1(it, file) }
+        val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + v1AbilityImplsForValidation + letDecls
         try {
             DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
         } catch (e: TypeCheckError) {
@@ -272,9 +281,9 @@ class ContextBuilder {
         }
 
         // Add ability implementations to context (with ability declaration hashes for hash-based index)
-        val allV1AbilityDeclsForHash = v1AbilityDecls + v1ImportedAbilities
+        val allParsedAbilityDeclsForHash = abilityDecls + importedAbilities
         for (abilityImplDecl in abilityImplDecls) {
-            ctx = addAbilityImpl(ctx, abilityImplDecl, allV1AbilityDeclsForHash, v1ImportedAbilities)
+            ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
 
         // VALIDATION PHASE: Run ability validations after context is built
@@ -292,7 +301,7 @@ class ContextBuilder {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
-        for (abilityImplDecl in abilityImplDecls) {
+        for (abilityImplDecl in v1AbilityImplsForValidation) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
                 abilityDeclarations = allV1AbilityDecls,
@@ -310,7 +319,7 @@ class ContextBuilder {
         val importedAbilityNames = importedAbilities.keys
         val importedTypeNames = importedTypes.keys
 
-        for (abilityImplDecl in abilityImplDecls) {
+        for (abilityImplDecl in v1AbilityImplsForValidation) {
             AbilityValidator.validateOrphanRules(
                 impl = abilityImplDecl,
                 localAbilityNames = localAbilityNames,
@@ -857,9 +866,10 @@ class ContextBuilder {
      */
     private fun addAbilityImpl(
         ctx: TypingContext,
-        implDecl: ImplAbilityDeclaration,
-        allAbilityDecls: Map<String, AbilityDeclaration> = emptyMap(),
-        importedAbilities: Map<String, AbilityDeclaration> = emptyMap()
+        implDecl: ParsedImplAbilityDecl,
+        allAbilityDecls: Map<String, ParsedAbilityDecl> = emptyMap(),
+        importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
+        file: String = "<module>"
     ): TypingContext {
         // Extract target type names from type annotations
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
@@ -874,14 +884,14 @@ class ContextBuilder {
 
         // Handle inherent impls: impl Type where { methods }
         if (implDecl.isInherent) {
-            return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey)
+            return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey, file)
         }
 
         // Extract type variables from generic impl header (e.g., 'a from `impl Eq 'a for ['a]`)
         // Only actual type variables (starting with ') are tracked — concrete types (like Str, Float)
         // in abilityTypeArgs are not type variables.
         val typeVars = implDecl.abilityTypeArgs
-            .filterIsInstance<IdentifierTypeAnnotation>()
+            .filterIsInstance<ParsedNamedType>()
             .filter { it.name.startsWith("'") }
             .map { it.name }
             .toSet()
@@ -892,8 +902,24 @@ class ContextBuilder {
         val allTargetAnnotations = implDecl.allTypeArgs
         val allTargetNames = allTargetAnnotations.map { getTypeName(it) }
 
-        // Collect method-level constraints from all operations
-        val operationConstraints = implDecl.operations.flatMap { it.abilityConstraints }
+        // Convert v2 type annotations to v1 for AbilityImplInfo (which stores v1 TypeAnnotation)
+        val v1AllTargetAnnotations = allTargetAnnotations.map { ParserBridge.toV1TypeAnnotation(it, file) }
+        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
+            ParserBridge.toV1TypeAnnotation(v, file)
+        }
+
+        // Collect method-level constraints from all operations (convert to v1)
+        val operationConstraints = implDecl.operations.flatMap { op ->
+            op.abilityConstraints.map { c ->
+                FunctionAbilityConstraint(
+                    abilityName = c.abilityName,
+                    typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
+                    associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) ->
+                        ParserBridge.toV1TypeAnnotation(v, file)
+                    }
+                )
+            }
+        }
 
         // Create impl info — look up ability declaration hash for hash-based index
         val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
@@ -902,8 +928,8 @@ class ContextBuilder {
             abilityName = implDecl.abilityName!!,  // safe: not inherent
             abilityDeclHash = abilityDeclHash,
             targetTypes = allTargetNames,
-            targetTypeAnnotations = allTargetAnnotations,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
+            targetTypeAnnotations = v1AllTargetAnnotations,
+            associatedTypeBindings = v1AssocBindings,
             sourceModule = null,
             contentHash = implKey,
             typeVars = typeVars,
@@ -920,9 +946,10 @@ class ContextBuilder {
      */
     private fun addAnonymousImpl(
         ctx: TypingContext,
-        implDecl: ImplAbilityDeclaration,
+        implDecl: ParsedImplAbilityDecl,
         targetTypeNames: List<String>,
-        implKey: String
+        implKey: String,
+        file: String = "<module>"
     ): TypingContext {
         var result = ctx
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
@@ -931,32 +958,30 @@ class ContextBuilder {
             // Build method type from annotations if available
             val opParamType = op.paramType
             val paramType = if (opParamType != null) {
-                convertTypeAnnotation(opParamType)
+                convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(opParamType, file))
             } else {
-                // Infer param type from the lambda's parameters
-                val lambda = op.implementation as? LambdaExpression
+                // Infer param type from the lambda's parameters (v2 ParsedExpr)
+                val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
                 if (lambda != null) {
-                    when (val params = lambda.parameters) {
-                        is TypedParameters -> {
+                    when (val params = lambda.params) {
+                        is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> {
                             MezzeType.RecordType(
-                                fields = params.recordType.entries.associate { entry ->
-                                    entry.name to convertTypeAnnotation(entry.type)
+                                fields = params.fields.associate { entry ->
+                                    entry.name to convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(entry.type, file))
                                 },
                                 rowVar = null
                             )
                         }
-                        is UntypedParameters -> {
+                        is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> {
                             if (params.names.isEmpty()) {
                                 MezzeType.RecordType(fields = emptyMap(), rowVar = null)
                             } else {
-                                // Untyped params — use fresh type vars
                                 MezzeType.RecordType(
                                     fields = params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
                                     rowVar = null
                                 )
                             }
                         }
-                        else -> MezzeType.RecordType(fields = emptyMap(), rowVar = null)
                     }
                 } else {
                     MezzeType.RecordType(fields = emptyMap(), rowVar = null)
@@ -965,7 +990,7 @@ class ContextBuilder {
 
             val opReturnType = op.returnType
             val returnType = if (opReturnType != null) {
-                convertTypeAnnotation(opReturnType)
+                convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(opReturnType, file))
             } else {
                 // Return type unknown at registration time — use a fresh type variable.
                 // The actual type will be inferred during typechecking of the method call.
@@ -988,11 +1013,15 @@ class ContextBuilder {
         }
 
         // Also register as a regular impl so the interpreter can find it by content hash
+        val v1TargetTypes = implDecl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) }
+        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
+            ParserBridge.toV1TypeAnnotation(v, file)
+        }
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = null,  // inherent impl
             targetTypes = targetTypeNames,
-            targetTypeAnnotations = implDecl.targetTypes,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
+            targetTypeAnnotations = v1TargetTypes,
+            associatedTypeBindings = v1AssocBindings,
             sourceModule = null,
             contentHash = implKey
         )
@@ -1006,50 +1035,46 @@ class ContextBuilder {
      * This bypasses validation (since the impl was already validated in its home module)
      * and only registers the InherentMethodInfo + AbilityImplInfo entries.
      *
-     * Uses inferred types from the already-typechecked impl (since annotations are often null
-     * for impl operations written as `name = {args} -> body`).
+     * Builds method types from annotations or lambda parameter shapes.
+     * The v2 ParsedImplAbilityDecl does not carry inferredType; types will be
+     * unified during type checking of method calls.
      */
     fun registerImportedInherentImpl(
         ctx: TypingContext,
-        implDecl: ImplAbilityDeclaration,
-        implKey: String
+        implDecl: ParsedImplAbilityDecl,
+        implKey: String,
+        file: String = "<import>"
     ): TypingContext {
         var result = ctx
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
 
         for (op in implDecl.operations) {
-            // Use the inferred type from the already-typechecked implementation.
-            // The implementation is a lambda whose inferredType is FunctionType(paramType, returnType).
-            val methodType = op.implementation.inferredType as? MezzeType.FunctionType
+            // Build method type from annotations or lambda params
+            val paramType = op.paramType?.let { convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(it, file)) }
                 ?: run {
-                    // Fallback: build from annotations or lambda params
-                    val paramType = op.paramType?.let { convertTypeAnnotation(it) }
-                        ?: run {
-                            val lambda = op.implementation as? LambdaExpression
-                            if (lambda != null) {
-                                when (val params = lambda.parameters) {
-                                    is TypedParameters -> MezzeType.RecordType(
-                                        fields = params.recordType.entries.associate { entry ->
-                                            entry.name to convertTypeAnnotation(entry.type)
-                                        },
-                                        rowVar = null
-                                    )
-                                    is UntypedParameters -> MezzeType.RecordType(
-                                        fields = if (params.names.isEmpty()) emptyMap()
-                                                 else params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
-                                        rowVar = null
-                                    )
-                                    else -> MezzeType.RecordType(fields = emptyMap(), rowVar = null)
-                                }
-                            } else {
-                                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
-                            }
+                    val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
+                    if (lambda != null) {
+                        when (val params = lambda.params) {
+                            is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> MezzeType.RecordType(
+                                fields = params.fields.associate { entry ->
+                                    entry.name to convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(entry.type, file))
+                                },
+                                rowVar = null
+                            )
+                            is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> MezzeType.RecordType(
+                                fields = if (params.names.isEmpty()) emptyMap()
+                                         else params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
+                                rowVar = null
+                            )
                         }
-                    val returnType = op.returnType?.let { convertTypeAnnotation(it) }
-                        ?: MezzeType.VarType(TypeVar.fresh())
-                    MezzeType.FunctionType(paramType = paramType, returnType = returnType)
+                    } else {
+                        MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+                    }
                 }
+            val returnType = op.returnType?.let { convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(it, file)) }
+                ?: MezzeType.VarType(TypeVar.fresh())
+            val methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType)
 
             val methodInfo = TypingContext.InherentMethodInfo(
                 targetTypeName = targetTypeName,
@@ -1061,11 +1086,15 @@ class ContextBuilder {
         }
 
         // Also register as a regular impl so the interpreter can find it by content hash
+        val v1TargetTypes = implDecl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) }
+        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
+            ParserBridge.toV1TypeAnnotation(v, file)
+        }
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = null,
             targetTypes = targetTypeNames,
-            targetTypeAnnotations = implDecl.targetTypes,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
+            targetTypeAnnotations = v1TargetTypes,
+            associatedTypeBindings = v1AssocBindings,
             sourceModule = null,
             contentHash = implKey
         )
@@ -1135,6 +1164,38 @@ class ContextBuilder {
                 } else {
                     "${modulePart}_${annotation.typeName}_${argNames.joinToString("_")}"
                 }
+            }
+        }
+    }
+
+    /**
+     * Extract type name from v2 ParsedTypeAnnotation for impl keys.
+     * Mirrors the v1 getTypeName(TypeAnnotation) logic.
+     */
+    private fun getTypeName(annotation: ParsedTypeAnnotation): String {
+        return when (annotation) {
+            is ParsedNamedType -> annotation.name.removePrefix("'")
+            is ParsedTypeApp -> {
+                val allArgsAreTypeVars = annotation.args.all { arg ->
+                    arg is ParsedNamedType && (arg.name.startsWith("'") || arg.name.first().isLowerCase())
+                }
+                if (allArgsAreTypeVars) {
+                    annotation.constructor
+                } else {
+                    val argNames = annotation.args.map { getTypeName(it) }
+                    if (argNames.isEmpty()) annotation.constructor
+                    else "${annotation.constructor}_${argNames.joinToString("_")}"
+                }
+            }
+            is ParsedFunctionType -> "Function"
+            is ParsedRecordType -> "Record"
+            is ParsedVariantType -> "Variant"
+            is ParsedSeqType -> "Seq_${getTypeName(annotation.elementType)}"
+            is ParsedQualifiedType -> {
+                val modulePart = annotation.modulePath.joinToString("_")
+                val argNames = annotation.args.map { getTypeName(it) }
+                if (argNames.isEmpty()) "${modulePart}_${annotation.typeName}"
+                else "${modulePart}_${annotation.typeName}_${argNames.joinToString("_")}"
             }
         }
     }

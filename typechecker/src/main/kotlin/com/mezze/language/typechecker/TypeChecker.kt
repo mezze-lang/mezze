@@ -966,6 +966,7 @@ class TypeChecker(
 
         // Add imported ability implementations
         // These are needed for ability method dispatch (e.g., EncodeFormat.encode_int)
+        val parserBridge = com.mezze.language.parser.MezzeParser
         for ((implKey, implDecl) in importContext.importedAbilityImpls) {
             if (implDecl.isInherent) {
                 // Inherent impls need both AbilityImplInfo AND InherentMethodInfo registered.
@@ -975,19 +976,24 @@ class TypeChecker(
                 // Named ability impls only need AbilityImplInfo
                 // Extract type variable names from abilityTypeArgs for structural matching
                 val implTypeVars = implDecl.abilityTypeArgs
-                    .filterIsInstance<IdentifierTypeAnnotation>()
+                    .filterIsInstance<com.mezze.language.parsedast.ParsedNamedType>()
                     .filter { it.name.startsWith("'") }
                     .map { it.name }
                     .toSet()
                 val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
                     importContext.importedAbilities[name]?.contentHash
                 }
+                // Convert v2 type annotations to v1 for AbilityImplInfo
+                val v1AllTypeArgs = implDecl.allTypeArgs.map { parserBridge.toV1TypeAnnotation(it, "<import>") }
+                val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
+                    parserBridge.toV1TypeAnnotation(v, "<import>")
+                }
                 val implInfo = TypingContext.AbilityImplInfo(
                     abilityName = implDecl.abilityName,
                     abilityDeclHash = abilityDeclHashForImpl,
-                    targetTypes = implDecl.allTypeArgs.map { typeAnnotationToString(it) },
-                    targetTypeAnnotations = implDecl.allTypeArgs,
-                    associatedTypeBindings = implDecl.associatedTypeBindings,
+                    targetTypes = v1AllTypeArgs.map { typeAnnotationToString(it) },
+                    targetTypeAnnotations = v1AllTypeArgs,
+                    associatedTypeBindings = v1AssocBindings,
                     sourceModule = null,
                     contentHash = implKey,
                     typeVars = implTypeVars

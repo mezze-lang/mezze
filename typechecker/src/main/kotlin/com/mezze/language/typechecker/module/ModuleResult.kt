@@ -237,7 +237,7 @@ data class ModuleImportContext(
     val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // Imported abilities (keyed by name)
     val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,     // Imported effects (keyed by name)
     val importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,         // Imported effect implementations (keyed by performer name)
-    val importedAbilityImpls: Map<String, ImplAbilityDeclaration>,  // Imported ability implementations (keyed by content hash)
+    val importedAbilityImpls: Map<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>,  // Imported ability implementations (keyed by content hash)
     // Content-hash indexed maps for O(1) lookup without string parsing
     val effectsByHash: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
     val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()  // Abilities keyed by content hash

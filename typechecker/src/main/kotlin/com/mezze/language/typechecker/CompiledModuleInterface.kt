@@ -76,7 +76,7 @@ data class CompiledModuleInterface(
         }
 
         data class InherentImplRegistration(
-            val implDecl: ImplAbilityDeclaration,
+            val implDecl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
             val implKey: String
         ) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
@@ -162,21 +162,26 @@ data class CompiledModuleInterface(
             }
 
             // Ability impls
+            val parserBridge = com.mezze.language.parser.MezzeParser
             for ((implKey, implDecl) in importContext.importedAbilityImpls) {
                 if (implDecl.isInherent) {
                     extensions.add(ContextExtension.InherentImplRegistration(implDecl, implKey))
                 } else {
                     val implTypeVars = implDecl.abilityTypeArgs
-                        .filterIsInstance<IdentifierTypeAnnotation>()
+                        .filterIsInstance<com.mezze.language.parsedast.ParsedNamedType>()
                         .filter { it.name.startsWith("'") }
                         .map { it.name }
                         .toSet()
+                    val v1AllTypeArgs = implDecl.allTypeArgs.map { parserBridge.toV1TypeAnnotation(it, "<import>") }
+                    val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
+                        parserBridge.toV1TypeAnnotation(v, "<import>")
+                    }
                     val implInfo = TypingContext.AbilityImplInfo(
                         abilityName = implDecl.abilityName,
                         abilityDeclHash = null,
-                        targetTypes = implDecl.allTypeArgs.map { it.toString() },
-                        targetTypeAnnotations = implDecl.allTypeArgs,
-                        associatedTypeBindings = implDecl.associatedTypeBindings,
+                        targetTypes = v1AllTypeArgs.map { it.toString() },
+                        targetTypeAnnotations = v1AllTypeArgs,
+                        associatedTypeBindings = v1AssocBindings,
                         sourceModule = null,
                         contentHash = implKey,
                         typeVars = implTypeVars

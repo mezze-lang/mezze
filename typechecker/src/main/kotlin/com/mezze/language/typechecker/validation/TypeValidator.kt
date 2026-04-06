@@ -1894,7 +1894,7 @@ class TypeValidator(
      * Checks for orphan instances and overlapping instances.
      */
     fun validateAbilityImpl(
-        implDecl: ImplAbilityDeclaration,
+        implDecl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         context: TypingContext
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()

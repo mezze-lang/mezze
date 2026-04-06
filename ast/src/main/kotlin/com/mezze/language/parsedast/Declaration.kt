@@ -219,6 +219,25 @@ data class ParsedImplAbilityDecl(
     val contentHash: String? = null
 ) : ParsedDecl {
     val isInherent: Boolean get() = target is ParsedImplTarget.Inherent
+
+    /** Convenience: get the ability name for named impls, or null for inherent impls */
+    val abilityName: String? get() = (target as? ParsedImplTarget.Named)?.ability?.localName
+
+    /** Convenience: get the ability ParsedQualifiedRef for named impls */
+    val abilityRef: ParsedQualifiedRef? get() = (target as? ParsedImplTarget.Named)?.ability
+
+    /**
+     * All type arguments combined: concrete abilityTypeArgs (before 'for') + targetTypes (after 'for').
+     * Maps positionally to the ability's type params (extra params first, self last).
+     *
+     * Type variable abilityTypeArgs are quantifiers (not type arguments), so they are excluded.
+     */
+    val allTypeArgs: List<ParsedTypeAnnotation> get() {
+        val concreteArgs = abilityTypeArgs.filter {
+            it !is ParsedNamedType || !it.name.startsWith("'")
+        }
+        return concreteArgs + targetTypes
+    }
 }
 
 /**

@@ -42,8 +42,8 @@ data class ProgramIndex(
     val effectDeclarations: Map<String, ParsedEffectDecl>,
     val performersByName: Map<String, ParsedPerformerDecl>,
     val performersByEffect: Map<String, List<ParsedPerformerDecl>>,
-    val abilityImplsByAbility: Map<String, List<ImplAbilityDeclaration>>,
-    val abilityImplsByHash: Map<String, ImplAbilityDeclaration>,
+    val abilityImplsByAbility: Map<String, List<ParsedImplAbilityDecl>>,
+    val abilityImplsByHash: Map<String, ParsedImplAbilityDecl>,
     val letBindings: Map<String, ParsedLetDecl>,
     val useDeclarations: List<ParsedUseDecl>,
     val pubUseDeclarations: List<ParsedPubUseDecl>
@@ -87,14 +87,14 @@ data class ProgramIndex(
                 }
             }
 
-            // Convert ability impls to v1 and compute content hashes
-            val v1AbilityImpls = abilityImplDecls.map { impl ->
-                val v1 = v2AbilityImplToV1ForHashing(impl, module.path)
+            // Compute content hashes for ability impls (convert to v1 only for hashing)
+            val hashedAbilityImpls = abilityImplDecls.map { impl ->
                 if (impl.contentHash != null) {
-                    v1.copy(contentHash = impl.contentHash)
+                    impl
                 } else {
+                    val v1 = v2AbilityImplToV1ForHashing(impl, module.path)
                     val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1).toFullHexString()
-                    v1.copy(contentHash = hash)
+                    impl.copy(contentHash = hash)
                 }
             }
 
@@ -104,10 +104,10 @@ data class ProgramIndex(
                 effectDeclarations = effectDecls,
                 performersByName = hashedPerformers.associateBy { it.performerName },
                 performersByEffect = hashedPerformers.groupBy { it.effect.localName },
-                abilityImplsByAbility = v1AbilityImpls
+                abilityImplsByAbility = hashedAbilityImpls
                     .filter { !it.isInherent }
                     .groupBy { it.abilityName!! },
-                abilityImplsByHash = v1AbilityImpls.associateBy { impl ->
+                abilityImplsByHash = hashedAbilityImpls.associateBy { impl ->
                     impl.contentHash!!
                 },
                 letBindings = letDecls
@@ -128,25 +128,10 @@ data class ProgramIndex(
          */
         @Deprecated("Use build(ParsedModule) instead — v1 overload kept for ModuleResolver compat")
         fun build(program: Program): ProgramIndex {
-            val items = program.items
-
             // Convert entire program to ParsedModule via the parser bridge, then use the v2 build.
             // This preserves all expression structure (implementations, etc.) unlike manual conversion.
             val parsedModule = com.mezze.language.parser.MezzeParser().programToParsedModule(program)
-            val v2Index = build(parsedModule)
-
-            // For ability impls, keep the original v1 objects (they carry inferredType from type-checking)
-            val abilityImplDecls = items.filterIsInstance<ImplAbilityDeclaration>()
-            return v2Index.copy(
-                abilityImplsByAbility = abilityImplDecls
-                    .filter { !it.isInherent }
-                    .groupBy { it.abilityName!! },
-                abilityImplsByHash = abilityImplDecls.associate { impl ->
-                    val hash = impl.contentHash
-                        ?: com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl).toFullHexString()
-                    hash to (if (impl.contentHash != null) impl else impl.copy(contentHash = hash))
-                }
-            )
+            return build(parsedModule)
         }
 
         /** Convert v2 ParsedPerformerDecl to v1 ImplDeclaration for content hash computation. */
