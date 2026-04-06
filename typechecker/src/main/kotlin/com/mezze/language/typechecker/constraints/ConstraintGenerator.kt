@@ -1066,7 +1066,7 @@ class ConstraintGenerator(
     }
 
     /**
-     * Helper: Get binding name from LetBinding for results map key.
+     * Helper: Get binding name from ParsedLetDecl for results map key.
      *
      * For simple patterns (let x = ...), returns the variable name.
      * For complex patterns (let {x, y} = ...), returns first binding or placeholder.

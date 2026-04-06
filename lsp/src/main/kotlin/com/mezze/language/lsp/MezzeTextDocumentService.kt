@@ -242,7 +242,6 @@ class MezzeTextDocumentService(
             if (program != null) {
                 typeCheckResult = TypeCheckResult(
                     program = program,
-                    monomorphicInstances = emptyMap(),  // Not available in recovery mode
                     resolvedImports = buildResolvedImports(recoveryResult.importContext),
                     importedAbilities = recoveryResult.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = recoveryResult.importContext?.importedEffects ?: emptyMap()

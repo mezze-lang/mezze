@@ -35,7 +35,6 @@ class TypeCheckerCompatibilityTest {
 
         assertNotNull(result)
         assertNotNull(result)
-        assertEquals(0, result.monomorphicInstances.size)
     }
 
     @Test
@@ -87,8 +86,6 @@ class TypeCheckerCompatibilityTest {
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
-        // Should have monomorphic instances for identity$Int and identity$String
-        assertTrue(result.monomorphicInstances.size >= 0)
     }
 
     @Test

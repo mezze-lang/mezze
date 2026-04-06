@@ -256,7 +256,6 @@ class ModuleTypeChecker(
                             else module.exports,
                         context = moduleContext,
                         substitution = result.substitution,
-                        monomorphicInstances = result.monomorphicInstances,
                         v2TypedModule = result.typedModule,
                         parsedModule = module.parsedModule,
                         typeContext = typeContext

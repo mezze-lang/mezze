@@ -83,7 +83,6 @@ enum class ImportKind {
 @Serializable
 data class TypeCheckResult(
     val program: Program,  // DEPRECATED — empty. Use typedModule instead.
-    val monomorphicInstances: Map<String, LetBinding> = emptyMap(),
     val resolvedImports: List<ResolvedImport> = emptyList(),
     val warnings: List<TypeCheckWarning> = emptyList(),
     val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),

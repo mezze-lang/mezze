@@ -90,7 +90,6 @@ import java.nio.file.Paths
  * when (result) {
  *     is TypeCheckResult.Success -> {
  *         // result.program has inferred types and resolved call sites!
- *         // result.monomorphicInstances contains specialized functions
  *         println("Type checking succeeded!")
  *     }
  *     is TypeCheckResult.Failure -> {
@@ -132,7 +131,6 @@ class TypeChecker(
             @Deprecated("Use typedModule instead — v1 Program kept for backward compat during migration")
             val program: Program,
             val substitution: Substitution,
-            val monomorphicInstances: Map<String, LetBinding>,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
             val loadedModules: Map<String, TypedModule> = emptyMap(),
@@ -703,7 +701,6 @@ class TypeChecker(
                 return TypeCheckResult.Success(
                     program = typedProgram,
                     substitution = substitution,
-                    monomorphicInstances = emptyMap(),
                     importContext = importContext,
                     warnings = warnings + validationWarnings,
                     loadedModules = loadedModules,
@@ -897,19 +894,37 @@ class TypeChecker(
             return false
         }
 
-        // Check if it exists in the module's program
+        // Prefer v2 ParsedModule when available
+        val parsedModule = module.parsedModule
+        if (parsedModule != null) {
+            for (decl in parsedModule.decls) {
+                when (decl) {
+                    is com.mezze.language.parsedast.ParsedLetDecl -> {
+                        if (decl.isSimpleBinding && decl.variableName == itemName) return true
+                    }
+                    is com.mezze.language.parsedast.ParsedTypeDecl -> if (decl.name == itemName) return true
+                    is com.mezze.language.parsedast.ParsedAbilityDecl -> if (decl.name == itemName) return true
+                    is com.mezze.language.parsedast.ParsedEffectDecl -> if (decl.name == itemName) return true
+                    is com.mezze.language.parsedast.ParsedPerformerDecl -> if (decl.performerName == itemName) return true
+                    else -> {}
+                }
+            }
+            return false
+        }
+
+        // Fallback: v1 Program (for backward compat with preloaded modules)
+        @Suppress("DEPRECATION")
         val program = module.program
         for (item in program.items) {
             when (item) {
                 is LetBinding -> {
-                    // Only check simple bindings (not destructuring patterns)
                     if (item.isSimpleBinding && item.variableName == itemName) return true
                 }
                 is TypeDeclaration -> if (item.name == itemName) return true
                 is AbilityDeclaration -> if (item.name == itemName) return true
                 is EffectDeclaration -> if (item.name == itemName) return true
                 is ImplDeclaration -> if (item.performerName == itemName) return true
-                is ImplAbilityDeclaration -> {} // These don't have simple names
+                is ImplAbilityDeclaration -> {}
                 is UseDeclaration, is PubUseDeclaration, is TopLevelExpression -> {}
             }
         }
@@ -1289,9 +1304,7 @@ class TypeChecker(
      *
      * Example:
      * ```kotlin
-     * val binding = typedProgram.items.filterIsInstance<LetBinding>()
-     *     .find { it.variableName == "x" }
-     * val type = binding?.inferredType
+     * // Use typedModule.decls.filterIsInstance<TypedLetDecl>() in v2 pipeline
      * ```
      */
     @Deprecated("Use inferredType on AST nodes instead", ReplaceWith("typedProgram.items"))
@@ -1367,7 +1380,6 @@ class TypeChecker(
 
                 com.mezze.language.ast.TypeCheckResult(
                     program = result.program,
-                    monomorphicInstances = result.monomorphicInstances,
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
                     importedAbilities = emptyMap(),  // v2 types don't fit v1 TypeCheckResult — callers should use typedModule
@@ -1696,8 +1708,7 @@ class TypeChecker(
                     program = program,
                     exports = emptyMap(),  // Actual exports are in ModuleResolver
                     context = TypingContext.empty,
-                    substitution = com.mezze.language.typechecker.solving.Substitution(),
-                    monomorphicInstances = emptyMap()
+                    substitution = com.mezze.language.typechecker.solving.Substitution()
                 )
                 com.mezze.language.typechecker.module.ModuleTypeChecker.preloadIntoGlobalCache(modulePath, typedModule)
             }
@@ -1713,266 +1724,6 @@ class TypeChecker(
             is MezzeType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
             is MezzeType.VarType -> "VarType(${type.variable})"
             else -> type::class.simpleName ?: type.toString()
-        }
-    }
-
-    // ====================================================================
-    // CONTINUATION TRANSFORMATION
-    // ====================================================================
-
-    /**
-     * Transform continuation-using code to state machines.
-     *
-     * This pass runs after type checking and transforms perform block bodies
-     * from DoExpression to StateMachineExpression. This is required for
-     * continuation-based effects (like Choice with AllPaths) that need to
-     * capture and resume continuations.
-     */
-    private fun transformContinuations(program: Program): Program {
-        val transformedItems = program.items.map { item ->
-            transformProgramItem(item)
-        }
-        return program.copy(items = transformedItems)
-    }
-
-    private fun transformProgramItem(item: ProgramItem): ProgramItem {
-        return when (item) {
-            is LetBinding -> {
-                val transformedExpr = transformExpression(item.expression)
-                if (transformedExpr !== item.expression) {
-                    item.copy(expression = transformedExpr)
-                } else {
-                    item
-                }
-            }
-            is TopLevelExpression -> {
-                val transformedExpr = transformExpression(item.expression)
-                if (transformedExpr !== item.expression) {
-                    item.copy(expression = transformedExpr)
-                } else {
-                    item
-                }
-            }
-            is ImplDeclaration -> {
-                val transformedOps = item.operations.map { op ->
-                    val transformedImpl = transformExpression(op.implementation)
-                    if (transformedImpl !== op.implementation) {
-                        op.copy(implementation = transformedImpl)
-                    } else {
-                        op
-                    }
-                }
-                if (transformedOps != item.operations) {
-                    item.copy(operations = transformedOps)
-                } else {
-                    item
-                }
-            }
-            is ImplAbilityDeclaration -> {
-                val transformedOps = item.operations.map { op ->
-                    val transformedImpl = transformExpression(op.implementation)
-                    if (transformedImpl !== op.implementation) {
-                        op.copy(implementation = transformedImpl)
-                    } else {
-                        op
-                    }
-                }
-                if (transformedOps != item.operations) {
-                    item.copy(operations = transformedOps)
-                } else {
-                    item
-                }
-            }
-            else -> item
-        }
-    }
-
-    private fun transformExpression(expr: Expression): Expression {
-        return when (expr) {
-            is PerformExpression -> {
-                // ALWAYS transform perform blocks into state machines
-                // Even if we don't detect continuation usage in the code, effect handlers
-                // (like AllPaths) might use continuations internally
-                val transformedInner = transformExpression(expr.expression)
-                expr.copy(expression = transformedInner)
-            }
-            is DoExpression -> {
-                // Transform statements
-                val transformedStmts = expr.statements.map { stmt ->
-                    transformStatement(stmt)
-                }
-                val transformedResult = transformExpression(expr.result)
-                if (transformedStmts != expr.statements || transformedResult !== expr.result) {
-                    expr.copy(statements = transformedStmts, result = transformedResult)
-                } else {
-                    expr
-                }
-            }
-            is FunctionCall -> {
-                val transformedFunc = transformExpression(expr.function)
-                val transformedArgs = transformExpression(expr.arguments)
-                if (transformedFunc !== expr.function || transformedArgs !== expr.arguments) {
-                    expr.copy(function = transformedFunc, arguments = transformedArgs)
-                } else {
-                    expr
-                }
-            }
-            is LambdaExpression -> {
-                // First recursively transform the body
-                val transformedBody = transformExpression(expr.body)
-
-                if (transformedBody !== expr.body) {
-                    expr.copy(body = transformedBody)
-                } else {
-                    expr
-                }
-            }
-            is IfExpression -> {
-                val transformedCond = transformExpression(expr.condition)
-                val transformedThen = transformExpression(expr.thenBranch)
-                val transformedElse = transformExpression(expr.elseBranch)
-                if (transformedCond !== expr.condition || transformedThen !== expr.thenBranch || transformedElse !== expr.elseBranch) {
-                    expr.copy(condition = transformedCond, thenBranch = transformedThen, elseBranch = transformedElse)
-                } else {
-                    expr
-                }
-            }
-            is MatchExpression -> {
-                val transformedExpr = transformExpression(expr.expression)
-                val transformedCases = expr.cases.map { case ->
-                    val transformedCaseExpr = transformExpression(case.expression)
-                    val transformedGuard = case.guard?.let { transformExpression(it) }
-                    if (transformedCaseExpr !== case.expression || transformedGuard !== case.guard) {
-                        case.copy(expression = transformedCaseExpr, guard = transformedGuard)
-                    } else {
-                        case
-                    }
-                }
-                if (transformedExpr !== expr.expression || transformedCases != expr.cases) {
-                    expr.copy(expression = transformedExpr, cases = transformedCases)
-                } else {
-                    expr
-                }
-            }
-            is RecordLiteral -> {
-                val transformedEntries = expr.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> {
-                            val transformedValue = entry.value?.let { transformExpression(it) }
-                            if (transformedValue !== entry.value) {
-                                entry.copy(value = transformedValue)
-                            } else {
-                                entry
-                            }
-                        }
-                        is RecordSpreadEntry -> {
-                            val transformedExpr = transformExpression(entry.expression)
-                            if (transformedExpr !== entry.expression) {
-                                entry.copy(expression = transformedExpr)
-                            } else {
-                                entry
-                            }
-                        }
-                    }
-                }
-                if (transformedEntries != expr.entries) {
-                    expr.copy(entries = transformedEntries)
-                } else {
-                    expr
-                }
-            }
-            is MemberAccess -> {
-                val transformedReceiver = transformExpression(expr.receiver)
-                if (transformedReceiver !== expr.receiver) {
-                    expr.copy(receiver = transformedReceiver)
-                } else {
-                    expr
-                }
-            }
-            is VariantConstruction -> {
-                val transformedValue = expr.value?.let { transformExpression(it) }
-                if (transformedValue !== expr.value) {
-                    expr.copy(value = transformedValue)
-                } else {
-                    expr
-                }
-            }
-            is SeqLiteral -> {
-                val transformedElements = expr.elements.map { element ->
-                    when (element) {
-                        is SeqRegularElement -> SeqRegularElement(transformExpression(element.expression))
-                        is SeqSpreadElement -> SeqSpreadElement(transformExpression(element.expression))
-                    }
-                }
-                if (transformedElements != expr.elements) {
-                    expr.copy(elements = transformedElements)
-                } else {
-                    expr
-                }
-            }
-            is EffectCallExpression -> {
-                val transformedArgs = transformExpression(expr.arguments)
-                if (transformedArgs !== expr.arguments) {
-                    expr.copy(arguments = transformedArgs)
-                } else {
-                    expr
-                }
-            }
-            is StringLiteral -> {
-                val parts = expr.parts
-                if (parts != null) {
-                    val transformedParts = parts.map { part ->
-                        when (part) {
-                            is ExpressionPart -> {
-                                val transformedExpr = transformExpression(part.expression)
-                                if (transformedExpr !== part.expression) {
-                                    ExpressionPart(transformedExpr)
-                                } else {
-                                    part
-                                }
-                            }
-                            else -> part
-                        }
-                    }
-                    if (transformedParts != expr.parts) {
-                        expr.copy(parts = transformedParts)
-                    } else {
-                        expr
-                    }
-                } else {
-                    expr
-                }
-            }
-            // State machines and literals don't need transformation
-            is StateMachineExpression, is IntLiteral, is NatLiteral, is FloatLiteral,
-            is FractionLiteral, is Identifier -> expr
-
-            // PipePlaceholder should never reach here - it's desugared in PipeExpression handling
-            is PipePlaceholder -> throw TypeCheckError(
-                "'@' can only be used inside a pipe expression (|>). " +
-                "Use '@' to refer to the piped value: value |> func { arg = @ }",
-                expr.sourceLocation
-            )
-
-            // PipeExpression - desugar by replacing @ with left value, then continue transform
-            is PipeExpression -> {
-                // First transform both sides
-                val transformedLeft = transformExpression(expr.left)
-                // Desugar: replace PipePlaceholder in right with left value
-                val desugaredRight = replacePipePlaceholder(expr.right, transformedLeft)
-                // Then transform the desugared right side
-                transformExpression(desugaredRight)
-            }
-
-            // Parenthesized - transform inner
-            is ParenthesizedExpression -> {
-                val transformed = transformExpression(expr.expression)
-                if (transformed !== expr.expression) {
-                    expr.copy(expression = transformed)
-                } else {
-                    expr
-                }
-            }
         }
     }
 
@@ -2283,26 +2034,6 @@ class TypeChecker(
         }
     }
 
-    private fun transformStatement(stmt: Statement): Statement {
-        return when (stmt) {
-            is LetStatement -> {
-                val transformedExpr = transformExpression(stmt.expression)
-                if (transformedExpr !== stmt.expression) {
-                    stmt.copy(expression = transformedExpr)
-                } else {
-                    stmt
-                }
-            }
-            is ExpressionStatement -> {
-                val transformedExpr = transformExpression(stmt.expression)
-                if (transformedExpr !== stmt.expression) {
-                    stmt.copy(expression = transformedExpr)
-                } else {
-                    stmt
-                }
-            }
-        }
-    }
 }
 
 /**
@@ -2320,15 +2051,6 @@ fun formatTypeCheckResult(
     return when (result) {
         is TypeChecker.TypeCheckResult.Success -> buildString {
             appendLine("✓ Type checking succeeded!")
-
-            if (result.monomorphicInstances.isNotEmpty()) {
-                appendLine("  Generated ${result.monomorphicInstances.size} specialized function(s)")
-                if (result.monomorphicInstances.size <= 10) {
-                    for (name in result.monomorphicInstances.keys.sorted()) {
-                        appendLine("    - $name")
-                    }
-                }
-            }
 
             if (result.warnings.isNotEmpty()) {
                 appendLine("Warnings:")

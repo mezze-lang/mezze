@@ -862,8 +862,6 @@ class TypeValidator(
         return errors
     }
 
-    // NOTE: validateAnnotation(LetBinding, ...) was deleted — replaced by validateParsedAnnotation(ParsedLetDecl, ...)
-
     /**
      * Validate type annotation for a v2 ParsedLetDecl.
      * Uses ParsedTypeAnnotation directly.
@@ -1067,44 +1065,6 @@ class TypeValidator(
         }
 
         return errors
-    }
-
-    /**
-     * Validate the main function for execution.
-     *
-     * Call this AFTER type-checking when you want to run the program as an executable.
-     * This validates that main exists and has type {} -> {} <*>.
-     *
-     * @param program The type-checked program
-     * @param substitution The substitution from constraint solving
-     * @return ValidationError if main is invalid, null if valid
-     */
-    fun validateMainForExecution(
-        program: Program,
-        substitution: Substitution,
-        letBindings: Map<String, LetBinding>? = null,
-        constraintResults: Map<String, ConstraintResult> = emptyMap()
-    ): ValidationError? {
-        // Find the main binding using O(1) map lookup if available, else scan
-        val mainBinding = letBindings?.get("main")
-            ?: program.items.filterIsInstance<LetBinding>()
-                .find { binding ->
-                    binding.isSimpleBinding && binding.variableName == "main"
-                }
-
-        if (mainBinding == null) {
-            return ValidationError.MainFunctionTypeError(
-                actualType = MezzeType.RecordType(emptyMap()),  // placeholder
-                reason = "no 'main' function found. Define main = {} -> perform Handler in ...",
-                sourceLocation = null
-            )
-        }
-
-        // Look up the type from constraintResults (preferred) or fall back to the AST node field.
-        val rawType = constraintResults["main"]?.type ?: mainBinding.inferredType ?: return null
-        val finalType = substitution.apply(rawType)
-
-        return validateMainType(finalType, mainBinding.expression.sourceLocation)
     }
 
     /**
@@ -1865,24 +1825,6 @@ class TypeValidator(
      */
     internal fun findSimilarNames(target: String, candidates: List<String>, maxDistance: Int = 3): List<String> {
         return StringDistance.findSimilar(target, candidates, maxDistance, maxResults = 3)
-    }
-
-    /**
-     * Get binding name from LetBinding for looking up constraint results.
-     *
-     * For simple patterns (let x = ...), returns the variable name.
-     * For complex patterns (let {x, y} = ...), returns first binding or placeholder.
-     */
-    private fun getBindingName(binding: LetBinding): String {
-        // Extract all bindings from the pattern
-        val bindings = binding.pattern.extractBindings()
-
-        // Return first binding name, or a placeholder if no bindings
-        return bindings.firstOrNull() ?: when (binding.pattern) {
-            is WildcardPattern -> "_wildcard"
-            is LiteralPattern -> "_literal"
-            else -> "_pattern"
-        }
     }
 
     /**
