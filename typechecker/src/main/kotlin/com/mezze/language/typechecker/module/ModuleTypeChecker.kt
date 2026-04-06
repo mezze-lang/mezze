@@ -216,7 +216,12 @@ class ModuleTypeChecker(
             // Use the module's file path parent directory for import resolution
             val typeChecker = TypeChecker.withContext(moduleContext)
             val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
-            val result = typeChecker.checkProgram(module.program, modulePath, module.modulePath)
+            // Prefer ParsedModule (v2) if available, fall back to v1 Program
+            val result = if (module.parsedModule != null) {
+                typeChecker.checkParsedModule(module.parsedModule!!, modulePath, module.modulePath)
+            } else {
+                typeChecker.checkProgram(module.program, modulePath, module.modulePath)
+            }
 
             return when (result) {
                 is TypeChecker.TypeCheckResult.Success -> {
