@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.mono
 
+import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeVar
@@ -548,10 +549,11 @@ class Monomorphizer {
                         // If caller didn't inject the receiver (methodCallResolutions didn't
                         // propagate to TypedAstBuilder), inject it from the TypedFieldAccess
                         // receiver expression. The first param of the impl method is the receiver.
-                        // Only do this when callerFields is empty (no explicit args) to avoid
-                        // breaking legitimate field-access-then-call patterns.
-                        if (fn is TypedFieldAccess && callerFields.isEmpty()) {
-                            val receiverParamName = paramNames.firstOrNull() ?: "it"
+                        // Inject when: callerFields is empty, OR the receiver param (usually "it")
+                        // is not present in callerFields (method call where TypedAstBuilder
+                        // didn't wrap the receiver due to missing methodCallResolutions).
+                        val receiverParamName = paramNames.firstOrNull() ?: Keywords.IT
+                        if (fn is TypedFieldAccess && receiverParamName !in callerFields) {
                             callerFields[receiverParamName] = fn.record
                         }
 

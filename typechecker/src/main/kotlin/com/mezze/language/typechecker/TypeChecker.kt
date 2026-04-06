@@ -651,6 +651,7 @@ class TypeChecker(
 
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
 
+
                     // V2 validation: pattern exhaustiveness and unreachable on MonoAST.
                     // Stored for running AFTER the pipeline try-catch so validation errors
                     // are not confused with pipeline crashes.

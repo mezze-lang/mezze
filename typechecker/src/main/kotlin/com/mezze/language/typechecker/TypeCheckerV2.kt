@@ -532,6 +532,26 @@ class TypeCheckerV2 {
             }
         }
 
+        // Build effect name→hash lookup for detecting Effect.operation patterns
+        currentModuleEffectHashes = mutableMapOf<String, String>().also { map ->
+            for (item in program.items) {
+                if (item is EffectDeclaration && item.contentHash != null) {
+                    map[item.name] = item.contentHash!!
+                }
+            }
+        }
+
+        // Build performer name→(implHash, effectHash) lookup for PerformExpression→TypedPerform
+        currentModulePerformerInfo = mutableMapOf<String, Pair<String, String>>().also { map ->
+            for (item in program.items) {
+                if (item is ImplDeclaration && item.contentHash != null) {
+                    val effectName = item.effect.localName
+                    val effectHash = currentModuleEffectHashes[effectName] ?: ""
+                    map[item.performerName] = Pair(item.contentHash!!, effectHash)
+                }
+            }
+        }
+
         for (item in program.items) {
             when (item) {
                 is LetBinding -> {
@@ -680,6 +700,16 @@ class TypeCheckerV2 {
     /** Name→hash lookup for resolving function references in impl bodies */
     private var currentModuleBindingHashes: Map<String, String> = emptyMap()
 
+    /** Stack of lambda parameter names — identifiers matching these are locals, not global functions */
+    private val lambdaParamScopes = ArrayDeque<Set<String>>()
+
+    /** Effect name→contentHash lookup for detecting Effect.operation patterns in v1→v2 conversion */
+    private var currentModuleEffectHashes: Map<String, String> = emptyMap()
+
+    /** Performer name→(implHash, effectHash) lookup for PerformExpression→TypedPerform */
+    private var currentModulePerformerInfo: Map<String, Pair<String, String>> = emptyMap()
+
+
     private fun v1ExprToTyped(expr: Expression, file: String): TypedExpr {
         val type = expr.inferredType ?: MezzeType.VarType(TypeVar("unknown"))
         val loc = v1LocFromExpr(expr, file)
@@ -703,7 +733,11 @@ class TypeCheckerV2 {
                 TypedStringLit(parts, type, loc)
             }
             is Identifier -> {
-                val binding = if (expr.resolvedContentHash != null) {
+                // Check if this identifier is a lambda parameter — local params shadow globals
+                val isLambdaParam = lambdaParamScopes.any { it.contains(expr.localName) }
+                val binding = if (isLambdaParam) {
+                    BindingRef.Local(0, 0) // Lambda parameter — resolved by Resolver's SlotAllocator
+                } else if (expr.resolvedContentHash != null) {
                     BindingRef.ByHash(v1HashToTypedHash(expr.resolvedContentHash))
                 } else if (expr.localName.startsWith("__native_")) {
                     BindingRef.Native(expr.localName)
@@ -728,9 +762,31 @@ class TypeCheckerV2 {
                         com.mezze.language.typedast.TypedParam(name, MezzeType.VarType(TypeVar(name)), loc)
                     }
                 }
-                TypedLambda(params, v1ExprToTyped(expr.body, file), emptyList(), type, loc)
+                // Track lambda param names so Identifier resolution prefers local over global
+                lambdaParamScopes.addLast(params.map { it.name }.toSet())
+                val body = v1ExprToTyped(expr.body, file)
+                lambdaParamScopes.removeLast()
+                TypedLambda(params, body, emptyList(), type, loc)
             }
             is FunctionCall -> {
+                // Detect Effect.operation { args } pattern that the v1 typechecker
+                // missed converting to EffectCallExpression. Emit TypedPerformOp
+                // so the pipeline produces DynamicEffectCallNode instead of field access.
+                val fn = expr.function
+                if (fn is MemberAccess) {
+                    val receiverName = (fn.receiver as? Identifier)?.localName
+                        ?: (fn.receiver as? VariantConstruction)?.constructor
+                    val effectHash = receiverName?.let { currentModuleEffectHashes[it] }
+                    if (effectHash != null) {
+                        return TypedPerformOp(
+                            v1HashToTypedHash(effectHash),
+                            fn.member,
+                            v1ExprToTyped(expr.arguments, file),
+                            type, loc
+                        )
+                    }
+                }
+
                 // If the function call has a resolved content hash, use it for a direct call
                 // This handles operator desugaring (1 + 2 → NumAdd.add) where the function
                 // is resolved to a specific ability impl method by the v1 typechecker
@@ -760,37 +816,42 @@ class TypeCheckerV2 {
                 v1ExprToTyped(expr.expression, file),
                 expr.cases.map { c ->
                     val patterns = c.patterns.map { v1PatternToTyped(it, file) }
-                    val bindings = c.patterns.flatMap { it.extractBindings() }.map { name ->
+                    val bindingNames = c.patterns.flatMap { it.extractBindings() }
+                    val bindings = bindingNames.map { name ->
                         PatternBinding(name, MezzeType.VarType(TypeVar(name)), loc)
                     }
-                    TypedCase(
-                        patterns,
-                        bindings,
-                        c.guard?.let { v1ExprToTyped(it, file) },
-                        v1ExprToTyped(c.expression, file),
-                        loc
-                    )
+                    // Push pattern bindings so case body sees them as locals
+                    lambdaParamScopes.addLast(bindingNames.toSet())
+                    val guard = c.guard?.let { v1ExprToTyped(it, file) }
+                    val body = v1ExprToTyped(c.expression, file)
+                    lambdaParamScopes.removeLast()
+                    TypedCase(patterns, bindings, guard, body, loc)
                 },
                 type,
                 loc
             )
-            is DoExpression -> TypedBlock(
-                expr.statements.map { stmt ->
+            is DoExpression -> {
+                // Collect let binding names so they shadow globals in subsequent expressions
+                val letNames = mutableSetOf<String>()
+                val stmts = expr.statements.map { stmt ->
                     when (stmt) {
-                        is LetStatement -> TypedStatement.Let(
-                            (stmt.pattern as? VariablePattern)?.name ?: "<pattern>",
-                            Hash.ZERO,
-                            MezzeType.VarType(TypeVar("unknown")),
-                            v1ExprToTyped(stmt.expression, file),
-                            loc
-                        )
+                        is LetStatement -> {
+                            val name = (stmt.pattern as? VariablePattern)?.name ?: "<pattern>"
+                            val value = v1ExprToTyped(stmt.expression, file)
+                            letNames.add(name)
+                            // Add to current scope so subsequent stmts see this binding
+                            if (lambdaParamScopes.isNotEmpty()) {
+                                val current = lambdaParamScopes.removeLast()
+                                lambdaParamScopes.addLast(current + name)
+                            }
+                            TypedStatement.Let(name, Hash.ZERO, MezzeType.VarType(TypeVar("unknown")), value, loc)
+                        }
                         is ExpressionStatement -> TypedStatement.Expr(v1ExprToTyped(stmt.expression, file), loc)
                     }
-                },
-                v1ExprToTyped(expr.result, file),
-                type,
-                loc
-            )
+                }
+                val result = v1ExprToTyped(expr.result, file)
+                TypedBlock(stmts, result, type, loc)
+            }
             is RecordLiteral -> TypedRecord(
                 expr.entries.map { entry ->
                     when (entry) {
@@ -833,7 +894,15 @@ class TypeCheckerV2 {
             is ParenthesizedExpression -> v1ExprToTyped(expr.expression, file)
             is PerformExpression -> {
                 val handlers = expr.handlers.map { h ->
-                    TypedHandlerRef(Hash.ZERO, Hash.ZERO, h.performer.localName, null, loc)
+                    val performerName = h.performer.localName
+                    val info = currentModulePerformerInfo[performerName]
+                    TypedHandlerRef(
+                        v1HashToTypedHash(info?.first),
+                        v1HashToTypedHash(info?.second),
+                        performerName,
+                        h.parameters?.let { v1ExprToTyped(it, file) },
+                        loc
+                    )
                 }
                 TypedPerform(handlers, v1ExprToTyped(expr.expression, file), type, loc)
             }

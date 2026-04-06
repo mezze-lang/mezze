@@ -24,6 +24,9 @@ class Resolver {
     /** Lambda bodies extracted during resolution */
     private val extractedLambdas = mutableListOf<ResolvedFunction>()
 
+    /** True when resolving handler operation bodies — `scope` reads from context, not frame */
+    private var inHandlerOperation = false
+
     fun resolve(monoModule: MonoModule): ResolvedModule {
         extractedLambdas.clear()
         val resolvedFunctions = monoModule.functions.map { fn ->
@@ -38,7 +41,9 @@ class Resolver {
                 params = emptyList(),
                 operations = pd.operations.entries.mapIndexed { idx, (opName, body) ->
                     val ctx = SlotAllocator()
+                    inHandlerOperation = true
                     val resolvedBody = resolveExpr(body, ctx)
+                    inHandlerOperation = false
                     ResolvedFunction(
                         hash = computeHash("${pd.hash.hex}_op_$idx"),
                         name = opName,
@@ -110,6 +115,11 @@ class Resolver {
             is MonoVar -> {
                 when (val binding = expr.binding) {
                     is MonoBinding.Local -> {
+                        // In handler operations, `scope` is provided by the HandleNode
+                        // via the MezzeContext, not as a frame-local variable.
+                        if (inHandlerOperation && expr.name == "scope") {
+                            return ResolvedReadContext("scope", hash, loc)
+                        }
                         val kind = typeToSlotKind(expr.type)
                         val existingSlot = ctx.findLocal(expr.name)
                         if (existingSlot != null) {

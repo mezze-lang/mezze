@@ -187,6 +187,7 @@ class ExpressionConstraintGenerator {
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val usedVars = mutableSetOf<String>()
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
+        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
 
         var interpolationIndex = 0
         for (part in expr.parts) {
@@ -206,6 +207,7 @@ class ExpressionConstraintGenerator {
                     // Track used variables from interpolated expressions
                     usedVars.addAll(exprResult.usedVariables)
                     referencedBindings.addAll(exprResult.referencedBindings)
+                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
                     constraints.add(
                         Constraint.Equality(
                             left = exprResult.type,
@@ -228,7 +230,8 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
             usedVariables = usedVars,
-            referencedBindings = referencedBindings
+            referencedBindings = referencedBindings,
+            methodCallResolutions = methodCallResolutions
         )
     }
 
@@ -247,6 +250,7 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
+        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
 
         var elementIndex = 0
         for (element in expr.elements) {
@@ -258,6 +262,7 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(result.abilityConstraints)
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
+                    methodCallResolutions.putAll(result.methodCallResolutions)
                     // Regular element must match element type
                     constraints.add(
                         Constraint.Equality(
@@ -277,6 +282,7 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(result.abilityConstraints)
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
+                    methodCallResolutions.putAll(result.methodCallResolutions)
                     // Spread element must be a seq with matching element type
                     constraints.add(
                         Constraint.Equality(
@@ -298,7 +304,8 @@ class ExpressionConstraintGenerator {
             effects = effects,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = undefinedVars
+            undefinedVariables = undefinedVars,
+            methodCallResolutions = methodCallResolutions
         )
     }
 
@@ -490,6 +497,7 @@ class ExpressionConstraintGenerator {
         val usedVars = mutableSetOf<String>()
         val effects = mutableSetOf<String>()  // Collect effects from field expressions
         val effectInstances = mutableSetOf<MezzeType.EffectInstance>()  // Collect effect instances
+        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -535,6 +543,7 @@ class ExpressionConstraintGenerator {
                     usedVars.addAll(fieldResult.usedVariables)
                     effects.addAll(fieldResult.effects)  // Propagate effects from field expressions
                     effectInstances.addAll(fieldResult.effectInstances)  // Propagate effect instances
+                    methodCallResolutions.putAll(fieldResult.methodCallResolutions)
                 }
                 is ParsedRecordEntry.Spread -> {
                     // Spread: {...baseRecord}
@@ -547,6 +556,7 @@ class ExpressionConstraintGenerator {
                     usedVars.addAll(spreadResult.usedVariables)
                     effects.addAll(spreadResult.effects)  // Propagate effects from spread expressions
                     effectInstances.addAll(spreadResult.effectInstances)  // Propagate effect instances
+                    methodCallResolutions.putAll(spreadResult.methodCallResolutions)
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -689,7 +699,8 @@ class ExpressionConstraintGenerator {
             undefinedVariables = undefinedVars,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
-            usedVariables = usedVars
+            usedVariables = usedVars,
+            methodCallResolutions = methodCallResolutions
         )
     }
 
@@ -916,7 +927,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = fieldType,
             constraints = constraints,
-            undefinedVariables = receiverResult.undefinedVariables
+            undefinedVariables = receiverResult.undefinedVariables,
+            methodCallResolutions = receiverResult.methodCallResolutions
         )
     }
 
@@ -933,7 +945,7 @@ class ExpressionConstraintGenerator {
         // The receiver is passed separately via the member access (x.method {args}).
         if (methodType !is MezzeType.FunctionType) return methodType
         val params = (methodType.paramType as? MezzeType.RecordType)?.fields ?: return methodType
-        val strippedParams = params.filterKeys { it != "it" }
+        val strippedParams = params.filterKeys { it != Keywords.IT }
         return MezzeType.FunctionType(
             paramType = MezzeType.RecordType(fields = strippedParams, rowVar = null),
             returnType = methodType.returnType,
@@ -1044,9 +1056,9 @@ class ExpressionConstraintGenerator {
 
             if (fullMethodType !is MezzeType.FunctionType) return null
 
-            // Strip `it` from param record — call-site only has the other params
+            // Strip receiver param from param record — call-site only has the other params
             val fullParams = (fullMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
-            val strippedParams = fullParams.filterKeys { it != "it" }
+            val strippedParams = fullParams.filterKeys { it != Keywords.IT }
             strippedMethodType = MezzeType.FunctionType(
                 paramType = MezzeType.RecordType(fields = strippedParams, rowVar = null),
                 returnType = fullMethodType.returnType,
@@ -1243,7 +1255,7 @@ class ExpressionConstraintGenerator {
             abilityName = resolvedAbilityName,
             methodName = methodName,
             methodHash = null,  // Resolved at TypedAstBuilder time via ability impl index
-            receiverFieldName = "it",  // Ability methods always use "it" as receiver param
+            receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
             isInherentMethod = false
         )
 
@@ -1321,9 +1333,9 @@ class ExpressionConstraintGenerator {
             // from the receiver expression's constraint generation.
 
             if (freshMethodType is MezzeType.FunctionType) {
-                // Strip `it` from param type — method syntax passes receiver separately
+                // Strip receiver param from param type — method syntax passes receiver separately
                 val fullParams = (freshMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
-                val strippedParams = fullParams.filterKeys { it != "it" }
+                val strippedParams = fullParams.filterKeys { it != Keywords.IT }
                 val strippedParamType = MezzeType.RecordType(fields = strippedParams, rowVar = null)
 
                 // Constrain arguments (without it)
@@ -1350,7 +1362,7 @@ class ExpressionConstraintGenerator {
                 abilityName = null,  // Inherent methods have no ability
                 methodName = methodName,
                 methodHash = null,   // Resolved at TypedAstBuilder time
-                receiverFieldName = "it",  // Inherent methods also use "it" as receiver param
+                receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
                 isInherentMethod = true,
                 implContentHash = methodInfo.implContentHash
             )
@@ -2434,7 +2446,8 @@ class ExpressionConstraintGenerator {
                 undefinedVariables = payloadResult.undefinedVariables,
                 usedVariables = payloadResult.usedVariables,
                 abilityConstraints = payloadResult.abilityConstraints,
-                referencedBindings = payloadResult.referencedBindings
+                referencedBindings = payloadResult.referencedBindings,
+                methodCallResolutions = payloadResult.methodCallResolutions
             )
         }
     }
@@ -2992,7 +3005,8 @@ class ExpressionConstraintGenerator {
                         abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                         usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
-                        referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
+                        referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
+                        methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
                     )
                 }
             }
@@ -3093,7 +3107,8 @@ class ExpressionConstraintGenerator {
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                     usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                     tailCalls = tailCalls,
-                    referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
+                    referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
+                    methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
                 )
             }
         }
@@ -4360,8 +4375,6 @@ class ExpressionConstraintGenerator {
         // Create EffectInstance with associated types bound from the argument
         // For Exception.throw { error = FakeError {...} }, we need to bind 'error to FakeError
         val effectDecl = context.effectDeclarations[effectName]
-        // DEBUG:
-        println("DEBUG generateEffectCall: effectName=$effectName, effectDecl=$effectDecl, keys=${context.effectDeclarations.keys}")
         DebugLogger.debug(Category.Effects) { "generateEffectCall: creating effectInstance, effectDecl=$effectDecl, assocTypes=${effectDecl?.associatedTypes}, opType=$instantiatedOperationType" }
         val effectInstance = if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty() && instantiatedOperationType is MezzeType.FunctionType) {
             // Extract associated type bindings from the argument
@@ -4402,7 +4415,8 @@ class ExpressionConstraintGenerator {
             constraints = argResult.constraints + additionalConstraints,
             effects = setOf(effectName),
             effectInstances = effectInstances + argResult.effectInstances,  // Include effect instances!
-            undefinedVariables = argResult.undefinedVariables
+            undefinedVariables = argResult.undefinedVariables,
+            methodCallResolutions = argResult.methodCallResolutions
         )
     }
 

@@ -98,6 +98,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
 
+        // Clear the static closure cache to avoid sharing CallTargets across Polyglot contexts.
+        // Each test creates a new context, and Truffle requires CallTargets to be context-specific.
+        evaluatedClosureCache.clear();
+
         // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];

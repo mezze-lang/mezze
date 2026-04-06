@@ -151,9 +151,36 @@ public final class DynamicEffectCallNode extends MezzeNode {
             return createSuspendedEffectCall(argument);
         }
 
-        // Handler should be a record. If it's a function (parameterized impl), that's an error
-        // because parameterized impls should be invoked via ParameterizedHandleNode first.
-        if (!(handler instanceof MezzeRecord handlerRecord)) {
+        // Handler should be a record. If it's a MezzeFunction (closure factory not yet evaluated),
+        // try evaluating it to get the performer record.
+        MezzeRecord handlerRecord;
+        if (handler instanceof MezzeRecord rec) {
+            handlerRecord = rec;
+        } else if (handler instanceof MezzeFunction fn) {
+            // Lazy evaluation: the handler is a closure factory that wasn't evaluated yet
+            // (e.g., because captures were missing during module loading)
+            try {
+                Object result = fn.getCallTarget().call(new Object[] { MezzeRecord.empty() });
+                if (result instanceof MezzeFunction innerFn) {
+                    result = innerFn.getCallTarget().call(new Object[] { MezzeRecord.empty() });
+                }
+                if (result instanceof MezzeRecord rec) {
+                    handlerRecord = rec;
+                    // Cache the resolved record back in context for future lookups
+                    if (effectContentHash != null && !effectContentHash.isEmpty()) {
+                        context.defineGlobal(effectContentHash, handlerRecord);
+                    }
+                } else {
+                    throw new RuntimeException("Effect handler closure factory returned " +
+                        (result == null ? "null" : result.getClass().getSimpleName()) +
+                        " instead of a record for operation '" + operationName + "'");
+                }
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to evaluate effect handler closure factory: " + e.getMessage(), e);
+            }
+        } else {
             throw new RuntimeException("Effect handler must be a record, got: " +
                 (handler == null ? "null" : handler.getClass().getSimpleName()) +
                 ". For parameterized impls, use 'perform Handler {params} in ...'");

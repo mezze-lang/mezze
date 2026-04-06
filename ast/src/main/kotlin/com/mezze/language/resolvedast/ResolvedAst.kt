@@ -80,6 +80,7 @@ sealed interface ResolvedExpr {
 @Serializable data class ResolvedReadLocal(val slot: Int, val kind: SlotKind, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 @Serializable data class ResolvedWriteLocal(val slot: Int, val kind: SlotKind, val value: ResolvedExpr, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 @Serializable data class ResolvedReadParam(val index: Int, val kind: SlotKind, override val hash: Hash, override val loc: Loc) : ResolvedExpr
+@Serializable data class ResolvedReadContext(val name: String, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 @Serializable data class ResolvedReadCapture(val index: Int, val kind: SlotKind, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 
 // Calls

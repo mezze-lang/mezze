@@ -155,11 +155,15 @@ public final class MezzeFunctionRootNode extends RootNode {
         if (parameterCount > 0 && args.length > closureCount) {
             Object recordArg = args[closureCount];
             if (recordArg instanceof MezzeRecord record) {
+                debugLog2("UNPACK fn=" + name + " paramNames=" + java.util.Arrays.toString(parameterNames) + " record=" + record + " closureCount=" + closureCount + " paramCount=" + parameterCount);
                 unpackRecordFast(frame, record);
             } else {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
-                throw new IllegalArgumentException("Expected record argument, got: " +
-                    (recordArg == null ? "null" : recordArg.getClass().getName()));
+                throw new IllegalArgumentException("Expected record argument for fn=" + name +
+                    " paramNames=" + java.util.Arrays.toString(parameterNames) +
+                    " closureCount=" + closureCount +
+                    " args.length=" + args.length +
+                    ", got: " + (recordArg == null ? "null" : recordArg.getClass().getName()));
             }
         }
 
@@ -209,6 +213,11 @@ public final class MezzeFunctionRootNode extends RootNode {
      * Slow path: compute field indices and cache them.
      * Split into two parts - boundary for index computation, inline for frame binding.
      */
+    @TruffleBoundary
+    private void debugLog2(String msg) {
+        try { new java.io.FileWriter("/tmp/v2pr-debug.log", true).append("[FnRoot] " + msg + "\n").close(); } catch (Exception e) {}
+    }
+
     private void unpackRecordSlow(VirtualFrame frame, MezzeRecord record, Object shape) {
         // Compute indices in boundary method (can't access frame there)
         Object[] result = computeFieldIndicesAndValues(record, shape);

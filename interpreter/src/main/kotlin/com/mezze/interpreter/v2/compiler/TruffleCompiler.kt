@@ -105,6 +105,10 @@ class TruffleCompiler(
 
             // === Variables ===
             is ReadLocalIR -> ReadLocalNode(node.slot, slotKindToInt(node.kind))
+            is ReadContextIR -> {
+                // Read a named value from the MezzeContext (used for `scope` in handler operations)
+                com.mezze.interpreter.v2.nodes.ReadContextNode(node.name)
+            }
             is WriteLocalIR -> {
                 val valueNode = compileNode(node.value, source)
                 WriteLocalNode.create(valueNode, node.slot, slotKindToInt(node.kind))

@@ -117,7 +117,9 @@ final class HandlerLookupNode extends MezzeNode {
                     context.defineGlobal(contentHash, handler);
                 }
             } catch (Exception e) {
-                // Evaluation failed — keep looking
+                // Evaluation failed (missing captures, etc.) — return the raw MezzeFunction.
+                // DynamicEffectCallNode will evaluate it lazily when handler operations are called.
+                // This is better than throwing "handler not found" since we DID find a handler.
             }
         }
         if (handler == null) {

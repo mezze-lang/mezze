@@ -129,6 +129,7 @@ class Lowerer {
             }
 
             is ResolvedReadLocal -> ReadLocalIR(expr.slot, expr.kind, src)
+            is ResolvedReadContext -> ReadContextIR(expr.name, src)
             is ResolvedWriteLocal -> WriteLocalIR(expr.slot, expr.kind, lowerExpr(expr.value, ft), src)
             // Params are unpacked from record arg into frame slots by MezzeFunctionRootNode.
             // Frame layout: params(0..P-1), locals(P..P+L-1), captures(P+L..P+L+C-1).
