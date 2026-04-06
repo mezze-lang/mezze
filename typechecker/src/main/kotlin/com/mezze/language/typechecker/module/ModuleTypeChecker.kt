@@ -194,10 +194,19 @@ class ModuleTypeChecker(
             // global cache retains the typed module. Sync them so importers see all impls.
             @Suppress("DEPRECATION")
             val cachedProgram = cached.program
+            @Suppress("DEPRECATION")
+            val typeContext = buildTypeContextFromProgram(cachedProgram)
+            @Suppress("DEPRECATION")
             moduleResolver?.updateModuleExports(
-                cached.modulePath, cachedProgram,
-                buildTypeContextFromProgram(cachedProgram)
+                cached.modulePath, cachedProgram, typeContext
             )
+            // Also store the parsedModule in the resolver cache for v2 consumers
+            val cachedParsedModule = cached.parsedModule ?: module.parsedModule
+            if (cachedParsedModule != null) {
+                moduleResolver?.updateModuleExportsV2(
+                    cached.modulePath, cachedParsedModule, typeContext
+                )
+            }
             return ModuleTypeCheckResult.Success(cached)
         }
 
@@ -240,17 +249,26 @@ class ModuleTypeChecker(
                         context = moduleContext,
                         substitution = result.substitution,
                         monomorphicInstances = result.monomorphicInstances,
-                        v2TypedModule = result.typedModule
+                        v2TypedModule = result.typedModule,
+                        parsedModule = module.parsedModule
                     )
 
                     // Cache the result in GLOBAL cache (thread-safe)
                     putInGlobalCache(module.modulePath, typedModule)
 
-                    // Update ModuleResolver's cache with real inferred types
+                    // Update ModuleResolver's cache with real inferred types and ProgramIndex.
+                    // The v1 updateModuleExports rebuilds the ProgramIndex from the typed program
+                    // (which has cross-module ability impls resolved and content hashes computed).
+                    // Then updateModuleExportsV2 overlays the parsedModule for v2 consumers.
                     if (moduleProgram.items.isNotEmpty()) {
                         moduleResolver?.let { resolver ->
                             val typeContext = buildTypeContextFromProgram(moduleProgram)
+                            @Suppress("DEPRECATION")
                             resolver.updateModuleExports(module.modulePath, moduleProgram, typeContext)
+                            // Also store the parsedModule in the resolver cache for v2 path
+                            if (module.parsedModule != null) {
+                                resolver.updateModuleExportsV2(module.modulePath, module.parsedModule!!, typeContext)
+                            }
                         }
                     }
 

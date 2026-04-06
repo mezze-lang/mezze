@@ -1597,8 +1597,10 @@ class TypeChecker(
          * Returns the Program if the module has been type-checked, null otherwise.
          */
         @JvmStatic
+        @Deprecated("Use ModuleResolver.getFromCache(modulePath)?.parsedModule instead")
         fun getTypedModule(modulePath: String): Program? {
             // Get from ModuleResolver's cache
+            @Suppress("DEPRECATION")
             return ModuleResolver.getFromCache(modulePath)?.program
         }
 
@@ -1666,6 +1668,7 @@ class TypeChecker(
                 }
 
                 // Update ModuleResolver's cache with the preloaded module
+                @Suppress("DEPRECATION")
                 resolver.updateModuleExports(modulePath, program, typeContext)
 
                 // Also cache in ModuleTypeChecker's global cache to prevent re-type-checking.

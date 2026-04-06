@@ -195,12 +195,14 @@ data class ProgramIndex(
 data class Module(
     val path: ModulePath,
     val filePath: String,
-    @Deprecated("Use LoadedModule.parsedModule instead — v1 Program kept for backward compat during migration")
+    @Deprecated("Use parsedModule instead — v1 Program kept for backward compat during migration")
     val program: Program,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
     val sourceHash: String? = null,
-    val index: ProgramIndex = ProgramIndex.EMPTY
+    val index: ProgramIndex = ProgramIndex.EMPTY,
+    /** V2 ParsedModule — the primary AST. Use instead of program when possible. */
+    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 ) {
     /** Legacy accessor for module name as string. Use path.fullPath instead. */
     val name: String get() = path.fullPath
@@ -437,9 +439,25 @@ class ModuleResolver(
         }
 
         @JvmStatic
+        @Deprecated("Use getAllParsedModules() instead — v1 Program overload kept for CLI compat")
         fun getAllModules(): Map<String, Program> {
             synchronized(cacheLock) {
+                @Suppress("DEPRECATION")
                 return moduleCache.mapValues { (_, module) -> module.program }
+            }
+        }
+
+        /**
+         * Get all cached modules as ParsedModules.
+         * Returns only modules that have a parsedModule stored (all modules loaded
+         * through the normal loadModule path).
+         */
+        @JvmStatic
+        fun getAllParsedModules(): Map<String, ParsedModule> {
+            synchronized(cacheLock) {
+                return moduleCache.mapNotNull { (key, module) ->
+                    module.parsedModule?.let { key to it }
+                }.toMap()
             }
         }
 
@@ -687,7 +705,8 @@ class ModuleResolver(
                     exports = parsedExports,
                     dependencies = dependencies,
                     sourceHash = sourceHash,
-                    index = programIndex
+                    index = programIndex,
+                    parsedModule = parsedModule
                 )
 
                 // Cache the module (thread-safe)
@@ -1091,10 +1110,13 @@ class ModuleResolver(
      * @param module The parsed module to extract exports from.
      * @param modulePath Optional qualified module path (e.g. "std::int") used only for
      *   registering the hash in [ContentHashRegistry] for debugging.
+     * @param typeContext Optional type context from type-checking — maps binding names to
+     *   their inferred MezzeType. When provided, overrides the annotation-derived types.
      */
     private fun extractExportsFromParsedModule(
         module: ParsedModule,
-        modulePath: String? = null
+        modulePath: String? = null,
+        typeContext: Map<String, MezzeType>? = null
     ): Map<String, ExportedItem> {
         val exports = mutableMapOf<String, ExportedItem>()
         val file = module.path
@@ -1108,9 +1130,15 @@ class ModuleResolver(
                 is ParsedLetDecl -> {
                     if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
 
-                    // Derive MezzeType from the optional type annotation
-                    val mezzeType: MezzeType = decl.typeAnnotation
+                    // Only simple bindings have a stable single name to export
+                    if (!decl.isSimpleBinding) continue
+                    val name = decl.variableName
+
+                    // Priority: 1) typeContext (inferred), 2) annotation, 3) fresh var
+                    val fromContext = typeContext?.get(name)
+                    val fromAnnotation = decl.typeAnnotation
                         ?.let { convertParsedTypeAnnotation(it) }
+                    val mezzeType: MezzeType = fromContext ?: fromAnnotation
                         ?: MezzeType.VarType(TypeVar.fresh())
 
                     // Convert to v1 and compute content hash
@@ -1123,10 +1151,6 @@ class ModuleResolver(
                         expression = ParserBridge.toV1Expr(decl.value, file)
                     )
                     val contentHash = ASTHasher.hashLetBinding(v1Binding).toFullHexString()
-
-                    // Only simple bindings have a stable single name to export
-                    if (!decl.isSimpleBinding) continue
-                    val name = decl.variableName
 
                     exports[name] = ExportedItem(
                         name = name,
@@ -1186,10 +1210,14 @@ class ModuleResolver(
                     )
                     val contentHash = ASTHasher.hashTypeDeclaration(v1TypeDecl).toFullHexString()
 
+                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    val fromContext = typeContext?.get(decl.name)
+                    val typeMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
+
                     exports[decl.name] = ExportedItem(
                         name = decl.name,
                         type = ExportedItemType.TYPE,
-                        mezzeType = MezzeType.VarType(TypeVar.fresh()),
+                        mezzeType = typeMezzeType,
                         originalName = decl.name,
                         contentHash = contentHash
                     )
@@ -1233,10 +1261,14 @@ class ModuleResolver(
                     )
                     val contentHash = ASTHasher.hashEffectDeclaration(v1Effect).toFullHexString()
 
+                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    val fromContext = typeContext?.get(decl.name)
+                    val mezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
+
                     exports[decl.name] = ExportedItem(
                         name = decl.name,
                         type = ExportedItemType.EFFECT,
-                        mezzeType = MezzeType.VarType(TypeVar.fresh()),
+                        mezzeType = mezzeType,
                         originalName = decl.name,
                         contentHash = contentHash
                     )
@@ -1319,10 +1351,14 @@ class ModuleResolver(
                     )
                     val contentHash = ASTHasher.hashAbilityDeclaration(v1Ability).toFullHexString()
 
+                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    val fromContext = typeContext?.get(decl.name)
+                    val abilityMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
+
                     exports[decl.name] = ExportedItem(
                         name = decl.name,
                         type = ExportedItemType.ABILITY,
-                        mezzeType = MezzeType.VarType(TypeVar.fresh()),
+                        mezzeType = abilityMezzeType,
                         originalName = decl.name,
                         contentHash = contentHash
                     )
@@ -1384,10 +1420,14 @@ class ModuleResolver(
                     // Don't overwrite an existing TYPE export with a HANDLER export
                     val existingExport = exports[decl.performerName]
                     if (existingExport?.type != ExportedItemType.TYPE) {
+                        // Priority: 1) typeContext (inferred), 2) fresh var
+                        val fromContext = typeContext?.get(decl.performerName)
+                        val performerMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
+
                         exports[decl.performerName] = ExportedItem(
                             name = decl.performerName,
                             type = ExportedItemType.FUNCTION, // handlers are treated as values
-                            mezzeType = MezzeType.VarType(TypeVar.fresh()),
+                            mezzeType = performerMezzeType,
                             originalName = decl.performerName,
                             contentHash = contentHash
                         )
@@ -1611,10 +1651,11 @@ class ModuleResolver(
     }
     
     /**
-     * Update a module's exports with typed program
-     * Called after type-checking to populate exports with inferred types
+     * Update a module's exports with typed program (v1 path).
+     * Called after type-checking to populate exports with inferred types.
      * @param typeContext Optional context from TypeChecker with inferred types for exports
      */
+    @Deprecated("Use updateModuleExportsV2(ParsedModule) instead — v1 overload kept for backward compat")
     fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, MezzeType>? = null) {
         // Skip update if program is empty (new pipeline returns empty v1 Program)
         if (typedProgram.items.isEmpty()) return
@@ -1635,8 +1676,10 @@ class ModuleResolver(
 
         val module = getFromCache(modulePath)
         // Rebuild index with the new typed program
+        @Suppress("DEPRECATION")
         val updatedIndex = ProgramIndex.build(typedProgram)
 
+        @Suppress("DEPRECATION")
         val updatedModule = if (module != null) {
             module.copy(
                 program = typedProgram,
@@ -1660,6 +1703,80 @@ class ModuleResolver(
         putInCache(modulePath, updatedModule)
 
         DebugLogger.debug(Category.ModuleResolver) { "Cached module with ${updatedModule.exports.size} exports" }
+    }
+
+    /**
+     * Update a module's exports from a ParsedModule (v2 path).
+     *
+     * This is the v2 replacement for [updateModuleExports] — it works entirely from
+     * ParsedModule + typeContext, avoiding the need for a v1 Program.
+     *
+     * When the module is already cached (normal case after loadModule), this method
+     * updates only the export types from the typeContext while preserving the content
+     * hashes and ProgramIndex from the original load. This ensures content-addressed
+     * lookups remain consistent.
+     *
+     * When the module is NOT cached (rare — typically only during initial prelude load),
+     * this falls back to extractExportsFromParsedModule which recomputes hashes.
+     *
+     * @param modulePath The module's qualified path (e.g. "std::int")
+     * @param parsedModule The v2 ParsedModule
+     * @param typeContext Optional context from type-checking with inferred MezzeTypes
+     */
+    fun updateModuleExportsV2(
+        modulePath: String,
+        parsedModule: ParsedModule,
+        typeContext: Map<String, MezzeType>? = null
+    ) {
+        if (parsedModule.decls.isEmpty()) return
+        DebugLogger.debug(Category.ModuleResolver) {
+            "updateModuleExportsV2: modulePath=$modulePath, ${parsedModule.decls.size} decls"
+        }
+
+        val module = getFromCache(modulePath)
+
+        if (module != null) {
+            // Module already cached — update export types from typeContext while
+            // preserving existing content hashes and ProgramIndex.
+            val updatedExports = if (typeContext != null && typeContext.isNotEmpty()) {
+                module.exports.mapValues { (_, export) ->
+                    val inferredType = typeContext[export.originalName]
+                    if (inferredType != null) export.copy(mezzeType = inferredType) else export
+                }
+            } else {
+                module.exports
+            }
+
+            val updatedModule = module.copy(
+                exports = updatedExports,
+                parsedModule = parsedModule
+            )
+            putInCache(modulePath, updatedModule)
+
+            DebugLogger.debug(Category.ModuleResolver) {
+                "Cached module (v2, updated types) with ${updatedModule.exports.size} exports"
+            }
+        } else {
+            // Module NOT in cache — compute exports from scratch using ParsedModule
+            val updatedExports = extractExportsFromParsedModule(parsedModule, modulePath, typeContext)
+            val updatedIndex = ProgramIndex.build(parsedModule)
+
+            val newModule = Module(
+                path = ModulePath.parse(modulePath),
+                filePath = "",
+                program = Program(emptyList()),
+                exports = updatedExports,
+                dependencies = emptyList(),
+                sourceHash = null,
+                index = updatedIndex,
+                parsedModule = parsedModule
+            )
+            putInCache(modulePath, newModule)
+
+            DebugLogger.debug(Category.ModuleResolver) {
+                "Cached module (v2, new) with ${newModule.exports.size} exports"
+            }
+        }
     }
 
     private fun checkIdentifiersInExpression(expr: Expression, indent: String) {
