@@ -608,7 +608,7 @@ class TypeChecker(
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                 var loweredPerformers: List<Array<String>> = emptyList()
                 var v2MonoModule: com.mezze.language.monoast.MonoModule? = null
-                if (!isStdlibModule) try {
+                try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
                         constraintResults = globallyResolvedConstraintResults,
@@ -626,24 +626,23 @@ class TypeChecker(
                     )
                     val typed = builder.build(parsedModule)
                     emittedTypedModule = typed
+                } catch (emitEx: Exception) {
+                    System.err.println("V2 TypedAstBuilder (${currentModulePath}): ${emitEx::class.simpleName}: ${emitEx.message}")
+                }
 
-                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(typed)
+                // Phase 2: Mono → Resolve → Lower (entry module only)
+                if (!isStdlibModule && emittedTypedModule != null) try {
+                    val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(emittedTypedModule!!)
 
-                    // Build allModules: entry + user imports + prelude (all cached)
+                    // Build allModules: entry + user imports + prelude (all v2 TypedAST)
                     val preludeV2 = PrecompiledStdlib.v2Modules
                     val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
                     allModules.putAll(preludeV2)
                     allModules[wrapped.hash] = wrapped
                     if (loadedModules.isNotEmpty()) {
-                        val adapter = TypeCheckerV2()
-                        for ((path, v1Module) in loadedModules) {
-                            val v2Module = adapter.convertV1TypedModule(path, v1Module)
-                            val hashKey = v2Module.hash.hex
-                            val cached = v1ToV2ModuleCache[hashKey]
-                            if (cached != null) {
-                                allModules[cached.hash] = cached
-                            } else {
-                                v1ToV2ModuleCache[hashKey] = v2Module
+                        for ((_, v1Module) in loadedModules) {
+                            val v2Module = v1Module.v2TypedModule
+                            if (v2Module != null) {
                                 allModules[v2Module.hash] = v2Module
                             }
                         }
@@ -651,10 +650,7 @@ class TypeChecker(
 
                     val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
 
-
                     // V2 validation: pattern exhaustiveness and unreachable on MonoAST.
-                    // Stored for running AFTER the pipeline try-catch so validation errors
-                    // are not confused with pipeline crashes.
                     v2MonoModule = monoModule
 
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)

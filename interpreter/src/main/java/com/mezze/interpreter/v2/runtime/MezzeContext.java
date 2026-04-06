@@ -366,6 +366,7 @@ public final class MezzeContext {
         return collapsedHandlers.get().get(effectContentHash);
     }
 
+
     /**
      * Get the current handler stack version.
      * Used by DynamicEffectCallNode for cache invalidation.

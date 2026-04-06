@@ -140,6 +140,27 @@ public final class MonomorphicCallNode extends MezzeNode {
         }
 
         cachedFunction = (MezzeFunction) value;
+
+        // If this is a closure factory, eagerly evaluate it during resolution
+        // instead of during execute(). This avoids the bug where execute()
+        // re-invokes the inner closure with the same argument (e.g., MezzeUnit
+        // from a {} call), which crashes if the inner function expects a record.
+        if (isClosureFactory) {
+            try {
+                Object factoryResult = cachedFunction.getCallTarget().call(
+                    new Object[] { com.mezze.interpreter.v2.values.MezzeRecord.empty() }
+                );
+                if (factoryResult instanceof MezzeFunction innerClosure) {
+                    cachedFunction = innerClosure;
+                    closureResolved = true;
+                    // Cache for other callers
+                    context.defineGlobal(lookupKey, innerClosure);
+                }
+            } catch (Exception e) {
+                // Not a closure factory — use the original function
+            }
+        }
+
         CallTarget target = cachedFunction.getCallTarget();
         callNode = DirectCallNode.create(target);
         cachedClosureValues = cachedFunction.getClosureValues();

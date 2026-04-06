@@ -186,7 +186,9 @@ data class TypedModule(
     val substitution: Substitution,                   // Type substitution from inference
     val monomorphicInstances: Map<String, LetBinding>, // Specialized function instances
     val dependencyGraph: com.mezze.language.typechecker.dependencies.DependencyGraph =
-        com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY  // Dependencies between definitions
+        com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY,  // Dependencies between definitions
+    /** V2 TypedModule emitted by TypedAstBuilder — used by monomorphizer */
+    val v2TypedModule: com.mezze.language.typedast.TypedModule? = null
 )
 
 // ============================================================================

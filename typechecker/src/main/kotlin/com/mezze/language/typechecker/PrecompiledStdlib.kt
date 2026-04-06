@@ -59,20 +59,16 @@ object PrecompiledStdlib {
         // Build the compiled interface from the import context
         compiledPrelude = CompiledModuleInterface.fromImportContext(preludeImportContext)
 
-        // Try loading pre-compiled v2 modules from classpath resource
+        // Build v2 modules from TypedAstBuilder output (stored during type-checking)
         val cached = tryLoadV2ModulesFromResource()
         if (cached != null) {
             v2Modules = cached
         } else {
-            // Fallback: convert v1 modules to v2
-            val adapter = TypeCheckerV2()
             val v2 = mutableMapOf<Hash, com.mezze.language.typedast.TypedModule>()
-            for ((path, v1Module) in loadedModules) {
-                try {
-                    val v2Module: com.mezze.language.typedast.TypedModule = adapter.convertV1TypedModule(path, v1Module)
+            for ((_, v1Module) in loadedModules) {
+                val v2Module = v1Module.v2TypedModule
+                if (v2Module != null) {
                     v2[v2Module.hash] = v2Module
-                } catch (_: Exception) {
-                    // Skip modules that can't be converted
                 }
             }
             v2Modules = v2

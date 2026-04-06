@@ -254,6 +254,17 @@ class ASTToTruffleConverterV2(
             fieldValueNodes.add(convertExpression(op.implementation))
         }
 
+        // Also include initialize_scope and finalize_scope as fields in the handler record
+        // so the v2 pipeline's HandleNode can dynamically detect and call them
+        scopedInfo.initializeScope?.let { initOp ->
+            fieldNames.add("initialize_scope")
+            fieldValueNodes.add(convertExpression(initOp.implementation))
+        }
+        scopedInfo.finalizeScope?.let { finalOp ->
+            fieldNames.add("finalize_scope")
+            fieldValueNodes.add(convertExpression(finalOp.implementation))
+        }
+
         val recordNode = RecordLiteralNode.allObjects(
             fieldNames.toTypedArray(),
             fieldValueNodes.toTypedArray()

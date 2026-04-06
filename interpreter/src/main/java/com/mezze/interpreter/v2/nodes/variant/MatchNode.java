@@ -287,10 +287,24 @@ public final class MatchNode extends MezzeNode {
         }
     }
 
+    @TruffleBoundary
+    private void debugMatch(Object value) {
+        String info = value == null ? "null" : value.getClass().getSimpleName();
+        if (value instanceof MezzeVariant v) {
+            info += " tag=" + v.getTag() + " name=" + v.getConstructorName();
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < branches.length; i++) {
+                sb.append(" br[").append(i).append("].tag=").append(branches[i].getTag());
+            }
+            info += sb.toString();
+        }
+        try { new java.io.FileWriter("/tmp/v2pr-debug.log", true).append("[Match] value=" + info + "\n").close(); } catch (Exception e) {}
+    }
+
     @Override
     public Object execute(VirtualFrame frame) {
         Object value = valueNode.execute(frame);
-
+        debugMatch(value);
         if (value instanceof MezzeVariant variant) {
             // MONOMORPHIC FAST PATH: If we've only ever seen one tag, skip all dispatch
             if (monomorphicTagAssumption != null && monomorphicTagAssumption.isValid()) {

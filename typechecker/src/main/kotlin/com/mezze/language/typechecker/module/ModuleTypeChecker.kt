@@ -230,7 +230,8 @@ class ModuleTypeChecker(
                             else module.exports,
                         context = moduleContext,
                         substitution = result.substitution,
-                        monomorphicInstances = result.monomorphicInstances
+                        monomorphicInstances = result.monomorphicInstances,
+                        v2TypedModule = result.typedModule
                     )
 
                     // Cache the result in GLOBAL cache (thread-safe)
