@@ -53,6 +53,7 @@ sealed class ModuleLoadResult {
 data class LoadedModule(
     val path: ModulePath,              // Structured module path
     val filePath: String,              // Physical file path
+    @Deprecated("Use parsedModule instead — v1 Program kept for backward compat during migration")
     val program: Program,              // Parsed AST (v1 — kept for backward compat during migration)
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
     val dependencies: List<ModulePath>, // Module dependencies as structured paths
@@ -182,7 +183,8 @@ sealed class ModuleTypeCheckResult {
  */
 data class TypedModule(
     val modulePath: String,                           // Module path
-    val program: Program,                             // Type-checked AST (with inferred types) — v1 compat, use v2TypedModule instead
+    @Deprecated("Use v2TypedModule instead — v1 Program kept for backward compat during migration")
+    val program: Program,
     val exports: Map<String, ExportedItem>,           // Exports with complete types
     val context: TypingContext,                       // Module-specific typing context
     val substitution: Substitution,                   // Type substitution from inference

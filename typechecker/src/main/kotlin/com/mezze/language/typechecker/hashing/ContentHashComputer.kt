@@ -78,6 +78,7 @@ object ContentHashComputer {
      * 1. First pass: Compute all declaration hashes and build name->hash lookup
      * 2. Second pass: Resolve references (e.g., ImplDeclaration.effect.resolvedContentHash)
      */
+    @Deprecated("Used only by ModuleResolver for v1 Program loading path — v2 uses ParsedASTHasher and TypedAstBuilder")
     fun computeHashes(program: Program): HashResult {
         val hashMap = mutableMapOf<String, MezzeHash>()
 

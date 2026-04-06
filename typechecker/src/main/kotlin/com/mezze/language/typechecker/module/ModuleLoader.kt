@@ -229,6 +229,7 @@ class ModuleLoader(
     /**
      * Convert ModuleResolver's Module to our LoadedModule type.
      */
+    @Suppress("DEPRECATION")
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
         val parser = com.mezze.language.parser.MezzeParser()
         return LoadedModule(

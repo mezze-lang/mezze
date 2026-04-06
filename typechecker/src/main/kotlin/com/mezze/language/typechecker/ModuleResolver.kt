@@ -64,6 +64,7 @@ data class ProgramIndex(
          * Build an index from a program (v1 AST — converts to v2 types).
          * Called once during module loading, all subsequent lookups are O(1).
          */
+        @Deprecated("Use build(ParsedModule) instead — v1 overload kept for ModuleResolver compat")
         fun build(program: Program): ProgramIndex {
             val items = program.items
 
@@ -194,6 +195,7 @@ data class ProgramIndex(
 data class Module(
     val path: ModulePath,
     val filePath: String,
+    @Deprecated("Use LoadedModule.parsedModule instead — v1 Program kept for backward compat during migration")
     val program: Program,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
@@ -901,6 +903,7 @@ class ModuleResolver(
      * @param modulePath The module path for registry purposes (e.g., "std::int")
      * @param typeContext Optional context from TypeChecker containing inferred types
      */
+    @Deprecated("Use extractExportsFromParsedModule instead — v1 overload kept for backward compat")
     private fun extractExports(
         program: Program,
         modulePath: String? = null,
@@ -1462,6 +1465,7 @@ class ModuleResolver(
     /**
      * Extract module dependencies from use declarations
      */
+    @Deprecated("Operates on v1 Program — should be migrated to ParsedModule")
     private fun extractDependencies(program: Program): List<ModuleDependency> {
         val dependencies = mutableListOf<ModuleDependency>()
         

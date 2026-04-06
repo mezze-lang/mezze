@@ -23,19 +23,6 @@ import com.mezze.language.typechecker.hashing.ContentHashComputer
  */
 object DuplicateDeclarationValidator {
     /**
-     * Validate all duplicate declarations in a ParsedModule.
-     * This is the preferred entry point. Converts to v1 Program internally
-     * since the validation logic operates on v1 types.
-     *
-     * @param module The parsed module to validate
-     * @throws TypeCheckError if any duplicate declarations are found
-     */
-    fun validateParsedModule(module: com.mezze.language.parsedast.ParsedModule) {
-        val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
-        validateProgram(program)
-    }
-
-    /**
      * Validate all duplicate declarations in a program.
      * This should be called BEFORE context building.
      *
@@ -252,14 +239,6 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Collect all type variable names used in a type definition (without location).
-     * Kept for backward compatibility.
-     */
-    private fun collectTypeVariablesInDefinition(definition: TypeDefinition): Set<String> {
-        return collectTypeVariablesWithLocation(definition).map { it.first }.toSet()
-    }
-
-    /**
      * Collect all type variable names with their source locations from a type annotation.
      * Note: Most type annotations don't have source locations, so we return null for those.
      */
@@ -306,52 +285,6 @@ object DuplicateDeclarationValidator {
         }
     }
 
-    /**
-     * Collect all type variable names used in a type annotation.
-     * All type variables found must be declared as type parameters.
-     */
-    private fun collectTypeVariablesInAnnotation(annotation: TypeAnnotation): Set<String> {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Type variables start with apostrophe or lowercase
-                if (annotation.name.startsWith("'")) {
-                    setOf(annotation.name.removePrefix("'"))
-                } else if (annotation.name.first().isLowerCase()) {
-                    setOf(annotation.name)
-                } else {
-                    emptySet()
-                }
-            }
-            is TypeApplicationAnnotation -> {
-                annotation.args.flatMap { collectTypeVariablesInAnnotation(it) }.toSet()
-            }
-            is FunctionTypeAnnotation -> {
-                collectTypeVariablesInAnnotation(annotation.paramType) +
-                    collectTypeVariablesInAnnotation(annotation.returnType) +
-                    (annotation.effects?.let { collectTypeVariablesInAnnotation(it) } ?: emptySet())
-            }
-            is RecordTypeAnnotation -> {
-                annotation.entries.flatMap { entry ->
-                    collectTypeVariablesInAnnotation(entry.type)
-                }.toSet()
-            }
-            is VariantTypeAnnotation -> {
-                annotation.constructors.flatMap { ctor ->
-                    ctor.dataType?.let { collectTypeVariablesInAnnotation(it) } ?: emptySet()
-                }.toSet()
-            }
-            is SeqTypeAnnotation -> {
-                collectTypeVariablesInAnnotation(annotation.elementType)
-            }
-            is EffectRowAnnotation -> {
-                // Effect row annotations might contain type variables in their effect parameters
-                emptySet()
-            }
-            is QualifiedTypeAnnotation -> {
-                annotation.args.flatMap { collectTypeVariablesInAnnotation(it) }.toSet()
-            }
-        }
-    }
 
     /**
      * Validate no duplicate effect declarations (Bug #9b, OldTypeChecker.kt:880-904)

@@ -192,9 +192,11 @@ class ModuleTypeChecker(
             // Ensure the ModuleResolver also has the typed version with content hashes.
             // After clearCache(), the resolver re-loads from disk (unhashed), but this
             // global cache retains the typed module. Sync them so importers see all impls.
+            @Suppress("DEPRECATION")
+            val cachedProgram = cached.program
             moduleResolver?.updateModuleExports(
-                cached.modulePath, cached.program,
-                buildTypeContextFromProgram(cached.program)
+                cached.modulePath, cachedProgram,
+                buildTypeContextFromProgram(cachedProgram)
             )
             return ModuleTypeCheckResult.Success(cached)
         }
@@ -217,6 +219,7 @@ class ModuleTypeChecker(
             val typeChecker = TypeChecker.withContext(moduleContext)
             val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
             // Prefer ParsedModule (v2) if available, fall back to v1 Program
+            @Suppress("DEPRECATION")
             val result = if (module.parsedModule != null) {
                 typeChecker.checkParsedModule(module.parsedModule!!, modulePath, module.modulePath)
             } else {
@@ -226,6 +229,7 @@ class ModuleTypeChecker(
             return when (result) {
                 is TypeChecker.TypeCheckResult.Success -> {
                     // Create typed module — use original program for structure
+                    @Suppress("DEPRECATION")
                     val moduleProgram = if (result.program.items.isNotEmpty()) result.program else module.program
                     val typedModule = TypedModule(
                         modulePath = module.modulePath,

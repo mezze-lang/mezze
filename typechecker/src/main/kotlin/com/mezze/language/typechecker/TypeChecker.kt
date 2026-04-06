@@ -129,14 +129,16 @@ class TypeChecker(
          * Type checking succeeded.
          */
         data class Success(
-            val program: Program,                              // V1 Program with inferred types (kept for backward compat; prefer typedModule)
+            @Deprecated("Use typedModule instead — v1 Program kept for backward compat during migration")
+            val program: Program,
             val substitution: Substitution,
             val monomorphicInstances: Map<String, LetBinding>,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
             val loadedModules: Map<String, TypedModule> = emptyMap(),
             val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
-            val programBeforeContinuations: Program? = null,   // V1 Program BEFORE StateMachine transform (legacy, used as fallback)
+            @Deprecated("Legacy v1 field — no longer needed since TypedAstEmitter was removed")
+            val programBeforeContinuations: Program? = null,
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
             val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
             val loweredPerformers: List<Array<String>> = emptyList()  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
@@ -180,6 +182,7 @@ class TypeChecker(
      * @param program The program to type-check
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
+    @Deprecated("Prefer checkParsedModule(ParsedModule, ...) — v1 Program overload kept for backward compat")
     fun checkProgram(program: Program, currentPath: Path = Paths.get("."), currentModulePath: String? = null, enablePrelude: Boolean = false): TypeCheckResult {
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -743,6 +746,7 @@ class TypeChecker(
     /**
      * Check if a program has import declarations.
      */
+    @Deprecated("Use hasImportsParsed(ParsedModule) instead")
     private fun hasImports(program: Program): Boolean {
         return program.items.any { item ->
             item is UseDeclaration || item is PubUseDeclaration
@@ -1005,6 +1009,7 @@ class TypeChecker(
      *
      * @param importContext The import context containing imported effects/abilities with content hashes
      */
+    @Deprecated("V1 pipeline only — v2 uses ParsedASTHasher and TypedAstBuilder for hashing")
     private fun computeDeclarationHashes(
         program: Program,
         importContext: ModuleImportContext? = null
@@ -1300,6 +1305,7 @@ class TypeChecker(
      *
      * @throws TypeCheckError if type checking fails
      */
+    @Deprecated("Use typeCheck(ParsedModule, ...) instead — v1 Program overload kept for backward compat")
     fun typeCheck(program: Program): com.mezze.language.ast.TypeCheckResult {
         return typeCheck(program, Paths.get("."))
     }
@@ -1324,6 +1330,7 @@ class TypeChecker(
         return typeCheck(program, currentPath, enablePrelude, modulePath)
     }
 
+    @Deprecated("Use typeCheck(ParsedModule, ...) instead — v1 Program overload kept for backward compat")
     fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
@@ -1405,16 +1412,9 @@ class TypeChecker(
 
         return when (result) {
             is TypeCheckResult.Success -> {
-                // Use the TypedModule already emitted by the v2 pipeline (TypedAstBuilder)
-                // inside checkProgram. Falls back to legacy TypedAstEmitter only if v2 failed.
+                // Use the TypedModule emitted by the v2 pipeline (TypedAstBuilder)
                 val typedModule = result.typedModule
-                    ?: com.mezze.language.typechecker.emit.TypedAstEmitter.emit(
-                        result.programBeforeContinuations ?: result.program,
-                        result.monomorphicInstances,
-                        result.importContext,
-                        module.path,
-                        result.abilityImpls
-                    )
+                    ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
             }
             is TypeCheckResult.Failure -> {
@@ -1965,6 +1965,7 @@ class TypeChecker(
      * Desugar all PipeExpressions in a program.
      * Converts: x |> f { a = @ } to f { a = x }
      */
+    @Deprecated("V1 pipeline only — v2 ParsedModule desugars pipes in constraint generation")
     private fun desugarPipeExpressions(program: Program): Program {
         return program.copy(
             items = program.items.map { desugarPipeInProgramItem(it) }
@@ -1978,6 +1979,7 @@ class TypeChecker(
      * is imported from another module, its impl is still parsed as ImplDeclaration (effect impl syntax).
      * This step converts those to ImplAbilityDeclaration using the import context.
      */
+    @Deprecated("V1 pipeline only — v2 ContextBuilder.build(ParsedModule) handles impl resolution")
     private fun resolveImplDeclarationsWithImports(
         program: Program,
         importContext: ModuleImportContext?

@@ -68,6 +68,7 @@ class ImportResolver(
      * @param program The program to process
      * @return ImportResolutionResult (Success or Failure)
      */
+    @Deprecated("Use resolveImports(ParsedModule) instead — v1 Program overload kept for TypeChecker.checkProgram compat")
     fun resolveImports(program: Program): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
         var importContext = ModuleImportContext.empty()
