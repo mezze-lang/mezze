@@ -79,7 +79,7 @@ sealed class UnificationResult {
  *
  * @param typeDeclarations Map of type declarations for expanding type applications
  */
-fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Shortcut: if types are identical, no substitution needed
     if (type1 == type2) {
         return UnificationResult.Success(Substitution.empty)
@@ -104,7 +104,7 @@ fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, Type
 /**
  * Internal implementation of unification (without caching).
  */
-private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, TypeDeclaration>): UnificationResult {
+private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): UnificationResult {
     // SPECIAL CASE: Bool primitive unifies with Bool variant
     // BoolType (primitive) can unify with VariantType([True, False])
     // This allows pattern matching on True/False while keeping Bool as a primitive
@@ -509,7 +509,7 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
 /**
  * Unify two function types.
  */
-private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Unify parameter types
     val paramResult = unify(fn1.paramType, fn2.paramType, typeDeclarations)
     if (paramResult is UnificationResult.Failure) {
@@ -613,7 +613,7 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
  * Examples:
  * - multiply {x, y} -> x * y  with  multiply {y = 5}  gives  {x} -> x * 5
  */
-private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     val fields1 = rec1.fields.keys
     val fields2 = rec2.fields.keys
 
@@ -701,7 +701,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
 /**
  * Unify two variant types.
  */
-internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     val constructors1 = var1.constructors.keys
     val constructors2 = var2.constructors.keys
 
@@ -907,7 +907,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 /**
  * Unify two type applications.
  */
-private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Type constructors must match — check by hash first (stable across renames/aliases),
     // then by name, then fall back to open variant expansion.
     val constructorsMatch = app1.constructor == app2.constructor ||
@@ -967,7 +967,7 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
 /**
  * Unify two map types.
  */
-private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Unify key types
     val keyResult = unify(map1.keyType, map2.keyType, typeDeclarations)
     if (keyResult is UnificationResult.Failure) {
@@ -990,7 +990,7 @@ private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDecl
 /**
  * Unify two sorted map types.
  */
-private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Unify key types
     val keyResult = unify(map1.keyType, map2.keyType, typeDeclarations)
     if (keyResult is UnificationResult.Failure) {
@@ -1017,7 +1017,7 @@ private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.Sorte
  * Suspended<T, <E2>>, the result is Suspended<T, <E1, E2>>. This allows match
  * expressions with branches having different effects to type-check correctly.
  */
-private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
     // Unify value types
     val valueResult = unify(susp1.valueType, susp2.valueType, typeDeclarations)
     if (valueResult is UnificationResult.Failure) {
@@ -1162,12 +1162,12 @@ private fun formatTypeRaw(type: MezzeType): String {
  * @param typeDeclarations Map of type declarations
  * @return The expanded record type, or null if expansion failed
  */
-internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration>): MezzeType.RecordType? {
+internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.RecordType? {
     // Look up the type declaration
     val typeDecl = typeDeclarations[typeApp.constructor] ?: return null
 
     // Only record definitions can be expanded to record types
-    val recordDef = typeDecl.definition as? RecordDefinition ?: return null
+    val recordDef = typeDecl.definition as? com.mezze.language.parsedast.ParsedRecordDef ?: return null
 
     // Build substitution map for type parameters
     val typeParamSubst = typeDecl.typeParams.zip(typeApp.args).associate { (paramName, argType) ->
@@ -1255,7 +1255,7 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
 
     // Build the record type by converting each field
     val fields = recordDef.fields.associate { field ->
-        val convertedType = contextBuilder.convertTypeAnnotation(field.type)
+        val convertedType = contextBuilder.convertParsedTypeAnnotation(field.type)
         val substitutedType = substituteTypeParams(convertedType)
         field.name to substitutedType
     }
@@ -1279,7 +1279,7 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
  * @param typeDeclarations Map of type declarations
  * @return The expanded variant type, or null if expansion failed
  */
-internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration>): MezzeType.VariantType? {
+internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.VariantType? {
     // Look up the type declaration - first in local declarations, then in all cached modules
     val typeDecl = typeDeclarations[typeApp.constructor]
         ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
@@ -1288,18 +1288,20 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     // Handle both variant definitions and newtype definitions
     // Newtypes are essentially single-constructor variants
     val variantDef = when (val def = typeDecl.definition) {
-        is VariantDefinition -> def
-        is NewtypeDefinition -> {
+        is com.mezze.language.parsedast.ParsedVariantDef -> def
+        is com.mezze.language.parsedast.ParsedNewtypeDef -> {
             // Expand newtype to variant for pattern matching and construction.
-            // Ability derivation uses a separate check (isNewtype in canDeriveAbility).
-            val payloadType = if (def.wrappedType is RecordTypeAnnotation) {
+            val payloadType = if (def.wrappedType is com.mezze.language.parsedast.ParsedRecordType) {
                 def.wrappedType
             } else {
-                RecordTypeAnnotation(
-                    entries = listOf(RecordTypeEntry("val", def.wrappedType))
+                val synLoc = com.mezze.language.parsedast.Loc("<expand>", 0, 0, 0, 0)
+                com.mezze.language.parsedast.ParsedRecordType(
+                    entries = listOf(com.mezze.language.parsedast.ParsedRecordTypeEntry("val", def.wrappedType, synLoc)),
+                    loc = synLoc
                 )
             }
-            VariantDefinition(listOf(VariantConstructorDef(def.constructor, payloadType)))
+            val synLoc = com.mezze.language.parsedast.Loc("<expand>", 0, 0, 0, 0)
+            com.mezze.language.parsedast.ParsedVariantDef(listOf(com.mezze.language.parsedast.ParsedVariantCtorDef(def.constructor, payloadType, synLoc)), loc = synLoc)
         }
         else -> return null
     }
@@ -1411,7 +1413,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         val dataType = constructor.dataType?.let { annotation ->
             // Convert type annotation to MezzeType
             // This creates TypeVars for the type parameters like 'a
-            val convertedType = contextBuilder.convertTypeAnnotation(annotation)
+            val convertedType = contextBuilder.convertParsedTypeAnnotation(annotation)
             // Substitute those TypeVars with the actual type arguments
             substituteTypeParams(convertedType)
         }
@@ -1486,13 +1488,13 @@ enum class TypeDefinitionKind {
 
 internal fun getTypeDefinitionKind(
     typeApp: MezzeType.TypeApplication,
-    typeDeclarations: Map<String, TypeDeclaration>
+    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
 ): TypeDefinitionKind {
     val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeDefinitionKind.UNKNOWN
     return when (typeDecl.definition) {
-        is RecordDefinition -> TypeDefinitionKind.RECORD
-        is VariantDefinition -> TypeDefinitionKind.VARIANT
-        is NewtypeDefinition -> TypeDefinitionKind.NEWTYPE
+        is com.mezze.language.parsedast.ParsedRecordDef -> TypeDefinitionKind.RECORD
+        is com.mezze.language.parsedast.ParsedVariantDef -> TypeDefinitionKind.VARIANT
+        is com.mezze.language.parsedast.ParsedNewtypeDef -> TypeDefinitionKind.NEWTYPE
     }
 }
 
@@ -1509,12 +1511,12 @@ internal fun getTypeDefinitionKind(
  */
 internal fun expandTypeApplication(
     typeApp: MezzeType.TypeApplication,
-    typeDeclarations: Map<String, TypeDeclaration>
+    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
 ): TypeExpansionResult {
     val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeExpansionResult.NotFound
 
     return when (val definition = typeDecl.definition) {
-        is RecordDefinition -> {
+        is com.mezze.language.parsedast.ParsedRecordDef -> {
             val expanded = expandTypeApplicationToRecord(typeApp, typeDeclarations)
             if (expanded != null) {
                 TypeExpansionResult.Record(expanded)
@@ -1522,7 +1524,7 @@ internal fun expandTypeApplication(
                 TypeExpansionResult.NotFound
             }
         }
-        is VariantDefinition -> {
+        is com.mezze.language.parsedast.ParsedVariantDef -> {
             val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
             if (expanded != null) {
                 TypeExpansionResult.Variant(expanded)
@@ -1530,7 +1532,7 @@ internal fun expandTypeApplication(
                 TypeExpansionResult.NotFound
             }
         }
-        is NewtypeDefinition -> {
+        is com.mezze.language.parsedast.ParsedNewtypeDef -> {
             val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
             if (expanded != null && expanded.constructors.size == 1) {
                 val (constructorName, payloadType) = expanded.constructors.entries.first()

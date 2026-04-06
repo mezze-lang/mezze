@@ -39,8 +39,8 @@ import com.mezze.language.typechecker.WellKnownHashes
  */
 class TypeValidator(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
-    private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
+    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
     private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
 ) {
     private val abilityResolver = AbilityResolver(context, typeDeclarations)
@@ -315,11 +315,11 @@ class TypeValidator(
                             // Expand TypeApplication to VariantType using type declarations
                             val typeDecl = typeDeclarations[appliedType.constructor]
                             val definition = typeDecl?.definition
-                            if (definition is VariantDefinition) {
+                            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                                 // Build VariantType from definition
                                 MezzeType.VariantType(
                                     constructors = definition.constructors.associate { ctor ->
-                                        ctor.name to ctor.dataType?.let { convertTypeAnnotation(it) }
+                                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
                                     },
                                     rowVar = if (definition.isOpen) RowVar.fresh() else null
                                 )
@@ -595,7 +595,7 @@ class TypeValidator(
 
         for ((aliasName, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
-            if (definition is RecordDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedRecordDef) {
                 // Check if fields match
                 val aliasFields = definition.fields.associate { it.name to it.type }
 
@@ -633,7 +633,7 @@ class TypeValidator(
 
         for ((aliasName, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 // Get constructors from the type declaration
                 val aliasConstructors = definition.constructors.map { it.name }.toSet()
 
@@ -667,8 +667,8 @@ class TypeValidator(
      */
     private fun inferTypeArgsFromVariant(
         variantType: MezzeType.VariantType,
-        typeDecl: TypeDeclaration,
-        definition: VariantDefinition
+        typeDecl: com.mezze.language.parsedast.ParsedTypeDecl,
+        definition: com.mezze.language.parsedast.ParsedVariantDef
     ): List<MezzeType>? {
         // Map type parameter names to their inferred types
         val typeArgMap = mutableMapOf<String, MezzeType>()
@@ -683,7 +683,7 @@ class TypeValidator(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -1570,6 +1570,12 @@ class TypeValidator(
         return convertTypeAnnotation(annotation)
     }
 
+    /** Convert v2 ParsedTypeAnnotation to MezzeType by going through v1. */
+    private fun convertParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<validator>")
+        return convertTypeAnnotation(v1)
+    }
+
     /**
      * Validate that built-in abilities are not used as values.
      *
@@ -2245,7 +2251,7 @@ class TypeValidator(
      */
     private fun inferScrutineeTypeFromPatterns(
         matchExpr: MatchExpression,
-        typeDecls: Map<String, TypeDeclaration>
+        typeDecls: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
     ): MezzeType? {
         // Collect all constructor names from patterns
         val constructorNames = mutableSetOf<String>()
@@ -2264,14 +2270,14 @@ class TypeValidator(
         // Find a type declaration that contains these constructors
         for ((typeName, typeDecl) in typeDecls) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 // Check if this variant has the constructors we're looking for
                 val variantConstructors = definition.constructors.map { it.name }.toSet()
                 if (constructorNames.all { it in variantConstructors }) {
                     // Found it! Build the VariantType
                     return MezzeType.VariantType(
                         constructors = definition.constructors.associate { ctor ->
-                            ctor.name to ctor.dataType?.let { convertTypeAnnotation(it) }
+                            ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
                         },
                         rowVar = if (definition.isOpen) RowVar.fresh() else null
                     )
@@ -2308,7 +2314,7 @@ class TypeValidator(
     private fun validatePerformExpressionsInExpression(
         expr: Expression,
         implDeclarations: Map<String, ImplDeclaration>,
-        effectDeclarations: Map<String, EffectDeclaration>,
+        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
         functionDefinitions: Map<String, LambdaExpression>
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
@@ -2476,7 +2482,7 @@ class TypeValidator(
     private fun validatePerformExpression(
         expr: PerformExpression,
         implDeclarations: Map<String, ImplDeclaration>,
-        effectDeclarations: Map<String, EffectDeclaration>,
+        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
         functionDefinitions: Map<String, LambdaExpression>
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
@@ -2545,7 +2551,7 @@ class TypeValidator(
      */
     private fun collectThrownErrorTypes(
         expr: Expression,
-        effectDeclarations: Map<String, EffectDeclaration>,
+        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
         functionDefinitions: Map<String, LambdaExpression>
     ): Map<String, Map<String, MezzeType>> {
         val result = mutableMapOf<String, MutableMap<String, MezzeType>>()
@@ -2710,7 +2716,7 @@ class TypeValidator(
      * @return A map from associated type names (e.g., "'error") to the extracted types
      */
     private fun extractAssociatedTypeValues(
-        effectDecl: EffectDeclaration,
+        effectDecl: com.mezze.language.parsedast.ParsedEffectDecl,
         operationName: String,
         args: Expression
     ): Map<String, MezzeType>? {
@@ -2725,7 +2731,7 @@ class TypeValidator(
         val associatedTypeNames = effectDecl.associatedTypes.toSet()
 
         // Parse the parameter type annotation to find field -> associated type mappings
-        val fieldToAssocType = findAssociatedTypeFields(paramTypeAnnotation, associatedTypeNames)
+        val fieldToAssocType = findAssociatedTypeFields(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(paramTypeAnnotation, "<effect>"), associatedTypeNames)
 
         if (fieldToAssocType.isEmpty()) return null
 
@@ -2886,27 +2892,24 @@ class TypeValidator(
                 if (typeDecl != null) {
                     val definition = typeDecl.definition
                     return when (definition) {
-                        is VariantDefinition -> {
-                            // Build VariantType from definition
+                        is com.mezze.language.parsedast.ParsedVariantDef -> {
                             MezzeType.VariantType(
                                 constructors = definition.constructors.associate { ctor ->
-                                    ctor.name to ctor.dataType?.let { convertTypeAnnotation(it) }
+                                    ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
                                 },
                                 rowVar = if (definition.isOpen) RowVar.fresh() else null
                             )
                         }
-                        is RecordDefinition -> {
-                            // Build RecordType from definition
+                        is com.mezze.language.parsedast.ParsedRecordDef -> {
                             MezzeType.RecordType(
                                 fields = definition.fields.associate { field ->
-                                    field.name to convertTypeAnnotation(field.type)
+                                    field.name to convertParsedTypeAnnotation(field.type)
                                 },
                                 rowVar = null
                             )
                         }
-                        is NewtypeDefinition -> {
-                            // Expand newtypes to their underlying type
-                            convertTypeAnnotation(definition.wrappedType)
+                        is com.mezze.language.parsedast.ParsedNewtypeDef -> {
+                            convertParsedTypeAnnotation(definition.wrappedType)
                         }
                     }
                 }

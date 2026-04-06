@@ -227,14 +227,14 @@ sealed class ImportResolutionResult {
  */
 data class ModuleImportContext(
     val importedBindings: Map<String, ImportedBinding>,      // Imported functions/values (keyed by name)
-    val importedTypes: Map<String, TypeDeclaration>,         // Imported type declarations (keyed by name)
-    val importedAbilities: Map<String, AbilityDeclaration>,  // Imported abilities (keyed by name)
-    val importedEffects: Map<String, EffectDeclaration>,     // Imported effects (keyed by name)
+    val importedTypes: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,         // Imported type declarations (keyed by name)
+    val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // Imported abilities (keyed by name)
+    val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,     // Imported effects (keyed by name)
     val importedImpls: Map<String, ImplDeclaration>,         // Imported effect implementations (keyed by name)
     val importedAbilityImpls: Map<String, ImplAbilityDeclaration>,  // Imported ability implementations (keyed by name)
     // Content-hash indexed maps for O(1) lookup without string parsing
-    val effectsByHash: Map<String, EffectDeclaration> = emptyMap(),    // Effects keyed by content hash
-    val abilitiesByHash: Map<String, AbilityDeclaration> = emptyMap()  // Abilities keyed by content hash
+    val effectsByHash: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
+    val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()  // Abilities keyed by content hash
 ) {
     companion object {
         /**
@@ -286,13 +286,13 @@ data class ModuleImportContext(
      * Look up an effect by its content hash.
      * This is the preferred lookup method - O(1) with no string parsing.
      */
-    fun getEffectByHash(contentHash: String): EffectDeclaration? = effectsByHash[contentHash]
+    fun getEffectByHash(contentHash: String): com.mezze.language.parsedast.ParsedEffectDecl? = effectsByHash[contentHash]
 
     /**
      * Look up an ability by its content hash.
      * This is the preferred lookup method - O(1) with no string parsing.
      */
-    fun getAbilityByHash(contentHash: String): AbilityDeclaration? = abilitiesByHash[contentHash]
+    fun getAbilityByHash(contentHash: String): com.mezze.language.parsedast.ParsedAbilityDecl? = abilitiesByHash[contentHash]
 }
 
 /**

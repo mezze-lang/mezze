@@ -41,25 +41,37 @@ data class CompiledModuleInterface(
     sealed interface ContextExtension {
         fun apply(context: TypingContext): TypingContext
 
-        data class EffectRegistration(val effectDecl: EffectDeclaration) : ContextExtension {
+        data class EffectRegistration(val effectDecl: com.mezze.language.parsedast.ParsedEffectDecl) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
                 val builder = ContextBuilder()
-                val tempProgram = Program(items = listOf(effectDecl))
-                return builder.build(tempProgram, context).context
+                val parsedModule = com.mezze.language.parsedast.ParsedModule(
+                    path = "<effect-registration>",
+                    decls = listOf(effectDecl)
+                )
+                return builder.build(parsedModule, context).context
             }
         }
 
-        data class AbilityRegistration(val abilityDecl: AbilityDeclaration) : ContextExtension {
+        data class AbilityRegistration(val abilityDecl: com.mezze.language.parsedast.ParsedAbilityDecl) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
                 val builder = ContextBuilder()
-                val tempProgram = Program(items = listOf(abilityDecl))
-                return builder.build(tempProgram, context).context
+                val parsedModule = com.mezze.language.parsedast.ParsedModule(
+                    path = "<ability-registration>",
+                    decls = listOf(abilityDecl)
+                )
+                return builder.build(parsedModule, context).context
             }
         }
 
-        data class TypeRegistration(val typeDecl: TypeDeclaration) : ContextExtension {
+        data class TypeRegistration(val typeDecl: com.mezze.language.parsedast.ParsedTypeDecl) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
-                return ContextBuilder().addTypeConstructors(context, typeDecl, isImported = true)
+                val builder = ContextBuilder()
+                val parsedModule = com.mezze.language.parsedast.ParsedModule(
+                    path = "<type-registration>",
+                    decls = listOf(typeDecl)
+                )
+                // Build adds type constructors to context
+                return builder.build(parsedModule, context).context
             }
         }
 

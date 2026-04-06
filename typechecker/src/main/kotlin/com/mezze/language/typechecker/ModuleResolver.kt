@@ -37,9 +37,9 @@ import kotlin.io.path.isRegularFile
  * @property pubUseDeclarations All pub use declarations
  */
 data class ProgramIndex(
-    val typeDeclarations: Map<String, TypeDeclaration>,
-    val abilityDeclarations: Map<String, AbilityDeclaration>,
-    val effectDeclarations: Map<String, EffectDeclaration>,
+    val typeDeclarations: Map<String, ParsedTypeDecl>,
+    val abilityDeclarations: Map<String, ParsedAbilityDecl>,
+    val effectDeclarations: Map<String, ParsedEffectDecl>,
     val implsByPerformer: Map<String, ImplDeclaration>,
     val implsByEffect: Map<String, List<ImplDeclaration>>,
     val abilityImplsByAbility: Map<String, List<ImplAbilityDeclaration>>,
@@ -49,8 +49,10 @@ data class ProgramIndex(
     val pubUseDeclarations: List<PubUseDeclaration>
 ) {
     companion object {
+        private val syntheticLoc = Loc(file = "<index>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
+
         /**
-         * Build an index from a program.
+         * Build an index from a program (v1 AST — converts to v2 types).
          * Called once during module loading, all subsequent lookups are O(1).
          */
         fun build(program: Program): ProgramIndex {
@@ -65,9 +67,9 @@ data class ProgramIndex(
             val letBindingDecls = items.filterIsInstance<LetBinding>()
 
             return ProgramIndex(
-                typeDeclarations = typeDecls.associateBy { it.name },
-                abilityDeclarations = abilityDecls.associateBy { it.name },
-                effectDeclarations = effectDecls.associateBy { it.name },
+                typeDeclarations = typeDecls.associate { it.name to v1TypeDeclToParsed(it) },
+                abilityDeclarations = abilityDecls.associate { it.name to v1AbilityDeclToParsed(it) },
+                effectDeclarations = effectDecls.associate { it.name to v1EffectDeclToParsed(it) },
                 implsByPerformer = implDecls.associateBy { it.performerName },
                 implsByEffect = implDecls.groupBy { it.effect.localName },
                 abilityImplsByAbility = abilityImplDecls.filter { !it.isInherent }.groupBy { it.abilityName!! },
@@ -81,6 +83,73 @@ data class ProgramIndex(
                     .associateBy { it.variableName },
                 useDeclarations = items.filterIsInstance<UseDeclaration>(),
                 pubUseDeclarations = items.filterIsInstance<PubUseDeclaration>()
+            )
+        }
+
+        /** Convert v1 TypeAnnotation to v2 ParsedTypeAnnotation. */
+        private fun v1TypeAnnotationToParsed(ta: TypeAnnotation): ParsedTypeAnnotation = when (ta) {
+            is IdentifierTypeAnnotation -> ParsedNamedType(ta.name, syntheticLoc)
+            is TypeApplicationAnnotation -> ParsedTypeApp(ta.constructor, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
+            is RecordTypeAnnotation -> ParsedRecordType(
+                ta.entries.map { ParsedRecordTypeEntry(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) }, ta.isOpen, syntheticLoc
+            )
+            is VariantTypeAnnotation -> ParsedVariantType(
+                ta.constructors.map { ParsedVariantTypeCtor(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) }, ta.isOpen, syntheticLoc
+            )
+            is FunctionTypeAnnotation -> ParsedFunctionType(
+                v1TypeAnnotationToParsed(ta.paramType), v1TypeAnnotationToParsed(ta.returnType),
+                ta.effects?.let { era -> ParsedEffectRow(era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) }, era.isPolymorphic, era.isPerformed, syntheticLoc) },
+                ta.abilityConstraints.map { c -> ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
+                syntheticLoc
+            )
+            is SeqTypeAnnotation -> ParsedSeqType(v1TypeAnnotationToParsed(ta.elementType), syntheticLoc)
+            is QualifiedTypeAnnotation -> ParsedQualifiedType(ta.modulePath, ta.typeName, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
+            is EffectRowAnnotation -> ParsedNamedType("EffectRow", syntheticLoc)
+        }
+
+        private fun v1TypeDeclToParsed(td: TypeDeclaration): ParsedTypeDecl {
+            val def: ParsedTypeDef = when (val d = td.definition) {
+                is RecordDefinition -> ParsedRecordDef(d.fields.map { ParsedRecordFieldDef(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) }, d.isOpen, syntheticLoc)
+                is VariantDefinition -> ParsedVariantDef(d.constructors.map { ParsedVariantCtorDef(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) }, d.isOpen, syntheticLoc)
+                is NewtypeDefinition -> ParsedNewtypeDef(d.constructor, v1TypeAnnotationToParsed(d.wrappedType), syntheticLoc)
+            }
+            return ParsedTypeDecl(
+                name = td.name, typeParams = td.typeParams, definition = def,
+                visibility = if (td.visibility == com.mezze.language.ast.Visibility.PUBLIC) com.mezze.language.parsedast.Visibility.PUBLIC else com.mezze.language.parsedast.Visibility.PRIVATE,
+                loc = td.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+                contentHash = td.contentHash
+            )
+        }
+
+        private fun v1AbilityDeclToParsed(ad: AbilityDeclaration): ParsedAbilityDecl {
+            return ParsedAbilityDecl(
+                name = ad.name, typeParams = ad.typeParams, receiverTypeParam = ad.receiverTypeParam,
+                associatedTypes = ad.associatedTypes,
+                constraints = ad.constraints.map { ParsedAbilityConstraint(it.abilityName, it.typeParam, it.typeArgs.map { t -> ParsedNamedType(t.toString(), syntheticLoc) }, syntheticLoc) },
+                dependencies = ad.dependencies.map { ParsedAbilityDep(it.abilityName, it.typeArgs.map { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
+                operations = ad.operations.map { op ->
+                    ParsedAbilityOp(
+                        name = op.name,
+                        paramType = v1TypeAnnotationToParsed(op.paramType),
+                        returnType = v1TypeAnnotationToParsed(op.returnType),
+                        effects = op.effects?.let { era -> ParsedEffectRow(era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) }, era.isPolymorphic, era.isPerformed, syntheticLoc) },
+                        abilityConstraints = op.abilityConstraints.map { c -> ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
+                        loc = syntheticLoc)
+                },
+                visibility = com.mezze.language.parsedast.Visibility.PUBLIC,
+                loc = ad.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+                contentHash = ad.contentHash
+            )
+        }
+
+        private fun v1EffectDeclToParsed(ed: EffectDeclaration): ParsedEffectDecl {
+            return ParsedEffectDecl(
+                name = ed.name,
+                operations = ed.operations.map { op -> ParsedEffectOp(name = op.name, paramType = v1TypeAnnotationToParsed(op.paramType), returnType = v1TypeAnnotationToParsed(op.returnType), effects = op.effects, loc = syntheticLoc) },
+                associatedTypes = ed.associatedTypes,
+                visibility = com.mezze.language.parsedast.Visibility.PUBLIC,
+                loc = ed.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+                contentHash = ed.contentHash
             )
         }
 
@@ -400,7 +469,7 @@ class ModuleResolver(
          * @return The TypeDeclaration if found in any cached module, null otherwise
          */
         @JvmStatic
-        fun lookupTypeDeclaration(typeName: String): TypeDeclaration? {
+        fun lookupTypeDeclaration(typeName: String): ParsedTypeDecl? {
             synchronized(cacheLock) {
                 for ((_, module) in moduleCache) {
                     val typeDecl = module.index.typeDeclarations[typeName]
@@ -419,15 +488,15 @@ class ModuleResolver(
          * and need to find its declaring type (like `MyResult`) to get the full variant type.
          *
          * @param constructorName The constructor name to look up (e.g., "Success", "Info")
-         * @return The TypeDeclaration containing that constructor, or null if not found
+         * @return The ParsedTypeDecl containing that constructor, or null if not found
          */
         @JvmStatic
-        fun lookupTypeDeclarationForConstructor(constructorName: String): TypeDeclaration? {
+        fun lookupTypeDeclarationForConstructor(constructorName: String): ParsedTypeDecl? {
             synchronized(cacheLock) {
                 for ((_, module) in moduleCache) {
                     for ((_, typeDecl) in module.index.typeDeclarations) {
                         val definition = typeDecl.definition
-                        if (definition is VariantDefinition) {
+                        if (definition is ParsedVariantDef) {
                             val hasConstructor = definition.constructors.any { it.name == constructorName }
                             if (hasConstructor) {
                                 return typeDecl

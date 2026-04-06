@@ -34,8 +34,8 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
  */
 class ConstraintSolver(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
-    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
+    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()
 ) {
     /**
      * CodecGenerator for auto-deriving Encode/Decode implementations.
@@ -132,22 +132,22 @@ class ConstraintSolver(
     // ========================================================================
 
     /**
-     * Index from constructor name to (TypeDeclaration, VariantDefinition) pairs.
+     * Index from constructor name to (ParsedTypeDecl, ParsedVariantDef) pairs.
      * Built lazily on first use of findVariantWithConstructors.
      * Enables O(1) lookup instead of O(n) iteration over all type declarations.
      */
-    private val constructorIndex: Map<String, List<Pair<TypeDeclaration, VariantDefinition>>> by lazy {
+    private val constructorIndex: Map<String, List<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> by lazy {
         buildConstructorIndex()
     }
 
     /**
      * Build the constructor-to-variant index from type declarations.
      */
-    private fun buildConstructorIndex(): Map<String, List<Pair<TypeDeclaration, VariantDefinition>>> {
-        val index = mutableMapOf<String, MutableList<Pair<TypeDeclaration, VariantDefinition>>>()
+    private fun buildConstructorIndex(): Map<String, List<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> {
+        val index = mutableMapOf<String, MutableList<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>>()
         for ((_, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 for (constructor in definition.constructors) {
                     index.getOrPut(constructor.name) { mutableListOf() }
                         .add(Pair(typeDecl, definition))
@@ -329,7 +329,7 @@ class ConstraintSolver(
     ): VariantInferenceResult? {
         // OPTIMIZATION: Use constructor index for O(1) lookup of candidate variants
         // Collect all variant declarations that have at least one of the constructors
-        val candidateVariants = mutableSetOf<Pair<TypeDeclaration, VariantDefinition>>()
+        val candidateVariants = mutableSetOf<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>()
         for (constructorName in constructors) {
             constructorIndex[constructorName]?.let { variants ->
                 candidateVariants.addAll(variants)
@@ -1689,8 +1689,8 @@ class ConstraintSolver(
                         // Anonymous variant - check if it matches the type application
                         // e.g., Just {val = 42} matching Maybe Int
                         val typeDecl = typeDeclarations[annotation.constructor]
-                        if (typeDecl != null && typeDecl.definition is VariantDefinition) {
-                            val definition = typeDecl.definition as VariantDefinition
+                        if (typeDecl != null && typeDecl.definition is com.mezze.language.parsedast.ParsedVariantDef) {
+                            val definition = typeDecl.definition as com.mezze.language.parsedast.ParsedVariantDef
                             val declConstructors = definition.constructors.map { it.name }.toSet()
 
                             // Check if variant's constructors are subset of declaration's constructors
@@ -1763,7 +1763,7 @@ class ConstraintSolver(
     /**
      * Check if a type matches a type declaration (for non-parametric types).
      */
-    private fun typeMatchesDeclaration(type: MezzeType, typeDecl: TypeDeclaration): Boolean {
+    private fun typeMatchesDeclaration(type: MezzeType, typeDecl: com.mezze.language.parsedast.ParsedTypeDecl): Boolean {
         // Handle TypeApplication - check hash first, then constructor name
         if (type is MezzeType.TypeApplication) {
             val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
@@ -1771,15 +1771,12 @@ class ConstraintSolver(
         }
 
         return when (val definition = typeDecl.definition) {
-            is RecordDefinition -> {
+            is com.mezze.language.parsedast.ParsedRecordDef -> {
                 // Direct record match
                 if (type is MezzeType.RecordType) {
                     val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
                     return hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
                 }
-                // VariantType with single constructor matching the record type name
-                // e.g., Money { cents = 500 } produces VariantType({Money: {cents: Int}})
-                // but type Money = { cents: Int } is a RecordDefinition
                 if (type is MezzeType.VariantType && type.constructors.size == 1) {
                     val (ctorName, ctorPayload) = type.constructors.entries.first()
                     if (ctorName == typeDecl.name && ctorPayload is MezzeType.RecordType) {
@@ -1788,9 +1785,8 @@ class ConstraintSolver(
                 }
                 return false
             }
-            is VariantDefinition -> {
+            is com.mezze.language.parsedast.ParsedVariantDef -> {
                 if (type !is MezzeType.VariantType) return false
-                // Hash-first comparison
                 val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
                 hashMatch || type.typeName == typeDecl.name ||
                 definition.constructors.map { it.name }.toSet().containsAll(type.constructors.keys)
@@ -1812,8 +1808,8 @@ class ConstraintSolver(
      */
     private fun inferTypeArgsFromVariant(
         variantType: MezzeType.VariantType,
-        typeDecl: TypeDeclaration,
-        definition: VariantDefinition
+        typeDecl: com.mezze.language.parsedast.ParsedTypeDecl,
+        definition: com.mezze.language.parsedast.ParsedVariantDef
     ): List<MezzeType>? {
         // Map type parameter names to their inferred types
         val typeArgMap = mutableMapOf<String, MezzeType>()
@@ -1828,7 +1824,7 @@ class ConstraintSolver(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -2182,7 +2178,7 @@ class ConstraintSolver(
             // Check if this TypeApplication refers to a newtype declaration
             val typeDecl = typeDeclarations[unwrappedType.constructor]
                 ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
-            if (typeDecl?.definition is NewtypeDefinition) {
+            if (typeDecl?.definition is com.mezze.language.parsedast.ParsedNewtypeDef) {
                 isNewtype = true
             }
 
@@ -2941,7 +2937,7 @@ class ConstraintSolver(
                     //   match color is Red -> ... | Blue -> ...
                     // and there's a type Color = | Red, Blue, Green |, we should use
                     // the full Color type (with Green) so exhaustiveness checking works.
-                    val variantDef = declaringType.definition as VariantDefinition
+                    val variantDef = declaringType.definition as com.mezze.language.parsedast.ParsedVariantDef
 
                     // Create a shared mapping for type parameters so all constructors use the same type vars
                     val typeParamMapping = declaringType.typeParams.associate { param ->
@@ -3065,7 +3061,7 @@ class ConstraintSolver(
 
                 if (declaringTypeExpr != null) {
                     // User-defined List type - use VariantType
-                    val variantDef = declaringTypeExpr.definition as VariantDefinition
+                    val variantDef = declaringTypeExpr.definition as com.mezze.language.parsedast.ParsedVariantDef
 
                     val typeParamMapping = declaringTypeExpr.typeParams.associate { param ->
                         param to MezzeType.VarType(TypeVar.fresh())
@@ -3162,7 +3158,7 @@ class ConstraintSolver(
                 val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
 
                 if (typeForConstructor != null) {
-                    val variantDef = typeForConstructor.definition as VariantDefinition
+                    val variantDef = typeForConstructor.definition as com.mezze.language.parsedast.ParsedVariantDef
                     val constructorDef = variantDef.constructors.find { it.name == constructorName }
 
                     if (constructorDef != null) {
@@ -3175,7 +3171,7 @@ class ConstraintSolver(
                             // Constructor requires payload but none provided
                             // Extract field names from the declared payload for a helpful error message
                             val fieldNames = when (declaredPayload) {
-                                is RecordTypeAnnotation -> declaredPayload.entries.map { it.name }
+                                is com.mezze.language.parsedast.ParsedRecordType -> declaredPayload.entries.map { it.name }
                                 else -> listOf("...")
                             }
                             val fieldList = fieldNames.joinToString(", ")
@@ -3900,10 +3896,10 @@ class ConstraintSolver(
      * Example: findTypeDeclarationForConstructor("Red") might return
      * TypeDeclaration("Color", VariantDefinition([Red, Blue, Green]))
      */
-    private fun findTypeDeclarationForConstructor(constructorName: String): TypeDeclaration? {
+    private fun findTypeDeclarationForConstructor(constructorName: String): com.mezze.language.parsedast.ParsedTypeDecl? {
         for ((_, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 val hasConstructor = definition.constructors.any { it.name == constructorName }
                 if (hasConstructor) {
                     return typeDecl
@@ -3940,13 +3936,24 @@ class ConstraintSolver(
         val typeParamSubst = declaredTypeParams.associate { param ->
             param to MezzeType.VarType(TypeVar.fresh())
         }
-        return convertTypeAnnotation(annotation, typeParamSubst)
+        return convertTypeAnnotationV1(annotation, typeParamSubst)
     }
 
     /**
-     * Convert a type annotation to MezzeType with a substitution for type parameters.
+     * Convert a v2 ParsedTypeAnnotation to MezzeType with substitution (bridge to v1).
      */
     private fun convertTypeAnnotation(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        typeParamSubst: Map<String, MezzeType>
+    ): MezzeType {
+        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>")
+        return convertTypeAnnotationV1(v1, typeParamSubst)
+    }
+
+    /**
+     * Convert a v1 type annotation to MezzeType with a substitution for type parameters.
+     */
+    private fun convertTypeAnnotationV1(
         annotation: TypeAnnotation,
         typeParamSubst: Map<String, MezzeType>
     ): MezzeType {
@@ -3967,11 +3974,9 @@ class ConstraintSolver(
             }
             is FunctionTypeAnnotation -> {
                 MezzeType.FunctionType(
-                    paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
-                    returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
+                    paramType = convertTypeAnnotationV1(annotation.paramType, typeParamSubst),
+                    returnType = convertTypeAnnotationV1(annotation.returnType, typeParamSubst),
                     effects = annotation.effects?.let { effectRow ->
-                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
-                        // Use allEffectNames to include both simple effects and effect annotations
                         ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
                         MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
@@ -3981,7 +3986,7 @@ class ConstraintSolver(
             is RecordTypeAnnotation -> {
                 MezzeType.RecordType(
                     fields = annotation.entries.associate { entry ->
-                        entry.name to convertTypeAnnotation(entry.type, typeParamSubst)
+                        entry.name to convertTypeAnnotationV1(entry.type, typeParamSubst)
                     },
                     rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
@@ -3989,19 +3994,19 @@ class ConstraintSolver(
             is VariantTypeAnnotation -> {
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertTypeAnnotation(it, typeParamSubst) }
+                        ctor.name to ctor.dataType?.let { convertTypeAnnotationV1(it, typeParamSubst) }
                     }
                 )
             }
             is TypeApplicationAnnotation -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.constructor,
-                    args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
+                    args = annotation.args.map { convertTypeAnnotationV1(it, typeParamSubst) }
                 )
             }
             is SeqTypeAnnotation -> {
                 MezzeType.SeqType(
-                    elementType = convertTypeAnnotation(annotation.elementType, typeParamSubst)
+                    elementType = convertTypeAnnotationV1(annotation.elementType, typeParamSubst)
                 )
             }
             is EffectRowAnnotation -> {
@@ -4011,7 +4016,7 @@ class ConstraintSolver(
             is QualifiedTypeAnnotation -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.qualifiedName,
-                    args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
+                    args = annotation.args.map { convertTypeAnnotationV1(it, typeParamSubst) }
                 )
             }
         }

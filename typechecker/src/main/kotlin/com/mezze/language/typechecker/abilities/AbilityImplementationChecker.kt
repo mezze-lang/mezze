@@ -25,8 +25,8 @@ object AbilityImplementationChecker {
     fun hasBuiltInImplementation(
         abilityName: String,
         type: MezzeType,
-        typeDeclarations: Map<String, TypeDeclaration>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, TypeDeclaration>) -> MezzeType.VariantType?
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
     ): Boolean {
         // Unwrap SuspendedType to check the inner value type
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
@@ -77,8 +77,8 @@ object AbilityImplementationChecker {
 
     private fun hasEqImplementation(
         type: MezzeType,
-        typeDeclarations: Map<String, TypeDeclaration>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, TypeDeclaration>) -> MezzeType.VariantType?
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
     ): Boolean {
         return type is MezzeType.IntType ||
             type is MezzeType.FloatType ||
@@ -110,8 +110,8 @@ object AbilityImplementationChecker {
 
     private fun hasOrdImplementation(
         type: MezzeType,
-        typeDeclarations: Map<String, TypeDeclaration>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, TypeDeclaration>) -> MezzeType.VariantType?
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
     ): Boolean {
         return type is MezzeType.IntType ||
             type is MezzeType.FloatType ||

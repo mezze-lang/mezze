@@ -566,10 +566,10 @@ class ExpressionConstraintGenerator {
                         is MezzeType.TypeApplication -> {
                             // Resolve type alias to underlying record type
                             val typeDecl = context.typeDeclarations[spreadType.constructor]
-                            if (typeDecl != null && typeDecl.definition is RecordDefinition) {
-                                val recordDef = typeDecl.definition as RecordDefinition
+                            if (typeDecl != null && typeDecl.definition is ParsedRecordDef) {
+                                val recordDef = typeDecl.definition as ParsedRecordDef
                                 val resolvedFields = recordDef.fields.associate { field ->
-                                    field.name to convertFieldType(field.type)
+                                    field.name to convertParsedFieldType(field.type)
                                 }
                                 MezzeType.RecordType(
                                     fields = resolvedFields,
@@ -634,11 +634,11 @@ class ExpressionConstraintGenerator {
         if (expectedType != null && expectedType is MezzeType.TypeApplication) {
             // Look up type declaration and resolve to RecordType
             val typeDecl = context.typeDeclarations[expectedType.constructor]
-            if (typeDecl != null && typeDecl.definition is RecordDefinition) {
-                val recordDef = typeDecl.definition as RecordDefinition
-                // Convert RecordDefinition to RecordType (for validation purposes only)
+            if (typeDecl != null && typeDecl.definition is ParsedRecordDef) {
+                val recordDef = typeDecl.definition as ParsedRecordDef
+                // Convert ParsedRecordDef to RecordType (for validation purposes only)
                 val fields = recordDef.fields.associate { field ->
-                    field.name to convertFieldType(field.type)
+                    field.name to convertParsedFieldType(field.type)
                 }
                 val resolvedType = MezzeType.RecordType(
                     fields = fields,
@@ -862,7 +862,7 @@ class ExpressionConstraintGenerator {
                     // Look up the type alias definition to get its fields
                     context.typeDeclarations[t.constructor]?.let { typeDecl ->
                         when (val def = typeDecl.definition) {
-                            is RecordDefinition -> def.fields.map { it.name }.toSet() to def.isOpen
+                            is ParsedRecordDef -> def.fields.map { it.name }.toSet() to def.isOpen
                             else -> null
                         }
                     } ?: (emptySet<String>() to false)
@@ -2325,7 +2325,7 @@ class ExpressionConstraintGenerator {
             // Constructor not in scope — could be an imported newtype (constructor not exported)
             // Check type declarations for a newtype with this constructor name
             val newtypeDecl = context.typeDeclarations.values.find {
-                it.definition is NewtypeDefinition && (it.definition as NewtypeDefinition).constructor == expr.constructor
+                it.definition is ParsedNewtypeDef && (it.definition as ParsedNewtypeDef).constructor == expr.constructor
             }
             if (newtypeDecl != null) {
                 throw TypeCheckError(
@@ -2386,12 +2386,12 @@ class ExpressionConstraintGenerator {
             if (valueExpr is ParsedRecordLit && context.typeDeclarations.isNotEmpty()) {
                 // Find type declarations that have this constructor
                 for ((typeName, typeDecl) in context.typeDeclarations) {
-                    if (typeDecl.definition is VariantDefinition) {
-                        val variantDef = typeDecl.definition as VariantDefinition
+                    if (typeDecl.definition is ParsedVariantDef) {
+                        val variantDef = typeDecl.definition as ParsedVariantDef
                         val constructor = variantDef.constructors.find { it.name == expr.constructor }
 
-                        if (constructor != null && constructor.dataType is RecordTypeAnnotation) {
-                            val expectedRecordType = constructor.dataType as RecordTypeAnnotation
+                        if (constructor != null && constructor.dataType is ParsedRecordType) {
+                            val expectedRecordType = constructor.dataType as ParsedRecordType
                             val isOpen = expectedRecordType.isOpen
 
                             // Get fields from literal
@@ -4423,6 +4423,12 @@ class ExpressionConstraintGenerator {
     // ========================================================================
     // HELPER FUNCTIONS
     // ========================================================================
+
+    /** Convert v2 ParsedTypeAnnotation to MezzeType (via v1 bridge). */
+    private fun convertParsedFieldType(annotation: ParsedTypeAnnotation): MezzeType {
+        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<field>")
+        return convertFieldType(v1)
+    }
 
     /**
      * Convert TypeAnnotation to MezzeType for validation purposes only.

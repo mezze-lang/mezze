@@ -398,14 +398,14 @@ class ImportResolver(
         isQualified: Boolean
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
-        val types = mutableMapOf<String, TypeDeclaration>()
-        val abilities = mutableMapOf<String, AbilityDeclaration>()
-        val effects = mutableMapOf<String, EffectDeclaration>()
+        val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
+        val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, ImplDeclaration>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
         // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<String, EffectDeclaration>()
-        val abilitiesByHash = mutableMapOf<String, AbilityDeclaration>()
+        val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -581,14 +581,14 @@ class ImportResolver(
         items: List<ImportItem>
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
-        val types = mutableMapOf<String, TypeDeclaration>()
-        val abilities = mutableMapOf<String, AbilityDeclaration>()
-        val effects = mutableMapOf<String, EffectDeclaration>()
+        val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
+        val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, ImplDeclaration>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
         // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<String, EffectDeclaration>()
-        val abilitiesByHash = mutableMapOf<String, AbilityDeclaration>()
+        val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -766,7 +766,7 @@ class ImportResolver(
 
         // Check type declarations
         index.typeDeclarations[itemName]?.let { typeDecl ->
-            return typeDecl.visibility != Visibility.PUBLIC
+            return typeDecl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC
         }
 
         // Check ability declarations (abilities are always public, so if it's here but not exported, something is wrong)

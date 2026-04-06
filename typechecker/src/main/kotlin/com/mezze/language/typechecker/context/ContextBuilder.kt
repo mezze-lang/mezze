@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
@@ -37,30 +38,30 @@ class ContextBuilder {
      * Populated at the start of build() so that convertTypeAnnotationInternal
      * can resolve effect names to their content hashes for EffectRow.effectHashes.
      */
-    private var currentEffectDecls: Map<String, EffectDeclaration> = emptyMap()
+    private var currentEffectDecls: Map<String, ParsedEffectDecl> = emptyMap()
 
     /**
      * Ability declarations available during the current build() invocation.
      * Populated at the start of build() so that convertTypeAnnotationInternal
      * can resolve ability names to their content hashes for FunctionAbilityConstraint.abilityHash.
      */
-    private var currentAbilityDecls: Map<String, AbilityDeclaration> = emptyMap()
+    private var currentAbilityDecls: Map<String, ParsedAbilityDecl> = emptyMap()
 
     /**
      * Type declarations available during the current build() invocation.
      * Populated at the start of build() so that convertTypeAnnotationInternal
      * can resolve type constructor names to their content hashes for TypeApplication.typeHash.
      */
-    private var currentTypeDecls: Map<String, TypeDeclaration> = emptyMap()
+    private var currentTypeDecls: Map<String, ParsedTypeDecl> = emptyMap()
 
     /**
      * Build result - contains all typing environments
      */
     data class BuildResult(
         val context: TypingContext,
-        val typeDeclarations: Map<String, TypeDeclaration>,
-        val abilityDeclarations: Map<String, AbilityDeclaration>,
-        val effectDeclarations: Map<String, EffectDeclaration>,
+        val typeDeclarations: Map<String, ParsedTypeDecl>,
+        val abilityDeclarations: Map<String, ParsedAbilityDecl>,
+        val effectDeclarations: Map<String, ParsedEffectDecl>,
         val performerToEffect: Map<String, String>,  // performer name → effect name
         val performerToEffectHash: Map<String, String> = emptyMap(),  // performer contentHash → effect contentHash
         /** Maps performer names to the set of effects they ADD (not handle) */
@@ -83,29 +84,34 @@ class ContextBuilder {
         module: ParsedModule,
         parentContext: TypingContext = TypingContext.empty,
         importedImpls: Map<String, com.mezze.language.ast.ImplDeclaration> = emptyMap(),
-        importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
-        importedTypes: Map<String, TypeDeclaration> = emptyMap(),
-        importedEffects: Map<String, EffectDeclaration> = emptyMap(),
+        importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
+        importedTypes: Map<String, ParsedTypeDecl> = emptyMap(),
+        importedEffects: Map<String, ParsedEffectDecl> = emptyMap(),
         currentModulePath: String? = null
     ): BuildResult {
         val file = module.path
 
-        // Collect declarations by type, converting from ParsedDecl → v1
+        // Collect declarations by type — use v2 ParsedDecl types directly
         val typeDecls = module.decls.filterIsInstance<ParsedTypeDecl>()
-            .map { parsedTypeDeclToV1(it, file) }
             .associateBy { it.name }
             .toMutableMap()  // Make mutable so we can add built-in types
 
         // Add built-in variant types (Option, Result) if not already defined
-        addBuiltInTypes(typeDecls)
+        addBuiltInParsedTypes(typeDecls)
 
         val abilityDecls = module.decls.filterIsInstance<ParsedAbilityDecl>()
-            .map { parsedAbilityDeclToV1(it, file) }
             .associateBy { it.name }
 
         val effectDecls = module.decls.filterIsInstance<ParsedEffectDecl>()
-            .map { parsedEffectDeclToV1(it, file) }
             .associateBy { it.name }
+
+        // Still need v1 types for internal ContextBuilder methods that haven't been migrated yet
+        val v1TypeDecls = typeDecls.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
+        val v1AbilityDecls = abilityDecls.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
+        val v1EffectDecls = effectDecls.mapValues { (_, v) -> parsedEffectDeclToV1(v, file) }
+        val v1ImportedAbilities = importedAbilities.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
+        val v1ImportedEffects = importedEffects.mapValues { (_, v) -> parsedEffectDeclToV1(v, file) }
+        val v1ImportedTypes = importedTypes.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
 
         // Resolve impl declarations: the parser can't distinguish ability impls from
         // effect impls (same `impl X for Y where {}` syntax). The typechecker knows which
@@ -164,6 +170,7 @@ class ContextBuilder {
             .map { parsedLetDeclToV1(it, file) }
 
         // Validate duplicates — tolerate prelude duplicates when modules are merged
+        // Use the full decl lists (not deduplicated maps) to detect duplicates
         val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
         val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
         val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
@@ -179,7 +186,7 @@ class ContextBuilder {
             if (!isPrelude) throw e
         }
 
-        // Merge local and imported effect declarations for lookups
+        // Merge local and imported effect declarations for lookups (v2 types)
         val allEffectDecls = effectDecls + importedEffects
 
         // Make effect declarations available to convertTypeAnnotationInternal so it can
@@ -191,13 +198,14 @@ class ContextBuilder {
         currentAbilityDecls = abilityDecls + importedAbilities
         currentTypeDecls = typeDecls + importedTypes
 
+        // v1 effect decls for internal ContextBuilder methods
+        val allV1EffectDecls = v1EffectDecls + v1ImportedEffects
+        val allV1AbilityDecls = v1AbilityDecls + v1ImportedAbilities
+        val allV1TypeDecls = v1TypeDecls.toMutableMap()
+        allV1TypeDecls.putAll(v1ImportedTypes)
+
         // Build performer to effect mapping
         // CRITICAL: Merge imported impls with local impls
-        // Resolve effect names through the effect declarations to get canonical names.
-        // The impl.effectName may be qualified (e.g., "log::Log") but we want the
-        // actual effect name (e.g., "Log") from the EffectDeclaration.
-        // Note: We only do direct lookup (no fallback search) to respect import scoping.
-        // Validation in ConstraintGenerator will catch invalid effect names.
         val localMapping = implDecls.associate { impl ->
             val effectDecl = allEffectDecls[impl.effect.localName]
             val effectName = effectDecl?.name ?: impl.effect.localName
@@ -224,23 +232,21 @@ class ContextBuilder {
             performerToEffectHashMap[perfHash] = effHash
         }
 
-        // Build context with bindings for declarations
+        // Build context with bindings for declarations (uses v1 types internally)
         var ctx = parentContext
 
         // Add type constructors to context
-        for (typeDecl in typeDecls.values) {
+        for (typeDecl in v1TypeDecls.values) {
             ctx = addTypeConstructors(ctx, typeDecl)
         }
 
         // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
 
         // Add ability methods to context — both local AND imported abilities
-        // so that method-syntax calls (x.add, x.eq) and operators (+, ==)
-        // can resolve to the correct ability for user-defined types
-        for (abilityDecl in abilityDecls.values) {
+        for (abilityDecl in v1AbilityDecls.values) {
             ctx = addAbilityMethods(ctx, abilityDecl)
         }
-        for (abilityDecl in importedAbilities.values) {
+        for (abilityDecl in v1ImportedAbilities.values) {
             // Only add if not already present (local takes precedence)
             if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
                 ctx = addAbilityMethods(ctx, abilityDecl)
@@ -248,68 +254,48 @@ class ContextBuilder {
         }
 
         // Add effect operations to context
-        for (effectDecl in effectDecls.values) {
+        for (effectDecl in v1EffectDecls.values) {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
         // Add effect performers (impl blocks) to context
-        // (allEffectDecls was defined earlier for performer-to-effect mapping)
-        // Include both local AND imported impls so their PerformerTypeInfo is available
         for (implDecl in implDecls) {
-            ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
+            ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
         }
         for ((_, implDecl) in importedImpls) {
-            ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
+            ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
         }
 
         // Add ability implementations to context (with ability declaration hashes for hash-based index)
-        val allAbilityDeclsForHash = abilityDecls + importedAbilities
+        val allV1AbilityDeclsForHash = v1AbilityDecls + v1ImportedAbilities
         for (abilityImplDecl in abilityImplDecls) {
-            ctx = addAbilityImpl(ctx, abilityImplDecl, allAbilityDeclsForHash, importedAbilities)
+            ctx = addAbilityImpl(ctx, abilityImplDecl, allV1AbilityDeclsForHash, v1ImportedAbilities)
         }
 
         // VALIDATION PHASE: Run ability validations after context is built
-        // This follows the pattern from OldTypeChecker.kt which validates after registration
-
-        // 1. Validate name collisions between abilities, types, and effects
         AbilityValidator.validateNameCollisions(
-            abilityDeclarations = abilityDecls,
-            typeDeclarations = typeDecls,
-            effectDeclarations = effectDecls
+            abilityDeclarations = v1AbilityDecls,
+            typeDeclarations = allV1TypeDecls,
+            effectDeclarations = v1EffectDecls
         )
 
-        // 2. Validate ability dependencies (no circular dependencies)
-        for (abilityDecl in abilityDecls.values) {
-            AbilityValidator.validateAbilityDependencies(
-                abilityDeclaration = abilityDecl,
-                abilityDeclarations = abilityDecls
-            )
+        for (abilityDecl in v1AbilityDecls.values) {
+            AbilityValidator.validateAbilityDependencies(abilityDecl, v1AbilityDecls)
         }
 
-        // 3. Validate ability declarations (operation effects)
-        // Operations cannot have polymorphic (<...>) or performed (<*>) effects
-        for (abilityDecl in abilityDecls.values) {
+        for (abilityDecl in v1AbilityDecls.values) {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
-        // 4. Validate ability implementations (associated types, field/method conflicts, etc.)
-        // CRITICAL: Merge local and imported abilities to support qualified ability names
-        // e.g., `impl codec::EncodeFormat MyType where { ... }` needs access to imported abilities
-        val allAbilityDecls = abilityDecls + importedAbilities
-        val allTypeDecls = typeDecls + importedTypes
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                abilityDeclarations = allAbilityDecls,
-                typeDeclarations = allTypeDecls
+                abilityDeclarations = allV1AbilityDecls,
+                typeDeclarations = allV1TypeDecls
             )
         }
 
-        // 5. Validate orphan rules for ability implementations
-        // An impl must be in the same module as either the ability or one of the target types
-        // CRITICAL: Use only types actually declared in source, NOT injected built-ins (Bool, Option, Result).
-        // Built-in types are not "owned" by user modules, so users cannot impl for them.
-        // EXCEPTION: stdlib home modules (e.g., std::int for Int) can impl for their built-in types.
+        // Validate orphan rules
         val localAbilityNames = abilityDecls.keys
         val declaredTypeNames = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         val homeTypeNames = if (currentModulePath != null) {
@@ -330,15 +316,11 @@ class ContextBuilder {
         }
 
         // Build performer added effects mapping
-        // Maps performer name to the set of effects it ADDS (from operation return type signatures)
-        // e.g., FileLogger has operation with return type -> {} <FileSystem>
-        //       so FileLogger adds {"FileSystem"}
         val performerAddedEffectsMap = (implDecls + importedImpls.values).associate { impl ->
             impl.performerName to extractAddedEffects(impl)
         }.filterValues { it.isNotEmpty() }
 
         // Build implDeclarations map: performer name -> ImplDeclaration
-        // Include both local impls and imported impls
         val implDeclarationsMap = (implDecls.associateBy { it.performerName }) +
             importedImpls.mapValues { (_, impl) -> impl }
 
@@ -393,14 +375,10 @@ class ContextBuilder {
 
         val allEffectDecls = effectDecls + importedEffects
 
-        // Make effect declarations available to convertTypeAnnotationInternal so it can
-        // populate EffectRow.effectHashes with content hashes for hermetic checks.
-        currentEffectDecls = allEffectDecls
-
-        // Make ability and type declarations available to convertTypeAnnotationInternal
-        // so it can populate abilityHash / typeHash content hashes.
-        currentAbilityDecls = abilityDecls + importedAbilities
-        currentTypeDecls = typeDecls + importedTypes
+        // Convert v1 types to v2 for the current*Decls fields used by convertTypeAnnotationInternal
+        currentEffectDecls = allEffectDecls.mapValues { (_, v) -> v1EffectDeclToParsed(v) }
+        currentAbilityDecls = (abilityDecls + importedAbilities).mapValues { (_, v) -> v1AbilityDeclToParsed(v) }
+        currentTypeDecls = (typeDecls + importedTypes).mapValues { (_, v) -> v1TypeDeclToParsed(v) }
 
         val localMapping = implDecls.associate { impl ->
             val effectDecl = allEffectDecls[impl.effect.localName]
@@ -505,9 +483,9 @@ class ContextBuilder {
 
         return BuildResult(
             context = ctx,
-            typeDeclarations = typeDecls,
-            abilityDeclarations = abilityDecls,
-            effectDeclarations = effectDecls,
+            typeDeclarations = typeDecls.mapValues { (_, v) -> v1TypeDeclToParsed(v) },
+            abilityDeclarations = abilityDecls.mapValues { (_, v) -> v1AbilityDeclToParsed(v) },
+            effectDeclarations = effectDecls.mapValues { (_, v) -> v1EffectDeclToParsed(v) },
             performerToEffect = performerToEffectMap,
             performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
@@ -1327,6 +1305,16 @@ class ContextBuilder {
     }
 
     /**
+     * Convert a v2 ParsedTypeAnnotation to MezzeType.
+     * Bridge method: converts v2 → v1, then calls the existing converter.
+     */
+    fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
+        typeVarCache.clear()
+        val v1 = ParserBridge.toV1TypeAnnotation(annotation, "<converted>")
+        return convertTypeAnnotationInternal(v1)
+    }
+
+    /**
      * Internal recursive type annotation converter.
      * Uses cached type variables to ensure consistency within a single annotation.
      */
@@ -1600,6 +1588,89 @@ class ContextBuilder {
         // 2. Users to define their own List variant type if desired
     }
 
+    /**
+     * Register built-in variant types as ParsedTypeDecl (v2 types).
+     * Mirrors addBuiltInTypes but produces ParsedTypeDecl instead of TypeDeclaration.
+     */
+    private fun addBuiltInParsedTypes(typeDecls: MutableMap<String, ParsedTypeDecl>) {
+        val syntheticLoc = Loc(file = "<builtin>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
+
+        if (!typeDecls.containsKey("Bool")) {
+            typeDecls["Bool"] = ParsedTypeDecl(
+                name = "Bool",
+                typeParams = emptyList(),
+                definition = ParsedVariantDef(
+                    constructors = listOf(
+                        ParsedVariantCtorDef("True", null, syntheticLoc),
+                        ParsedVariantCtorDef("False", null, syntheticLoc)
+                    ),
+                    isOpen = false,
+                    loc = syntheticLoc
+                ),
+                visibility = ParsedVisibility.PUBLIC,
+                loc = syntheticLoc
+            )
+        }
+
+        if (!typeDecls.containsKey(BuiltinTypes.OPTION)) {
+            typeDecls[BuiltinTypes.OPTION] = ParsedTypeDecl(
+                name = BuiltinTypes.OPTION,
+                typeParams = listOf("a"),
+                definition = ParsedVariantDef(
+                    constructors = listOf(
+                        ParsedVariantCtorDef(BuiltinTypes.SOME,
+                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
+                            syntheticLoc),
+                        ParsedVariantCtorDef(BuiltinTypes.NONE, null, syntheticLoc)
+                    ),
+                    isOpen = false,
+                    loc = syntheticLoc
+                ),
+                visibility = ParsedVisibility.PUBLIC,
+                loc = syntheticLoc
+            )
+        }
+
+        if (!typeDecls.containsKey(BuiltinTypes.RESULT)) {
+            typeDecls[BuiltinTypes.RESULT] = ParsedTypeDecl(
+                name = BuiltinTypes.RESULT,
+                typeParams = listOf("a", "e"),
+                definition = ParsedVariantDef(
+                    constructors = listOf(
+                        ParsedVariantCtorDef(BuiltinTypes.OK,
+                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
+                            syntheticLoc),
+                        ParsedVariantCtorDef(BuiltinTypes.ERR,
+                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.ERROR_FIELD, ParsedNamedType("e", syntheticLoc), syntheticLoc)), false, syntheticLoc),
+                            syntheticLoc)
+                    ),
+                    isOpen = false,
+                    loc = syntheticLoc
+                ),
+                visibility = ParsedVisibility.PUBLIC,
+                loc = syntheticLoc
+            )
+        }
+
+        if (!typeDecls.containsKey("Ordering")) {
+            typeDecls["Ordering"] = ParsedTypeDecl(
+                name = "Ordering",
+                typeParams = emptyList(),
+                definition = ParsedVariantDef(
+                    constructors = listOf(
+                        ParsedVariantCtorDef("LT", null, syntheticLoc),
+                        ParsedVariantCtorDef("EQ", null, syntheticLoc),
+                        ParsedVariantCtorDef("GT", null, syntheticLoc)
+                    ),
+                    isOpen = false,
+                    loc = syntheticLoc
+                ),
+                visibility = ParsedVisibility.PUBLIC,
+                loc = syntheticLoc
+            )
+        }
+    }
+
     // ============================================================================
     // ParsedDecl → v1 AST conversion helpers
     // ============================================================================
@@ -1611,10 +1682,114 @@ class ContextBuilder {
             com.mezze.language.parsedast.Visibility.PRIVATE -> com.mezze.language.ast.Visibility.PRIVATE
         }
 
+    // ============================================================================
+    // v1 AST → ParsedDecl (v2) conversion helpers (for deprecated build(Program) overload)
+    // ============================================================================
+
+    private val syntheticLoc = Loc(file = "<v1-bridge>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
+
+    /** Convert v1 TypeAnnotation to v2 ParsedTypeAnnotation (best effort). */
+    private fun v1TypeAnnotationToParsed(ta: TypeAnnotation): ParsedTypeAnnotation = when (ta) {
+        is IdentifierTypeAnnotation -> ParsedNamedType(ta.name, syntheticLoc)
+        is TypeApplicationAnnotation -> ParsedTypeApp(ta.constructor, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
+        is RecordTypeAnnotation -> ParsedRecordType(
+            ta.entries.map { ParsedRecordTypeEntry(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) },
+            ta.isOpen, syntheticLoc
+        )
+        is VariantTypeAnnotation -> ParsedVariantType(
+            ta.constructors.map { ParsedVariantTypeCtor(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
+            ta.isOpen, syntheticLoc
+        )
+        is FunctionTypeAnnotation -> ParsedFunctionType(
+            v1TypeAnnotationToParsed(ta.paramType), v1TypeAnnotationToParsed(ta.returnType),
+            ta.effects?.let { era ->
+                ParsedEffectRow(
+                    era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
+                    era.isPolymorphic, era.isPerformed, syntheticLoc
+                )
+            },
+            ta.abilityConstraints.map { c -> ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
+            syntheticLoc
+        )
+        is SeqTypeAnnotation -> ParsedSeqType(v1TypeAnnotationToParsed(ta.elementType), syntheticLoc)
+        is QualifiedTypeAnnotation -> ParsedQualifiedType(ta.modulePath, ta.typeName, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
+        is EffectRowAnnotation -> ParsedNamedType("EffectRow", syntheticLoc)  // shouldn't occur as a type
+    }
+
+    /** Convert v1 TypeDeclaration to v2 ParsedTypeDecl. */
+    private fun v1TypeDeclToParsed(td: TypeDeclaration): ParsedTypeDecl {
+        val def: ParsedTypeDef = when (val d = td.definition) {
+            is RecordDefinition -> ParsedRecordDef(
+                d.fields.map { ParsedRecordFieldDef(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) },
+                d.isOpen, syntheticLoc
+            )
+            is VariantDefinition -> ParsedVariantDef(
+                d.constructors.map { ParsedVariantCtorDef(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
+                d.isOpen, syntheticLoc
+            )
+            is NewtypeDefinition -> ParsedNewtypeDef(d.constructor, v1TypeAnnotationToParsed(d.wrappedType), syntheticLoc)
+        }
+        return ParsedTypeDecl(
+            name = td.name, typeParams = td.typeParams, definition = def,
+            visibility = if (td.visibility == com.mezze.language.ast.Visibility.PUBLIC) ParsedVisibility.PUBLIC else ParsedVisibility.PRIVATE,
+            loc = td.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+            contentHash = td.contentHash
+        )
+    }
+
+    /** Convert v1 AbilityDeclaration to v2 ParsedAbilityDecl. */
+    private fun v1AbilityDeclToParsed(ad: AbilityDeclaration): ParsedAbilityDecl {
+        return ParsedAbilityDecl(
+            name = ad.name,
+            typeParams = ad.typeParams,
+            receiverTypeParam = ad.receiverTypeParam,
+            associatedTypes = ad.associatedTypes,
+            constraints = ad.constraints.map { ParsedAbilityConstraint(it.abilityName, it.typeParam, it.typeArgs.map { MezzeType -> ParsedNamedType(MezzeType.toString(), syntheticLoc) }, syntheticLoc) },
+            dependencies = ad.dependencies.map { ParsedAbilityDep(it.abilityName, it.typeArgs.map { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
+            operations = ad.operations.map { op ->
+                ParsedAbilityOp(
+                    name = op.name,
+                    paramType = v1TypeAnnotationToParsed(op.paramType),
+                    returnType = v1TypeAnnotationToParsed(op.returnType),
+                    effects = op.effects?.let { era ->
+                        ParsedEffectRow(era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) }, era.isPolymorphic, era.isPerformed, syntheticLoc)
+                    },
+                    abilityConstraints = op.abilityConstraints.map { c ->
+                        ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc)
+                    },
+                    loc = syntheticLoc
+                )
+            },
+            visibility = ParsedVisibility.PUBLIC,
+            loc = ad.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+            contentHash = ad.contentHash
+        )
+    }
+
+    /** Convert v1 EffectDeclaration to v2 ParsedEffectDecl. */
+    private fun v1EffectDeclToParsed(ed: EffectDeclaration): ParsedEffectDecl {
+        return ParsedEffectDecl(
+            name = ed.name,
+            operations = ed.operations.map { op ->
+                ParsedEffectOp(
+                    name = op.name,
+                    paramType = v1TypeAnnotationToParsed(op.paramType),
+                    returnType = v1TypeAnnotationToParsed(op.returnType),
+                    effects = op.effects,
+                    loc = syntheticLoc
+                )
+            },
+            associatedTypes = ed.associatedTypes,
+            visibility = ParsedVisibility.PUBLIC,
+            loc = ed.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
+            contentHash = ed.contentHash
+        )
+    }
+
     /**
      * Convert a ParsedTypeDecl to a v1 TypeDeclaration.
      */
-    private fun parsedTypeDeclToV1(decl: ParsedTypeDecl, file: String): TypeDeclaration {
+    internal fun parsedTypeDeclToV1(decl: ParsedTypeDecl, file: String = "<converted>"): TypeDeclaration {
         val definition: TypeDefinition = when (val def = decl.definition) {
             is ParsedRecordDef -> RecordDefinition(
                 fields = def.fields.map { f ->

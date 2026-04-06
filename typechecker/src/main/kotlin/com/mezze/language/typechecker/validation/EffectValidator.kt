@@ -255,7 +255,7 @@ class EffectValidator(
      */
     fun validateEffectImpl(
         implDecl: ImplDeclaration,
-        effectDecl: EffectDeclaration
+        effectDecl: com.mezze.language.parsedast.ParsedEffectDecl
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 

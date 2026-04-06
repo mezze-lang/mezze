@@ -942,24 +942,23 @@ class TypeChecker(
         // during member access (e.g., Log.println)
         val contextBuilder = ContextBuilder()
         for ((effectName, effectDecl) in importContext.importedEffects) {
-            // Use ContextBuilder to add effect operations with proper type conversion
-            // This creates the RecordType with operation fields and stores it as "{effectName}_ability"
-            val tempProgram = Program(items = listOf(effectDecl))
-            val tempBuildResult = contextBuilder.build(tempProgram, context)
+            val tempModule = com.mezze.language.parsedast.ParsedModule("<import-effect>", listOf(effectDecl))
+            val tempBuildResult = contextBuilder.build(tempModule, context)
             context = tempBuildResult.context
         }
 
         // Add imported abilities
         for ((abilityName, abilityDecl) in importContext.importedAbilities) {
-            // Use ContextBuilder to add ability methods
-            val tempProgram = Program(items = listOf(abilityDecl))
-            val tempBuildResult = contextBuilder.build(tempProgram, context)
+            val tempModule = com.mezze.language.parsedast.ParsedModule("<import-ability>", listOf(abilityDecl))
+            val tempBuildResult = contextBuilder.build(tempModule, context)
             context = tempBuildResult.context
         }
 
         // Add imported types (newtype constructors are private — not imported)
         for ((typeName, typeDecl) in importContext.importedTypes) {
-            context = contextBuilder.addTypeConstructors(context, typeDecl, isImported = true)
+            // Convert to v1 for addTypeConstructors (which still takes v1 TypeDeclaration)
+            val v1TypeDecl = contextBuilder.parsedTypeDeclToV1(typeDecl)
+            context = contextBuilder.addTypeConstructors(context, v1TypeDecl, isImported = true)
         }
 
         // Add imported ability implementations
@@ -1254,9 +1253,9 @@ class TypeChecker(
             }
         }
 
-        // Add imported type declarations
+        // Add imported type declarations (v2 ParsedTypeDecl → convert to v1 for addTypeDeclaration)
         importContext?.importedTypes?.values?.forEach { typeDecl ->
-            addTypeDeclaration(typeDecl)
+            addTypeDeclaration(contextBuilder.parsedTypeDeclToV1(typeDecl))
         }
 
         return result
@@ -1348,8 +1347,8 @@ class TypeChecker(
                     monomorphicInstances = result.monomorphicInstances,
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
-                    importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
-                    importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                    importedAbilities = emptyMap(),  // v2 types don't fit v1 TypeCheckResult — callers should use typedModule
+                    importedEffects = emptyMap(),  // v2 types don't fit v1 TypeCheckResult — callers should use typedModule
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers

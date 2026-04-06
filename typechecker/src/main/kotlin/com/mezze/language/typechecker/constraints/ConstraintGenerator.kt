@@ -57,13 +57,13 @@ class ConstraintGenerator(
     private val patternGenerator: PatternConstraintGenerator,
     private val abilityGenerator: AbilityConstraintGenerator,
     private val effectGenerator: EffectConstraintGenerator,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
     private val performerToEffect: Map<String, String> = emptyMap(),
     initialPerformerAddedEffects: Map<String, Set<String>> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
-    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
-    private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap()
+    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
+    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
 ) {
     // Mutable map for tracking effects that performers add
     // This is populated initially from explicit effect annotations, and updated
@@ -2466,13 +2466,13 @@ class ConstraintGenerator(
          * Create default constraint generator with all sub-generators.
          */
         fun create(
-            typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
+            typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
             performerToEffect: Map<String, String> = emptyMap(),
             performerAddedEffects: Map<String, Set<String>> = emptyMap(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
-            abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
-            effectDeclarations: Map<String, EffectDeclaration> = emptyMap()
+            abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
+            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             val patternGen = PatternConstraintGenerator()

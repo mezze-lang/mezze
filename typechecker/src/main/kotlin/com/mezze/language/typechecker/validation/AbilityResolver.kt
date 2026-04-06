@@ -28,7 +28,7 @@ import com.mezze.language.ast.PrimitiveTypes
  */
 class AbilityResolver(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
 ) {
     private val codecGenerator = CodecGenerator()
 
@@ -184,7 +184,7 @@ class AbilityResolver(
         // Check if this is a newtype by looking up the type declaration
         val typeName = type.typeName
         val typeDecl = if (typeName != null) typeDeclarations[typeName] else null
-        val isNewtype = typeDecl?.definition is NewtypeDefinition
+        val isNewtype = typeDecl?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
 
         if (isNewtype) {
             return checkNewtypeAbility(type, abilityName, typeArgs, typeDecl!!.definition as NewtypeDefinition, abilityHash)
@@ -266,7 +266,7 @@ class AbilityResolver(
         type: MezzeType.TypeApplication,
         abilityName: String,
         typeArgs: List<MezzeType>,
-        definition: NewtypeDefinition,
+        definition: com.mezze.language.parsedast.ParsedNewtypeDef,
         abilityHash: String? = null
     ): AbilityCheckResult {
         return when {
@@ -326,9 +326,9 @@ class AbilityResolver(
         val typeDecl = typeDeclarations[type.constructor]
         if (typeDecl != null) {
             // Check if this is a newtype - newtypes have special deriving rules
-            if (typeDecl.definition is NewtypeDefinition) {
+            if (typeDecl.definition is com.mezze.language.parsedast.ParsedNewtypeDef) {
                 return checkNewtypeAbilityForTypeApplication(
-                    type, abilityName, typeArgs, typeDecl.definition as NewtypeDefinition, abilityHash
+                    type, abilityName, typeArgs, typeDecl.definition as com.mezze.language.parsedast.ParsedNewtypeDef, abilityHash
                 )
             }
 
@@ -346,24 +346,17 @@ class AbilityResolver(
 
                 // Check the underlying type structure
                 return when (val definition = typeDecl.definition) {
-                    is VariantDefinition -> {
-                        // For variant types, check all constructor data types
-                        // But skip recursive references (handled by inProgressChecks)
+                    is com.mezze.language.parsedast.ParsedVariantDef -> {
                         for (constructor in definition.constructors) {
                             val dataTypeAnnotation = constructor.dataType ?: continue
-                            // Check if this is a self-reference - if so, skip
                             if (isSelfReference(dataTypeAnnotation, type.constructor)) continue
-
-                            // For non-self-referential parts, we need to check the concrete type
-                            // This is already handled by the recursive check with inProgressChecks
                         }
                         AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
                     }
-                    is RecordDefinition -> {
+                    is com.mezze.language.parsedast.ParsedRecordDef -> {
                         AbilityCheckResult.Satisfied("Derived from type declaration ${type.constructor}")
                     }
-                    is NewtypeDefinition -> {
-                        // Already handled above, but needed for exhaustive when
+                    is com.mezze.language.parsedast.ParsedNewtypeDef -> {
                         checkNewtypeAbilityForTypeApplication(type, abilityName, typeArgs, definition, abilityHash)
                     }
                 }
@@ -376,11 +369,11 @@ class AbilityResolver(
     /**
      * Check if a type annotation references the given type name (self-reference).
      */
-    private fun isSelfReference(annotation: TypeAnnotation, typeName: String): Boolean {
+    private fun isSelfReference(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation, typeName: String): Boolean {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name == typeName
-            is TypeApplicationAnnotation -> annotation.constructor == typeName
-            is RecordTypeAnnotation -> annotation.entries.any { isSelfReference(it.type, typeName) }
+            is com.mezze.language.parsedast.ParsedNamedType -> annotation.name == typeName
+            is com.mezze.language.parsedast.ParsedTypeApp -> annotation.constructor == typeName
+            is com.mezze.language.parsedast.ParsedRecordType -> annotation.entries.any { isSelfReference(it.type, typeName) }
             else -> false
         }
     }
@@ -540,8 +533,8 @@ class AbilityResolver(
      */
     private fun inferTypeArgsFromVariant(
         variantType: MezzeType.VariantType,
-        typeDecl: TypeDeclaration,
-        definition: VariantDefinition
+        typeDecl: com.mezze.language.parsedast.ParsedTypeDecl,
+        definition: com.mezze.language.parsedast.ParsedVariantDef
     ): List<MezzeType>? {
         // Map type parameter names to their inferred types
         val typeArgMap = mutableMapOf<String, MezzeType>()
@@ -556,7 +549,7 @@ class AbilityResolver(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -712,8 +705,8 @@ class AbilityResolver(
                     }
                     type is MezzeType.VariantType && type.typeName == null -> {
                         val typeDecl = typeDeclarations[annotation.constructor]
-                        if (typeDecl != null && typeDecl.definition is VariantDefinition) {
-                            val definition = typeDecl.definition as VariantDefinition
+                        if (typeDecl != null && typeDecl.definition is com.mezze.language.parsedast.ParsedVariantDef) {
+                            val definition = typeDecl.definition as com.mezze.language.parsedast.ParsedVariantDef
                             val declConstructors = definition.constructors.map { it.name }.toSet()
                             if (!declConstructors.containsAll(type.constructors.keys)) {
                                 return false
@@ -769,19 +762,19 @@ class AbilityResolver(
         }
     }
 
-    private fun typeMatchesDeclaration(type: MezzeType, typeDecl: TypeDeclaration): Boolean {
+    private fun typeMatchesDeclaration(type: MezzeType, typeDecl: com.mezze.language.parsedast.ParsedTypeDecl): Boolean {
         // Hash-first: check typeHash against declaration's contentHash
         if (type is MezzeType.TypeApplication) {
             val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
             return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
         }
         return when (val definition = typeDecl.definition) {
-            is RecordDefinition -> {
+            is com.mezze.language.parsedast.ParsedRecordDef -> {
                 if (type !is MezzeType.RecordType) return false
                 val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
                 hashMatch || type.typeName == typeDecl.name || type.fields.keys == definition.fields.map { it.name }.toSet()
             }
-            is VariantDefinition -> {
+            is com.mezze.language.parsedast.ParsedVariantDef -> {
                 if (type !is MezzeType.VariantType) return false
                 val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
                 hashMatch || type.typeName == typeDecl.name ||

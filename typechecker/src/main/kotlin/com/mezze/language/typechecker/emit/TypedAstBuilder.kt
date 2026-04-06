@@ -38,9 +38,9 @@ class TypedAstBuilder(
     private val substitution: Substitution,
     private val constraintResults: Map<String, ConstraintResult>,
     private val abilityImpls: Map<String, TypingContext.AbilityImplInfo>,
-    private val typeDeclarations: Map<String, TypeDeclaration>,   // v1 for now, will migrate later
-    private val abilityDeclarations: Map<String, AbilityDeclaration>,  // v1 for now
-    private val effectDeclarations: Map<String, EffectDeclaration>,    // v1 for now
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,   // v1 for now, will migrate later
+    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // v1 for now
+    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,    // v1 for now
     private val performerToEffect: Map<String, String>,
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, String>,
@@ -1198,7 +1198,7 @@ class TypedAstBuilder(
     private fun resolveEffectForOperation(
         opName: String,
         qualifier: ParsedModulePath?
-    ): EffectDeclaration? {
+    ): com.mezze.language.parsedast.ParsedEffectDecl? {
         // If qualified, try to find by effect name
         if (qualifier != null) {
             val effectName = qualifier.shortName

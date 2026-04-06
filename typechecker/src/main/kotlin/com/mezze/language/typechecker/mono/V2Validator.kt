@@ -14,7 +14,7 @@ import com.mezze.language.typechecker.TypeCheckError
  * where types are concrete (after monomorphization).
  */
 class V2Validator(
-    private val typeDeclarations: Map<String, com.mezze.language.ast.TypeDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
 ) {
     private val errors = mutableListOf<TypeCheckError>()
 
@@ -109,7 +109,7 @@ class V2Validator(
                 // Expand TypeApplication to VariantType using type declarations
                 val typeDecl = typeDeclarations[scrutineeType.constructor]
                 val definition = typeDecl?.definition
-                if (definition is com.mezze.language.ast.VariantDefinition) {
+                if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                     MezzeType.VariantType(
                         constructors = definition.constructors.associate { ctor ->
                             ctor.name to ctor.dataType?.let { MezzeType.VarType(com.mezze.language.ast.TypeVar("payload")) }

@@ -405,11 +405,11 @@ data class ConstraintContext(
     val performerAddedEffects: Map<String, Set<String>> = emptyMap(),  // Maps handler names to effects they ADD (e.g., FileLogger -> {FileSystem})
     val abilityNames: Set<String> = emptySet(),  // Set of all ability names (e.g., Show, Eq)
     val effectNames: Set<String> = emptySet(),  // Set of all effect names (e.g., Log, FileSystem)
-    val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),  // Effect declarations (for associated type lookup)
+    val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),  // Effect declarations (for associated type lookup)
     val performContext: ParsedPerform? = null,  // Current perform context for effect associated type substitution
-    val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
+    val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),  // All ability declarations for method type lookup
     val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)
-    val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),  // Type declarations for validation only (NOT for general type resolution)
+    val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),  // Type declarations for validation only (NOT for general type resolution)
     val currentBindingName: String? = null,  // The name of the binding being generated (for per-binding open variant tracking)
 
     // TCO: Name of the enclosing function for self-recursion detection
