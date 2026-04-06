@@ -133,26 +133,11 @@ class TypedAstBuilder(
         }
 
         // Add hashes for all let declarations in this module
-        for (decl in module.decls) {
-            if (decl is ParsedLetDecl && decl.isSimpleBinding) {
-                val name = decl.variableName
-                val key = BindingKey.unqualified(name)
-                if (key in mutableHashes) continue
-                try {
-                    val v1Expr = ParserBridge.toV1Expr(decl.value, module.path)
-                    val v1Pattern = ParserBridge.toV1Pattern(decl.pattern, module.path)
-                    val v1TypeAnn = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, module.path) }
-                    val v1Binding = com.mezze.language.ast.LetBinding(
-                        pattern = v1Pattern,
-                        expression = v1Expr,
-                        typeAnnotation = v1TypeAnn,
-                        visibility = if (decl.visibility == ParsedVisibility.PUBLIC) com.mezze.language.ast.Visibility.PUBLIC else com.mezze.language.ast.Visibility.PRIVATE
-                    )
-                    val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(v1Binding).toFullHexString()
-                    mutableHashes[key] = hash
-                } catch (_: Exception) {
-                    // Hash computation failed — skip
-                }
+        val moduleHashes = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashAllLetDecls(module)
+        for ((name, hash) in moduleHashes) {
+            val key = BindingKey.unqualified(name)
+            if (key !in mutableHashes) {
+                mutableHashes[key] = hash
             }
         }
         precomputedHashes = mutableHashes
@@ -272,22 +257,10 @@ class TypedAstBuilder(
         // Register binding in identifier context so later bindings can reference it
         identifierContext[name] = type
 
-        // Compute content hash by converting to v1 LetBinding and hashing
-        // This ensures hashes match stdlib modules (which are compiled via v1)
-        val hash = try {
-            val v1Expr = ParserBridge.toV1Expr(decl.value, file)
-            val v1Pattern = ParserBridge.toV1Pattern(decl.pattern, file)
-            val v1TypeAnn = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, file) }
-            val v1Binding = LetBinding(
-                pattern = v1Pattern,
-                expression = v1Expr,
-                typeAnnotation = v1TypeAnn,
-                visibility = if (decl.visibility == ParsedVisibility.PUBLIC) com.mezze.language.ast.Visibility.PUBLIC else com.mezze.language.ast.Visibility.PRIVATE
-            )
-            Hash.fromV1(ASTHasher.hashLetBinding(v1Binding).toFullHexString())
-        } catch (_: Exception) {
-            computeHash("let_$name:${typeToString(type)}")
-        }
+        // Compute content hash for this declaration
+        val hash = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashLetDecl(decl, file)
+            ?.let { Hash.fromV1(it) }
+            ?: computeHash("let_$name:${typeToString(type)}")
 
         val scheme = V2TypeScheme(emptyList(), emptyList(), type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
