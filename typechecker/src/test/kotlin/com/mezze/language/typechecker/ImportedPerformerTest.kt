@@ -109,7 +109,7 @@ class ImportedPerformerTest {
     }
 
     @Test
-    fun `checkProgramForExecution should pass for valid main with imported performer`() {
+    fun `checkProgram should pass for valid main with imported performer`() {
         val source = """
             use std::effects::log::{println, Console}
 
@@ -120,11 +120,11 @@ class ImportedPerformerTest {
         val program = parser.parse(source)
 
         // This should NOT throw - it was throwing before the fix
-        val result = typeChecker.checkProgramForExecution(program)
+        val result = typeChecker.checkProgram(program)
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
-            "checkProgramForExecution should succeed for valid main"
+            "checkProgram should succeed for valid main"
         )
     }
 
@@ -142,7 +142,7 @@ class ImportedPerformerTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.checkProgramForExecution(program)
+        val result = typeChecker.checkProgram(program)
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
