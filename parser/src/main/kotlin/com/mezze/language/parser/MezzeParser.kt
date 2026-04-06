@@ -107,6 +107,16 @@ class MezzeParser(
         return v1ProgramToParsedModule(program, file)
     }
 
+    /**
+     * Convert ParsedModule to v1 Program (bridge for backward compatibility).
+     * Includes impl resolution and desugaring.
+     */
+    fun parsedModuleToProgram(module: ParsedModule): Program {
+        val program = parsedModuleToV1Program(module, emptyList())
+        val resolvedProgram = resolveImplDeclarations(program)
+        return desugarProgram(resolvedProgram)
+    }
+
     companion object {
         /** Convert v1 Expression → ParsedExpr */
         @JvmStatic

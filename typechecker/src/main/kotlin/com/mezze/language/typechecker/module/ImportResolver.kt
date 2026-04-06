@@ -120,6 +120,71 @@ class ImportResolver(
     }
 
     /**
+     * Resolve imports from a ParsedModule (v2 AST entry point).
+     * Converts v2 use decls to v1 UseDeclaration and delegates.
+     */
+    fun resolveImports(module: com.mezze.language.parsedast.ParsedModule): ImportResolutionResult {
+        val errors = mutableListOf<ModuleError>()
+        var importContext = ModuleImportContext.empty()
+        val loadedModules = mutableMapOf<String, TypedModule>()
+
+        for (decl in module.decls) {
+            val (use, isPublic) = when (decl) {
+                is com.mezze.language.parsedast.ParsedUseDecl -> Pair(parsedUseToV1(decl), false)
+                is com.mezze.language.parsedast.ParsedPubUseDecl -> Pair(parsedPubUseToV1(decl), true)
+                else -> continue
+            }
+            val result = processUseDeclaration(use, isPublic)
+            when (result) {
+                is ProcessResult.Success -> {
+                    importContext = importContext.merge(result.context)
+                    result.module?.let { loadedModules[it.modulePath] = it }
+                }
+                is ProcessResult.Failure -> errors.addAll(result.errors)
+            }
+        }
+
+        return if (errors.isEmpty()) {
+            ImportResolutionResult.Success(importContext, loadedModules)
+        } else {
+            ImportResolutionResult.Failure(errors)
+        }
+    }
+
+    /** Convert v2 ParsedUseDecl to v1 UseDeclaration */
+    private fun parsedUseToV1(decl: com.mezze.language.parsedast.ParsedUseDecl): UseDeclaration {
+        return UseDeclaration(
+            path = parsedUsePathToV1(decl.path),
+            alias = decl.alias,
+            sourceLocation = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+        )
+    }
+
+    /** Convert v2 ParsedPubUseDecl to v1 UseDeclaration */
+    private fun parsedPubUseToV1(decl: com.mezze.language.parsedast.ParsedPubUseDecl): UseDeclaration {
+        return UseDeclaration(
+            path = parsedUsePathToV1(decl.path),
+            alias = decl.alias,
+            sourceLocation = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+        )
+    }
+
+    /** Convert v2 ParsedUsePath to v1 UsePath */
+    private fun parsedUsePathToV1(path: com.mezze.language.parsedast.ParsedUsePath): UsePath {
+        return when (path) {
+            is com.mezze.language.parsedast.ParsedUsePath.Module ->
+                ModulePath(path.path.segments)
+            is com.mezze.language.parsedast.ParsedUsePath.Selective ->
+                SelectivePath(
+                    module = path.modulePath.segments,
+                    items = path.items.map { item ->
+                        ImportItem(name = item.name, alias = item.alias)
+                    }
+                )
+        }
+    }
+
+    /**
      * Process a single UseDeclaration.
      *
      * This loads the module and extracts the requested imports.

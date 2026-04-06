@@ -732,6 +732,28 @@ class TypeChecker(
     }
 
     /**
+     * Type-check a ParsedModule directly (v2 entry point).
+     *
+     * This is the preferred entry point. Internally bridges to checkProgram
+     * via v1 Program conversion until all phases are migrated to v2.
+     */
+    /**
+     * Type-check a ParsedModule directly (v2 entry point).
+     *
+     * This is the preferred entry point. Internally bridges to checkProgram
+     * via v1 Program conversion until all phases are migrated to v2.
+     */
+    fun checkParsedModule(
+        module: com.mezze.language.parsedast.ParsedModule,
+        currentPath: Path = Paths.get("."),
+        currentModulePath: String? = null,
+        enablePrelude: Boolean = false
+    ): TypeCheckResult {
+        val program = MezzeParser().parsedModuleToProgram(module)
+        return checkProgram(program, currentPath, currentModulePath, enablePrelude)
+    }
+
+    /**
      * Check a program with error recovery.
      *
      * Unlike checkProgram() which returns on the first error, this method
