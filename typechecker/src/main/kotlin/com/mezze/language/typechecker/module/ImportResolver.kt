@@ -402,7 +402,7 @@ class ImportResolver(
         val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val impls = mutableMapOf<String, ImplDeclaration>()
+        val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
         // Content-hash indexed maps for O(1) lookup
         val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
@@ -545,12 +545,12 @@ class ImportResolver(
             // Use index for O(1) access to all impl declarations (effect handlers)
             // For module imports (isQualified=true), also add under qualified names
             // so that `perform log::Console` resolves correctly
-            for ((performerName, impl) in module.index.implsByPerformer) {
-                impls[performerName] = impl
+            for ((performerName, perf) in module.index.performersByName) {
+                impls[performerName] = perf
                 if (isQualified && alias != null) {
                     // Use BindingKey for qualified performer lookup
                     val qualifiedKey = BindingKey.qualified(alias, performerName)
-                    impls[qualifiedKey.toKeyString()] = impl
+                    impls[qualifiedKey.toKeyString()] = perf
                 }
             }
 
@@ -585,7 +585,7 @@ class ImportResolver(
         val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val impls = mutableMapOf<String, ImplDeclaration>()
+        val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
         val abilityImpls = mutableMapOf<String, ImplAbilityDeclaration>()
         // Content-hash indexed maps for O(1) lookup
         val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
@@ -662,36 +662,36 @@ class ImportResolver(
             }
         }
 
-        // CRITICAL: Also extract ImplDeclarations for the imported items
+        // CRITICAL: Also extract performer and ability impl declarations for the imported items
         // These are needed to build the performerToEffect mapping
         // All lookups via O(1) index instead of O(N) filterIsInstance scans
         if (module != null) {
             val index = module.index
 
-            // Extract impl declarations for imported effects
+            // Extract performer declarations for imported effects
             // (Handlers are associated with effects, not exported separately)
             for (item in items) {
                 // O(1) check if this is an effect import
                 val effectDecl = index.effectDeclarations[item.name]
 
                 if (effectDecl != null) {
-                    // O(1) lookup of all impl declarations for this effect
-                    val effectImpls = index.implsByEffect[effectDecl.name] ?: emptyList()
+                    // O(1) lookup of all performer declarations for this effect
+                    val effectPerformers = index.performersByEffect[effectDecl.name] ?: emptyList()
 
-                    // Add each impl with a unique key (performerName)
-                    for (impl in effectImpls) {
-                        impls[impl.performerName] = impl
+                    // Add each performer with a unique key (performerName)
+                    for (perf in effectPerformers) {
+                        impls[perf.performerName] = perf
                     }
                 }
 
                 // O(1) check if this is a direct performer import (e.g., Console)
-                val performerImpl = index.implsByPerformer[item.name]
+                val performerImpl = index.performersByName[item.name]
                 if (performerImpl != null && !impls.containsKey(item.name)) {
                     impls[item.name] = performerImpl
                 }
             }
 
-            // Extract ImplAbilityDeclarations for imported abilities
+            // Extract ability impl declarations for imported abilities
             for (item in items) {
                 // O(1) check if this is an ability import
                 val abilityDecl = index.abilityDeclarations[item.name]
@@ -762,7 +762,7 @@ class ImportResolver(
         // Check let bindings (functions/values)
         index.letBindings[itemName]?.let { binding ->
             // Found it - it exists but wasn't exported (otherwise it would be in exports)
-            return binding.visibility != Visibility.PUBLIC
+            return binding.visibility != com.mezze.language.parsedast.Visibility.PUBLIC
         }
 
         // Check type declarations

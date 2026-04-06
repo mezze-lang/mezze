@@ -194,7 +194,9 @@ data class TypedModule(
     /** V2 TypedModule emitted by TypedAstBuilder — used by monomorphizer */
     val v2TypedModule: com.mezze.language.typedast.TypedModule? = null,
     /** V2 ParsedModule — the primary AST representation. Use instead of program when possible. */
-    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
+    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
+    /** Extracted type context: name → inferred MezzeType. Built once at type-check time. */
+    val typeContext: Map<String, MezzeType> = emptyMap()
 )
 
 // ============================================================================
@@ -234,8 +236,8 @@ data class ModuleImportContext(
     val importedTypes: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,         // Imported type declarations (keyed by name)
     val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // Imported abilities (keyed by name)
     val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,     // Imported effects (keyed by name)
-    val importedImpls: Map<String, ImplDeclaration>,         // Imported effect implementations (keyed by name)
-    val importedAbilityImpls: Map<String, ImplAbilityDeclaration>,  // Imported ability implementations (keyed by name)
+    val importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,         // Imported effect implementations (keyed by performer name)
+    val importedAbilityImpls: Map<String, ImplAbilityDeclaration>,  // Imported ability implementations (keyed by content hash)
     // Content-hash indexed maps for O(1) lookup without string parsing
     val effectsByHash: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
     val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()  // Abilities keyed by content hash

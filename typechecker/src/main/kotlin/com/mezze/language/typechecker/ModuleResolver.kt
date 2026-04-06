@@ -40,59 +40,197 @@ data class ProgramIndex(
     val typeDeclarations: Map<String, ParsedTypeDecl>,
     val abilityDeclarations: Map<String, ParsedAbilityDecl>,
     val effectDeclarations: Map<String, ParsedEffectDecl>,
-    val implsByPerformer: Map<String, ImplDeclaration>,
-    val implsByEffect: Map<String, List<ImplDeclaration>>,
+    val performersByName: Map<String, ParsedPerformerDecl>,
+    val performersByEffect: Map<String, List<ParsedPerformerDecl>>,
     val abilityImplsByAbility: Map<String, List<ImplAbilityDeclaration>>,
     val abilityImplsByHash: Map<String, ImplAbilityDeclaration>,
-    val letBindings: Map<String, LetBinding>,
-    val useDeclarations: List<UseDeclaration>,
-    val pubUseDeclarations: List<PubUseDeclaration>
+    val letBindings: Map<String, ParsedLetDecl>,
+    val useDeclarations: List<ParsedUseDecl>,
+    val pubUseDeclarations: List<ParsedPubUseDecl>
 ) {
+    /** @deprecated Use performersByName — kept for source compat during migration */
+    @Deprecated("Use performersByName", ReplaceWith("performersByName"))
+    val implsByPerformer: Map<String, ParsedPerformerDecl> get() = performersByName
+
+    /** @deprecated Use performersByEffect — kept for source compat during migration */
+    @Deprecated("Use performersByEffect", ReplaceWith("performersByEffect"))
+    val implsByEffect: Map<String, List<ParsedPerformerDecl>> get() = performersByEffect
+
     companion object {
         private val syntheticLoc = Loc(file = "<index>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
 
         /**
          * Build an index from a ParsedModule (v2 AST).
-         * Populates v2 fields directly and converts to v1 for remaining fields.
+         * Populates all fields directly from v2 types — no v1 conversion.
          */
         fun build(module: ParsedModule): ProgramIndex {
-            val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
-            return build(program)
+            val decls = module.decls
+
+            val typeDecls = decls.filterIsInstance<ParsedTypeDecl>()
+                .associateBy { it.name }
+            val abilityDecls = decls.filterIsInstance<ParsedAbilityDecl>()
+                .associateBy { it.name }
+            val effectDecls = decls.filterIsInstance<ParsedEffectDecl>()
+                .associateBy { it.name }
+
+            val performerDecls = decls.filterIsInstance<ParsedPerformerDecl>()
+            val abilityImplDecls = decls.filterIsInstance<ParsedImplAbilityDecl>()
+            val letDecls = decls.filterIsInstance<ParsedLetDecl>()
+
+            // Compute content hashes for performers that don't have them
+            val hashedPerformers = performerDecls.map { perf ->
+                if (perf.contentHash != null) perf
+                else {
+                    val v1 = v2PerformerToV1ForHashing(perf, module.path)
+                    val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(v1).toFullHexString()
+                    perf.copy(contentHash = hash)
+                }
+            }
+
+            // Convert ability impls to v1 and compute content hashes
+            val v1AbilityImpls = abilityImplDecls.map { impl ->
+                val v1 = v2AbilityImplToV1ForHashing(impl, module.path)
+                if (impl.contentHash != null) {
+                    v1.copy(contentHash = impl.contentHash)
+                } else {
+                    val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1).toFullHexString()
+                    v1.copy(contentHash = hash)
+                }
+            }
+
+            return ProgramIndex(
+                typeDeclarations = typeDecls,
+                abilityDeclarations = abilityDecls,
+                effectDeclarations = effectDecls,
+                performersByName = hashedPerformers.associateBy { it.performerName },
+                performersByEffect = hashedPerformers.groupBy { it.effect.localName },
+                abilityImplsByAbility = v1AbilityImpls
+                    .filter { !it.isInherent }
+                    .groupBy { it.abilityName!! },
+                abilityImplsByHash = v1AbilityImpls.associateBy { impl ->
+                    impl.contentHash!!
+                },
+                letBindings = letDecls
+                    .filter { it.isSimpleBinding }
+                    .associateBy { it.variableName },
+                useDeclarations = decls.filterIsInstance<ParsedUseDecl>(),
+                pubUseDeclarations = decls.filterIsInstance<ParsedPubUseDecl>()
+            )
         }
 
         /**
-         * Build an index from a program (v1 AST — converts to v2 types).
+         * Build an index from a program (v1 AST — converts to v2 types via parser bridge).
          * Called once during module loading, all subsequent lookups are O(1).
+         *
+         * Uses the parser's round-trip converter to properly convert all v1 expressions
+         * to v2 ParsedExpr (preserving full expression structure, needed for
+         * extractSuspensionType in ContextBuilder).
          */
         @Deprecated("Use build(ParsedModule) instead — v1 overload kept for ModuleResolver compat")
         fun build(program: Program): ProgramIndex {
             val items = program.items
 
-            // Pre-filter by type once
-            val typeDecls = items.filterIsInstance<TypeDeclaration>()
-            val abilityDecls = items.filterIsInstance<AbilityDeclaration>()
-            val effectDecls = items.filterIsInstance<EffectDeclaration>()
-            val implDecls = items.filterIsInstance<ImplDeclaration>()
-            val abilityImplDecls = items.filterIsInstance<ImplAbilityDeclaration>()
-            val letBindingDecls = items.filterIsInstance<LetBinding>()
+            // Convert entire program to ParsedModule via the parser bridge, then use the v2 build.
+            // This preserves all expression structure (implementations, etc.) unlike manual conversion.
+            val parsedModule = com.mezze.language.parser.MezzeParser().programToParsedModule(program)
+            val v2Index = build(parsedModule)
 
-            return ProgramIndex(
-                typeDeclarations = typeDecls.associate { it.name to v1TypeDeclToParsed(it) },
-                abilityDeclarations = abilityDecls.associate { it.name to v1AbilityDeclToParsed(it) },
-                effectDeclarations = effectDecls.associate { it.name to v1EffectDeclToParsed(it) },
-                implsByPerformer = implDecls.associateBy { it.performerName },
-                implsByEffect = implDecls.groupBy { it.effect.localName },
-                abilityImplsByAbility = abilityImplDecls.filter { !it.isInherent }.groupBy { it.abilityName!! },
+            // For ability impls, keep the original v1 objects (they carry inferredType from type-checking)
+            val abilityImplDecls = items.filterIsInstance<ImplAbilityDeclaration>()
+            return v2Index.copy(
+                abilityImplsByAbility = abilityImplDecls
+                    .filter { !it.isInherent }
+                    .groupBy { it.abilityName!! },
                 abilityImplsByHash = abilityImplDecls.associate { impl ->
                     val hash = impl.contentHash
                         ?: com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl).toFullHexString()
                     hash to (if (impl.contentHash != null) impl else impl.copy(contentHash = hash))
+                }
+            )
+        }
+
+        /** Convert v2 ParsedPerformerDecl to v1 ImplDeclaration for content hash computation. */
+        private fun v2PerformerToV1ForHashing(decl: ParsedPerformerDecl, file: String): ImplDeclaration {
+            val ParserBridge = com.mezze.language.parser.MezzeParser
+            return ImplDeclaration(
+                effect = QualifiedRef(
+                    localName = decl.effect.localName,
+                    qualifier = decl.effect.qualifier?.let { com.mezze.language.ast.ModulePath(it.segments) }
+                ),
+                performerName = decl.performerName,
+                performerParams = decl.params.map { p ->
+                    PerformerParameter(
+                        name = p.name,
+                        type = ParserBridge.toV1TypeAnnotation(p.type, file)
+                    )
                 },
-                letBindings = letBindingDecls
-                    .filter { it.isSimpleBinding }
-                    .associateBy { it.variableName },
-                useDeclarations = items.filterIsInstance<UseDeclaration>(),
-                pubUseDeclarations = items.filterIsInstance<PubUseDeclaration>()
+                associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
+                    ParserBridge.toV1TypeAnnotation(ann, file)
+                },
+                operations = decl.operations.map { op ->
+                    PerformerOperation(
+                        name = op.name,
+                        paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
+                        returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
+                        implementation = ParserBridge.toV1Expr(op.implementation, file),
+                        effects = op.effects?.let { row ->
+                            EffectRowAnnotation(
+                                effects = row.effects,
+                                effectAnnotations = row.effectAnnotations.map { ea ->
+                                    EffectAnnotation(
+                                        name = ea.name,
+                                        associatedTypes = ea.associatedTypes.mapValues { (_, v) ->
+                                            ParserBridge.toV1TypeAnnotation(v, file)
+                                        }
+                                    )
+                                },
+                                isPolymorphic = row.isPolymorphic,
+                                isPerformed = row.isPerformed
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+        /** Convert v2 ParsedImplAbilityDecl to v1 ImplAbilityDeclaration for content hash computation. */
+        private fun v2AbilityImplToV1ForHashing(decl: ParsedImplAbilityDecl, file: String): ImplAbilityDeclaration {
+            val ParserBridge = com.mezze.language.parser.MezzeParser
+            val target: ImplTarget = when (val t = decl.target) {
+                is ParsedImplTarget.Named -> ImplTarget.Named(
+                    ability = QualifiedRef(
+                        localName = t.ability.localName,
+                        qualifier = t.ability.qualifier?.let { com.mezze.language.ast.ModulePath(it.segments) }
+                    )
+                )
+                is ParsedImplTarget.Inherent -> ImplTarget.Inherent
+            }
+            return ImplAbilityDeclaration(
+                target = target,
+                targetTypes = decl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) },
+                abilityTypeArgs = decl.abilityTypeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
+                forallVars = decl.forallVars,
+                associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
+                    ParserBridge.toV1TypeAnnotation(ann, file)
+                },
+                operations = decl.operations.map { op ->
+                    ImplAbilityOperation(
+                        name = op.name,
+                        paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
+                        returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
+                        implementation = ParserBridge.toV1Expr(op.implementation, file),
+                        abilityConstraints = op.abilityConstraints.map { c ->
+                            FunctionAbilityConstraint(
+                                abilityName = c.abilityName,
+                                typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
+                                associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) ->
+                                    ParserBridge.toV1TypeAnnotation(v, file)
+                                }
+                            )
+                        }
+                    )
+                },
+                contentHash = null
             )
         }
 
@@ -170,8 +308,8 @@ data class ProgramIndex(
             typeDeclarations = emptyMap(),
             abilityDeclarations = emptyMap(),
             effectDeclarations = emptyMap(),
-            implsByPerformer = emptyMap(),
-            implsByEffect = emptyMap(),
+            performersByName = emptyMap(),
+            performersByEffect = emptyMap(),
             abilityImplsByAbility = emptyMap(),
             abilityImplsByHash = emptyMap(),
             letBindings = emptyMap(),

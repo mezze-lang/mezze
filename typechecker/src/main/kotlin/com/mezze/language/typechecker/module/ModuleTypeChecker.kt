@@ -192,14 +192,17 @@ class ModuleTypeChecker(
             // Ensure the ModuleResolver also has the typed version with content hashes.
             // After clearCache(), the resolver re-loads from disk (unhashed), but this
             // global cache retains the typed module. Sync them so importers see all impls.
+            val typeContext = cached.typeContext
+
+            // Update v1 ModuleResolver cache if the cached program is non-empty
             @Suppress("DEPRECATION")
             val cachedProgram = cached.program
-            @Suppress("DEPRECATION")
-            val typeContext = buildTypeContextFromProgram(cachedProgram)
-            @Suppress("DEPRECATION")
-            moduleResolver?.updateModuleExports(
-                cached.modulePath, cachedProgram, typeContext
-            )
+            if (cachedProgram.items.isNotEmpty()) {
+                @Suppress("DEPRECATION")
+                moduleResolver?.updateModuleExports(
+                    cached.modulePath, cachedProgram, typeContext
+                )
+            }
             // Also store the parsedModule in the resolver cache for v2 consumers
             val cachedParsedModule = cached.parsedModule ?: module.parsedModule
             if (cachedParsedModule != null) {
@@ -240,6 +243,11 @@ class ModuleTypeChecker(
                     // Create typed module — use original program for structure
                     @Suppress("DEPRECATION")
                     val moduleProgram = if (result.program.items.isNotEmpty()) result.program else module.program
+
+                    // Build type context once — reused for exports and resolver updates
+                    val typeContext = if (moduleProgram.items.isNotEmpty())
+                        buildTypeContextFromProgram(moduleProgram) else emptyMap()
+
                     val typedModule = TypedModule(
                         modulePath = module.modulePath,
                         program = moduleProgram,
@@ -250,7 +258,8 @@ class ModuleTypeChecker(
                         substitution = result.substitution,
                         monomorphicInstances = result.monomorphicInstances,
                         v2TypedModule = result.typedModule,
-                        parsedModule = module.parsedModule
+                        parsedModule = module.parsedModule,
+                        typeContext = typeContext
                     )
 
                     // Cache the result in GLOBAL cache (thread-safe)
@@ -262,7 +271,6 @@ class ModuleTypeChecker(
                     // Then updateModuleExportsV2 overlays the parsedModule for v2 consumers.
                     if (moduleProgram.items.isNotEmpty()) {
                         moduleResolver?.let { resolver ->
-                            val typeContext = buildTypeContextFromProgram(moduleProgram)
                             @Suppress("DEPRECATION")
                             resolver.updateModuleExports(module.modulePath, moduleProgram, typeContext)
                             // Also store the parsedModule in the resolver cache for v2 path

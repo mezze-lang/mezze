@@ -1074,10 +1074,8 @@ class TypedAstBuilder(
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
         val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
-        // If the effect isn't directly in scope, get the hash from the performer's
-        // ImplDeclaration.effect.resolvedContentHash (populated by v1 typechecker).
+        // Look up effect hash from effect declaration or v1 impl's resolvedContentHash
         val effectContentHash = effectDecl?.contentHash
-            ?: importedImpl?.effect?.resolvedContentHash
             ?: implDecl?.effect?.resolvedContentHash
         val effectHash = Hash.fromV1(effectContentHash)
 

@@ -83,7 +83,7 @@ class ContextBuilder {
     fun build(
         module: ParsedModule,
         parentContext: TypingContext = TypingContext.empty,
-        importedImpls: Map<String, com.mezze.language.ast.ImplDeclaration> = emptyMap(),
+        importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl> = emptyMap(),
         importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
         importedTypes: Map<String, ParsedTypeDecl> = emptyMap(),
         importedEffects: Map<String, ParsedEffectDecl> = emptyMap(),
@@ -204,6 +204,11 @@ class ContextBuilder {
         val allV1TypeDecls = v1TypeDecls.toMutableMap()
         allV1TypeDecls.putAll(v1ImportedTypes)
 
+        // Convert imported v2 performers to v1 ImplDeclarations for internal use
+        val v1ImportedImpls: Map<String, ImplDeclaration> = importedImpls.mapValues { (_, perf) ->
+            parsedPerformerDeclToV1(perf, file)
+        }
+
         // Build performer to effect mapping
         // CRITICAL: Merge imported impls with local impls
         val localMapping = implDecls.associate { impl ->
@@ -211,7 +216,7 @@ class ContextBuilder {
             val effectName = effectDecl?.name ?: impl.effect.localName
             impl.performerName to effectName
         }
-        val importedMapping = importedImpls.mapValues { (_, impl) ->
+        val importedMapping = v1ImportedImpls.mapValues { (_, impl) ->
             val effectDecl = allEffectDecls[impl.effect.localName]
             effectDecl?.name ?: impl.effect.localName
         }
@@ -225,7 +230,7 @@ class ContextBuilder {
             val effHash = effectDecl?.contentHash ?: continue
             performerToEffectHashMap[perfHash] = effHash
         }
-        for ((_, impl) in importedImpls) {
+        for ((_, impl) in v1ImportedImpls) {
             val perfHash = impl.contentHash ?: continue
             val effectDecl = allEffectDecls[impl.effect.localName]
             val effHash = effectDecl?.contentHash ?: continue
@@ -262,7 +267,7 @@ class ContextBuilder {
         for (implDecl in implDecls) {
             ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
         }
-        for ((_, implDecl) in importedImpls) {
+        for ((_, implDecl) in v1ImportedImpls) {
             ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
         }
 
@@ -316,13 +321,13 @@ class ContextBuilder {
         }
 
         // Build performer added effects mapping
-        val performerAddedEffectsMap = (implDecls + importedImpls.values).associate { impl ->
+        val performerAddedEffectsMap = (implDecls + v1ImportedImpls.values).associate { impl ->
             impl.performerName to extractAddedEffects(impl)
         }.filterValues { it.isNotEmpty() }
 
         // Build implDeclarations map: performer name -> ImplDeclaration
         val implDeclarationsMap = (implDecls.associateBy { it.performerName }) +
-            importedImpls.mapValues { (_, impl) -> impl }
+            v1ImportedImpls.mapValues { (_, impl) -> impl }
 
         return BuildResult(
             context = ctx,
@@ -1712,7 +1717,7 @@ class ContextBuilder {
     /**
      * Convert a ParsedImplAbilityDecl to a v1 ImplAbilityDeclaration.
      */
-    private fun parsedImplAbilityDeclToV1(decl: ParsedImplAbilityDecl, file: String): ImplAbilityDeclaration {
+    private fun parsedImplAbilityDeclToV1(decl: ParsedImplAbilityDecl, file: String = "<import>"): ImplAbilityDeclaration {
         val target: ImplTarget = when (val t = decl.target) {
             is ParsedImplTarget.Named -> ImplTarget.Named(
                 ability = QualifiedRef(
