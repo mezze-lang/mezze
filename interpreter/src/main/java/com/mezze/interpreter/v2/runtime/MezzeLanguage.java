@@ -133,13 +133,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             projectRoot = Paths.get(".");
         }
 
-        // Parse via v1 parser (entry point), then typecheck which runs the v2 pipeline
-        // internally and produces TruffleIR (loweredFunctions).
-        // Note: The v1 parse() is only used as entry point — the typechecker's v2 pipeline
-        // (ParsedModule → TypedModule → Mono → Resolve → Lower) does the actual work.
-        // Full migration to V2PipelineRunner.tryCompile() blocked on closure factory issue.
-        Program ast = sharedParser.parse(sourceCode, true, null);
-        var typeCheckResult = sharedTypeChecker.typeCheck(ast, projectRoot, true, null);
+        // Parse to v2 ParsedModule and typecheck via v2 pipeline
+        var parsedModule = sharedParser.parseParsedModule(sourceCode, source.getPath() != null ? source.getPath() : "<unknown>");
+        var typeCheckResult = sharedTypeChecker.typeCheck(parsedModule, projectRoot, true, null);
 
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {

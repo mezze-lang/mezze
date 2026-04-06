@@ -1852,6 +1852,14 @@ class TypeChecker(
      * @throws TypeCheckError if type checking fails
      */
     @JvmOverloads
+    /**
+     * Type check a ParsedModule (v2 entry point).
+     */
+    fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
+        val program = MezzeParser().parsedModuleToProgram(module)
+        return typeCheck(program, currentPath, enablePrelude, modulePath)
+    }
+
     fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
