@@ -114,12 +114,72 @@ class TypedAstBuilder(
     // ========================================================================
 
     /**
+     * Pre-compute content hashes for all let declarations in the module.
+     * Adds them to identifierContentHashes so resolveBinding() can find them.
+     * This is needed because impl bodies may reference functions defined later
+     * in the same module, and we need hash-based resolution for all of them.
+     */
+    private fun precomputeContentHashes(module: ParsedModule) {
+        val mutableHashes = identifierContentHashes.toMutableMap()
+
+        // Add hashes from imported bindings (needed for impl bodies that call imported functions)
+        importContext?.importedBindings?.forEach { (name, binding) ->
+            if (binding.contentHash != null) {
+                val key = BindingKey.unqualified(name)
+                if (key !in mutableHashes) {
+                    mutableHashes[key] = binding.contentHash!!
+                }
+            }
+        }
+
+        // Add hashes for all let declarations in this module
+        for (decl in module.decls) {
+            if (decl is ParsedLetDecl && decl.isSimpleBinding) {
+                val name = decl.variableName
+                val key = BindingKey.unqualified(name)
+                if (key in mutableHashes) continue
+                try {
+                    val v1Expr = ParserBridge.toV1Expr(decl.value, module.path)
+                    val v1Pattern = ParserBridge.toV1Pattern(decl.pattern, module.path)
+                    val v1TypeAnn = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, module.path) }
+                    val v1Binding = com.mezze.language.ast.LetBinding(
+                        pattern = v1Pattern,
+                        expression = v1Expr,
+                        typeAnnotation = v1TypeAnn,
+                        visibility = if (decl.visibility == ParsedVisibility.PUBLIC) com.mezze.language.ast.Visibility.PUBLIC else com.mezze.language.ast.Visibility.PRIVATE
+                    )
+                    val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(v1Binding).toFullHexString()
+                    mutableHashes[key] = hash
+                } catch (_: Exception) {
+                    // Hash computation failed — skip
+                }
+            }
+        }
+        precomputedHashes = mutableHashes
+    }
+
+    /** Extended identifier content hashes (includes precomputed module-level hashes) */
+    private var precomputedHashes: Map<BindingKey, String>? = null
+
+    /** Stack of lambda parameter names — these shadow content hashes */
+    private val lambdaParamScopes = ArrayDeque<Set<String>>()
+
+    /** Get the effective identifier content hashes (precomputed if available) */
+    private val effectiveContentHashes: Map<BindingKey, String>
+        get() = precomputedHashes ?: identifierContentHashes
+
+    /**
      * Walk a ParsedModule and produce a TypedModule.
      *
      * Processes declarations in order, populating identifierContext
      * so that later bindings can reference earlier ones.
      */
     fun build(module: ParsedModule): TypedModule {
+        // Pre-compute content hashes for all let declarations in this module.
+        // This ensures that impl bodies can reference any function in the module
+        // by hash, even if the function appears later in the source.
+        precomputeContentHashes(module)
+
         val decls = mutableListOf<TypedDecl>()
         val abilityDeclsList = mutableListOf<TypedAbilityDecl>()
         val abilityImplsList = mutableListOf<TypedAbilityImpl>()
@@ -518,6 +578,9 @@ class TypedAstBuilder(
                     identifierContext[param.name] = param.type
                 }
 
+                // Track lambda params so resolveBinding prefers Local over ByHash
+                lambdaParamScopes.addLast(params.map { it.name }.toSet())
+
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
                     is MezzeType.FunctionType -> substitution.apply(ct.returnType)
@@ -526,7 +589,8 @@ class TypedAstBuilder(
 
                 val body = buildExpr(expr.body, file, returnType)
 
-                // Restore previous context
+                // Restore scopes
+                lambdaParamScopes.removeLast()
                 for ((name, prevType) in savedContext) {
                     if (prevType != null) identifierContext[name] = prevType
                     else identifierContext.remove(name)
@@ -908,21 +972,26 @@ class TypedAstBuilder(
 
     private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {
         val patterns = case.patterns.map { buildPattern(it, file) }
-        val bindings = case.patterns.flatMap { p -> p.extractBindings() }.map { name ->
+        val bindingNames = case.patterns.flatMap { p -> p.extractBindings() }
+        val bindings = bindingNames.map { name ->
             PatternBinding(name, MezzeType.VarType(TypeVar(name)), case.loc)
         }
-        // If-let bindings make patterns conditional (they can fail to match).
-        // Represent as a guard so V2Validator treats the pattern as non-exhaustive.
+
+        // Push pattern bindings so case body sees them as locals, not globals
+        lambdaParamScopes.addLast(bindingNames.toSet())
+
         val caseGuard = case.guard
         val guard = if (caseGuard != null) {
             buildExpr(caseGuard, file, MezzeType.BoolType)
         } else if (case.ifLetBindings.isNotEmpty()) {
-            // Synthetic guard — marks this case as conditional
             TypedBoolLit(true, MezzeType.BoolType, case.loc)
         } else {
             null
         }
         val body = buildExpr(case.body, file, contextType)
+
+        lambdaParamScopes.removeLast()
+
         return TypedCase(patterns, bindings, guard, body, case.loc)
     }
 
@@ -1105,16 +1174,23 @@ class TypedAstBuilder(
      * 4. Fallback → Local(0, 0)
      */
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
-        // Qualified reference — try identifierContentHashes with qualifier
+        // Lambda params always shadow global bindings (unqualified only)
+        if (qualifier == null && lambdaParamScopes.any { name in it }) {
+            return BindingRef.Local(0, 0)
+        }
+
+        val hashes = effectiveContentHashes
+
+        // Qualified reference — try content hashes with qualifier
         if (qualifier != null) {
             val qualKey = BindingKey(qualifier.shortName, name)
-            val hash = identifierContentHashes[qualKey]
+            val hash = hashes[qualKey]
             if (hash != null) return BindingRef.ByHash(Hash.fromV1(hash))
         }
 
-        // Unqualified: check identifierContentHashes
+        // Unqualified: check content hashes
         val unqualKey = BindingKey.unqualified(name)
-        val localHash = identifierContentHashes[unqualKey]
+        val localHash = hashes[unqualKey]
         if (localHash != null) return BindingRef.ByHash(Hash.fromV1(localHash))
 
         // Check importContext
