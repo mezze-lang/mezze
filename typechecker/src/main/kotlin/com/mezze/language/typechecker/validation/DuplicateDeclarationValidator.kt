@@ -1,12 +1,12 @@
 package com.mezze.language.typechecker.validation
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.BuiltinTypes
+import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
-import com.mezze.language.typechecker.hashing.ContentHashComputer
 
 /**
- * Validates that declarations are not duplicated within a program.
+ * Validates that declarations are not duplicated within a parsed module.
  *
  * Implements Bug #9 validation checks:
  * - Bug #9a: Duplicate variable declarations in same scope
@@ -19,42 +19,50 @@ import com.mezze.language.typechecker.hashing.ContentHashComputer
  * - Duplicate type declarations
  * - Duplicate constructor names across types
  *
- * Based on validation logic from OldTypeChecker.kt:839-1143
+ * Works directly on v2 ParsedDecl types (no v1 conversion).
  */
 object DuplicateDeclarationValidator {
     /**
-     * Validate all duplicate declarations in a program.
+     * Validate all duplicate declarations in a parsed module.
      * This should be called BEFORE context building.
      *
-     * @param program The program to validate
+     * @param module The parsed module to validate
      * @throws TypeCheckError if any duplicate declarations are found
      */
-    fun validateProgram(program: Program) {
-        validateDuplicateTypes(program)
-        validateDuplicateConstructors(program)
-        validateNewtypeConstructors(program)
-        validateFreeTypeVariables(program)
-        validateDuplicateEffects(program)
-        validateDuplicatePerformers(program)
-        validateDuplicateAbilities(program)
-        validateDuplicateAbilityImpls(program)
-        validateDuplicateInherentMethods(program)
-        validateDuplicateVariables(program)
-        // Note: 'pub' validation for effects, abilities, and impls is handled by the parser.
-        // The parser rejects 'pub' before these declarations with a helpful error message.
+    fun validateModule(module: ParsedModule) {
+        validateDuplicateTypes(module)
+        validateDuplicateConstructors(module)
+        validateNewtypeConstructors(module)
+        validateFreeTypeVariables(module)
+        validateDuplicateEffects(module)
+        validateDuplicatePerformers(module)
+        validateDuplicateAbilities(module)
+        validateDuplicateAbilityImpls(module)
+        validateDuplicateInherentMethods(module)
+        validateDuplicateVariables(module)
     }
 
     /**
-     * Validate no duplicate type declarations (OldTypeChecker.kt:974-976)
+     * Validate using a list of resolved declarations.
+     * Used by ContextBuilder which merges parsed ability impls and performer decls
+     * before calling validation.
      */
-    private fun validateDuplicateTypes(program: Program) {
+    fun validateDecls(decls: List<ParsedDecl>) {
+        val syntheticModule = ParsedModule("<validation>", decls)
+        validateModule(syntheticModule)
+    }
+
+    /**
+     * Validate no duplicate type declarations
+     */
+    private fun validateDuplicateTypes(module: ParsedModule) {
         val declaredTypes = mutableSetOf<String>()
 
-        for (item in program.items.filterIsInstance<TypeDeclaration>()) {
+        for (item in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             if (declaredTypes.contains(item.name)) {
                 throw TypeCheckError(
                     "Duplicate type declaration: type '${item.name}' is already declared",
-                    item.sourceLocation
+                    item.loc.toSourceLocation()
                 )
             }
             declaredTypes.add(item.name)
@@ -63,45 +71,34 @@ object DuplicateDeclarationValidator {
 
     /**
      * Built-in variant constructors that cannot be redefined in OTHER types.
-     * These are constructors from built-in types like Option (Some/None) and Result (Ok/Err).
-     *
-     * Users CAN redefine the built-in type itself (e.g., `type Option = | Some, None |`)
-     * but CANNOT use these constructors in a differently-named type
-     * (e.g., `type MyOption = | Some, None |` is NOT allowed).
      */
     private val BUILTIN_CONSTRUCTORS = mapOf(
-        // Option type constructors
         BuiltinTypes.SOME to BuiltinTypes.OPTION,
         BuiltinTypes.NONE to BuiltinTypes.OPTION,
-        // Result type constructors
         BuiltinTypes.OK to BuiltinTypes.RESULT,
         BuiltinTypes.ERR to BuiltinTypes.RESULT
-        // Note: True/False are literals, not variant constructors
     )
 
     /**
-     * Validate no duplicate constructor names across types (OldTypeChecker.kt:1009-1067)
-     * Also validates that user-defined constructors don't conflict with built-in constructors
-     * (unless the user is redefining the built-in type itself).
+     * Validate no duplicate constructor names across types.
+     * Also validates that user-defined constructors don't conflict with built-in constructors.
      */
-    private fun validateDuplicateConstructors(program: Program) {
+    private fun validateDuplicateConstructors(module: ParsedModule) {
         val constructorToTypeMap = mutableMapOf<String, String>()
 
-        for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             val definition = typeDecl.definition
             when (definition) {
-                is VariantDefinition -> {
+                is ParsedVariantDef -> {
                     for (constructor in definition.constructors) {
                         val constructorName = constructor.name
 
-                        // Check against built-in constructors, but allow redefining the same type
-                        // e.g., `type Option = | Some, None |` is OK, but `type MyOption = | Some, None |` is NOT
                         val builtinType = BUILTIN_CONSTRUCTORS[constructorName]
                         if (builtinType != null && typeDecl.name != builtinType) {
                             throw TypeCheckError(
                                 "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                                 "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                                typeDecl.sourceLocation
+                                typeDecl.loc.toSourceLocation()
                             )
                         }
 
@@ -110,22 +107,21 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
                                 "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                                typeDecl.sourceLocation
+                                typeDecl.loc.toSourceLocation()
                             )
                         }
                         constructorToTypeMap[constructorName] = typeDecl.name
                     }
                 }
-                is NewtypeDefinition -> {
+                is ParsedNewtypeDef -> {
                     val constructorName = definition.constructor
 
-                    // Check against built-in constructors
                     val builtinType = BUILTIN_CONSTRUCTORS[constructorName]
                     if (builtinType != null && typeDecl.name != builtinType) {
                         throw TypeCheckError(
                             "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                             "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                            typeDecl.sourceLocation
+                            typeDecl.loc.toSourceLocation()
                         )
                     }
 
@@ -134,12 +130,12 @@ object DuplicateDeclarationValidator {
                         throw TypeCheckError(
                             "Duplicate constructor name: constructor '$constructorName' is already defined " +
                             "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                            typeDecl.sourceLocation
+                            typeDecl.loc.toSourceLocation()
                         )
                     }
                     constructorToTypeMap[constructorName] = typeDecl.name
                 }
-                is RecordDefinition -> {
+                is ParsedRecordDef -> {
                     // Records don't have constructors in the same way
                 }
             }
@@ -147,30 +143,25 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Validate newtype constructor naming conventions (OldTypeChecker.kt:1517-1530)
-     *
-     * - Constructor must start with an uppercase letter
-     * - Constructor cannot collide with built-in ability names
+     * Validate newtype constructor naming conventions.
      */
-    private fun validateNewtypeConstructors(program: Program) {
-        for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
+    private fun validateNewtypeConstructors(module: ParsedModule) {
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             val definition = typeDecl.definition
-            if (definition is NewtypeDefinition) {
+            if (definition is ParsedNewtypeDef) {
                 val constructorName = definition.constructor
 
-                // Validate constructor naming convention (must start with uppercase)
                 if (!constructorName.first().isUpperCase()) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' must start with an uppercase letter",
-                        typeDecl.sourceLocation
+                        typeDecl.loc.toSourceLocation()
                     )
                 }
 
-                // Validate constructor doesn't collide with built-in ability names
                 if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' is already used by a built-in ability",
-                        typeDecl.sourceLocation
+                        typeDecl.loc.toSourceLocation()
                     )
                 }
             }
@@ -179,19 +170,9 @@ object DuplicateDeclarationValidator {
 
     /**
      * Validate that type declarations don't have free (undeclared) type variables.
-     *
-     * For example:
-     * - `type Color 'a = | Red, Blue { n: 'a } |` is VALID ('a is declared)
-     * - `type Color = | Red, Blue { n: 'a } |` is INVALID ('a is free/undeclared)
-     *
-     * Free type variables in type definitions are confusing because:
-     * 1. The type appears monomorphic but has polymorphic fields
-     * 2. Different usages can unify the free variable to different types
-     * 3. It's unclear what type the field should have
      */
-    private fun validateFreeTypeVariables(program: Program) {
-        for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
-            // typeParams are stored WITH the apostrophe prefix (e.g., "'a")
+    private fun validateFreeTypeVariables(module: ParsedModule) {
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
             val declaredParams = typeDecl.typeParams.map { it.removePrefix("'") }.toSet()
             val usedTypeVarsWithLocation = collectTypeVariablesWithLocation(typeDecl.definition)
 
@@ -204,8 +185,7 @@ object DuplicateDeclarationValidator {
                     val params = freeTypeVars.map { it.first }.distinct().sorted().joinToString(" ") { "'$it" }
                     "Add them as type parameters: type ${typeDecl.name} $params = ..."
                 }
-                // Use the source location of the first free type variable if available
-                val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.sourceLocation
+                val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.loc.toSourceLocation()
                 throw TypeCheckError(
                     "Type '${typeDecl.name}' has undeclared type variable(s): $freeVarList. $suggestion",
                     errorLocation
@@ -216,87 +196,76 @@ object DuplicateDeclarationValidator {
 
     /**
      * Collect all type variable names used in a type definition, with their source locations.
-     *
-     * All type variables must be declared as type parameters - no implicit
-     * rank-2 polymorphism. This follows OCaml and Roc's approach.
      */
-    private fun collectTypeVariablesWithLocation(definition: TypeDefinition): List<Pair<String, SourceLocation?>> {
+    private fun collectTypeVariablesWithLocation(definition: ParsedTypeDef): List<Pair<String, com.mezze.language.ast.SourceLocation?>> {
         return when (definition) {
-            is VariantDefinition -> {
+            is ParsedVariantDef -> {
                 definition.constructors.flatMap { ctor ->
-                    ctor.dataType?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList()
+                    ctor.dataType?.let { collectTypeVariablesFromParsedAnnotation(it) } ?: emptyList()
                 }
             }
-            is RecordDefinition -> {
+            is ParsedRecordDef -> {
                 definition.fields.flatMap { field ->
-                    collectTypeVariablesWithLocationFromAnnotation(field.type)
+                    collectTypeVariablesFromParsedAnnotation(field.type)
                 }
             }
-            is NewtypeDefinition -> {
-                collectTypeVariablesWithLocationFromAnnotation(definition.wrappedType)
+            is ParsedNewtypeDef -> {
+                collectTypeVariablesFromParsedAnnotation(definition.wrappedType)
             }
         }
     }
 
     /**
-     * Collect all type variable names with their source locations from a type annotation.
-     * Note: Most type annotations don't have source locations, so we return null for those.
+     * Collect all type variable names with their source locations from a parsed type annotation.
      */
-    private fun collectTypeVariablesWithLocationFromAnnotation(annotation: TypeAnnotation): List<Pair<String, SourceLocation?>> {
+    private fun collectTypeVariablesFromParsedAnnotation(annotation: ParsedTypeAnnotation): List<Pair<String, com.mezze.language.ast.SourceLocation?>> {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Type variables start with apostrophe or lowercase
+            is ParsedNamedType -> {
                 if (annotation.name.startsWith("'")) {
-                    listOf(annotation.name.removePrefix("'") to annotation.sourceLocation)
+                    listOf(annotation.name.removePrefix("'") to annotation.loc.toSourceLocation())
                 } else if (annotation.name.first().isLowerCase()) {
-                    listOf(annotation.name to annotation.sourceLocation)
+                    listOf(annotation.name to annotation.loc.toSourceLocation())
                 } else {
                     emptyList()
                 }
             }
-            is TypeApplicationAnnotation -> {
-                annotation.args.flatMap { collectTypeVariablesWithLocationFromAnnotation(it) }
+            is ParsedTypeApp -> {
+                annotation.args.flatMap { collectTypeVariablesFromParsedAnnotation(it) }
             }
-            is FunctionTypeAnnotation -> {
-                collectTypeVariablesWithLocationFromAnnotation(annotation.paramType) +
-                    collectTypeVariablesWithLocationFromAnnotation(annotation.returnType) +
-                    (annotation.effects?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList())
+            is ParsedFunctionType -> {
+                collectTypeVariablesFromParsedAnnotation(annotation.paramType) +
+                    collectTypeVariablesFromParsedAnnotation(annotation.returnType)
             }
-            is RecordTypeAnnotation -> {
+            is ParsedRecordType -> {
                 annotation.entries.flatMap { entry ->
-                    collectTypeVariablesWithLocationFromAnnotation(entry.type)
+                    collectTypeVariablesFromParsedAnnotation(entry.type)
                 }
             }
-            is VariantTypeAnnotation -> {
+            is ParsedVariantType -> {
                 annotation.constructors.flatMap { ctor ->
-                    ctor.dataType?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList()
+                    ctor.dataType?.let { collectTypeVariablesFromParsedAnnotation(it) } ?: emptyList()
                 }
             }
-            is SeqTypeAnnotation -> {
-                collectTypeVariablesWithLocationFromAnnotation(annotation.elementType)
+            is ParsedSeqType -> {
+                collectTypeVariablesFromParsedAnnotation(annotation.elementType)
             }
-            is EffectRowAnnotation -> {
-                // Effect row annotations might contain type variables in their effect parameters
-                emptyList()
-            }
-            is QualifiedTypeAnnotation -> {
-                annotation.args.flatMap { collectTypeVariablesWithLocationFromAnnotation(it) }
+            is ParsedQualifiedType -> {
+                annotation.args.flatMap { collectTypeVariablesFromParsedAnnotation(it) }
             }
         }
     }
 
-
     /**
-     * Validate no duplicate effect declarations (Bug #9b, OldTypeChecker.kt:880-904)
+     * Validate no duplicate effect declarations
      */
-    private fun validateDuplicateEffects(program: Program) {
+    private fun validateDuplicateEffects(module: ParsedModule) {
         val declaredEffects = mutableSetOf<String>()
 
-        for (effect in program.items.filterIsInstance<EffectDeclaration>()) {
+        for (effect in module.decls.filterIsInstance<ParsedEffectDecl>()) {
             if (declaredEffects.contains(effect.name)) {
                 throw TypeCheckError(
                     "Duplicate effect declaration: effect '${effect.name}' is already defined",
-                    effect.sourceLocation
+                    effect.loc.toSourceLocation()
                 )
             }
             declaredEffects.add(effect.name)
@@ -304,16 +273,16 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Validate no duplicate performer/handler declarations (Bug #9c, OldTypeChecker.kt:839-876)
+     * Validate no duplicate performer/handler declarations
      */
-    private fun validateDuplicatePerformers(program: Program) {
+    private fun validateDuplicatePerformers(module: ParsedModule) {
         val declaredPerformers = mutableSetOf<String>()
 
-        for (impl in program.items.filterIsInstance<ImplDeclaration>()) {
+        for (impl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
             if (declaredPerformers.contains(impl.performerName)) {
                 throw TypeCheckError(
                     "Duplicate effect handler declaration: performer '${impl.performerName}' is already defined",
-                    impl.sourceLocation
+                    impl.loc.toSourceLocation()
                 )
             }
             declaredPerformers.add(impl.performerName)
@@ -321,16 +290,16 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Validate no duplicate ability declarations (Bug #9d, OldTypeChecker.kt:907-931)
+     * Validate no duplicate ability declarations
      */
-    private fun validateDuplicateAbilities(program: Program) {
+    private fun validateDuplicateAbilities(module: ParsedModule) {
         val declaredAbilities = mutableSetOf<String>()
 
-        for (ability in program.items.filterIsInstance<AbilityDeclaration>()) {
+        for (ability in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
             if (declaredAbilities.contains(ability.name)) {
                 throw TypeCheckError(
                     "Duplicate ability declaration: ability '${ability.name}' is already defined",
-                    ability.sourceLocation
+                    ability.loc.toSourceLocation()
                 )
             }
             declaredAbilities.add(ability.name)
@@ -338,20 +307,14 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Validate no duplicate ability implementations (Bug #9e, OldTypeChecker.kt:933-968)
-     *
-     * Two ability implementations are considered duplicates if they implement
-     * the same ability for the same type(s).
+     * Validate no duplicate ability implementations for same type
      */
-    private fun validateDuplicateAbilityImpls(program: Program) {
+    private fun validateDuplicateAbilityImpls(module: ParsedModule) {
         val abilityImplKeys = mutableSetOf<String>()
 
-        for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
-            // Create a key from ability name + ability type args + target type names
-            // For `impl Into Str for Int`: abilityTypeArgs=[Str], targetTypes=[Int] → key="Into_Str_Int"
-            // For `impl Into Float for Int`: abilityTypeArgs=[Float], targetTypes=[Int] → key="Into_Float_Int"
-            val abilityTypeArgNames = impl.abilityTypeArgs.map { typeAnnotationToString(it) }
-            val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
+        for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
+            val abilityTypeArgNames = impl.abilityTypeArgs.map { parsedTypeAnnotationToString(it) }
+            val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
             val allTypeNames = abilityTypeArgNames + targetTypeNames
             val implLabel = impl.abilityName ?: "inherent"
             val key = "${implLabel}_${allTypeNames.joinToString("_")}"
@@ -360,7 +323,7 @@ object DuplicateDeclarationValidator {
                 throw TypeCheckError(
                     "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
                     "for type(s) ${allTypeNames.joinToString(", ")}",
-                    impl.sourceLocation
+                    impl.loc.toSourceLocation()
                 )
             }
             abilityImplKeys.add(key)
@@ -369,21 +332,14 @@ object DuplicateDeclarationValidator {
 
     /**
      * Validate no duplicate method names across inherent impls on the same type.
-     *
-     * Even though we prevent duplicate `impl Type where { ... }` blocks above,
-     * if that check is relaxed in the future (e.g., allowing extension impls),
-     * this catches method name collisions.
-     * Also catches method names that appear in both an inherent impl and an ability impl
-     * for the same type, which would be ambiguous at call sites.
      */
-    private fun validateDuplicateInherentMethods(program: Program) {
-        // Track method names per type across all inherent impls
-        val methodsByType = mutableMapOf<String, MutableMap<String, SourceLocation?>>()
+    private fun validateDuplicateInherentMethods(module: ParsedModule) {
+        val methodsByType = mutableMapOf<String, MutableMap<String, Loc?>>()
 
-        for (impl in program.items.filterIsInstance<ImplAbilityDeclaration>()) {
+        for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
             if (!impl.isInherent) continue
 
-            val targetTypeNames = impl.targetTypes.map { typeAnnotationToString(it) }
+            val targetTypeNames = impl.targetTypes.map { parsedTypeAnnotationToString(it) }
             val typeKey = targetTypeNames.joinToString("_")
 
             val existingMethods = methodsByType.getOrPut(typeKey) { mutableMapOf() }
@@ -394,29 +350,28 @@ object DuplicateDeclarationValidator {
                     throw TypeCheckError(
                         "Duplicate method '${op.name}' in inherent impl for type(s) ${targetTypeNames.joinToString(", ")}. " +
                         "Each method name must be unique across all inherent impls for a type.",
-                        op.implementation.sourceLocation
+                        op.loc.toSourceLocation()
                     )
                 }
-                existingMethods[op.name] = op.implementation.sourceLocation
+                existingMethods[op.name] = op.loc
             }
         }
     }
 
     /**
-     * Validate no duplicate variable declarations (Bug #9a, OldTypeChecker.kt:1123-1143)
+     * Validate no duplicate variable declarations
      */
-    private fun validateDuplicateVariables(program: Program) {
+    private fun validateDuplicateVariables(module: ParsedModule) {
         val declaredVariables = mutableSetOf<String>()
 
-        for (item in program.items.filterIsInstance<LetBinding>()) {
-            // Extract all variable names from the pattern using the AST utility
+        for (item in module.decls.filterIsInstance<ParsedLetDecl>()) {
             val boundNames = item.pattern.extractBindings()
 
             for (name in boundNames) {
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",
-                        item.expression.sourceLocation
+                        item.value.loc.toSourceLocation()
                     )
                 }
                 declaredVariables.add(name)
@@ -425,10 +380,41 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Convert type annotation to string for duplicate checking.
-     * Delegates to ContentHashComputer for consistency with ability lookup keys.
+     * Convert parsed type annotation to string for duplicate checking.
      */
-    private fun typeAnnotationToString(annotation: TypeAnnotation): String {
-        return ContentHashComputer.typeAnnotationToString(annotation)
+    fun parsedTypeAnnotationToString(annotation: ParsedTypeAnnotation): String {
+        return when (annotation) {
+            is ParsedNamedType -> annotation.name
+            is ParsedFunctionType -> "Function"
+            is ParsedTypeApp -> {
+                val args = annotation.args.joinToString("_") { parsedTypeAnnotationToString(it) }
+                if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_$args"
+            }
+            is ParsedRecordType -> {
+                val fieldNames = annotation.entries.map { it.name }.sorted().joinToString("_")
+                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
+            }
+            is ParsedVariantType -> {
+                val constructorNames = annotation.constructors.map { it.name }.sorted().joinToString("_")
+                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
+            }
+            is ParsedSeqType -> "Array_${parsedTypeAnnotationToString(annotation.elementType)}"
+            is ParsedQualifiedType -> {
+                val modulePart = annotation.modulePath.joinToString("_")
+                val args = annotation.args.joinToString("_") { parsedTypeAnnotationToString(it) }
+                if (args.isEmpty()) "${modulePart}_${annotation.typeName}" else "${modulePart}_${annotation.typeName}_$args"
+            }
+        }
     }
+}
+
+/**
+ * Extension to convert v2 Loc to v1 SourceLocation for error reporting.
+ */
+private fun Loc.toSourceLocation(): com.mezze.language.ast.SourceLocation {
+    return com.mezze.language.ast.SourceLocation(
+        file = this.file,
+        line = this.startLine,
+        column = this.startCol
+    )
 }

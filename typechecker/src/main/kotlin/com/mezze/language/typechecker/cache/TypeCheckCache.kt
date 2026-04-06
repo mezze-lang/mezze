@@ -1,6 +1,6 @@
 package com.mezze.language.typechecker.cache
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.debug.DebugLogger
@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * All caches use content hashes as keys:
  * - **Constraint cache**: (bindingHash, contextHash) → ConstraintResult
- * - **Monomorphic cache**: (originalHash, typeArgsHash) → LetBinding
  * - **Ability impl cache**: abilityKey → (implHash, modulePath)
  *
  * ## Usage
@@ -49,8 +48,6 @@ object TypeCheckCache {
     // Stats tracking
     private val constraintCacheHits = AtomicLong(0)
     private val constraintCacheMisses = AtomicLong(0)
-    private val monomorphicCacheHits = AtomicLong(0)
-    private val monomorphicCacheMisses = AtomicLong(0)
     private val abilityImplCacheHits = AtomicLong(0)
     private val abilityImplCacheMisses = AtomicLong(0)
 
@@ -128,54 +125,6 @@ object TypeCheckCache {
         // L2: Store in SQLite asynchronously (if enabled)
         // For now, we skip SQLite storage for ConstraintResult due to serialization complexity
         // The in-memory cache handles intra-session caching
-    }
-
-    // ========================================================================
-    // MONOMORPHIZATION CACHE
-    // ========================================================================
-
-    data class MonomorphicKey(
-        val originalHash: String,
-        val typeArgsHash: String
-    )
-
-    data class CachedMonomorphicInstance(
-        val binding: LetBinding,
-        val timestamp: Long = System.currentTimeMillis()
-    )
-
-    private val monomorphicCacheL1 = ConcurrentHashMap<MonomorphicKey, CachedMonomorphicInstance>()
-
-    /**
-     * Get cached monomorphic instance.
-     */
-    fun getMonomorphicInstance(originalHash: String, typeArgsHash: String): LetBinding? {
-        val key = MonomorphicKey(originalHash, typeArgsHash)
-
-        // L1: Check in-memory cache
-        monomorphicCacheL1[key]?.let {
-            monomorphicCacheHits.incrementAndGet()
-            return it.binding
-        }
-
-        // L2: Check SQLite (if enabled)
-        // Note: SQLite lookup for LetBinding requires codebase module dependency
-        // For now, we rely on L1 cache for monomorphic instances
-        // Cross-session persistence is handled via the definitions table
-
-        monomorphicCacheMisses.incrementAndGet()
-        return null
-    }
-
-    /**
-     * Store monomorphic instance in cache.
-     */
-    fun putMonomorphicInstance(originalHash: String, typeArgsHash: String, binding: LetBinding) {
-        val key = MonomorphicKey(originalHash, typeArgsHash)
-        monomorphicCacheL1[key] = CachedMonomorphicInstance(binding)
-
-        // L2: Store in SQLite handled via reflection when codebase is available
-        // The serialization is done in the codebase module to avoid circular deps
     }
 
     /**
@@ -358,7 +307,6 @@ object TypeCheckCache {
      */
     fun clearAll() {
         constraintCacheL1.clear()
-        monomorphicCacheL1.clear()
         abilityImplCacheL1.clear()
     }
 
@@ -385,9 +333,6 @@ object TypeCheckCache {
             constraintCacheL1Size = constraintCacheL1.size,
             constraintCacheHits = constraintCacheHits.get(),
             constraintCacheMisses = constraintCacheMisses.get(),
-            monomorphicCacheL1Size = monomorphicCacheL1.size,
-            monomorphicCacheHits = monomorphicCacheHits.get(),
-            monomorphicCacheMisses = monomorphicCacheMisses.get(),
             abilityImplCacheL1Size = abilityImplCacheL1.size,
             abilityImplCacheHits = abilityImplCacheHits.get(),
             abilityImplCacheMisses = abilityImplCacheMisses.get(),
@@ -399,9 +344,6 @@ object TypeCheckCache {
         val constraintCacheL1Size: Int,
         val constraintCacheHits: Long,
         val constraintCacheMisses: Long,
-        val monomorphicCacheL1Size: Int,
-        val monomorphicCacheHits: Long,
-        val monomorphicCacheMisses: Long,
         val abilityImplCacheL1Size: Int,
         val abilityImplCacheHits: Long,
         val abilityImplCacheMisses: Long,
@@ -412,11 +354,6 @@ object TypeCheckCache {
                 constraintCacheHits.toDouble() / (constraintCacheHits + constraintCacheMisses)
             } else 0.0
 
-        val monomorphicCacheHitRate: Double
-            get() = if (monomorphicCacheHits + monomorphicCacheMisses > 0) {
-                monomorphicCacheHits.toDouble() / (monomorphicCacheHits + monomorphicCacheMisses)
-            } else 0.0
-
         val abilityImplCacheHitRate: Double
             get() = if (abilityImplCacheHits + abilityImplCacheMisses > 0) {
                 abilityImplCacheHits.toDouble() / (abilityImplCacheHits + abilityImplCacheMisses)
@@ -425,7 +362,6 @@ object TypeCheckCache {
         override fun toString(): String = buildString {
             appendLine("TypeCheckCache Stats:")
             appendLine("  Constraint Cache: ${constraintCacheL1Size} entries, ${(constraintCacheHitRate * 100).toInt()}% hit rate")
-            appendLine("  Monomorphic Cache: ${monomorphicCacheL1Size} entries, ${(monomorphicCacheHitRate * 100).toInt()}% hit rate")
             appendLine("  Ability Impl Cache: ${abilityImplCacheL1Size} entries, ${(abilityImplCacheHitRate * 100).toInt()}% hit rate")
             appendLine("  SQLite Persistence: ${if (hasSqlitePersistence) "enabled" else "disabled"}")
         }

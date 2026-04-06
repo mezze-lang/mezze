@@ -174,18 +174,16 @@ class ContextBuilder {
         val implDecls = resolvedImplDecls
         val abilityImplDecls = resolvedAbilityImplDecls
 
-        val letDecls = module.decls.filterIsInstance<ParsedLetDecl>()
-            .map { parsedLetDeclToV1(it, file) }
-
         // Validate duplicates — tolerate prelude duplicates when modules are merged
-        // Use the full decl lists (not deduplicated maps) to detect duplicates
-        val typeDeclList = module.decls.filterIsInstance<ParsedTypeDecl>().map { parsedTypeDeclToV1(it, file) }
-        val abilityDeclList = module.decls.filterIsInstance<ParsedAbilityDecl>().map { parsedAbilityDeclToV1(it, file) }
-        val effectDeclList = module.decls.filterIsInstance<ParsedEffectDecl>().map { parsedEffectDeclToV1(it, file) }
-        val v1AbilityImplsForValidation = abilityImplDecls.map { parsedImplAbilityDeclToV1(it, file) }
-        val allV1Items: List<ProgramItem> = typeDeclList + abilityDeclList + effectDeclList + implDecls + v1AbilityImplsForValidation + letDecls
+        // Build a list of all v2 declarations for validation (types, abilities, effects, ability impls, performers, lets)
+        val allDeclsForValidation: List<ParsedDecl> = module.decls.filterIsInstance<ParsedTypeDecl>() +
+            module.decls.filterIsInstance<ParsedAbilityDecl>() +
+            module.decls.filterIsInstance<ParsedEffectDecl>() +
+            module.decls.filterIsInstance<ParsedPerformerDecl>() +
+            abilityImplDecls +
+            module.decls.filterIsInstance<ParsedLetDecl>()
         try {
-            DuplicateDeclarationValidator.validateProgram(Program(allV1Items))
+            DuplicateDeclarationValidator.validateDecls(allDeclsForValidation)
         } catch (e: TypeCheckError) {
             // Only suppress duplicates from prelude injection (stdlib performer types)
             // Re-throw user code duplicates
@@ -285,6 +283,9 @@ class ContextBuilder {
         for (abilityImplDecl in abilityImplDecls) {
             ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
+
+        // Convert ability impls to v1 for AbilityValidator (still uses v1 types)
+        val v1AbilityImplsForValidation = abilityImplDecls.map { parsedImplAbilityDeclToV1(it, file) }
 
         // VALIDATION PHASE: Run ability validations after context is built
         AbilityValidator.validateNameCollisions(
@@ -1817,20 +1818,6 @@ class ContextBuilder {
         )
         // Compute content hash (same as Phase 0.6)
         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
-    }
-
-    /**
-     * Convert a ParsedLetDecl to a v1 LetBinding.
-     */
-    private fun parsedLetDeclToV1(decl: ParsedLetDecl, file: String): LetBinding {
-        val result = LetBinding(
-            pattern = ParserBridge.toV1Pattern(decl.pattern, file),
-            visibility = convertVisibility(decl.visibility),
-            typeAnnotation = decl.typeAnnotation?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-            expression = ParserBridge.toV1Expr(decl.value, file)
-        )
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(result)
         return result.copy(contentHash = hash.toFullHexString())
     }
 

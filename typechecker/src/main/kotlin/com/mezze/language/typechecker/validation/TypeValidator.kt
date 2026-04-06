@@ -57,32 +57,23 @@ class TypeValidator(
      */
     /**
      * Validate using ParsedModule (v2 entry point).
-     * Bridges internally to v1 Program for now.
+     * Works directly on ParsedDecl types. Converts individual items to v1
+     * only when deeper helpers still need v1 (pattern/expression validation).
      */
     fun validate(
         module: com.mezze.language.parsedast.ParsedModule,
         constraintResults: Map<String, ConstraintResult>,
         substitution: Substitution
     ): ValidationResult {
-        val program = com.mezze.language.parser.MezzeParser().parsedModuleToProgram(module)
-        return validate(program, constraintResults, substitution)
-    }
-
-    @Deprecated("Use validate(ParsedModule, ...) instead")
-    fun validate(
-        program: Program,
-        constraintResults: Map<String, ConstraintResult>,
-        substitution: Substitution
-    ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
         val warnings = mutableListOf<String>()
+        val parserBridge = com.mezze.language.parser.MezzeParser
 
-        // Validate each binding
+        // Validate each binding from constraint results
         for ((bindingName, result) in constraintResults) {
             // Check for undefined variables
             if (result.undefinedVariables.isNotEmpty()) {
                 for (undefinedVar in result.undefinedVariables) {
-                    // Get similar variable names from context for suggestions
                     val allVariables = context.getAllBindings()
                     val candidateNames = allVariables.keys.map { key ->
                         if (key.qualifier != null) "${key.qualifier}.${key.localName}" else key.localName
@@ -99,14 +90,11 @@ class TypeValidator(
                 }
             }
 
-            // Apply substitution to get final type
             val finalType = substitution.apply(result.type)
 
-            // Check if a built-in ability is being used as a value
             val abilityValueErrors = validateBuiltInAbilityUsage(finalType, bindingName)
             errors.addAll(abilityValueErrors)
 
-            // Validate ability constraints
             val abilityErrors = validateAbilityConstraints(
                 result.abilityConstraints,
                 finalType,
@@ -114,136 +102,89 @@ class TypeValidator(
                 substitution
             )
             errors.addAll(abilityErrors)
-
-            // Validate effect usage
-            // NOTE: Now that we have SuspendedType conversion, effects at top level
-            // are properly wrapped in SuspendedType, so validation should pass.
-            // However, we keep validation disabled for top-level let bindings because
-            // effects are ALLOWED to be unhandled at top level - they become part
-            // of the SuspendedType. The validation would only be useful to check
-            // that function bodies don't use undeclared effects, which is a different concern.
-            // TODO: Consider re-enabling for function body validation only
-            // val effectErrors = validateEffectUsage(
-            //     result.effects,
-            //     finalType,
-            //     bindingName
-            // )
-            // errors.addAll(effectErrors)
         }
 
-        // Validate type annotations match inferred types
-        for (item in program.items) {
-            when (item) {
-                is LetBinding -> {
-                    val annotationErrors = validateAnnotation(item, substitution, constraintResults)
+        val file = module.path
+
+        // Validate type annotations, top-level effects, and patterns using v2 decls
+        for (decl in module.decls) {
+            when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> {
+                    // Validate annotation (v2 path — uses ParsedTypeAnnotation directly)
+                    val annotationErrors = validateParsedAnnotation(decl, substitution, constraintResults)
                     errors.addAll(annotationErrors)
-                }
-                else -> {
-                    // Other items don't need annotation validation here
-                }
-            }
-        }
 
-        // Validate top-level effect restrictions:
-        // 1. Top-level VALUES cannot have <*> (performed effects)
-        // 2. Top-level FUNCTIONS can return <*> (they're just definitions)
-        // 3. 'main' must have type {} -> {} <*>
-        // Note: TopLevelExpression items are NOT validated for <*> because:
-        //   - They're primarily used in tests/REPL to evaluate expressions
-        //   - Real programs shouldn't have bare expressions at module level
-        //   - The critical case (let result = ...) is already caught by LetBinding validation
-        for (item in program.items) {
-            when (item) {
-                is LetBinding -> {
-                    val topLevelErrors = validateTopLevelEffects(item, substitution, constraintResults)
+                    // Validate top-level effect restrictions
+                    val topLevelErrors = validateParsedTopLevelEffects(decl, substitution, constraintResults)
                     errors.addAll(topLevelErrors)
-                }
-                else -> {
-                    // TopLevelExpression and other items don't need effect restrictions
-                }
-            }
-        }
 
-        // Validate let binding patterns (both top-level and in expressions)
-        for (item in program.items) {
-            when (item) {
-                is LetBinding -> {
-                    // Validate top-level let binding pattern
-                    // Look up type from constraintResults by binding name (for simple bindings).
-                    // Destructuring patterns can't be keyed by a single name, so skip those.
-                    val scrutineeType = if (item.isSimpleBinding) {
-                        constraintResults[item.variableName]?.type?.let { substitution.apply(it) }
-                    } else {
-                        null
-                    }
+                    // Validate let binding patterns and expression patterns
+                    // Convert to v1 only for the pattern/expression validation helpers that still need v1
+                    val v1Pattern = parserBridge.toV1Pattern(decl.pattern, file)
+                    val scrutineeType = if (decl.isSimpleBinding) {
+                        constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
+                    } else null
                     if (scrutineeType != null) {
-                        val patternErrors = validateLetPattern(item.pattern, scrutineeType)
+                        val patternErrors = validateLetPattern(v1Pattern, scrutineeType)
                         errors.addAll(patternErrors)
                     }
 
-                    // Also recursively validate patterns in the binding's expression
-                    val exprPatternErrors = validatePatternsInExpression(item.expression, substitution)
+                    val v1Expr = parserBridge.toV1Expr(decl.value, file)
+                    val exprPatternErrors = validatePatternsInExpression(v1Expr, substitution)
                     errors.addAll(exprPatternErrors)
                 }
-                is TopLevelExpression -> {
-                    // Validate patterns in top-level expressions
-                    val exprPatternErrors = validatePatternsInExpression(item.expression, substitution)
+                is com.mezze.language.parsedast.ParsedTopLevelExpr -> {
+                    val v1Expr = parserBridge.toV1Expr(decl.expression, file)
+                    val exprPatternErrors = validatePatternsInExpression(v1Expr, substitution)
                     errors.addAll(exprPatternErrors)
                 }
-                else -> {
-                    // Other items handled below
-                }
-            }
-        }
-
-        // Validate effect declarations
-        for (item in program.items) {
-            when (item) {
-                is EffectDeclaration -> {
-                    val declErrors = effectValidator.validateEffectDeclaration(item)
+                is com.mezze.language.parsedast.ParsedEffectDecl -> {
+                    val v1EffectDecl = parsedEffectDeclToV1(decl, file)
+                    val declErrors = effectValidator.validateEffectDeclaration(v1EffectDecl)
                     errors.addAll(declErrors)
                 }
-
-                is ImplDeclaration -> {
-                    // Find corresponding effect declaration using O(1) map lookup
-                    val effectDecl = effectDeclarations[item.effect.localName]
-
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> {
+                    val effectDecl = effectDeclarations[decl.effect.localName]
                     if (effectDecl != null) {
-                        val implErrors = effectValidator.validateEffectImpl(item, effectDecl)
+                        val v1Impl = parsedPerformerDeclToV1(decl, file)
+                        val implErrors = effectValidator.validateEffectImpl(v1Impl, effectDecl)
                         errors.addAll(implErrors)
                     }
                 }
-
-                else -> {
-                    // Other items don't need validation here
-                }
+                else -> { /* Other items don't need validation here */ }
             }
         }
 
         // Validate perform expressions (handler type compatibility)
-        // Use the pre-built maps passed to constructor for O(1) lookups
-        // Build map of function definitions for looking up function bodies
-        val functionDefinitions = buildFunctionDefinitions(program)
-        for (item in program.items) {
-            val performErrors = when (item) {
-                is LetBinding -> validatePerformExpressionsInExpression(
-                    item.expression,
-                    implDeclarations,
-                    effectDeclarations,
-                    functionDefinitions
-                )
-                is TopLevelExpression -> validatePerformExpressionsInExpression(
-                    item.expression,
-                    implDeclarations,
-                    effectDeclarations,
-                    functionDefinitions
-                )
+        // Convert to v1 for the expression-walking helper that still needs v1 types
+        val v1FunctionDefs = mutableMapOf<String, LambdaExpression>()
+        for (decl in module.decls) {
+            if (decl is com.mezze.language.parsedast.ParsedLetDecl && decl.isSimpleBinding) {
+                val v1Expr = parserBridge.toV1Expr(decl.value, file)
+                if (v1Expr is LambdaExpression) {
+                    v1FunctionDefs[decl.variableName] = v1Expr
+                }
+            }
+        }
+        for (decl in module.decls) {
+            val performErrors = when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> {
+                    val v1Expr = parserBridge.toV1Expr(decl.value, file)
+                    validatePerformExpressionsInExpression(
+                        v1Expr, implDeclarations, effectDeclarations, v1FunctionDefs
+                    )
+                }
+                is com.mezze.language.parsedast.ParsedTopLevelExpr -> {
+                    val v1Expr = parserBridge.toV1Expr(decl.expression, file)
+                    validatePerformExpressionsInExpression(
+                        v1Expr, implDeclarations, effectDeclarations, v1FunctionDefs
+                    )
+                }
                 else -> emptyList()
             }
             errors.addAll(performErrors)
         }
 
-        // Return result
         return if (errors.isEmpty()) {
             ValidationResult.Success(warnings)
         } else {
@@ -921,47 +862,31 @@ class TypeValidator(
         return errors
     }
 
+    // NOTE: validateAnnotation(LetBinding, ...) was deleted — replaced by validateParsedAnnotation(ParsedLetDecl, ...)
+
     /**
-     * Validate that a type annotation matches the inferred type.
-     *
-     * This checks that when a user writes:
-     *   let x: Int = ...
-     *
-     * The inferred type actually matches Int.
-     *
-     * For function types, it also checks:
-     * - Parameter count and types
-     * - Return type
-     * - Ability constraints
-     * - Effect annotations
+     * Validate type annotation for a v2 ParsedLetDecl.
+     * Uses ParsedTypeAnnotation directly.
      */
-    private fun validateAnnotation(
-        binding: LetBinding,
+    private fun validateParsedAnnotation(
+        decl: com.mezze.language.parsedast.ParsedLetDecl,
         substitution: Substitution,
         constraintResults: Map<String, ConstraintResult>
     ): List<ValidationError> {
-        val annotation = binding.typeAnnotation ?: return emptyList()
-        // Look up the inferred type from constraintResults rather than from the AST node.
-        // Simple bindings have a name key; complex patterns are skipped.
-        val bindingKey = if (binding.isSimpleBinding) binding.variableName else return emptyList()
+        val parsedAnnotation = decl.typeAnnotation ?: return emptyList()
+        val bindingKey = if (decl.isSimpleBinding) decl.variableName else return emptyList()
         val inferredType = constraintResults[bindingKey]?.type ?: return emptyList()
 
-        // Try to convert annotation to MezzeType
-        // If conversion fails, skip validation (annotation might use unsupported syntax)
         val annotatedType = try {
-            convertAnnotationToType(annotation)
-        } catch (e: Exception) {
-            // Skip validation if annotation can't be converted
-            // This can happen with seq annotations or other edge cases
+            convertParsedTypeAnnotation(parsedAnnotation)
+        } catch (_: Exception) {
             return emptyList()
         }
 
-        // Apply substitution to inferred type
         val finalType = substitution.apply(inferredType)
 
-        // Check if types are compatible
         if (!typesCompatible(annotatedType, finalType)) {
-            val bindingName = if (binding.isSimpleBinding) binding.variableName else "_pattern"
+            val bindingName = if (decl.isSimpleBinding) decl.variableName else "_pattern"
             return listOf(
                 ValidationError.AnnotationMismatch(
                     bindingName = bindingName,
@@ -976,71 +901,95 @@ class TypeValidator(
     }
 
     /**
-     * Validate top-level effect restrictions.
-     *
-     * Note: We intentionally do NOT restrict:
-     * 1. Top-level values from having <*> - useful for tests and scripts
-     * 2. The 'main' function type - validation happens at runtime when executing
-     *
-     * The runtime/CLI should validate main type before execution.
-     * This keeps type-checking working for tests and library code that use
-     * 'main' as a regular binding name.
+     * Validate top-level effect restrictions for a v2 ParsedLetDecl.
      */
-    private fun validateTopLevelEffects(
-        binding: LetBinding,
+    private fun validateParsedTopLevelEffects(
+        decl: com.mezze.language.parsedast.ParsedLetDecl,
         substitution: Substitution,
         constraintResults: Map<String, ConstraintResult>
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
-        // Skip 'main' - it has separate validation via validateMainForExecution
-        if (binding.isSimpleBinding && binding.variableName == "main") {
+        if (decl.isSimpleBinding && decl.variableName == "main") {
             return emptyList()
         }
 
-        // Look up the inferred type from constraintResults.
-        // Only simple bindings have a reliable name key; skip complex patterns.
-        val bindingKey = if (binding.isSimpleBinding) binding.variableName else return emptyList()
+        val bindingKey = if (decl.isSimpleBinding) decl.variableName else return emptyList()
         val inferredType = constraintResults[bindingKey]?.type ?: return emptyList()
         val finalType = substitution.apply(inferredType)
 
-        // Check if this is a value (not a function) with performed effects
-        // Functions are allowed to have <*> because they're just definitions
-        // Values with <*> would mean effects executed at module load time
         when (finalType) {
-            is MezzeType.FunctionType -> {
-                // Functions can have <*> in their return type - that's fine
-                // They're just definitions, execution happens when called
-            }
+            is MezzeType.FunctionType -> { /* Functions are definitions, <*> is fine */ }
             is MezzeType.SuspendedType -> {
-                // SuspendedType wraps a value with its effects
-                // If it has performed=true, that means effects were executed
                 if (finalType.effects.performed) {
                     errors.add(
                         ValidationError.TopLevelPerformedEffects(
-                            bindingName = binding.variableName,
+                            bindingName = decl.variableName,
                             effectRow = finalType.effects,
-                            sourceLocation = binding.expression.sourceLocation
+                            sourceLocation = SourceLocation(
+                                file = decl.loc.file,
+                                line = decl.loc.startLine,
+                                column = decl.loc.startCol
+                            )
                         )
                     )
                 }
             }
-            else -> {
-                // For non-SuspendedType, non-FunctionType values, we DON'T validate
-                // based on ConstraintResult.performed because:
-                // 1. Direct `perform` expressions at top-level are a common test pattern
-                // 2. The perform is explicit and visible in the code
-                // 3. The truly problematic pattern (calling functions with <*>) is caught
-                //    by the SuspendedType check above
-                //
-                // The key patterns we want to catch are:
-                // - let result = myFunc {} where myFunc returns T <*>
-                // - let result = ({} -> perform H in e) {}
-                // Both produce SuspendedType and are caught above.
-            }
+            else -> { /* Other types don't need top-level effect validation */ }
         }
 
         return errors
+    }
+
+    /**
+     * Convert a v2 ParsedEffectDecl to a v1 EffectDeclaration for validation.
+     * Thin bridge for EffectValidator which still operates on v1 types.
+     */
+    private fun parsedEffectDeclToV1(decl: com.mezze.language.parsedast.ParsedEffectDecl, file: String): EffectDeclaration {
+        return EffectDeclaration(
+            name = decl.name,
+            operations = decl.operations.map { op ->
+                EffectOperation(
+                    name = op.name,
+                    paramType = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(op.paramType, file),
+                    returnType = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(op.returnType, file),
+                    effects = op.effects
+                )
+            },
+            associatedTypes = decl.associatedTypes
+        )
+    }
+
+    /**
+     * Convert a v2 ParsedPerformerDecl to a v1 ImplDeclaration for validation.
+     * Thin bridge for EffectValidator which still operates on v1 types.
+     */
+    private fun parsedPerformerDeclToV1(decl: com.mezze.language.parsedast.ParsedPerformerDecl, file: String): ImplDeclaration {
+        val effect = QualifiedRef(
+            localName = decl.effect.localName,
+            qualifier = decl.effect.qualifier?.let { ModulePath(it.segments) }
+        )
+        return ImplDeclaration(
+            effect = effect,
+            performerName = decl.performerName,
+            performerParams = decl.params.map { p ->
+                PerformerParameter(
+                    name = p.name,
+                    type = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(p.type, file)
+                )
+            },
+            associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
+                com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(ann, file)
+            },
+            operations = decl.operations.map { op ->
+                PerformerOperation(
+                    name = op.name,
+                    paramType = op.paramType?.let { com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(it, file) },
+                    returnType = op.returnType?.let { com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(it, file) },
+                    implementation = com.mezze.language.parser.MezzeParser.toV1Expr(op.implementation, file)
+                )
+            }
+        )
     }
 
     /**
@@ -1566,10 +1515,6 @@ class TypeValidator(
      *
      * We use the existing convertTypeAnnotation function from the AST module.
      */
-    private fun convertAnnotationToType(annotation: TypeAnnotation): MezzeType {
-        return convertTypeAnnotation(annotation)
-    }
-
     /** Convert v2 ParsedTypeAnnotation to MezzeType by going through v1. */
     private fun convertParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
         val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<validator>")
@@ -2292,19 +2237,7 @@ class TypeValidator(
     // PERFORM EXPRESSION VALIDATION
     // ========================================================================
 
-    /**
-     * Build a map of function definitions from the program.
-     * This maps function names to their lambda bodies.
-     */
-    private fun buildFunctionDefinitions(program: Program): Map<String, LambdaExpression> {
-        val result = mutableMapOf<String, LambdaExpression>()
-        for (item in program.items) {
-            if (item is LetBinding && item.isSimpleBinding && item.expression is LambdaExpression) {
-                result[item.variableName] = item.expression as LambdaExpression
-            }
-        }
-        return result
-    }
+    // NOTE: buildFunctionDefinitions(Program) was deleted — v2 validate() builds v1FunctionDefs inline
 
     /**
      * Validate perform expressions in an expression tree.
