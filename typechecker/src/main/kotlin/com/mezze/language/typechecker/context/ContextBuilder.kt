@@ -258,12 +258,11 @@ class ContextBuilder {
 
         // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
 
-        // Add ability methods to context — both local AND imported abilities
-        for (abilityDecl in v1AbilityDecls.values) {
+        // Add ability methods to context — both local AND imported abilities (v2 types)
+        for (abilityDecl in abilityDecls.values) {
             ctx = addAbilityMethods(ctx, abilityDecl)
         }
-        for (abilityDecl in v1ImportedAbilities.values) {
-            // Only add if not already present (local takes precedence)
+        for (abilityDecl in importedAbilities.values) {
             if (ctx.getAbilityOperationType(abilityDecl.name) == null) {
                 ctx = addAbilityMethods(ctx, abilityDecl)
             }
@@ -488,29 +487,27 @@ class ContextBuilder {
     /**
      * Add ability methods to context
      */
-    private fun addAbilityMethods(ctx: TypingContext, abilityDecl: AbilityDeclaration): TypingContext {
+    private fun addAbilityMethods(ctx: TypingContext, abilityDecl: ParsedAbilityDecl): TypingContext {
         var result = ctx
+        typeVarCache.clear()
 
-        // Add ability record type (for qualified access like Show.display)
         val abilityRecordType = MezzeType.RecordType(
             fields = abilityDecl.operations.associate { op ->
-                // Convert method-level ability constraints to FunctionAbilityConstraint
                 val constraints = op.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) },
+                        typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotationInternal(it) },
                         abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                     )
                 }
                 val functionType = MezzeType.FunctionType(
-                    paramType = convertTypeAnnotation(op.paramType),
-                    returnType = convertTypeAnnotation(op.returnType),
+                    paramType = convertParsedTypeAnnotationInternal(op.paramType),
+                    returnType = convertParsedTypeAnnotationInternal(op.returnType),
                     abilityConstraints = constraints
                 )
                 op.name to functionType
             }
         )
-        // Use dedicated map instead of "${name}_ability" pattern
         result = result.extendWithAbilityOperationType(abilityDecl.name, abilityRecordType)
 
         return result
