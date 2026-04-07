@@ -1,13 +1,15 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 
 /**
- * Tests for recursive type declarations to ensure type parameters are preserved correctly
+ * Tests for recursive type declarations to ensure type parameters are preserved correctly.
+ * Uses the v2 ParsedModule directly — no v1 Program needed.
  */
 class RecursiveTypeDeclarationTest {
     private lateinit var parser: MezzeParser
@@ -27,17 +29,19 @@ class RecursiveTypeDeclarationTest {
             type Simple 'a = | A { x: 'a, y: 'a } |
         """.trimIndent()
 
+        // Parse and typecheck to ensure it succeeds
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        // Extract the type declaration
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
-        val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
-        val constructorDataType = definition.constructors[0].dataType as com.mezze.language.ast.RecordTypeAnnotation
+        // Validate via the parsed AST
+        val module = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = module.decls.filterIsInstance<ParsedTypeDecl>().first()
+        val definition = typeDecl.definition as ParsedVariantDef
+        val constructorDataType = definition.constructors[0].dataType as ParsedRecordType
 
         // Both fields should reference the same type variable 'a'
-        val xType = constructorDataType.entries.find { it.name == "x" }!!.type as com.mezze.language.ast.IdentifierTypeAnnotation
-        val yType = constructorDataType.entries.find { it.name == "y" }!!.type as com.mezze.language.ast.IdentifierTypeAnnotation
+        val xType = constructorDataType.entries.find { it.name == "x" }!!.type as ParsedNamedType
+        val yType = constructorDataType.entries.find { it.name == "y" }!!.type as ParsedNamedType
 
         assertEquals("'a", xType.name)
         assertEquals("'a", yType.name)
@@ -49,21 +53,23 @@ class RecursiveTypeDeclarationTest {
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
         """.trimIndent()
 
+        // Parse and typecheck to ensure it succeeds
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        // Extract the type declaration
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
-        val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
+        // Validate via the parsed AST
+        val module = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = module.decls.filterIsInstance<ParsedTypeDecl>().first()
+        val definition = typeDecl.definition as ParsedVariantDef
 
         // Find the Node constructor
         val nodeConstructor = definition.constructors.find { it.name == "Node" }!!
-        val recordType = nodeConstructor.dataType as com.mezze.language.ast.RecordTypeAnnotation
+        val recordType = nodeConstructor.dataType as ParsedRecordType
 
         // Get the three field types
-        val valueType = recordType.entries.find { it.name == "value" }!!.type as com.mezze.language.ast.IdentifierTypeAnnotation
-        val leftType = recordType.entries.find { it.name == "left" }!!.type as com.mezze.language.ast.TypeApplicationAnnotation
-        val rightType = recordType.entries.find { it.name == "right" }!!.type as com.mezze.language.ast.TypeApplicationAnnotation
+        val valueType = recordType.entries.find { it.name == "value" }!!.type as ParsedNamedType
+        val leftType = recordType.entries.find { it.name == "left" }!!.type as ParsedTypeApp
+        val rightType = recordType.entries.find { it.name == "right" }!!.type as ParsedTypeApp
 
         // Value field should be 'a
         assertEquals("'a", valueType.name)
@@ -71,31 +77,30 @@ class RecursiveTypeDeclarationTest {
         // Left and right should be Tree 'a
         assertEquals("Tree", leftType.constructor)
         assertEquals(1, leftType.args.size)
-        assertEquals("'a", (leftType.args[0] as com.mezze.language.ast.IdentifierTypeAnnotation).name)
+        assertEquals("'a", (leftType.args[0] as ParsedNamedType).name)
 
         assertEquals("Tree", rightType.constructor)
         assertEquals(1, rightType.args.size)
-        assertEquals("'a", (rightType.args[0] as com.mezze.language.ast.IdentifierTypeAnnotation).name)
+        assertEquals("'a", (rightType.args[0] as ParsedNamedType).name)
     }
 
     @Test
     fun `test tree type declaration prints with single type variable`() {
-        // This is the main regression test - ensures that Tree 'a prints as
-        // Tree = | Leaf, Node { left: Tree 'a, right: Tree 'a, value: 'a } |
-        // and NOT as Tree = | Leaf, Node { left: 'a, right: 'b, value: 'c } |
+        // This is the main regression test - ensures that Tree 'a prints correctly
         val source = """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
         """.trimIndent()
 
+        // Parse and typecheck to ensure it succeeds
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program)
 
-        // This test just verifies typechecking succeeds
-        // The actual printing is verified manually
-        assertEquals(1, result.items.size)
+        // Validate via the parsed AST
+        val module = parser.parseParsedModule(source, "test.mz")
+        assertEquals(1, module.decls.size)
 
         // Verify there are no spurious type variables (like 'b, 'c)
-        val typeDecl = result.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = module.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertFalse(typeDecl.toString().contains("'b"), "Should not contain 'b type variable")
         assertFalse(typeDecl.toString().contains("'c"), "Should not contain 'c type variable")
     }

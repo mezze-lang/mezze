@@ -125,7 +125,7 @@ class TypeChecker(
          */
         data class Success(
             @Deprecated("Use typedModule instead — v1 Program kept for backward compat during migration")
-            val program: Program,
+            val program: Program = Program(emptyList()),
             val substitution: Substitution,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
@@ -135,7 +135,11 @@ class TypeChecker(
             val programBeforeContinuations: Program? = null,
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
             val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
-            val loweredPerformers: List<Array<String>> = emptyList()  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
+            val loweredPerformers: List<Array<String>> = emptyList(),  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
+            /** Extracted type context: binding name -> resolved MezzeType. Built from constraint results + substitution. */
+            val typeContext: Map<String, MezzeType> = emptyMap(),
+            /** The resolved ParsedModule (after ContextBuilder resolves performer->ability impls). */
+            val resolvedParsedModule: com.mezze.language.parsedast.ParsedModule? = null
         ) : TypeCheckResult()
 
         /**
@@ -594,37 +598,15 @@ class TypeChecker(
                     return TypeCheckResult.Failure(mapped)
                 }
 
-                // Build a v1 Program with inferredType and content hashes for backward compat
-                val v1ProgramRaw = MezzeParser().parsedModuleToProgram(parsedModule)
-                // Compute content hashes on the v1 Program (needed by extractExports and downstream)
-                val v1Program = ContentHashComputer.computeHashes(v1ProgramRaw).program
-                val typedItems = v1Program.items.map { item ->
-                    when (item) {
-                        is LetBinding -> {
-                            if (item.inferredType != null) return@map item
-                            val key = if (item.isSimpleBinding) item.variableName else null
-                            val resolved = key?.let { globallyResolvedConstraintResults[it] }?.let { cr ->
-                                substitution.apply(cr.type)
-                            }
-                            if (resolved != null) item.copy(inferredType = resolved) else item
-                        }
-                        is ImplDeclaration -> {
-                            if (item.inferredType != null) return@map item
-                            val resolved = globallyResolvedConstraintResults[item.performerName]?.let { cr ->
-                                substitution.apply(cr.type)
-                            }
-                            if (resolved != null) item.copy(inferredType = resolved) else item
-                        }
-                        else -> item
-                    }
+                // Build typeContext from constraint results + substitution
+                val typeContext = globallyResolvedConstraintResults.mapValues { (_, cr) ->
+                    substitution.apply(cr.type)
                 }
-                val typedProgram = Program(items = typedItems)
 
                 val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
                     v2ValidationResult.warnings.map { TypeCheckWarning(message = it, sourceLocation = null) }
                 } else emptyList()
                 return TypeCheckResult.Success(
-                    program = typedProgram,
                     substitution = substitution,
                     importContext = importContext,
                     warnings = warnings + validationWarnings,
@@ -633,7 +615,9 @@ class TypeChecker(
                     programBeforeContinuations = null,
                     typedModule = emittedTypedModule,
                     loweredFunctions = loweredFns,
-                    loweredPerformers = loweredPerformers
+                    loweredPerformers = loweredPerformers,
+                    typeContext = typeContext,
+                    resolvedParsedModule = parsedModule
                 )
             }
         }

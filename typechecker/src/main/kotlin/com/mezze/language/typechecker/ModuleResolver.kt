@@ -87,14 +87,40 @@ data class ProgramIndex(
                 }
             }
 
-            // Compute content hashes for ability impls (convert to v1 only for hashing)
-            val hashedAbilityImpls = abilityImplDecls.map { impl ->
-                if (impl.contentHash != null) {
-                    impl
+            // Compute content hashes for ability impls.
+            // Use the same hashing path as ContentHashComputer: convert the whole module
+            // to a v1 Program, compute hashes there, then map back. This ensures hash
+            // consistency between ProgramIndex.build(parsedModule) and the v1 pipeline.
+            val hashedAbilityImpls = run {
+                val needsHashing = abilityImplDecls.any { it.contentHash == null }
+                if (!needsHashing) {
+                    abilityImplDecls  // All already have hashes — no work needed
                 } else {
-                    val v1 = v2AbilityImplToV1ForHashing(impl, module.path)
-                    val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1).toFullHexString()
-                    impl.copy(contentHash = hash)
+                    // Convert to v1 and compute hashes via ContentHashComputer for consistency
+                    val v1Program = MezzeParser().parsedModuleToProgram(module)
+                    val hashedProgram = com.mezze.language.typechecker.hashing.ContentHashComputer.computeHashes(v1Program).program
+                    // Build a lookup from (abilityName, targetTypes) to content hash
+                    val v1HashLookup = hashedProgram.items
+                        .filterIsInstance<ImplAbilityDeclaration>()
+                        .filter { it.contentHash != null }
+                        .associateBy { implAbilityKey(it) }
+
+                    abilityImplDecls.map { impl ->
+                        if (impl.contentHash != null) {
+                            impl
+                        } else {
+                            val key = parsedImplAbilityKey(impl)
+                            val v1Hash = v1HashLookup[key]?.contentHash
+                            if (v1Hash != null) {
+                                impl.copy(contentHash = v1Hash)
+                            } else {
+                                // Fallback: direct conversion for hashing
+                                val v1 = v2AbilityImplToV1ForHashing(impl, module.path)
+                                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1).toFullHexString()
+                                impl.copy(contentHash = hash)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -217,6 +243,26 @@ data class ProgramIndex(
                 },
                 contentHash = null
             )
+        }
+
+        /** Key for matching v1 ImplAbilityDeclaration to v2 ParsedImplAbilityDecl. */
+        private fun implAbilityKey(decl: ImplAbilityDeclaration): String {
+            val target = when (val t = decl.target) {
+                is ImplTarget.Named -> t.ability.localName
+                is ImplTarget.Inherent -> "_inherent"
+            }
+            val types = decl.targetTypes.joinToString(",") { it.toString() }
+            return "$target($types)"
+        }
+
+        /** Key for matching v2 ParsedImplAbilityDecl to v1 ImplAbilityDeclaration. */
+        private fun parsedImplAbilityKey(decl: ParsedImplAbilityDecl): String {
+            val target = when (val t = decl.target) {
+                is ParsedImplTarget.Named -> t.ability.localName
+                is ParsedImplTarget.Inherent -> "_inherent"
+            }
+            val types = decl.targetTypes.joinToString(",") { it.toString() }
+            return "$target($types)"
         }
 
         /** Convert v1 TypeAnnotation to v2 ParsedTypeAnnotation. */
@@ -1836,8 +1882,9 @@ class ModuleResolver(
         val module = getFromCache(modulePath)
 
         if (module != null) {
-            // Module already cached — update export types from typeContext while
-            // preserving existing content hashes and ProgramIndex.
+            // Module already cached — update export types from typeContext and
+            // rebuild ProgramIndex so abilityImplsByHash/abilityImplsByAbility
+            // are populated (needed by import resolution).
             val updatedExports = if (typeContext != null && typeContext.isNotEmpty()) {
                 module.exports.mapValues { (_, export) ->
                     val inferredType = typeContext[export.originalName]
@@ -1847,14 +1894,17 @@ class ModuleResolver(
                 module.exports
             }
 
+            val updatedIndex = ProgramIndex.build(parsedModule)
+
             val updatedModule = module.copy(
                 exports = updatedExports,
-                parsedModule = parsedModule
+                parsedModule = parsedModule,
+                index = updatedIndex
             )
             putInCache(modulePath, updatedModule)
 
             DebugLogger.debug(Category.ModuleResolver) {
-                "Cached module (v2, updated types) with ${updatedModule.exports.size} exports"
+                "Cached module (v2, updated types+index) with ${updatedModule.exports.size} exports"
             }
         } else {
             // Module NOT in cache — compute exports from scratch using ParsedModule

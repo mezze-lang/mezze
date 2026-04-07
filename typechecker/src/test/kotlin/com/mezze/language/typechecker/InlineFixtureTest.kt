@@ -35,7 +35,7 @@ x + 10
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -58,7 +58,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -77,7 +77,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -98,7 +98,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -121,7 +121,7 @@ result
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -157,7 +157,7 @@ half
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -190,7 +190,7 @@ intDefault
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -223,7 +223,7 @@ count
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -242,7 +242,7 @@ result
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -264,7 +264,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -296,7 +296,7 @@ let updatedConfig = {...configRecord, timeout = 60, debug = True}
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -319,7 +319,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -341,7 +341,7 @@ result1
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -367,7 +367,7 @@ let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -397,7 +397,7 @@ intResult
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -419,7 +419,7 @@ let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -438,7 +438,7 @@ result1 + 100
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     @Test
@@ -460,7 +460,7 @@ result
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
         assertNotNull(result)
-        assertTrue(result.items.isNotEmpty())
+        assertNotNull(result.typedModule)
     }
 
     // === Invalid Fixtures ===

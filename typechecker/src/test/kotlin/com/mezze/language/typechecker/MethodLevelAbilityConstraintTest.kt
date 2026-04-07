@@ -78,8 +78,9 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val result = typeCheck(code)
-        val formatter = result.items.filterIsInstance<AbilityDeclaration>()
+        typeCheck(code) // ensure type checking succeeds
+        val module = parser.parseParsedModule(code, "test.mz")
+        val formatter = module.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Formatter" }!!
 
         assertEquals(2, formatter.operations[0].abilityConstraints.size)
@@ -100,8 +101,9 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val result = typeCheck(code)
-        val collection = result.items.filterIsInstance<AbilityDeclaration>()
+        typeCheck(code) // ensure type checking succeeds
+        val module = parser.parseParsedModule(code, "test.mz")
+        val collection = module.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Collection" }!!
 
         // length has no constraints
@@ -328,11 +330,12 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val result = typeCheck(code)
-        val container = result.items.filterIsInstance<AbilityDeclaration>()
+        typeCheck(code) // ensure type checking succeeds
+        val module = parser.parseParsedModule(code, "test.mz")
+        val container = module.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Container" }!!
 
-        assertEquals("'item", container.associatedType)
+        assertEquals(listOf("'item"), container.associatedTypes)
         assertEquals(0, container.dependencies.size)
         assertEquals(1, container.operations[2].abilityConstraints.size)
     }
@@ -412,8 +415,9 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val result = typeCheck(code)
-        val searchable = result.items.filterIsInstance<AbilityDeclaration>()
+        typeCheck(code) // ensure type checking succeeds
+        val module = parser.parseParsedModule(code, "test.mz")
+        val searchable = module.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Searchable" }!!
 
         val constraint = searchable.operations[0].abilityConstraints[0]
