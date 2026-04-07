@@ -99,8 +99,9 @@ public final class MezzeTestHelper {
         MezzeLanguage.clearLastResult();
 
         // Type-check the program to get TruffleIR (loweredFunctions)
+        var parsedModule = new com.mezze.language.parser.MezzeParser().programToParsedModule(program, "<test>");
         var tc = new TypeChecker();
-        var result = tc.typeCheck(program, root);
+        var result = tc.typeCheck(parsedModule, root);
         var functions = result.getLoweredFunctions();
         if (functions == null) {
             functions = java.util.Collections.emptyList();
@@ -156,9 +157,9 @@ public final class MezzeTestHelper {
         // Keep module caches for performance — only clear execution state
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
 
-        Program ast = parser.parse(sourceCode, true, null);
-        var result = typeChecker.typeCheck(ast, root);
-        return result.getProgram();
+        var parsedModule = parser.parseParsedModule(sourceCode, "<test>");
+        var result = typeChecker.typeCheck(parsedModule, root);
+        return new Program(java.util.Collections.emptyList(), java.util.Collections.emptyList()); // v1 Program no longer used — return empty
     }
 
     // ========================
