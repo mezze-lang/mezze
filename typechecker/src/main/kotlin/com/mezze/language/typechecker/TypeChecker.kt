@@ -653,8 +653,18 @@ class TypeChecker(
                 listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
                 listOf("std", "collections", "bytes"),
             )
-            val syntheticProgram = Program(items = preludeModules.map { UseDeclaration(path = ModulePath(it)) })
-            MezzeParser().programToParsedModule(syntheticProgram, "<prelude>")
+            val syntheticLoc = com.mezze.language.parsedast.Loc("<prelude>", 0, 0, 0, 0)
+            com.mezze.language.parsedast.ParsedModule(
+                path = "<prelude>",
+                decls = preludeModules.map { segments ->
+                    com.mezze.language.parsedast.ParsedUseDecl(
+                        path = com.mezze.language.parsedast.ParsedUsePath.Module(
+                            com.mezze.language.parsedast.ParsedModulePath(segments), syntheticLoc
+                        ),
+                        loc = syntheticLoc
+                    )
+                }
+            )
         }
 
         val result = importResolver.resolveImports(syntheticModule)
