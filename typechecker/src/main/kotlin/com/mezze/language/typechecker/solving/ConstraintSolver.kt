@@ -1703,7 +1703,7 @@ class ConstraintSolver(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappings(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -1720,6 +1720,15 @@ class ConstraintSolver(
      * For example, matching annotation `{val: 'a}` with type `RecordType({val: Int})`
      * extracts mapping 'a -> Int.
      */
+    private fun extractTypeParamMappings(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        concreteType: MezzeType,
+        typeParams: List<String>,
+        result: MutableMap<String, MezzeType>
+    ) {
+        extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<infer>"), concreteType, typeParams, result)
+    }
+
     private fun extractTypeParamMappings(
         annotation: TypeAnnotation,
         concreteType: MezzeType,

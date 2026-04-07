@@ -487,9 +487,9 @@ class AbilityResolver(
                             is com.mezze.language.parsedast.ParsedNamedType -> {
                                 val bound = typeVarBindings[typeArg.name]
                                 if (bound != null) bound
-                                else resolveTypeAnnotation(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(typeArg, "<resolver>"))
+                                else resolveTypeAnnotation(typeArg)
                             }
-                            else -> resolveTypeAnnotation(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(typeArg, "<resolver>"))
+                            else -> resolveTypeAnnotation(typeArg)
                         }
                     }
                     val result = checkAbilityImpl(resolvedTypeArgs.first(), constraint.abilityName, resolvedTypeArgs.drop(1))
@@ -549,7 +549,7 @@ class AbilityResolver(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappings(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -563,6 +563,15 @@ class AbilityResolver(
     /**
      * Extract type parameter mappings by comparing a type annotation with a concrete type.
      */
+    private fun extractTypeParamMappings(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        concreteType: MezzeType,
+        typeParams: List<String>,
+        mappings: MutableMap<String, MezzeType>
+    ) {
+        extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<infer>"), concreteType, typeParams, mappings)
+    }
+
     private fun extractTypeParamMappings(
         annotation: TypeAnnotation,
         concreteType: MezzeType,
@@ -628,6 +637,14 @@ class AbilityResolver(
     /**
      * Convert a simple TypeAnnotation to MezzeType (for constraint checking on generic impls).
      */
+    private fun resolveTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
+            else -> MezzeType.TypeApplication(annotation.toString(), emptyList())
+        }
+    }
+
     private fun resolveTypeAnnotation(annotation: TypeAnnotation): MezzeType {
         if (annotation is IdentifierTypeAnnotation) {
             PrimitiveTypes.fromName(annotation.name)?.let { return it }
