@@ -1298,49 +1298,6 @@ class TypedAstBuilder(
         }
     }
 
-    /**
-     * Convert a v1 TypeAnnotation to MezzeType.
-     * Used when the effect/ability declarations are still in v1 format.
-     */
-    private fun convertTypeAnnotationV1(annotation: TypeAnnotation): MezzeType {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                PrimitiveTypes.fromName(annotation.name) ?: run {
-                    if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                        MezzeType.VarType(TypeVar(annotation.name))
-                    } else {
-                        MezzeType.TypeApplication(annotation.name, emptyList())
-                    }
-                }
-            }
-            is FunctionTypeAnnotation -> {
-                MezzeType.FunctionType(
-                    paramType = convertTypeAnnotationV1(annotation.paramType),
-                    returnType = convertTypeAnnotationV1(annotation.returnType)
-                )
-            }
-            is RecordTypeAnnotation -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { it.name to convertTypeAnnotationV1(it.type) }
-                )
-            }
-            is VariantTypeAnnotation -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertTypeAnnotationV1(dt) } }
-                )
-            }
-            is TypeApplicationAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { convertTypeAnnotationV1(it) }
-                )
-            }
-            is SeqTypeAnnotation -> {
-                MezzeType.SeqType(elementType = convertTypeAnnotationV1(annotation.elementType))
-            }
-            else -> MezzeType.VarType(TypeVar("unknown"))
-        }
-    }
 
     // ========================================================================
     // Import building
