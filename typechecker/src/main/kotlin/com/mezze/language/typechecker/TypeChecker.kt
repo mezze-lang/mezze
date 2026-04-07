@@ -81,7 +81,7 @@ import java.nio.file.Paths
  * ## Usage:
  * ```kotlin
  * val typeChecker = TypeChecker()
- * val result = typeChecker.checkProgram(program)
+ * val result = typeChecker.checkParsedModule(parsedModule)
  *
  * when (result) {
  *     is TypeCheckResult.Success -> {
@@ -124,15 +124,11 @@ class TypeChecker(
          * Type checking succeeded.
          */
         data class Success(
-            @Deprecated("Use typedModule instead — v1 Program kept for backward compat during migration")
-            val program: Program = Program(emptyList()),
             val substitution: Substitution,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
             val loadedModules: Map<String, TypedModule> = emptyMap(),
             val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
-            @Deprecated("Legacy v1 field — no longer needed since TypedAstEmitter was removed")
-            val programBeforeContinuations: Program? = null,
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
             val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
             val loweredPerformers: List<Array<String>> = emptyList(),  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
@@ -181,16 +177,6 @@ class TypeChecker(
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
     @Deprecated("Prefer checkParsedModule(ParsedModule, ...) — v1 Program overload kept for backward compat")
-    fun checkProgram(program: Program, currentPath: Path = Paths.get("."), currentModulePath: String? = null, enablePrelude: Boolean = false): TypeCheckResult {
-        // Desugar pipe expressions in v1 Program before converting (the parser desugars pipes
-        // during parsing, but v1 Programs constructed programmatically may still have them)
-        @Suppress("DEPRECATION")
-        val desugared = desugarPipeExpressions(program)
-        // Convert v1 Program to ParsedModule and delegate to the real implementation
-        val parsedModule = MezzeParser().programToParsedModule(desugared, currentModulePath ?: "<unknown>")
-        return checkParsedModule(parsedModule, currentPath, currentModulePath, enablePrelude)
-    }
-
     /**
      * Type-check a ParsedModule directly (v2 entry point).
      *
@@ -616,7 +602,6 @@ class TypeChecker(
                     warnings = warnings + validationWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
-                    programBeforeContinuations = null,
                     typedModule = emittedTypedModule,
                     loweredFunctions = loweredFns,
                     loweredPerformers = loweredPerformers,
@@ -1045,7 +1030,7 @@ class TypeChecker(
                     com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
                 }
                 com.mezze.language.ast.TypeCheckResult(
-                    program = result.program,
+                    program = Program(emptyList()),
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
                     importedAbilities = emptyMap(),
@@ -1068,8 +1053,9 @@ class TypeChecker(
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
 
-        // Note: checkProgram() clears the unification cache internally
-        val result = checkProgram(program, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
+        // Convert v1 Program to v2 ParsedModule and delegate to the real implementation
+        val parsedModule = MezzeParser().programToParsedModule(program, modulePath ?: "<unknown>")
+        val result = checkParsedModule(parsedModule, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
@@ -1083,18 +1069,17 @@ class TypeChecker(
                 }
 
                 com.mezze.language.ast.TypeCheckResult(
-                    program = result.program,
+                    program = program,
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
-                    importedAbilities = emptyMap(),  // v2 types don't fit v1 TypeCheckResult — callers should use typedModule
-                    importedEffects = emptyMap(),  // v2 types don't fit v1 TypeCheckResult — callers should use typedModule
+                    importedAbilities = emptyMap(),
+                    importedEffects = emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers
                 )
             }
             is TypeCheckResult.Failure -> {
-                // Throw exception for first error (old behavior)
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
                 throw TypeCheckError(error.message, error.sourceLocation)
@@ -1554,235 +1539,7 @@ class TypeChecker(
         else -> expr
     }
 
-    /**
-     * Desugar all PipeExpressions in a program.
-     * Converts: x |> f { a = @ } to f { a = x }
-     */
-    @Deprecated("V1 pipeline only — v2 ParsedModule desugars pipes in constraint generation")
-    private fun desugarPipeExpressions(program: Program): Program {
-        return program.copy(
-            items = program.items.map { desugarPipeInProgramItem(it) }
-        )
-    }
-
-
-    private fun desugarPipeInProgramItem(item: ProgramItem): ProgramItem {
-        return when (item) {
-            is LetBinding -> item.copy(expression = desugarPipeInExpression(item.expression))
-            is ImplDeclaration -> item.copy(
-                operations = item.operations.map { op ->
-                    op.copy(implementation = desugarPipeInExpression(op.implementation))
-                }
-            )
-            is ImplAbilityDeclaration -> item.copy(
-                operations = item.operations.map { op ->
-                    op.copy(implementation = desugarPipeInExpression(op.implementation))
-                }
-            )
-            is TopLevelExpression -> item.copy(expression = desugarPipeInExpression(item.expression))
-            // These don't contain expressions
-            is TypeDeclaration, is EffectDeclaration, is AbilityDeclaration,
-            is UseDeclaration, is PubUseDeclaration -> item
-        }
-    }
-
-    /**
-     * Recursively desugar PipeExpressions in an expression tree.
-     */
-    private fun desugarPipeInExpression(expr: Expression): Expression {
-        return when (expr) {
-            // The main case: desugar PipeExpression
-            is PipeExpression -> {
-                // First desugar both sides recursively
-                val desugaredLeft = desugarPipeInExpression(expr.left)
-                val desugaredRight = desugarPipeInExpression(expr.right)
-                // Then replace @ placeholder with the left value
-                replacePipePlaceholder(desugaredRight, desugaredLeft)
-            }
-
-            // Recurse into all other expression types
-            is FunctionCall -> expr.copy(
-                function = desugarPipeInExpression(expr.function),
-                arguments = desugarPipeInExpression(expr.arguments)
-            )
-            is RecordLiteral -> expr.copy(
-                entries = expr.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> entry.copy(
-                            value = entry.value?.let { desugarPipeInExpression(it) }
-                        )
-                        is RecordSpreadEntry -> entry.copy(
-                            expression = desugarPipeInExpression(entry.expression)
-                        )
-                    }
-                }
-            )
-            is IfExpression -> expr.copy(
-                condition = desugarPipeInExpression(expr.condition),
-                thenBranch = desugarPipeInExpression(expr.thenBranch),
-                elseBranch = desugarPipeInExpression(expr.elseBranch)
-            )
-            is LambdaExpression -> expr.copy(
-                body = desugarPipeInExpression(expr.body)
-            )
-            is MatchExpression -> expr.copy(
-                expression = desugarPipeInExpression(expr.expression),
-                cases = expr.cases.map { case ->
-                    case.copy(
-                        guard = case.guard?.let { desugarPipeInExpression(it) },
-                        expression = desugarPipeInExpression(case.expression),
-                        ifLetBindings = case.ifLetBindings.map { binding ->
-                            binding.copy(expression = desugarPipeInExpression(binding.expression))
-                        }
-                    )
-                }
-            )
-            is DoExpression -> expr.copy(
-                statements = expr.statements.map { stmt ->
-                    when (stmt) {
-                        is LetStatement -> stmt.copy(
-                            expression = desugarPipeInExpression(stmt.expression)
-                        )
-                        is ExpressionStatement -> stmt.copy(
-                            expression = desugarPipeInExpression(stmt.expression)
-                        )
-                    }
-                },
-                result = desugarPipeInExpression(expr.result)
-            )
-            is SeqLiteral -> expr.copy(
-                elements = expr.elements.map { element ->
-                    when (element) {
-                        is SeqRegularElement -> element.copy(
-                            expression = desugarPipeInExpression(element.expression)
-                        )
-                        is SeqSpreadElement -> element.copy(
-                            expression = desugarPipeInExpression(element.expression)
-                        )
-                    }
-                }
-            )
-            is PerformExpression -> expr.copy(
-                expression = desugarPipeInExpression(expr.expression)
-            )
-            is EffectCallExpression -> expr.copy(
-                arguments = desugarPipeInExpression(expr.arguments)
-            )
-            is MemberAccess -> expr.copy(
-                receiver = desugarPipeInExpression(expr.receiver)
-            )
-            is VariantConstruction -> expr.copy(
-                value = expr.value?.let { desugarPipeInExpression(it) }
-            )
-            is ParenthesizedExpression -> expr.copy(
-                expression = desugarPipeInExpression(expr.expression)
-            )
-            is StringLiteral -> {
-                val parts = expr.parts
-                if (parts != null) {
-                    expr.copy(
-                        parts = parts.map { part ->
-                            when (part) {
-                                is ExpressionPart -> ExpressionPart(desugarPipeInExpression(part.expression))
-                                else -> part
-                            }
-                        }
-                    )
-                } else {
-                    expr
-                }
-            }
-            // Leaf nodes - no recursion needed
-            is IntLiteral, is NatLiteral, is FloatLiteral, is FractionLiteral,
-            is Identifier, is PipePlaceholder, is StateMachineExpression -> expr
-        }
-    }
-
-    /**
-     * Replace PipePlaceholder (@) in an expression with the given value.
-     * Used for desugaring PipeExpression: x |> f { a = @ } becomes f { a = x }
-     */
-    private fun replacePipePlaceholder(expr: Expression, replacement: Expression): Expression {
-        return when (expr) {
-            is PipePlaceholder -> replacement
-            is FunctionCall -> expr.copy(
-                function = replacePipePlaceholder(expr.function, replacement),
-                arguments = replacePipePlaceholder(expr.arguments, replacement)
-            )
-            is RecordLiteral -> expr.copy(
-                entries = expr.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> entry.copy(
-                            value = entry.value?.let { replacePipePlaceholder(it, replacement) }
-                        )
-                        is RecordSpreadEntry -> entry.copy(
-                            expression = replacePipePlaceholder(entry.expression, replacement)
-                        )
-                    }
-                }
-            )
-            is IfExpression -> expr.copy(
-                condition = replacePipePlaceholder(expr.condition, replacement),
-                thenBranch = replacePipePlaceholder(expr.thenBranch, replacement),
-                elseBranch = replacePipePlaceholder(expr.elseBranch, replacement)
-            )
-            is LambdaExpression -> expr.copy(
-                body = replacePipePlaceholder(expr.body, replacement)
-            )
-            is MatchExpression -> expr.copy(
-                expression = replacePipePlaceholder(expr.expression, replacement),
-                cases = expr.cases.map { case ->
-                    case.copy(
-                        guard = case.guard?.let { replacePipePlaceholder(it, replacement) },
-                        expression = replacePipePlaceholder(case.expression, replacement)
-                    )
-                }
-            )
-            is DoExpression -> expr.copy(
-                statements = expr.statements.map { stmt ->
-                    when (stmt) {
-                        is LetStatement -> stmt.copy(
-                            expression = replacePipePlaceholder(stmt.expression, replacement)
-                        )
-                        is ExpressionStatement -> stmt.copy(
-                            expression = replacePipePlaceholder(stmt.expression, replacement)
-                        )
-                    }
-                },
-                result = replacePipePlaceholder(expr.result, replacement)
-            )
-            is SeqLiteral -> expr.copy(
-                elements = expr.elements.map { element ->
-                    when (element) {
-                        is SeqRegularElement -> element.copy(
-                            expression = replacePipePlaceholder(element.expression, replacement)
-                        )
-                        is SeqSpreadElement -> element.copy(
-                            expression = replacePipePlaceholder(element.expression, replacement)
-                        )
-                    }
-                }
-            )
-            is PerformExpression -> expr.copy(
-                expression = replacePipePlaceholder(expr.expression, replacement)
-            )
-            is MemberAccess -> expr.copy(
-                receiver = replacePipePlaceholder(expr.receiver, replacement)
-            )
-            is VariantConstruction -> expr.copy(
-                value = expr.value?.let { replacePipePlaceholder(it, replacement) }
-            )
-            is ParenthesizedExpression -> expr.copy(
-                expression = replacePipePlaceholder(expr.expression, replacement)
-            )
-            is PipeExpression -> expr.copy(
-                left = replacePipePlaceholder(expr.left, replacement),
-                right = replacePipePlaceholder(expr.right, replacement)
-            )
-            // These don't contain placeholders
-            else -> expr
-        }
-    }
+    // V1 pipe desugarer deleted — v2 ParsedModule desugars pipes in desugarPipesInParsedModule()
 
 }
 
