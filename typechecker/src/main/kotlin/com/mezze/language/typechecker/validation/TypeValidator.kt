@@ -1475,10 +1475,9 @@ class TypeValidator(
      *
      * We use the existing convertTypeAnnotation function from the AST module.
      */
-    /** Convert v2 ParsedTypeAnnotation to MezzeType by going through v1. */
+    /** Convert ParsedTypeAnnotation to MezzeType (native v2). */
     private fun convertParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
-        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<validator>")
-        return convertTypeAnnotation(v1)
+        return com.mezze.language.ast.convertParsedTypeAnnotation(annotation)
     }
 
     /**
@@ -2396,8 +2395,7 @@ class TypeValidator(
                 }
 
                 // Convert handler's type annotation to MezzeType (expand type aliases)
-                val v1Annotation = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(handlerTypeAnnotation, "<validator>")
-                val handlerType = expandTypeAnnotation(v1Annotation)
+                val handlerType = expandParsedTypeAnnotation(handlerTypeAnnotation)
 
                 // Check compatibility
                 val compatible = areAssociatedTypesCompatible(handlerType, thrownType)
@@ -2755,58 +2753,28 @@ class TypeValidator(
      * This converts user-defined types (like PartialError) to their full type definition
      * (like VariantType with the constructors from the type declaration).
      */
-    private fun expandTypeAnnotation(annotation: TypeAnnotation): MezzeType {
-        when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                val name = annotation.name
-                // Check if it's a primitive type
-                PrimitiveTypes.fromName(name)?.let { return it }
-
-                // Check if it's a user-defined type
-                val typeDecl = typeDeclarations[name]
-                if (typeDecl != null) {
-                    val definition = typeDecl.definition
-                    return when (definition) {
-                        is com.mezze.language.parsedast.ParsedVariantDef -> {
-                            MezzeType.VariantType(
-                                constructors = definition.constructors.associate { ctor ->
-                                    ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
-                                },
-                                rowVar = if (definition.isOpen) RowVar.fresh() else null
-                            )
-                        }
-                        is com.mezze.language.parsedast.ParsedRecordDef -> {
-                            MezzeType.RecordType(
-                                fields = definition.fields.associate { field ->
-                                    field.name to convertParsedTypeAnnotation(field.type)
-                                },
-                                rowVar = null
-                            )
-                        }
-                        is com.mezze.language.parsedast.ParsedNewtypeDef -> {
-                            convertParsedTypeAnnotation(definition.wrappedType)
-                        }
-                    }
-                }
-
-                // Fall back to type variable if not found
-                return MezzeType.VarType(TypeVar(name))
+    private fun expandParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                val typeDecl = typeDeclarations[annotation.name]
+                if (typeDecl != null) when (val def = typeDecl.definition) {
+                    is com.mezze.language.parsedast.ParsedVariantDef -> MezzeType.VariantType(
+                        constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedTypeAnnotation(dt) } },
+                        rowVar = if (def.isOpen) RowVar.fresh() else null)
+                    is com.mezze.language.parsedast.ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to convertParsedTypeAnnotation(it.type) })
+                    is com.mezze.language.parsedast.ParsedNewtypeDef -> convertParsedTypeAnnotation(def.wrappedType)
+                } else MezzeType.VarType(TypeVar(annotation.name))
             }
-            is TypeApplicationAnnotation -> {
-                // For type applications like `List Int`, expand the constructor
-                val constructorName = annotation.constructor
-                val typeDecl = typeDeclarations[constructorName]
-                if (typeDecl != null) {
-                    // TODO: handle type arguments properly
-                    return expandTypeAnnotation(IdentifierTypeAnnotation(constructorName))
-                }
-                return convertTypeAnnotation(annotation)
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                val typeDecl = typeDeclarations[annotation.constructor]
+                if (typeDecl != null) expandParsedTypeAnnotation(com.mezze.language.parsedast.ParsedNamedType(annotation.constructor, annotation.loc))
+                else convertParsedTypeAnnotation(annotation)
             }
-            else -> {
-                return convertTypeAnnotation(annotation)
-            }
+            else -> convertParsedTypeAnnotation(annotation)
         }
     }
+
 
     /**
      * Unify a thrown type with existing types in the map.
