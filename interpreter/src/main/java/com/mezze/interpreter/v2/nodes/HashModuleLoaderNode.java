@@ -95,8 +95,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
+        try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt"); fw.write("[loadModules] ENTERED fns=" + functionHashes.length + " performers=" + performerInfos.length + "\n"); fw.close(); } catch (Exception ignored) {}
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
+        try {
 
         // Clear the static closure cache to avoid sharing CallTargets across Polyglot contexts.
         // Each test creates a new context, and Truffle requires CallTargets to be context-specific.
@@ -145,11 +147,13 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 3: Construct performer records from evaluated closures.
+        try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt", true); fw.write("[Pass3] performerInfos.length=" + performerInfos.length + "\n"); fw.close(); } catch (Exception ignored) {}
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
             String effectHash = info[1];
             int opCount = (info.length - 2) / 2;
+            try { new java.io.FileWriter("/tmp/handler_debug_keys.txt", true).append("  performer=" + performerHash.substring(0, 20) + " opCount=" + opCount + " infoLen=" + info.length + "\n").close(); } catch (Exception ignored) {}
             if (opCount > 0) {
                 // Check cache
                 Object cached = evaluatedClosureCache.get(performerHash);
@@ -163,6 +167,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         modulesLoaded = true;
+        } catch (Exception e) {
+            try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt", true); fw.write("[loadModules] EXCEPTION: " + e.getClass().getSimpleName() + ": " + e.getMessage() + "\n"); e.printStackTrace(new java.io.PrintWriter(fw)); fw.close(); } catch (Exception ignored) {}
+            modulesLoaded = true;
+        }
     }
 
     @CompilerDirectives.TruffleBoundary

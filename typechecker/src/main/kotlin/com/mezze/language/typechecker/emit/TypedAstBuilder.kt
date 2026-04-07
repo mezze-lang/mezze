@@ -416,7 +416,13 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = computeHash("performer_${decl.performerName}")
+        // Use the ASTHasher content hash so it matches what importers look up.
+        // Try: decl.contentHash, then implDeclarations, then identifierContentHashes, then fallback
+        val contentHash = decl.contentHash
+            ?: implDeclarations[decl.performerName]?.contentHash
+            ?: identifierContentHashes[BindingKey(null, decl.performerName)]
+        val hash = if (contentHash != null) Hash.fromV1(contentHash) else computeHash("performer_${decl.performerName}")
+        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder.buildPerformerDecl] performer=${decl.performerName} contentHash=${contentHash?.take(20)} hash=${hash.hex.take(20)}\n") } catch (_: Exception) {}
 
         // Resolve effect hash
         val effectName = decl.effect.localName
@@ -1065,9 +1071,9 @@ class TypedAstBuilder(
         // Look up performer declaration for hash info — check local impls AND imported impls
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
-        val performerHash = Hash.fromV1(
-            implDecl?.contentHash ?: importedImpl?.contentHash
-        )
+        val rawContentHash = implDecl?.contentHash ?: importedImpl?.contentHash
+        val performerHash = Hash.fromV1(rawContentHash)
+        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder] performer=$performerName hash=${rawContentHash?.take(20)}... from=${if (implDecl != null) "local" else "imported"}\n") } catch (_: Exception) {}
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
