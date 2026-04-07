@@ -29,7 +29,7 @@ class FullPipelineTest {
         val parsed = parser.parseParsedModule(source, file = "test.mz")
 
         // Stage 1: Typecheck
-        val typed = checker.checkParsedModule(parsed)
+        val typed = checker.checkParsedModuleToTyped(parsed)
 
         // Stage 2: Monomorphize
         val monoModule = mono.monomorphize(typed, mapOf(typed.hash to typed))

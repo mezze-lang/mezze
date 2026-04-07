@@ -666,7 +666,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         // v2 pipeline: typecheck into TypedModule
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
-        val typedModule = typeChecker.checkParsedModule(parsedModule, typeCheckProjectRoot)
+        val typedModule = typeChecker.checkParsedModuleToTyped(parsedModule, typeCheckProjectRoot)
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 

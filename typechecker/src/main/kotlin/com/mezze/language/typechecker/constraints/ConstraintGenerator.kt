@@ -1934,10 +1934,34 @@ class ConstraintGenerator(
     }
 
     /**
+     * Resolve a MezzeType to its underlying record field names and openness.
+     * Handles both direct RecordType and TypeApplication (type aliases to records).
+     * Returns (fieldNames, isOpen) or null if the type is not a record.
+     */
+    private fun resolveToRecordType(type: MezzeType): Pair<Set<String>, Boolean>? {
+        when (type) {
+            is MezzeType.RecordType -> {
+                return Pair(type.fields.keys, type.rowVar != null)
+            }
+            is MezzeType.TypeApplication -> {
+                // Look up the type declaration to check if it's a record alias
+                val typeDecl = typeDeclarations[type.constructor] ?: return null
+                val definition = typeDecl.definition
+                if (definition is com.mezze.language.parsedast.ParsedRecordDef) {
+                    val fieldNames = definition.fields.map { it.name }.toSet()
+                    return Pair(fieldNames, definition.isOpen)
+                }
+                return null
+            }
+            else -> return null
+        }
+    }
+
+    /**
      * Validate type annotation against expression.
      *
      * Performs upfront validation that catches errors the constraint solver would silently accept:
-     * 1. Record with extra fields when annotation is closed record
+     * 1. Record with extra/missing fields when annotation is a record type
      * 2. Lambda parameter count mismatch with function annotation
      * 3. Polymorphic function returning function (partial application check)
      */
@@ -1948,12 +1972,13 @@ class ConstraintGenerator(
         expression: ParsedExpr,
         inferredType: MezzeType
     ) {
-        // 1. RECORD EXTRA FIELD VALIDATION
-        // Check if annotation is a closed record type and expression is a record literal with extra fields
-        if (annotatedType is MezzeType.RecordType && expression is ParsedRecordLit) {
-            // Only validate if annotation is closed (no rowVar)
-            if (annotatedType.rowVar == null) {
-                val annotatedFields = annotatedType.fields.keys
+        // 1. RECORD FIELD VALIDATION
+        // Check record literals against record type annotations (both direct and via type aliases)
+        if (expression is ParsedRecordLit) {
+            // Resolve the annotated type to a record type (handles type aliases like `type Person = { ... }`)
+            val resolvedRecordInfo = resolveToRecordType(annotatedType)
+            if (resolvedRecordInfo != null) {
+                val (annotatedFields, isOpen) = resolvedRecordInfo
                 val literalFields = mutableSetOf<String>()
 
                 // Extract field names from record literal
@@ -1968,22 +1993,24 @@ class ConstraintGenerator(
                     }
                 }
 
-                // Check for extra fields
-                val extraFields = literalFields - annotatedFields
-                if (extraFields.isNotEmpty()) {
-                    throw com.mezze.language.typechecker.TypeCheckError(
-                        "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
-                        "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
-                        expression.loc.toSL()
-                    )
+                // Check for extra fields (only for closed records)
+                if (!isOpen) {
+                    val extraFields = literalFields - annotatedFields
+                    if (extraFields.isNotEmpty()) {
+                        throw com.mezze.language.typechecker.TypeCheckError(
+                            "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
+                            "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
+                            expression.loc.toSL()
+                        )
+                    }
                 }
 
-                // Check for missing fields
+                // Check for missing fields (required for BOTH open and closed records)
                 val missingFields = annotatedFields - literalFields
                 if (missingFields.isNotEmpty()) {
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
-                        "required by type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
+                        "required by ${if (isOpen) "open" else "closed"} record type { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }}${if (isOpen) ", ..." else ""} }",
                         expression.loc.toSL()
                     )
                 }

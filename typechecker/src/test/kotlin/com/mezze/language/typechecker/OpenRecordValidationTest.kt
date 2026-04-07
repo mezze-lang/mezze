@@ -19,7 +19,7 @@ class OpenRecordValidationTest {
         val tc = TypeChecker()
         val parsedModule = parser.parseParsedModule(source.trimIndent(), "test.mz")
         try {
-            val result = tc.checkParsedModule(parsedModule, Paths.get("."))
+            val result = tc.checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
             assertTrue(result is TypeChecker.TypeCheckResult.Success,
                 "Expected success but got failure: ${(result as? TypeChecker.TypeCheckResult.Failure)?.errors?.joinToString { it.message }}")
         } catch (e: TypeCheckError) {
@@ -31,7 +31,7 @@ class OpenRecordValidationTest {
         val tc = TypeChecker()
         val parsedModule = parser.parseParsedModule(source.trimIndent(), "test.mz")
         try {
-            val result = tc.checkParsedModule(parsedModule, Paths.get("."))
+            val result = tc.checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
             if (result is TypeChecker.TypeCheckResult.Failure) {
                 if (expectedError != null) {
                     val errors = result.errors

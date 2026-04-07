@@ -12,7 +12,7 @@ class TypeCheckerV2Test {
 
     private fun checkSource(source: String, file: String = "test.mz"): com.mezze.language.typedast.TypedModule {
         val module = parser.parseParsedModule(source, file)
-        return checker.checkParsedModule(module)
+        return checker.checkParsedModuleToTyped(module)
     }
 
     @Test

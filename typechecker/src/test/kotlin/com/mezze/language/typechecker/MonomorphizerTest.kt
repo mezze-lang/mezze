@@ -15,7 +15,7 @@ class MonomorphizerTest {
 
     private fun monoSource(source: String): MonoModule {
         val parsed = parser.parseParsedModule(source, file = "test.mz")
-        val typedModule = checker.checkParsedModule(parsed)
+        val typedModule = checker.checkParsedModuleToTyped(parsed)
         return mono.monomorphize(typedModule, mapOf(typedModule.hash to typedModule))
     }
 

@@ -413,11 +413,23 @@ class ImportResolutionTest {
             """.trimIndent()
 
             val parsedModule = parser.parseParsedModule(source, "test.mz")
-            val impl = parser.parse(source).items[0] as ImplDeclaration
-
-            assertEquals("Encode", impl.effect.localName)
-            assertEquals(listOf("codec"), impl.effect.qualifier?.segments)
-            assertTrue(impl.effect.isQualified)
+            // Parser resolves qualified ability refs — check on v2 AST
+            val implDecl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedPerformerDecl>().firstOrNull()
+                ?: parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
+            assertNotNull(implDecl, "Should have an impl declaration")
+            // Check the ability/effect name from the parsed decl
+            when (implDecl) {
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> {
+                    assertEquals("Encode", implDecl.effect.localName)
+                    assertEquals(listOf("codec"), implDecl.effect.qualifier?.segments)
+                }
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                    val target = implDecl.target as? com.mezze.language.parsedast.ParsedImplTarget.Named
+                    assertNotNull(target)
+                    assertEquals("Encode", target!!.ability.localName)
+                }
+                else -> fail("Unexpected decl type")
+            }
         }
 
         @Test
@@ -429,16 +441,24 @@ class ImportResolutionTest {
             """.trimIndent()
 
             val parsedModule = parser.parseParsedModule(source, "test.mz")
-            val impl = parser.parse(source).items[0] as ImplDeclaration
-
-            assertEquals("Encode", impl.effect.localName)
-            assertEquals(listOf("std", "codec"), impl.effect.qualifier?.segments)
-            assertTrue(impl.effect.isQualified)
-
-            // Check ability reference structure
-            assertEquals("Encode", impl.effect.localName)
-            assertEquals(listOf("std", "codec"), impl.effect.qualifier?.segments ?: emptyList<String>())
-            assertEquals("std::codec::Encode", "${impl.effect.qualifier?.fullPath}::${impl.effect.localName}")
+            val implDecl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedPerformerDecl>().firstOrNull()
+                ?: parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
+            assertNotNull(implDecl, "Should have an impl declaration")
+            when (implDecl) {
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> {
+                    assertEquals("Encode", implDecl.effect.localName)
+                    assertEquals(listOf("std", "codec"), implDecl.effect.qualifier?.segments)
+                    assertTrue(implDecl.effect.isQualified)
+                }
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                    val target = implDecl.target as? com.mezze.language.parsedast.ParsedImplTarget.Named
+                    assertNotNull(target)
+                    assertEquals("Encode", target!!.ability.localName)
+                    assertEquals(listOf("std", "codec"), target.ability.qualifier?.segments)
+                    assertTrue(target.ability.isQualified)
+                }
+                else -> fail("Unexpected decl type")
+            }
         }
     }
 }

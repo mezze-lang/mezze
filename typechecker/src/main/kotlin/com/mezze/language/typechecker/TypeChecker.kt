@@ -1123,7 +1123,7 @@ class TypeChecker(
         val loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
     )
 
-    fun checkParsedModule(
+    fun checkParsedModuleToTyped(
         module: ParsedModule,
         currentPath: Path = Paths.get("."),
         enablePrelude: Boolean = false

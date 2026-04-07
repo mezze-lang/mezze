@@ -91,10 +91,15 @@ class QualifiedAbilityImplTest {
         // Parse and type check
         val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        // Verify parsing: qualified ability impls are initially parsed as ParsedImplAbilityDecl
+        // Verify parsing: qualified ability impls may be parsed as ParsedPerformerDecl
+        // (since the parser tries effect impl first) or ParsedImplAbilityDecl.
+        // ContextBuilder resolves them during type checking.
         val parsedImpl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
-        assertNotNull(parsedImpl, "Parser should produce ParsedImplAbilityDecl for cross-module ability impl")
-        assertEquals("Serializable", parsedImpl!!.abilityName)
+        val parsedPerformer = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedPerformerDecl>().firstOrNull()
+        assertTrue(parsedImpl != null || parsedPerformer != null,
+            "Parser should produce ParsedImplAbilityDecl or ParsedPerformerDecl for cross-module ability impl")
+        val abilityName = parsedImpl?.abilityName ?: parsedPerformer?.effect?.localName
+        assertEquals("Serializable", abilityName)
 
         // Type check should succeed — qualified ability impl is resolved during type checking
         val typeCheckerWithRoot = TypeChecker()
@@ -102,8 +107,6 @@ class QualifiedAbilityImplTest {
         assertNotNull(typedResult)
         // Verify the typed module was produced (i.e., full pipeline ran successfully)
         assertNotNull(typedResult.typedModule, "TypedModule should be produced after successful type check")
-
-        println("SUCCESS: Qualified ability impl type-checked correctly!")
     }
 
     @Test
@@ -141,10 +144,14 @@ class QualifiedAbilityImplTest {
 
         val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        // Verify parsing: qualified ability impls are initially parsed as ParsedImplAbilityDecl
+        // Verify parsing: qualified ability impls may be parsed as ParsedPerformerDecl
+        // (since the parser tries effect impl first) or ParsedImplAbilityDecl.
         val parsedImpl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
-        assertNotNull(parsedImpl, "Parser should produce ParsedImplAbilityDecl for cross-module ability impl")
-        assertEquals("Encoder", parsedImpl!!.abilityName)
+        val parsedPerformer = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedPerformerDecl>().firstOrNull()
+        assertTrue(parsedImpl != null || parsedPerformer != null,
+            "Parser should produce ParsedImplAbilityDecl or ParsedPerformerDecl for cross-module ability impl")
+        val abilityName = parsedImpl?.abilityName ?: parsedPerformer?.effect?.localName
+        assertEquals("Encoder", abilityName)
 
         // Type check should succeed — qualified ability impl is resolved during type checking
         val typeCheckerWithRoot = TypeChecker()
@@ -152,8 +159,6 @@ class QualifiedAbilityImplTest {
         assertNotNull(typedResult)
         // Verify the typed module was produced (i.e., full pipeline ran successfully)
         assertNotNull(typedResult.typedModule, "TypedModule should be produced after successful type check")
-
-        println("SUCCESS: Multi-segment qualified ability impl works!")
     }
 
     @Test

@@ -122,7 +122,7 @@ class ImportedPerformerTest {
 
         // This should NOT throw
         val result = try {
-            typeChecker.checkParsedModule(parsedModule)
+            typeChecker.checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
         } catch (e: Exception) {
             fail("checkParsedModule threw: ${e::class.simpleName}: ${e.message}")
         }
@@ -147,11 +147,11 @@ class ImportedPerformerTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val result = typeChecker.checkParsedModule(parsedModule)
+        val result = typeChecker.checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
-            "Nested performs should work"
+            "Nested performs should work: ${(result as? TypeChecker.TypeCheckResult.Failure)?.errors?.joinToString { it.message }}"
         )
     }
 

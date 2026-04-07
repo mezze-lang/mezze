@@ -337,7 +337,7 @@ class InherentImplTest {
         assertEquals(2, impls.size)
         // Content hashes are set on the processed copy, not the original parsed AST nodes.
         // Just verify both impls are present and distinct by target type name.
-        val targetNames = impls.map { (it.targetTypes[0] as? IdentifierTypeAnnotation)?.name }.toSet()
+        val targetNames = impls.map { (it.targetTypes[0] as? com.mezze.language.parsedast.ParsedNamedType)?.name }.toSet()
         assertEquals(2, targetNames.size, "Different inherent impls should target different types")
     }
 
