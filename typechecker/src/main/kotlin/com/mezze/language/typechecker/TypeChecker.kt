@@ -452,15 +452,6 @@ class TypeChecker(
                 warnings.addAll(unusedVarWarnings)
                 warnings.addAll(patternWarnings)
 
-                val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
-                    if (impl.contentHash == null) {
-                        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl)
-                        impl.copy(contentHash = hash.toFullHexString())
-                    } else {
-                        impl
-                    }
-                }
-
                 val resolvedAbilities = solveResult.resolvedAbilityConstraints
                 val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
                 val mustBeOpenBindings = solveResult.mustBeOpenBindings
