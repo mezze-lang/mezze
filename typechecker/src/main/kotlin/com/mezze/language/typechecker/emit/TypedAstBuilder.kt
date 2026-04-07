@@ -44,7 +44,7 @@ class TypedAstBuilder(
     private val performerToEffect: Map<String, String>,
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, String>,
-    private val implDeclarations: Map<String, ImplDeclaration>,
+    private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
     private val tailCallLocations: Set<SourceLocation>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
     private val methodCallResolutions: Map<Loc, MethodCallInfo> = emptyMap()
@@ -1074,9 +1074,8 @@ class TypedAstBuilder(
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
         val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
-        // Look up effect hash from effect declaration or v1 impl's resolvedContentHash
+        // Look up effect hash from effect declaration
         val effectContentHash = effectDecl?.contentHash
-            ?: implDecl?.effect?.resolvedContentHash
         val effectHash = Hash.fromV1(effectContentHash)
 
         // Build params if present

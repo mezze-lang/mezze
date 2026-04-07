@@ -66,8 +66,8 @@ class ContextBuilder {
         val performerToEffectHash: Map<String, String> = emptyMap(),  // performer contentHash → effect contentHash
         /** Maps performer names to the set of effects they ADD (not handle) */
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
-        /** Maps performer names to their ImplDeclaration (for content hash lookup) */
-        val implDeclarations: Map<String, ImplDeclaration> = emptyMap(),
+        /** Maps performer names to their ParsedPerformerDecl (for content hash lookup) */
+        val implDeclarations: Map<String, ParsedPerformerDecl> = emptyMap(),
         /** ParsedModule with impl declarations resolved (ParsedPerformerDecl for abilities → ParsedImplAbilityDecl) */
         val resolvedModule: ParsedModule? = null
     )
@@ -343,8 +343,8 @@ class ContextBuilder {
         }.filterValues { it.isNotEmpty() }
 
         // Build implDeclarations map: performer name -> ImplDeclaration
-        val implDeclarationsMap = (implDecls.associateBy { it.performerName }) +
-            v1ImportedImpls.mapValues { (_, impl) -> impl }
+        val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
+            importedImpls
 
         // Build resolvedModule: replace converted ParsedPerformerDecl with ParsedImplAbilityDecl
         val resolvedMod = if (convertedPerformerDecls.isEmpty()) {

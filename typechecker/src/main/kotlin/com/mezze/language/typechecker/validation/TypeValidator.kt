@@ -41,7 +41,7 @@ class TypeValidator(
     private val context: TypingContext,
     private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
     private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
-    private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
+    private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl> = emptyMap()
 ) {
     private val abilityResolver = AbilityResolver(context, typeDeclarations)
     private val effectValidator = EffectValidator(context)
@@ -2188,7 +2188,7 @@ class TypeValidator(
      */
     private fun validatePerformExpressionsInExpression(
         expr: Expression,
-        implDeclarations: Map<String, ImplDeclaration>,
+        implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
         effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
         functionDefinitions: Map<String, LambdaExpression>
     ): List<ValidationError> {
@@ -2356,7 +2356,7 @@ class TypeValidator(
      */
     private fun validatePerformExpression(
         expr: PerformExpression,
-        implDeclarations: Map<String, ImplDeclaration>,
+        implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
         effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
         functionDefinitions: Map<String, LambdaExpression>
     ): List<ValidationError> {
@@ -2395,9 +2395,9 @@ class TypeValidator(
                     continue
                 }
 
-                // Convert handler's type annotation to MezzeType
-                // If it's a user-defined type, expand it using the type declarations
-                val handlerType = expandTypeAnnotation(handlerTypeAnnotation)
+                // Convert handler's type annotation to MezzeType (expand type aliases)
+                val v1Annotation = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(handlerTypeAnnotation, "<validator>")
+                val handlerType = expandTypeAnnotation(v1Annotation)
 
                 // Check compatibility
                 val compatible = areAssociatedTypesCompatible(handlerType, thrownType)
