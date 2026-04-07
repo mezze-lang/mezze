@@ -3772,97 +3772,38 @@ class ConstraintSolver(
      * Convert a type annotation to MezzeType for solver use.
      * Creates fresh type variables for declared type parameters.
      */
-    private fun convertTypeAnnotationForSolver(
-        annotation: TypeAnnotation,
-        declaredTypeParams: List<String>
-    ): MezzeType {
-        // Create fresh type variables for each declared type parameter
-        val typeParamSubst = declaredTypeParams.associate { param ->
-            param to MezzeType.VarType(TypeVar.fresh())
-        }
-        return convertTypeAnnotationV1(annotation, typeParamSubst)
-    }
-
     /**
-     * Convert a v2 ParsedTypeAnnotation to MezzeType with substitution (bridge to v1).
+     * Convert a ParsedTypeAnnotation to MezzeType with a substitution for type parameters.
      */
     private fun convertTypeAnnotation(
         annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
         typeParamSubst: Map<String, MezzeType>
     ): MezzeType {
-        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>")
-        return convertTypeAnnotationV1(v1, typeParamSubst)
-    }
-
-    /**
-     * Convert a v1 type annotation to MezzeType with a substitution for type parameters.
-     */
-    private fun convertTypeAnnotationV1(
-        annotation: TypeAnnotation,
-        typeParamSubst: Map<String, MezzeType>
-    ): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+            is com.mezze.language.parsedast.ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
-
-                // Type variable or type constructor
                 if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                    // Look up in substitution first
                     typeParamSubst[annotation.name]
                         ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
                         ?: MezzeType.VarType(TypeVar(annotation.name))
-                } else {
-                    MezzeType.TypeApplication(annotation.name, emptyList())
-                }
+                } else MezzeType.TypeApplication(annotation.name, emptyList())
             }
-            is FunctionTypeAnnotation -> {
-                MezzeType.FunctionType(
-                    paramType = convertTypeAnnotationV1(annotation.paramType, typeParamSubst),
-                    returnType = convertTypeAnnotationV1(annotation.returnType, typeParamSubst),
-                    effects = annotation.effects?.let { effectRow ->
-                        ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
-                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
-                    },
-                    abilityConstraints = emptyList()
-                )
-            }
-            is RecordTypeAnnotation -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to convertTypeAnnotationV1(entry.type, typeParamSubst)
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-                )
-            }
-            is VariantTypeAnnotation -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertTypeAnnotationV1(it, typeParamSubst) }
-                    }
-                )
-            }
-            is TypeApplicationAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { convertTypeAnnotationV1(it, typeParamSubst) }
-                )
-            }
-            is SeqTypeAnnotation -> {
-                MezzeType.SeqType(
-                    elementType = convertTypeAnnotationV1(annotation.elementType, typeParamSubst)
-                )
-            }
-            is EffectRowAnnotation -> {
-                val rowVar = if (annotation.isPolymorphic) RowVar.fresh() else null
-                MezzeType.EffectRow.simple(annotation.effects.toSet(), rowVar, annotation.isPerformed)
-            }
-            is QualifiedTypeAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.qualifiedName,
-                    args = annotation.args.map { convertTypeAnnotationV1(it, typeParamSubst) }
-                )
-            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(
+                paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
+                returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
+                effects = annotation.effects?.let { ContextBuilder.validateHermeticEffects(it.allEffectNames); MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed) }
+            )
+            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(
+                fields = annotation.entries.associate { it.name to convertTypeAnnotation(it.type, typeParamSubst) },
+                rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+            )
+            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertTypeAnnotation(dt, typeParamSubst) } })
+            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotation(it, typeParamSubst) })
+            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertTypeAnnotation(annotation.elementType, typeParamSubst))
+            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication(
+                (annotation.modulePath + annotation.typeName).joinToString("::"),
+                annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
+            )
         }
     }
 
