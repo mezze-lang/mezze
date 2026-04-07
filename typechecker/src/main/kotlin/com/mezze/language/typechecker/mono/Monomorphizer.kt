@@ -580,17 +580,8 @@ class Monomorphizer {
             // Guard against infinite recursion by checking if we're already inlining this operation.
             val inlineKey = "${matchingEntry.implHash.hex}_$methodName"
             if (inlineKey in currentlyInlining) {
-                // Recursive call — can't inline further. Create a call to the operation by hash.
-                val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
-                val opFnHash = computeOpHash(matchingEntry.implHash, methodName)
-                if (opFnHash !in processed) worklist.add(opFnHash)
-                return MonoCall(
-                    MonoVar(methodName, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(opFnHash)), opBody.type, opBody.loc),
-                    wrappedArg,
-                    expr.isTailCall,
-                    expr.type,
-                    expr.loc
-                )
+                // Recursive call — can't inline further. Skip method resolution.
+                return null
             }
 
             currentlyInlining.add(inlineKey)
