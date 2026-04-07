@@ -150,6 +150,13 @@ public final class HashModuleLoaderNode extends MezzeNode {
                         context.defineGlobal(functionNames[i], closure);
                     }
                     evaluatedClosureCache.put(hash, closure);
+                } else if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord record) {
+                    // Closure factory returned a record (e.g., performer constructor)
+                    context.defineGlobal(hash, record);
+                    if (i < functionNames.length && functionNames[i] != null) {
+                        context.defineGlobal(functionNames[i], record);
+                    }
+                    evaluatedClosureCache.put(hash, record);
                 }
             } catch (StackOverflowError soe) {
                 // Infinite recursion in closure factory — skip, keep raw MezzeFunction
