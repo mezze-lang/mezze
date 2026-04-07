@@ -123,7 +123,8 @@ class ContextBuilder {
         val allEffectNames = effectDecls.keys + importedEffects.keys +
             importedEffects.values.map { it.name }.toSet()
 
-        val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers
+        val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers (v1)
+        val resolvedParsedPerformerDecls = mutableListOf<ParsedPerformerDecl>()  // real effect performers (v2)
         val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()  // ability impls
         // Track which ParsedPerformerDecl were converted to ability impls (by identity)
         val convertedPerformerDecls = mutableMapOf<ParsedPerformerDecl, ParsedImplAbilityDecl>()
@@ -174,6 +175,7 @@ class ContextBuilder {
             } else {
                 // Real effect performer
                 resolvedImplDecls.add(parsedPerformerDeclToV1(perfDecl, file))
+                resolvedParsedPerformerDecls.add(perfDecl)
             }
         }
 
@@ -276,12 +278,12 @@ class ContextBuilder {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
-        // Add effect performers (impl blocks) to context
-        for (implDecl in implDecls) {
-            ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
+        // Add effect performers (impl blocks) to context (using v2 types directly)
+        for (perfDecl in resolvedParsedPerformerDecls) {
+            ctx = addEffectPerformer(ctx, perfDecl, allEffectDecls)
         }
-        for ((_, implDecl) in v1ImportedImpls) {
-            ctx = addEffectPerformer(ctx, implDecl, allV1EffectDecls)
+        for ((_, perfDecl) in importedImpls) {
+            ctx = addEffectPerformer(ctx, perfDecl, allEffectDecls)
         }
 
         // Add ability implementations to context (with ability declaration hashes for hash-based index)
@@ -583,6 +585,23 @@ class ContextBuilder {
      * @param associatedTypes Map of associated type names to their bound types
      * @return The inferred suspension type, or null if not found/inferrable
      */
+    private fun extractSuspensionTypeV2(
+        implDecl: ParsedPerformerDecl,
+        associatedTypes: Map<String, MezzeType>
+    ): MezzeType? {
+        val file = implDecl.loc.file
+        // Bridge: convert operations to v1 for the expression walker
+        for (op in implDecl.operations) {
+            val v1Impl = com.mezze.language.parser.MezzeParser.toV1Expr(op.implementation, file)
+            if (v1Impl !is LambdaExpression) continue
+            val suspendWithValue = findSuspendWithValue(v1Impl.body)
+            if (suspendWithValue != null) {
+                return inferSuspensionTypeFromExpression(suspendWithValue, associatedTypes)
+            }
+        }
+        return null
+    }
+
     private fun extractSuspensionType(
         implDecl: ImplDeclaration,
         associatedTypes: Map<String, MezzeType>
@@ -784,9 +803,17 @@ class ContextBuilder {
      */
     private fun addEffectPerformer(
         ctx: TypingContext,
-        implDecl: ImplDeclaration,
-        effectDecls: Map<String, EffectDeclaration>
+        implDecl: ParsedPerformerDecl,
+        effectDecls: Map<String, ParsedEffectDecl>
     ): TypingContext {
+        // Ensure content hash is available (compute if missing)
+        val implWithHash = if (implDecl.contentHash != null) implDecl else {
+            val v1 = parsedPerformerDeclToV1(implDecl, implDecl.loc.file)
+            implDecl.copy(contentHash = v1.contentHash)
+        }
+        @Suppress("NAME_SHADOWING")
+        val implDecl = implWithHash
+
         // Get the effect declaration to check associated types
         val effectDecl = effectDecls[implDecl.effect.localName] ?: return ctx
 
@@ -796,45 +823,36 @@ class ContextBuilder {
             typeVarCache.clear()
 
             // Convert associated type bindings to MezzeTypes
-            // The binding keys in implDecl should already have the ' prefix (e.g., 'state)
-            // but the effectDecl.associatedTypes might not
             val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
-                convertTypeAnnotationV1Internal(typeAnnotation)
+                convertParsedTypeAnnotationInternal(typeAnnotation)
             }
 
             // Store as RecordType with associated type names as field names
-            // CRITICAL: Keys must include the variable name EXACTLY as it appears in the operation types
-            // For associated type 'env, the key should be "env" (without ') to match TypeVar(name='env)
             val performerType = MezzeType.RecordType(
                 fields = effectDecl.associatedTypes.associate { assocType ->
-                    // Remove ' prefix from assocType name to match TypeVar naming
                     val varName = assocType.removePrefix("'")
                     val value = bindingFields[assocType] ?: bindingFields["'$assocType"] ?: MezzeType.VarType(TypeVar.fresh())
-                    varName to value  // Store with name like "env", not "'env"
+                    varName to value
                 }
             )
 
-            // Use content hash as the key for cross-module safety
             val contentHash = implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
                 )
 
-            // Convert performer parameters to a RecordType (e.g., {cont: Continuation 'a 'b 'c})
-            // These are the parameters that must be passed when using the performer at a perform site
-            val performerFieldsType = if (implDecl.performerParams.isNotEmpty()) {
+            val performerFieldsType = if (implDecl.params.isNotEmpty()) {
                 MezzeType.RecordType(
-                    fields = implDecl.performerParams.associate { param ->
-                        param.name to convertTypeAnnotationV1Internal(param.type)
+                    fields = implDecl.params.associate { param ->
+                        param.name to convertParsedTypeAnnotationInternal(param.type)
                     }
                 )
             } else null
 
             // Extract the suspension type from the impl body
-            // This analyzes calls to suspend_with to determine what type the perform should return
             val associatedTypesMap = performerType.fields.mapKeys { (k, _) -> k }
-            val suspensionType = extractSuspensionType(implDecl, associatedTypesMap)
+            val suspensionType = extractSuspensionTypeV2(implDecl, associatedTypesMap)
 
             val performerInfo = TypingContext.PerformerTypeInfo(
                 performerName = implDecl.performerName,
@@ -849,7 +867,7 @@ class ContextBuilder {
         }
 
         // Even if no associated types, we still need to store performer fields for continuation inference
-        if (implDecl.performerParams.isNotEmpty()) {
+        if (implDecl.params.isNotEmpty()) {
             val contentHash = implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
@@ -857,18 +875,17 @@ class ContextBuilder {
                 )
 
             val performerFieldsType = MezzeType.RecordType(
-                fields = implDecl.performerParams.associate { param ->
-                    param.name to convertTypeAnnotationV1Internal(param.type)
+                fields = implDecl.params.associate { param ->
+                    param.name to convertParsedTypeAnnotationInternal(param.type)
                 }
             )
 
-            // Extract the suspension type from the impl body (even without associated types)
-            val suspensionType = extractSuspensionType(implDecl, emptyMap())
+            val suspensionType = extractSuspensionTypeV2(implDecl, emptyMap())
 
             val performerInfo = TypingContext.PerformerTypeInfo(
                 performerName = implDecl.performerName,
                 effectName = implDecl.effect.localName,
-                associatedTypes = MezzeType.RecordType(emptyMap()),  // No associated types
+                associatedTypes = MezzeType.RecordType(emptyMap()),
                 performerFields = performerFieldsType,
                 suspensionType = suspensionType,
                 contentHash = contentHash
