@@ -207,7 +207,7 @@ class TypeChecker(
     ): TypeCheckResult {
         // Desugar pipe expressions in ParsedModule before type checking
         @Suppress("NAME_SHADOWING")
-        val module = try { desugarPipesInParsedModule(module) } catch (_: Exception) { module }
+        val module = desugarPipesInParsedModule(module)
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -1457,6 +1457,18 @@ class TypeChecker(
             }
             is com.mezze.language.parsedast.ParsedPerform -> hasPipes(expr.body)
             is com.mezze.language.parsedast.ParsedMemberAccess -> hasPipes(expr.receiver)
+            is com.mezze.language.parsedast.ParsedParens -> hasPipes(expr.expr)
+            is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.value?.let { hasPipes(it) } ?: false
+            is com.mezze.language.parsedast.ParsedSeqLit -> expr.elements.any { elem ->
+                when (elem) {
+                    is com.mezze.language.parsedast.ParsedSeqElement.Regular -> hasPipes(elem.expr)
+                    is com.mezze.language.parsedast.ParsedSeqElement.Spread -> hasPipes(elem.expr)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedStringLit -> expr.parts.any { part ->
+                part is com.mezze.language.parsedast.ParsedStringPart.Interpolation && hasPipes(part.expr)
+            }
+            is com.mezze.language.parsedast.ParsedEffectCall -> hasPipes(expr.arguments)
             else -> false
         }
         val hasAnyPipes = module.decls.any { decl ->
@@ -1495,6 +1507,15 @@ class TypeChecker(
             )
             is com.mezze.language.parsedast.ParsedPerform -> expr.copy(body = desugar(expr.body))
             is com.mezze.language.parsedast.ParsedMemberAccess -> expr.copy(receiver = desugar(expr.receiver))
+            is com.mezze.language.parsedast.ParsedParens -> expr.copy(expr = desugar(expr.expr))
+            is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.copy(value = expr.value?.let { desugar(it) })
+            is com.mezze.language.parsedast.ParsedSeqLit -> expr.copy(elements = expr.elements.map { elem ->
+                when (elem) {
+                    is com.mezze.language.parsedast.ParsedSeqElement.Regular -> elem.copy(expr = desugar(elem.expr))
+                    is com.mezze.language.parsedast.ParsedSeqElement.Spread -> elem.copy(expr = desugar(elem.expr))
+                }
+            })
+            is com.mezze.language.parsedast.ParsedEffectCall -> expr.copy(arguments = desugar(expr.arguments))
             else -> expr
         }
 
@@ -1528,6 +1549,8 @@ class TypeChecker(
             thenBranch = replaceParsedPlaceholder(expr.thenBranch, replacement),
             elseBranch = replaceParsedPlaceholder(expr.elseBranch, replacement)
         )
+        is com.mezze.language.parsedast.ParsedParens -> expr.copy(expr = replaceParsedPlaceholder(expr.expr, replacement))
+        is com.mezze.language.parsedast.ParsedMemberAccess -> expr.copy(receiver = replaceParsedPlaceholder(expr.receiver, replacement))
         else -> expr
     }
 

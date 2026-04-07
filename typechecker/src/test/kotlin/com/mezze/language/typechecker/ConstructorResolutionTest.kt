@@ -120,11 +120,10 @@ class ConstructorResolutionTest {
         return null
     }
 
-    private fun typeCheckAndGetParsed(source: String): Program {
+    private fun typeCheckAndGetParsed(source: String): com.mezze.language.parsedast.ParsedModule {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        typeChecker.typeCheck(parsedModule, Paths.get(".")) // runs typechecker to populate resolution fields
-        // Return v1 AST for inspection (resolution fields are set as side effects)
-        return parser.parse(source)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
+        return parsedModule
     }
 
     private fun typeCheckAndGetResult(source: String): com.mezze.language.ast.TypeCheckResult {
@@ -197,13 +196,13 @@ class ConstructorResolutionTest {
         // Verify that declaring an ability creates a recognized AbilityDeclaration in the program.
         // With method-call syntax (value.show {}), the ability name doesn't appear as a
         // VariantConstruction in the AST. Instead, verify the AbilityDeclaration is preserved.
-        val parsedProgram = typeCheckAndGetParsed("""
+        val parsedModule = typeCheckAndGetParsed("""
             ability Show for 'a where {
                 show: {it: 'a} -> Str
             }
         """.trimIndent())
 
-        val abilityDecl = parsedProgram.items.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val abilityDecl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Show" }
         assertNotNull(abilityDecl, "Should find Show ability declaration in typed program")
         assertEquals("Show", abilityDecl!!.name)

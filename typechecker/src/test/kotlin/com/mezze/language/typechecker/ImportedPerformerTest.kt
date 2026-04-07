@@ -120,12 +120,16 @@ class ImportedPerformerTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
 
-        // This should NOT throw - it was throwing before the fix
-        val result = typeChecker.checkParsedModule(parsedModule)
+        // This should NOT throw
+        val result = try {
+            typeChecker.checkParsedModule(parsedModule)
+        } catch (e: Exception) {
+            fail("checkParsedModule threw: ${e::class.simpleName}: ${e.message}")
+        }
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
-            "checkProgram should succeed for valid main"
+            "checkProgram should succeed for valid main: ${(result as? TypeChecker.TypeCheckResult.Failure)?.errors?.joinToString { it.message }}"
         )
     }
 
