@@ -88,7 +88,28 @@ object AbilityValidator {
      * @param abilityDeclarations Map of ability name to declaration
      * @throws TypeCheckError if validation fails
      */
+    /**
+     * Validate ability implementation (v2 entry point).
+     * Converts v2 types to v1 internally for the validation logic.
+     */
     fun validateAbilityImplementation(
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
+    ) {
+        val file = impl.loc.file
+        val parserBridge = com.mezze.language.parser.MezzeParser
+        val v1Impl = com.mezze.language.typechecker.context.ContextBuilder().parsedImplAbilityDeclToV1(impl, file)
+        val v1Abilities = abilityDeclarations.mapValues { (_, v) ->
+            com.mezze.language.typechecker.context.ContextBuilder().parsedAbilityDeclToV1(v, file)
+        }
+        val v1Types = typeDeclarations.mapValues { (_, v) ->
+            com.mezze.language.typechecker.context.ContextBuilder().parsedTypeDeclToV1(v, file)
+        }
+        validateAbilityImplementationV1(v1Impl, v1Abilities, v1Types)
+    }
+
+    private fun validateAbilityImplementationV1(
         impl: ImplAbilityDeclaration,
         abilityDeclarations: Map<String, AbilityDeclaration>,
         typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
@@ -482,6 +503,18 @@ object AbilityValidator {
      * @throws TypeCheckError if the impl is an orphan
      */
     fun validateOrphanRules(
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        localAbilityNames: Set<String>,
+        localTypeNames: Set<String>,
+        importedAbilityNames: Set<String>,
+        importedTypeNames: Set<String>
+    ) {
+        val file = impl.loc.file
+        val v1Impl = com.mezze.language.typechecker.context.ContextBuilder().parsedImplAbilityDeclToV1(impl, file)
+        validateOrphanRulesV1(v1Impl, localAbilityNames, localTypeNames, importedAbilityNames, importedTypeNames)
+    }
+
+    private fun validateOrphanRulesV1(
         impl: ImplAbilityDeclaration,
         localAbilityNames: Set<String>,
         localTypeNames: Set<String>,

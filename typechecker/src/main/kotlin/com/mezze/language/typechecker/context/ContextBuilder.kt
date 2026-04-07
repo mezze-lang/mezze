@@ -107,13 +107,7 @@ class ContextBuilder {
         val effectDecls = module.decls.filterIsInstance<ParsedEffectDecl>()
             .associateBy { it.name }
 
-        // Still need v1 types for internal ContextBuilder methods that haven't been migrated yet
-        val v1TypeDecls = typeDecls.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
-        val v1AbilityDecls = abilityDecls.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
-        // v1EffectDecls removed — all effect consumers now use v2 ParsedEffectDecl
-        val v1ImportedAbilities = importedAbilities.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
-        // v1ImportedEffects removed — addEffectOperations and addEffectPerformer now use v2 directly
-        val v1ImportedTypes = importedTypes.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
+        // v1 conversions completely removed — all consumers now use v2 types directly
 
         // Resolve impl declarations: the parser can't distinguish ability impls from
         // effect impls (same `impl X for Y where {}` syntax). The typechecker knows which
@@ -215,9 +209,7 @@ class ContextBuilder {
         currentTypeDecls = typeDecls + importedTypes
 
         // v1 effect decls for internal ContextBuilder methods
-        val allV1AbilityDecls = v1AbilityDecls + v1ImportedAbilities
-        val allV1TypeDecls = v1TypeDecls.toMutableMap()
-        allV1TypeDecls.putAll(v1ImportedTypes)
+        // allV1AbilityDecls and allV1TypeDecls removed — validators now use v2 types
 
         // v1ImportedImpls removed — all consumers now use importedImpls (v2) directly
 
@@ -287,17 +279,16 @@ class ContextBuilder {
             ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
 
-        // Convert ability impls to v1 for AbilityValidator (still uses v1 types)
-        val v1AbilityImplsForValidation = abilityImplDecls.map { parsedImplAbilityDeclToV1(it, file) }
+        // VALIDATION PHASE: Run ability validations after context is built (v2 types)
+        val allParsedAbilityDecls = abilityDecls + importedAbilities
+        val allParsedTypeDecls = typeDecls + importedTypes
 
-        // VALIDATION PHASE: Run ability validations after context is built
         AbilityValidator.validateNameCollisions(
             abilityDeclarations = abilityDecls,
-            typeDeclarations = typeDecls + importedTypes,
+            typeDeclarations = allParsedTypeDecls,
             effectDeclarations = effectDecls
         )
 
-        val allParsedAbilityDecls = abilityDecls + importedAbilities
         for (abilityDecl in abilityDecls.values) {
             AbilityValidator.validateAbilityDependencies(abilityDecl, allParsedAbilityDecls)
         }
@@ -306,11 +297,11 @@ class ContextBuilder {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
-        for (abilityImplDecl in v1AbilityImplsForValidation) {
+        for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                abilityDeclarations = allV1AbilityDecls,
-                typeDeclarations = allV1TypeDecls
+                abilityDeclarations = allParsedAbilityDecls,
+                typeDeclarations = allParsedTypeDecls
             )
         }
 
@@ -324,7 +315,7 @@ class ContextBuilder {
         val importedAbilityNames = importedAbilities.keys
         val importedTypeNames = importedTypes.keys
 
-        for (abilityImplDecl in v1AbilityImplsForValidation) {
+        for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateOrphanRules(
                 impl = abilityImplDecl,
                 localAbilityNames = localAbilityNames,
@@ -1780,7 +1771,7 @@ class ContextBuilder {
     /**
      * Convert a ParsedAbilityDecl to a v1 AbilityDeclaration.
      */
-    private fun parsedAbilityDeclToV1(decl: ParsedAbilityDecl, file: String): AbilityDeclaration {
+    internal fun parsedAbilityDeclToV1(decl: ParsedAbilityDecl, file: String): AbilityDeclaration {
         val result = AbilityDeclaration(
             name = decl.name,
             typeParams = decl.typeParams,
@@ -1906,7 +1897,7 @@ class ContextBuilder {
     /**
      * Convert a ParsedImplAbilityDecl to a v1 ImplAbilityDeclaration.
      */
-    private fun parsedImplAbilityDeclToV1(decl: ParsedImplAbilityDecl, file: String = "<import>"): ImplAbilityDeclaration {
+    internal fun parsedImplAbilityDeclToV1(decl: ParsedImplAbilityDecl, file: String = "<import>"): ImplAbilityDeclaration {
         val target: ImplTarget = when (val t = decl.target) {
             is ParsedImplTarget.Named -> ImplTarget.Named(
                 ability = QualifiedRef(
