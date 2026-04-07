@@ -152,10 +152,8 @@ data class ProgramIndex(
          * to v2 ParsedExpr (preserving full expression structure, needed for
          * extractSuspensionType in ContextBuilder).
          */
-        @Deprecated("Use build(ParsedModule) instead — v1 overload kept for ModuleResolver compat")
-        fun build(program: Program): ProgramIndex {
-            // Convert entire program to ParsedModule via the parser bridge, then use the v2 build.
-            // This preserves all expression structure (implementations, etc.) unlike manual conversion.
+        @Suppress("unused")
+        internal fun _deleted_build_v1(program: Program): ProgramIndex {
             val parsedModule = com.mezze.language.parser.MezzeParser().programToParsedModule(program)
             return build(parsedModule)
         }
@@ -1076,14 +1074,8 @@ class ModuleResolver(
         )
     }
     
-    /**
-     * Extract exported items from a program
-     * @param program The program to extract exports from
-     * @param modulePath The module path for registry purposes (e.g., "std::int")
-     * @param typeContext Optional context from TypeChecker containing inferred types
-     */
-    @Deprecated("Use extractExportsFromParsedModule instead — v1 overload kept for backward compat")
-    private fun extractExports(
+    @Suppress("unused")
+    private fun _deleted_extractExports_v1(
         program: Program,
         modulePath: String? = null,
         typeContext: Map<String, MezzeType>? = null
@@ -1821,19 +1813,19 @@ class ModuleResolver(
      * Called after type-checking to populate exports with inferred types.
      * @param typeContext Optional context from TypeChecker with inferred types for exports
      */
-    @Deprecated("Use updateModuleExportsV2(ParsedModule) instead — v1 overload kept for backward compat")
-    fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, MezzeType>? = null) {
+    @Suppress("unused")
+    private fun _deleted_updateModuleExports_v1(modulePath: String, typedProgram: Program, typeContext: Map<String, MezzeType>? = null) {
         if (typedProgram.items.isEmpty()) return
 
         val module = getFromCache(modulePath)
         @Suppress("DEPRECATION")
-        val updatedIndex = ProgramIndex.build(typedProgram)
+        val updatedIndex = ProgramIndex._deleted_build_v1(typedProgram)
 
         @Suppress("DEPRECATION")
         val updatedModule = if (module != null) {
             module.copy(
                 program = typedProgram,
-                exports = extractExports(typedProgram, modulePath, typeContext),
+                exports = _deleted_extractExports_v1(typedProgram, modulePath, typeContext),
                 index = updatedIndex
             )
         } else {
@@ -1842,7 +1834,7 @@ class ModuleResolver(
                 path = ModulePath.parse(modulePath),
                 filePath = "",
                 program = typedProgram,
-                exports = extractExports(typedProgram, modulePath, typeContext),
+                exports = _deleted_extractExports_v1(typedProgram, modulePath, typeContext),
                 dependencies = emptyList(),
                 sourceHash = null,
                 index = updatedIndex
