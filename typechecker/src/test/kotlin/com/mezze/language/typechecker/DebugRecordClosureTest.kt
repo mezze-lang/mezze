@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -29,10 +30,10 @@ class DebugRecordClosureTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
 
         // Get the type of accessField via v2 API

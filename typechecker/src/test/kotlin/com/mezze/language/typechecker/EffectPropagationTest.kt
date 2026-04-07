@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
@@ -45,8 +46,8 @@ class EffectPropagationTest {
               Database.query {sql = query}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val useDatabaseType = typedProgram.getVariableType("useDatabase")
         assertNotNull(useDatabaseType)
@@ -98,8 +99,8 @@ class EffectPropagationTest {
               Database.query {sql = sql}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val secureQueryType = typedProgram.getVariableType("secureQuery")
         assertNotNull(secureQueryType)
@@ -142,8 +143,8 @@ class EffectPropagationTest {
               first + second
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val complexFunctionType = typedProgram.getVariableType("complexFunction")
         assertNotNull(complexFunctionType)
@@ -202,8 +203,8 @@ class EffectPropagationTest {
               {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val copyFileType = typedProgram.getVariableType("copyFile")
         assertNotNull(copyFileType)
@@ -248,8 +249,8 @@ class EffectPropagationTest {
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val partiallyHandledType = typedProgram.getVariableType("partiallyHandledQuery")
         assertNotNull(partiallyHandledType)
@@ -284,8 +285,8 @@ class EffectPropagationTest {
               a.compute {r = b}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val pureCalculationType = typedProgram.getVariableType("pureCalculation")
         assertNotNull(pureCalculationType)
@@ -310,8 +311,8 @@ class EffectPropagationTest {
             let result = twice { f = {} -> 42 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val twiceType = typedProgram.getVariableType("twice")
         assertNotNull(twiceType)
@@ -350,8 +351,8 @@ class EffectPropagationTest {
             let result = apply { f = logging_fn }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
@@ -398,8 +399,8 @@ class EffectPropagationTest {
             let result = apply_both { f = log_fn, g = db_fn }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)
@@ -424,8 +425,8 @@ class EffectPropagationTest {
             let result = composed { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = typedProgram.getVariableType("result")
         assertNotNull(resultType)

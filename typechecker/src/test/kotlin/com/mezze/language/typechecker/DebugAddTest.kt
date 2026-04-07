@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -9,14 +10,14 @@ class DebugAddTest {
     fun debugAddFunction() {
         val source = "let add = {x, y} -> x + y"
         val parser = MezzeParser()
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         val typeAliases = typeChecker.getTypeAliases()
 
         println("Program: $source")
-        println("AST: $program")
+        println("AST: $parsedModule")
         println("Type check result: $result")
 
         val addType = result.getVariableType("add")

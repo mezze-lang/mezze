@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -26,9 +27,9 @@ class ArithmeticWithFunctionsTest {
     }
 
     private fun typeCheckShouldFail(code: String): String {
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         return exception.message ?: ""
     }
@@ -167,9 +168,9 @@ class ArithmeticWithFunctionsTest {
             let result = x + y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -179,9 +180,9 @@ class ArithmeticWithFunctionsTest {
             let result = 10 + f { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -192,8 +193,8 @@ class ArithmeticWithFunctionsTest {
             let result = f { x = 5 } + g { y = 10 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 }

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -52,8 +53,8 @@ class PerformedMarkerTest {
             let result = {} -> perform Console in Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = getVariableType(typedProgram, "result") as MezzeType.FunctionType
         assertNotNull(resultType.effects)
@@ -67,8 +68,8 @@ class PerformedMarkerTest {
             let pureFunc = {} -> 42
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "pureFunc") as MezzeType.FunctionType
         assertNull(funcType.effects, "Pure function should have null effects")
@@ -84,8 +85,8 @@ class PerformedMarkerTest {
             let effectfulFunc = {} -> Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "effectfulFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -113,8 +114,8 @@ class PerformedMarkerTest {
                 State.get {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "partialHandle") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -142,8 +143,8 @@ class PerformedMarkerTest {
             let outer = {} -> inner {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val outerType = getVariableType(typedProgram, "outer") as MezzeType.FunctionType
         assertNotNull(outerType.effects)
@@ -164,8 +165,8 @@ class PerformedMarkerTest {
             let conditional = {cond} -> if cond then perform Console in Log.println { msg = "yes" } else {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "conditional") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -188,8 +189,8 @@ class PerformedMarkerTest {
                 None -> {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "matchExpr") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -212,8 +213,8 @@ class PerformedMarkerTest {
                 42
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "doBlock") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -295,8 +296,8 @@ class PerformedMarkerTest {
                 State.put { val = x }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "multiPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -333,8 +334,8 @@ class PerformedMarkerTest {
                 perform IntState in State.get {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "seqPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -372,8 +373,8 @@ class PerformedMarkerTest {
                 helper2 {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "combined") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -462,8 +463,8 @@ class PerformedMarkerTest {
                 {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "stepByStep") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -503,8 +504,8 @@ class PerformedMarkerTest {
                     {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "branchPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -542,8 +543,8 @@ class PerformedMarkerTest {
                     {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "matchPerform") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -575,8 +576,8 @@ class PerformedMarkerTest {
                 State.get {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "partial") as MezzeType.FunctionType
         assertNotNull(funcType.effects)

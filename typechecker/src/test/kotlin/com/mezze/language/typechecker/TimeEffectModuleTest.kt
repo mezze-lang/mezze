@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -24,8 +25,8 @@ class TimeEffectModuleTest {
     }
 
     private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         return result
     }
 

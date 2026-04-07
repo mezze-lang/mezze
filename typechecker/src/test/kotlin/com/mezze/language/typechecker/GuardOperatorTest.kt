@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -22,8 +23,8 @@ class GuardOperatorTest {
     }
 
     private fun typeCheck(code: String) {
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 

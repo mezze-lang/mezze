@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -32,10 +33,10 @@ let y = "hello"
 let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation")
@@ -51,10 +52,10 @@ let x = 42
 let y = x + unknown_var
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation for undefined variable")
@@ -69,10 +70,10 @@ let y = "hello"
 let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.mz")
@@ -92,10 +93,10 @@ let y = "hello"
 let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             // The error message should include location info
@@ -117,10 +118,10 @@ let d = 4
 let e = a + "string"
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             assertNotNull(e.sourceLocation, "Error should have source location")
@@ -136,10 +137,10 @@ let y = "hello"
 let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             // The error should be a constraint violation (NumAdd ability)
@@ -159,10 +160,10 @@ let f = 6
 let g = 7
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.mz")
@@ -182,10 +183,10 @@ let y = 10
 let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -34,8 +35,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -58,8 +59,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -76,8 +77,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // With polymorphic parameter, should return function type with constraint
         val funcType = typedProgram.getVariableType("test") as MezzeType.FunctionType
@@ -101,8 +102,8 @@ class AbilityMethodCallTest {
             showResult
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = typedProgram.getVariableType("showResult") as MezzeType.FunctionType
         // Verify ability constraint is present
@@ -133,8 +134,8 @@ class AbilityMethodCallTest {
             test2
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test1"))
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test2"))
@@ -152,11 +153,11 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Abilities cannot be used as values - should throw TypeCheckError
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -172,9 +173,9 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(error.message?.contains("Direct ability access") == true,
@@ -201,8 +202,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -227,8 +228,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -249,8 +250,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val recordType = typedProgram.getVariableType("test") as MezzeType.RecordType
         assertEquals(MezzeType.StringType, recordType.fields["result"])
@@ -272,8 +273,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -305,8 +306,8 @@ class AbilityMethodCallTest {
             showIfEqual
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify both Show and Eq constraints are present
         val funcType = typedProgram.getVariableType("showIfEqual") as MezzeType.FunctionType
@@ -334,8 +335,8 @@ class AbilityMethodCallTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, typedProgram.getVariableType("test"))
     }
@@ -357,11 +358,11 @@ class AbilityMethodCallTest {
             t
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Direct ability access 'Parse.decode' is now blocked
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -375,9 +376,9 @@ class AbilityMethodCallTest {
             let test = Show.shwo
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(error.message?.contains("Direct ability access") == true,
@@ -400,9 +401,9 @@ class AbilityMethodCallTest {
             let x = 42.show { wrong_field = "oops" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -420,11 +421,11 @@ class AbilityMethodCallTest {
             let x = "hello".print {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // String doesn't have Printable impl — should fail at some point
         // (either typecheck error or unresolved constraint)
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             // If it passes typechecking, it means the constraint is deferred — that's OK
             // as long as it doesn't silently succeed with wrong behavior
         } catch (_: TypeCheckError) {
@@ -442,9 +443,9 @@ class AbilityMethodCallTest {
             let x = Show.show
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should suggest method-call and direct call syntax

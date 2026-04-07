@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -23,10 +24,10 @@ class SimpleComparisonTest {
             val code = "1 == 1"
             println("Testing: $code")
             
-            val program = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
             println("Parsed successfully")
             
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("Type check successful: $result")
             
         } catch (e: Exception) {

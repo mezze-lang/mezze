@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -28,15 +29,15 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         // Check parsed AST directly
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Either", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'a", typeDecl.typeParams[0])
         assertEquals("'b", typeDecl.typeParams[1])
 
         // Also verify type checking succeeds
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -46,14 +47,14 @@ class MultiParameterTypeTest {
             type Result 'ok 'err = | Ok 'ok, Err 'err |
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Result", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'ok", typeDecl.typeParams[0])
         assertEquals("'err", typeDecl.typeParams[1])
 
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -63,12 +64,12 @@ class MultiParameterTypeTest {
             type Triple 'a 'b 'c = | MkTriple { first: 'a, second: 'b, third: 'c } |
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Triple", typeDecl.name)
         assertEquals(3, typeDecl.typeParams.size)
 
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -81,8 +82,8 @@ class MultiParameterTypeTest {
             let right_val = Right { val = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check that the let bindings typecheck via TypedModule
         val leftType = result.getVariableType("left_val")
@@ -100,12 +101,12 @@ class MultiParameterTypeTest {
             let pair = MkPair { first = 1, second = "one" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Pair", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         val pairType = result.getVariableType("pair")
         assertNotNull(pairType)
     }
@@ -116,8 +117,8 @@ class MultiParameterTypeTest {
             type Maybe2 'a 'b = | Nothing, JustFirst { first: 'a }, JustSecond { second: 'b }, Both { first: 'a, second: 'b } |
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Maybe2", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
@@ -131,8 +132,8 @@ class MultiParameterTypeTest {
             type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
 
         // Check Left constructor
@@ -156,8 +157,8 @@ class MultiParameterTypeTest {
             type Status 'a 'b = | Pending, InProgress, Complete |
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeDecl = program.items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
         assertEquals("Status", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
@@ -180,7 +181,7 @@ class MultiParameterTypeTest {
 
         // The parser should now reject "Left 42" syntax
         val exception = assertThrows<Exception> {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
 
         // Verify the error message mentions that variant constructors must use {} syntax

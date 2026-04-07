@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -27,8 +28,8 @@ class OrdConstraintPropagationTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = typedProgram.getVariableType("test")
         assertNotNull(testType)
@@ -54,8 +55,8 @@ class OrdConstraintPropagationTest {
         // Enable debug output
         System.setProperty("mezze.debug.constraints", "true")
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = typedProgram.getVariableType("test")
         assertNotNull(testType)

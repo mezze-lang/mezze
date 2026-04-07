@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -40,17 +41,17 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify ability declaration is processed (from parsed AST)
-        val abilityDecl = program.items.find { it is AbilityDeclaration } as AbilityDeclaration?
+        val abilityDecl = parsedModule.decls.find { it is com.mezze.language.parsedast.ParsedAbilityDecl } as com.mezze.language.parsedast.ParsedAbilityDecl?
         assertNotNull(abilityDecl)
         assertEquals("Show", abilityDecl.name)
         assertEquals(listOf("'a"), abilityDecl.typeParams)
 
         // Verify implementation is processed (from parsed AST)
-        val implDecl = program.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
+        val implDecl = parsedModule.decls.find { it is com.mezze.language.parsedast.ParsedImplAbilityDecl } as com.mezze.language.parsedast.ParsedImplAbilityDecl?
         assertNotNull(implDecl)
         assertEquals("Show", implDecl.abilityName)
 
@@ -82,13 +83,13 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify MyOrd ability has method-level constraint (not ability-level dependency) — from parsed AST
-        val ordDecl = program.items.find {
-            it is AbilityDeclaration && it.name == "MyOrd"
-        } as AbilityDeclaration?
+        val ordDecl = parsedModule.decls.find {
+            it is com.mezze.language.parsedast.ParsedAbilityDecl && it.name == "MyOrd"
+        } as com.mezze.language.parsedast.ParsedAbilityDecl?
         assertNotNull(ordDecl)
         assertTrue(ordDecl.dependencies.isEmpty())
         assertEquals(1, ordDecl.operations.first().abilityConstraints.size)
@@ -111,8 +112,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should not throw
         assertTrue(true)
@@ -137,8 +138,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let result = displayValue {val = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify displayValue has ability constraints
         val functionType = result.getVariableType("displayValue") as? MezzeType.FunctionType
@@ -163,18 +164,18 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let result = 42.convert {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify multi-parameter ability declaration — from parsed AST
-        val convertDecl = program.items.find {
-            it is AbilityDeclaration && it.name == "Convert"
-        } as AbilityDeclaration?
+        val convertDecl = parsedModule.decls.find {
+            it is com.mezze.language.parsedast.ParsedAbilityDecl && it.name == "Convert"
+        } as com.mezze.language.parsedast.ParsedAbilityDecl?
         assertNotNull(convertDecl)
         assertEquals(listOf("'b", "'a"), convertDecl.typeParams)
 
         // Verify implementation with multiple target types — from parsed AST
-        val implDecl = program.items.find { it is ImplAbilityDeclaration } as ImplAbilityDeclaration?
+        val implDecl = parsedModule.decls.find { it is com.mezze.language.parsedast.ParsedImplAbilityDecl } as com.mezze.language.parsedast.ParsedImplAbilityDecl?
         assertNotNull(implDecl)
         assertEquals(2, implDecl.targetTypes.size)
     }
@@ -196,8 +197,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
               Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify fetchUser function has only Database effect
         val functionType = result.getVariableType("fetchUser") as? MezzeType.FunctionType
@@ -232,8 +233,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
               SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_str {n = id})", token = token}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify only SecureDatabase effect is used
         val functionType = result.getVariableType("secureUserFetch") as? MezzeType.FunctionType
@@ -266,8 +267,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let getResult = {} -> perform ConsoleLogger in loggedOperation {value = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify loggedOperation has Log effect
         val functionType = result.getVariableType("loggedOperation") as? MezzeType.FunctionType
@@ -306,10 +307,10 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let result = showValue {val = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // With strict validation, all ability constraints must have implementations
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -343,8 +344,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
             let getResult = {} -> perform ConsoleLogger in loggedShow {val = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify loggedShow has both ability constraints and effects
         val functionType = result.getVariableType("loggedShow") as? MezzeType.FunctionType

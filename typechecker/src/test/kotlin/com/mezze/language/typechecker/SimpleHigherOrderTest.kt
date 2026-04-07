@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -30,8 +31,8 @@ class SimpleHigherOrderTest {
         """.trimIndent()
 
         println("Starting typecheck...")
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("SUCCESS")
     }
 }

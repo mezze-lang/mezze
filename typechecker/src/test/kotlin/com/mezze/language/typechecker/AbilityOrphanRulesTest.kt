@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
 import com.mezze.language.ast.LetBinding
@@ -51,8 +52,8 @@ class AbilityOrphanRulesTest {
             let result = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed
         assertNotNull(result)
@@ -84,8 +85,8 @@ class AbilityOrphanRulesTest {
             let x = 42.print {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -115,8 +116,8 @@ class AbilityOrphanRulesTest {
             let result = p.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -143,8 +144,8 @@ class AbilityOrphanRulesTest {
             let result = c.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -174,8 +175,8 @@ class AbilityOrphanRulesTest {
             let f = c.convert {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -214,10 +215,10 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent())
 
-        val orphanProgram = parser.parse(Files.readString(orphanMod))
+        val orphanParsedModule = parser.parseParsedModule(Files.readString(orphanMod), "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(orphanProgram, tempDir)
+            typeChecker.typeCheck(orphanParsedModule, tempDir)
         }
 
         assertTrue(
@@ -249,10 +250,10 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent())
 
-        val orphanProgram = parser.parse(Files.readString(orphanMod))
+        val orphanParsedModule = parser.parseParsedModule(Files.readString(orphanMod), "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(orphanProgram, tempDir)
+            typeChecker.typeCheck(orphanParsedModule, tempDir)
         }
 
         assertTrue(
@@ -282,10 +283,10 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(
@@ -323,10 +324,10 @@ class AbilityOrphanRulesTest {
             }
         """.trimIndent())
 
-        val mod2Program = parser.parse(Files.readString(mod2))
+        val mod2ParsedModule = parser.parseParsedModule(Files.readString(mod2), "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(mod2Program, tempDir)
+            typeChecker.typeCheck(mod2ParsedModule, tempDir)
         }
 
         // Could be caught by either orphan rules or duplicate check
@@ -356,8 +357,8 @@ class AbilityOrphanRulesTest {
             let y = 42.debug {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -389,8 +390,8 @@ class AbilityOrphanRulesTest {
             let z = True.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -423,8 +424,8 @@ class AbilityOrphanRulesTest {
             let result = 42.show {}
         """.trimIndent())
 
-        val userProgram = parser.parse(Files.readString(userMod))
-        val result = typeChecker.typeCheck(userProgram, tempDir)
+        val userParsedModule = parser.parseParsedModule(Files.readString(userMod), "test.mz")
+        val result = typeChecker.typeCheck(userParsedModule, tempDir)
 
         assertNotNull(result)
     }
@@ -466,8 +467,8 @@ class AbilityOrphanRulesTest {
             let result = p.show {}
         """.trimIndent())
 
-        val userProgram = parser.parse(Files.readString(userMod))
-        val result = typeChecker.typeCheck(userProgram, tempDir)
+        val userParsedModule = parser.parseParsedModule(Files.readString(userMod), "test.mz")
+        val result = typeChecker.typeCheck(userParsedModule, tempDir)
 
         assertNotNull(result)
     }
@@ -486,7 +487,7 @@ class AbilityOrphanRulesTest {
 
         // Parser now rejects 'pub' before ability
         val error = assertThrows<ParseException> {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
 
         assertTrue(
@@ -505,7 +506,7 @@ class AbilityOrphanRulesTest {
 
         // Parser now rejects 'pub' before effect
         val error = assertThrows<ParseException> {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
 
         assertTrue(
@@ -528,8 +529,8 @@ class AbilityOrphanRulesTest {
             let x = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }
@@ -548,8 +549,8 @@ class AbilityOrphanRulesTest {
             let x = 42
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }

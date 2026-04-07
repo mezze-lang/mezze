@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -31,9 +32,9 @@ let flag = True   # expected: flag : Boolean
 x + 10
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -54,9 +55,9 @@ let result2 = processUser {user = user2}                                       #
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -73,9 +74,9 @@ let result2 = classify {age = 25}
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -94,9 +95,9 @@ let result3 = flip {f = constant, x = 1, y = 2}
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -117,9 +118,9 @@ let result = processColor {color = Red}                 # expected: result : Str
 result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -153,9 +154,9 @@ let preciseFrac: Frac = 22//7      # expected: preciseFrac : Frac
 half
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -186,9 +187,9 @@ let explicitInt: Int = 42                      # 42 is already Int (default)
 intDefault
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -219,9 +220,9 @@ let natSum = natValue + natValue   # expected: natSum : Nat
 count
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -238,9 +239,9 @@ let result = compose {f = multiply, g = add, x = 5}
 result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -260,9 +261,9 @@ let result2 = processOpenUser {user = user2}               # expected: result2 :
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -292,9 +293,9 @@ let configRecord = {timeout = 30, retries = 3, debug = False}
 let updatedConfig = {...configRecord, timeout = 60, debug = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -315,9 +316,9 @@ let result2 = processUser {user = user2}                    # expected: result2 
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -337,9 +338,9 @@ let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : St
 result1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -363,9 +364,9 @@ let floatResult = complex { x = 21.5, y = 42.5, z = True } # expected: floatResu
 let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -393,9 +394,9 @@ let intZero = isPositive { x = 0 }          # expected: intZero : Boolean
 intResult
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -415,9 +416,9 @@ let calc = {a = 10, b = 20}
 let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -434,9 +435,9 @@ let result2 = greet {name = "World"}    # expected: result2 : Str
 result1 + 100
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -456,9 +457,9 @@ let result = processColor {color = Red}                 # expected: result : Str
 result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         assertNotNull(result.typedModule)
     }
@@ -479,9 +480,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -504,9 +505,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -527,9 +528,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -552,9 +553,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -580,9 +581,9 @@ mixedSum1
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -613,9 +614,9 @@ validInt
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -640,9 +641,9 @@ processColor
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -666,9 +667,9 @@ processColor
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -699,9 +700,9 @@ let invalidBase = {...notRecord, x = 10}
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -727,9 +728,9 @@ let invalidBase = {...notRecord, x = 10}
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -751,9 +752,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -773,9 +774,9 @@ y
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -799,9 +800,9 @@ result
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {
@@ -825,9 +826,9 @@ processColor
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
             val typeChecker = TypeChecker()
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Some invalid fixtures may pass due to permissive type checking
             assertTrue(true)
         } catch (e: Exception) {

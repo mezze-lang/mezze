@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.module.ModuleError
@@ -55,14 +56,14 @@ class ModuleSystemTest {
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
         // Parse and type check
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         // Create a TypeChecker with the correct project root
         val typeCheckerWithRoot = TypeChecker()
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
+            val typedProgram = typeCheckerWithRoot.typeCheck(parsedModule, tempDir)
             assertNotNull(typedProgram)
             
             // Verify that the result variable has the correct type
@@ -86,10 +87,10 @@ class ModuleSystemTest {
             let x = 5
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         val exception = assertThrows(ModuleError.ModuleNotFound::class.java) {
-            typeChecker.typeCheck(program, tempDir)
+            typeChecker.typeCheck(parsedModule, tempDir)
         }
         
         assertTrue(exception.message!!.contains("non_existent::module"))
@@ -116,10 +117,10 @@ class ModuleSystemTest {
 
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         val exception = assertThrows(ModuleError.PrivateExport::class.java) {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(parsedModule, srcDir)
         }
 
         // Verify the error contains useful info
@@ -148,10 +149,10 @@ class ModuleSystemTest {
 
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         val exception = assertThrows(ModuleError.ExportNotFound::class.java) {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(parsedModule, srcDir)
         }
 
         // Verify the error contains useful info
@@ -181,10 +182,10 @@ class ModuleSystemTest {
         val srcDir = tempDir.resolve("src")
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         val exception = assertThrows(ModuleError.InternalModuleAccess::class.java) {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(parsedModule, srcDir)
         }
         
         assertTrue(exception.message!!.contains("internal"))
@@ -215,13 +216,13 @@ class ModuleSystemTest {
         
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         // For now, allow module system issues - this needs investigation
         // When importing a variant type, its constructors should also become available
         // This is a known limitation - constructor import from modules needs implementation
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, srcDir)
             assertNotNull(typedProgram)
             println("SUCCESS: Type constructor import worked!")
         } catch (e: Exception) {
@@ -258,11 +259,11 @@ class ModuleSystemTest {
         
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
             assertNotNull(typedProgram)
             println("SUCCESS: Module alias worked!")
         } catch (e: Exception) {
@@ -294,12 +295,12 @@ class ModuleSystemTest {
         Files.writeString(srcDir.resolve("a.mz"), moduleA)
         Files.writeString(srcDir.resolve("b.mz"), moduleB)
 
-        val program = parser.parse(moduleA)
+        val parsedModule = parser.parseParsedModule(moduleA, "test.mz")
 
         // Should throw CircularDependency since A -> B -> A forms a cycle
         // Note: The exception comes from the top-level ModuleError (typechecker package)
         val exception = assertThrows(com.mezze.language.typechecker.ModuleError.CircularDependency::class.java) {
-            typeChecker.typeCheck(program, tempDir)
+            typeChecker.typeCheck(parsedModule, tempDir)
         }
         assertNotNull(exception.message)
         assertTrue(exception.message!!.contains("Circular"))
@@ -322,11 +323,11 @@ class ModuleSystemTest {
         Files.writeString(srcDir.resolve("a.mz"), moduleA)
         // Don't create module B
 
-        val program = parser.parse(moduleA)
+        val parsedModule = parser.parseParsedModule(moduleA, "test.mz")
 
         // Should throw ModuleNotFound since module B doesn't exist
         assertThrows(ModuleError.ModuleNotFound::class.java) {
-            typeChecker.typeCheck(program, tempDir)
+            typeChecker.typeCheck(parsedModule, tempDir)
         }
     }
     
@@ -356,11 +357,11 @@ class ModuleSystemTest {
         
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
             assertNotNull(typedProgram)
             
             // Verify that constructors are available
@@ -400,11 +401,11 @@ class ModuleSystemTest {
         
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
         
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
             assertNotNull(typedProgram)
             
             println("SUCCESS: Selective imports with aliases work!")
@@ -437,11 +438,11 @@ class ModuleSystemTest {
         val srcDir = tempDir.resolve("src")
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
             assertNotNull(typedProgram)
 
             println("SUCCESS: Nested module paths work!")
@@ -478,11 +479,11 @@ class ModuleSystemTest {
             let x = 5
         """.trimIndent()
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         // Type-check the program (this should cache the effects module)
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, srcDir)
             assertNotNull(typedProgram)
 
             // Verify the effects module was cached
@@ -515,10 +516,10 @@ class ModuleSystemTest {
             let result1 = identity { x = 1 }
         """.trimIndent()
 
-        val program1 = parser.parse(mainModule1)
+        val parsedModule1 = parser.parseParsedModule(mainModule1, "test.mz")
 
         try {
-            typeChecker.typeCheck(program1, srcDir)
+            typeChecker.typeCheck(parsedModule1, srcDir)
 
             // Get the cached module
             val cachedModule = TypeChecker.getTypedModule("utils")
@@ -534,8 +535,8 @@ class ModuleSystemTest {
                 let result2 = identity { x = 2 }
             """.trimIndent()
 
-            val program2 = parser.parse(mainModule2)
-            typeChecker2.typeCheck(program2, srcDir)
+            val parsedModule2 = parser.parseParsedModule(mainModule2, "test.mz")
+            typeChecker2.typeCheck(parsedModule2, srcDir)
 
             // The cached module should still be available and contain the same data
             val cachedModule2 = TypeChecker.getTypedModule("utils")
@@ -577,10 +578,10 @@ class ModuleSystemTest {
             perform ConsoleLogger in logInfo { msg = "test" }
         """.trimIndent()
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, srcDir)
             assertNotNull(typedProgram)
 
             // Verify the cached module has handler mappings
@@ -637,10 +638,10 @@ class ModuleSystemTest {
             perform HandlerB in wrapperB {}
         """.trimIndent()
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir)
+            val typedProgram = typeChecker.typeCheck(parsedModule, srcDir)
             assertNotNull(typedProgram)
 
             // Verify both modules are cached
@@ -668,10 +669,10 @@ class ModuleSystemTest {
 
         // First TypeChecker caches the module
         val typeChecker1 = TypeChecker()
-        val program1 = parser.parse("use shared::{constant}\nlet x = constant")
+        val parsedModule1 = parser.parseParsedModule("use shared::{constant}\nlet x = constant", "test.mz")
 
         try {
-            typeChecker1.typeCheck(program1, srcDir)
+            typeChecker1.typeCheck(parsedModule1, srcDir)
 
             val cachedAfterFirst = TypeChecker.getTypedModule("shared")
             assertNotNull(cachedAfterFirst, "Module should be cached by first TypeChecker")
@@ -705,14 +706,14 @@ class ModuleSystemTest {
         Files.writeString(srcDir.resolve("mod2.mz"), module2)
 
         // Type-check both modules
-        val program = parser.parse("""
+        val parsedModule = parser.parseParsedModule("""
             use mod1::{value1}
             use mod2::{value2}
             let result = value1
-        """.trimIndent())
+        """.trimIndent(), "test.mz")
 
         try {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(parsedModule, srcDir)
 
             // Verify both are cached
             assertNotNull(TypeChecker.getTypedModule("mod1"), "mod1 should be cached")

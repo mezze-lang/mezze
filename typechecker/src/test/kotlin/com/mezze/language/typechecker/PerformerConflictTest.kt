@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -36,11 +37,11 @@ class PerformerConflictTest {
             perform BasicLogger, EnhancedLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should now correctly fail: we can't apply two handlers to the same single effect usage
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -69,10 +70,10 @@ class PerformerConflictTest {
               Database.save {data = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed - different effects, no conflict
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -90,10 +91,10 @@ class PerformerConflictTest {
             perform BasicLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -121,9 +122,9 @@ class PerformerConflictTest {
               Database.save {data = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed - different effects, no conflict
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 }

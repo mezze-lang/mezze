@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.LetBinding
 import com.mezze.language.parser.MezzeParser
@@ -34,8 +35,8 @@ class PolymorphicInstantiationTest {
     }
 
     private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(source)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun getBindingType(result: com.mezze.language.ast.TypeCheckResult, name: String): MezzeType? {

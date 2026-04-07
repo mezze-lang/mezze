@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -20,16 +21,16 @@ class AddFunctionDebugTest {
         println("=== STARTING CONSTRAINT DEBUG ===")
 
         val parser = MezzeParser()
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
-        println("Parsed program: $program")
+        println("Parsed program: $parsedModule")
 
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         val typeAliases = typeChecker.getTypeAliases()
 
         println("Source: $source")
-        println("Program AST: $program")
+        println("Program AST: $parsedModule")
         println("Type check result: $result")
 
         // Extract the type of 'add' from typedModule

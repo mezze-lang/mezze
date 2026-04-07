@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -34,8 +35,8 @@ class RecordFieldAccessTest {
             let result = point.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing existing field 'x' on closed record")
     }
@@ -47,8 +48,8 @@ class RecordFieldAccessTest {
             let sum = point.x + point.y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing multiple existing fields on closed record")
     }
@@ -60,10 +61,10 @@ class RecordFieldAccessTest {
             let result = point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' does not exist on closed record") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -78,10 +79,10 @@ class RecordFieldAccessTest {
             let result = math.substract {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: 'substract' is a typo") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'substract' not found") == true, "Error should mention missing field")
         assertTrue(error.message?.contains("Did you mean 'subtract'?") == true, "Error should suggest similar field name")
@@ -95,8 +96,8 @@ class RecordFieldAccessTest {
             let result = p.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing existing field on typed closed record")
     }
@@ -109,10 +110,10 @@ class RecordFieldAccessTest {
             let result = p.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not in Point type") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -126,8 +127,8 @@ class RecordFieldAccessTest {
             let result = math.add {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing function field and calling it")
     }
@@ -141,10 +142,10 @@ class RecordFieldAccessTest {
             let result = math.multiply {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: 'multiply' does not exist") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'multiply' not found") == true, "Error should mention missing field")
     }
@@ -158,8 +159,8 @@ class RecordFieldAccessTest {
             let result = point.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing existing field 'x' on open record")
     }
@@ -171,8 +172,8 @@ class RecordFieldAccessTest {
             let sum = point.x + point.y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing multiple existing fields on open record")
     }
@@ -184,10 +185,10 @@ class RecordFieldAccessTest {
             let result = point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not explicitly declared in open record") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -200,8 +201,8 @@ class RecordFieldAccessTest {
             let result = p.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing existing field on typed open record")
     }
@@ -214,10 +215,10 @@ class RecordFieldAccessTest {
             let result = p.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: field 'z' not in OpenPoint type") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
     }
@@ -229,8 +230,8 @@ class RecordFieldAccessTest {
             let result = getX {x = 42, y = 100}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: open record function can access declared fields")
     }
@@ -241,10 +242,10 @@ class RecordFieldAccessTest {
             let getZ: {x: Int, ...} -> Int = {x, ...} -> z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: 'z' is not declared in the open record parameter") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -260,8 +261,8 @@ class RecordFieldAccessTest {
             let result = data.point.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing nested field on closed records")
     }
@@ -276,10 +277,10 @@ class RecordFieldAccessTest {
             let result = data.point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' does not exist") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true, "Error should mention missing field 'z', got: ${error.message}")
     }
@@ -295,8 +296,8 @@ class RecordFieldAccessTest {
             let result = data.point.x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should pass: accessing nested field on open records")
     }
@@ -312,10 +313,10 @@ class RecordFieldAccessTest {
             let result = data.point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' not declared in open record") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true,
             "Error should mention missing field 'z', got: ${error.message}")
@@ -330,10 +331,10 @@ class RecordFieldAccessTest {
             let result = point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         // The error context should include available fields
         assertTrue(error.metadata["availableFields"] != null, "Error should include available fields in metadata")
@@ -346,10 +347,10 @@ class RecordFieldAccessTest {
             let result = point.nonexistent
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.metadata["field"] == "nonexistent", "Error should include the attempted field name")
     }

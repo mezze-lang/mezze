@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -49,8 +50,8 @@ class MutationEffectTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -64,8 +65,8 @@ class MutationEffectTest {
             let doMutate: {} -> {} <Mut> = {} -> Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -85,8 +86,8 @@ class MutationEffectTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -104,8 +105,8 @@ class MutationEffectTest {
             let test = {} -> perform LocalMut in Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -126,8 +127,8 @@ class MutationEffectTest {
                 Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -143,8 +144,8 @@ class MutationEffectTest {
             let test = {} -> perform DebugLocalMut in Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -162,8 +163,8 @@ class MutationEffectTest {
                 {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -178,8 +179,8 @@ class MutationEffectTest {
                 {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -194,8 +195,8 @@ class MutationEffectTest {
                 {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -209,8 +210,8 @@ class MutationEffectTest {
                 {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -227,8 +228,8 @@ class MutationEffectTest {
                 seq_to_mut {seq = xs}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -242,8 +243,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -260,8 +261,8 @@ class MutationEffectTest {
                 map_to_mut {map = m}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -275,8 +276,8 @@ class MutationEffectTest {
                 map_to_immut {map = mm}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -293,8 +294,8 @@ class MutationEffectTest {
                 set_to_mut {set = s}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -308,8 +309,8 @@ class MutationEffectTest {
                 set_to_immut {set = ms}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -326,8 +327,8 @@ class MutationEffectTest {
                 bytes_to_mut {bytes = b}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -341,8 +342,8 @@ class MutationEffectTest {
                 bytes_to_immut {bytes = mb}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -359,8 +360,8 @@ class MutationEffectTest {
                 int_to_mut {n = n}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -374,8 +375,8 @@ class MutationEffectTest {
                 read_int {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -388,8 +389,8 @@ class MutationEffectTest {
                 float_to_mut {n = n}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -403,8 +404,8 @@ class MutationEffectTest {
                 float_to_immut {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -417,8 +418,8 @@ class MutationEffectTest {
                 bool_to_mut {b = b}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -432,8 +433,8 @@ class MutationEffectTest {
                 bool_to_immut {b = mb}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -452,8 +453,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -468,8 +469,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -484,8 +485,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -500,8 +501,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -516,8 +517,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -535,8 +536,8 @@ class MutationEffectTest {
                 read_int {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -551,8 +552,8 @@ class MutationEffectTest {
                 read_int {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -567,8 +568,8 @@ class MutationEffectTest {
                 read_int {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -583,8 +584,8 @@ class MutationEffectTest {
                 read_int {n = mn}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -607,8 +608,8 @@ class MutationEffectTest {
                 read_int {n = acc}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -626,8 +627,8 @@ class MutationEffectTest {
                 read_int {n = counter}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -646,8 +647,8 @@ class MutationEffectTest {
                 read_int {n = sum}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -664,8 +665,8 @@ class MutationEffectTest {
                 seq_with_capacity {capacity = cap}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -678,8 +679,8 @@ class MutationEffectTest {
                 map_with_capacity {capacity = cap}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -692,8 +693,8 @@ class MutationEffectTest {
                 set_with_capacity {capacity = cap}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -712,8 +713,8 @@ class MutationEffectTest {
             let outer: {} -> {} <Mut> = {} -> inner {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -735,8 +736,8 @@ class MutationEffectTest {
             let pure_result: {} -> {} = {} -> perform LocalMut in mutating {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -757,8 +758,8 @@ class MutationEffectTest {
                     Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -773,8 +774,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = mut_seq}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -796,9 +797,9 @@ class MutationEffectTest {
             let pure_fn: {} -> {} = effectful
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -821,9 +822,9 @@ class MutationEffectTest {
             let test = {} -> perform OtherPerformer in Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -838,9 +839,9 @@ class MutationEffectTest {
             let bad_fn: {} -> {} = {} -> Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -876,9 +877,9 @@ class MutationEffectTest {
                 {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mut") == true,
             "Expected hermetic error but got: ${error.message}")
@@ -902,9 +903,9 @@ class MutationEffectTest {
                 State.get {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message?.contains("hermetic") == true || error.message?.contains("Mut") == true,
             "Expected hermetic error but got: ${error.message}")
@@ -928,8 +929,8 @@ class MutationEffectTest {
             let handled_fn: {} -> {} = {} -> perform LocalMut in Mut.mutate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -960,8 +961,8 @@ class MutationEffectTest {
                 perform Console in IO.print {msg = "done"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -979,8 +980,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -995,8 +996,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1015,8 +1016,8 @@ class MutationEffectTest {
                 read_int {n = acc}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1034,8 +1035,8 @@ class MutationEffectTest {
                 read_int {n = counter}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1050,8 +1051,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1066,8 +1067,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1081,8 +1082,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1097,8 +1098,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1113,8 +1114,8 @@ class MutationEffectTest {
                 map_to_immut {map = mut_m}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1129,8 +1130,8 @@ class MutationEffectTest {
                 set_to_immut {set = mut_s}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1164,8 +1165,8 @@ class MutationEffectTest {
                 get {c = c}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1192,8 +1193,8 @@ class MutationEffectTest {
                 freeze {buf = buf}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1215,8 +1216,8 @@ class MutationEffectTest {
                 read_int {n = counter}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1237,8 +1238,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1264,8 +1265,8 @@ class MutationEffectTest {
                 get_x {p = p}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1298,8 +1299,8 @@ class MutationEffectTest {
                 get_value {c = c}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1323,8 +1324,8 @@ class MutationEffectTest {
                 freeze_counter {state = active}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1343,8 +1344,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1369,8 +1370,8 @@ class MutationEffectTest {
                 seq_to_immut {seq = arr}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -1404,8 +1405,8 @@ class MutationEffectTest {
                 perform Console in Log.log {msg = "done"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 }

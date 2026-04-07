@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
@@ -27,8 +28,8 @@ class SimpleEffectPropagationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Just check that it parses and type checks successfully
         assertNotNull(typedProgram)
@@ -48,8 +49,8 @@ class SimpleEffectPropagationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check that both effects are declared
         assertNotNull(typedProgram)
@@ -68,8 +69,8 @@ class SimpleEffectPropagationTest {
             let testFunction : {x: Int} -> Int = {x} -> x
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Find the function via TypedModule
         val testFunctionType = typedProgram.getVariableType("testFunction")

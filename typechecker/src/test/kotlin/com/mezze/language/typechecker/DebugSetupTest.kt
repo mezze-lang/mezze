@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -32,10 +33,10 @@ class DebugSetupTest {
         val code = "let x = 42"
         println("TEST: About to parse simple code...")
         System.out.flush()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("TEST: Parsed. About to typecheck...")
         System.out.flush()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("TEST: Success!")
         System.out.flush()
     }

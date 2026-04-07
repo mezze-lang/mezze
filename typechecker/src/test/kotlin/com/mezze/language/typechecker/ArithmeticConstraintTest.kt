@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -22,8 +23,8 @@ class ArithmeticConstraintTest {
         val code = "let add = {x, y} -> x + y"
         
         try {
-            val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             
             // The function should type check successfully
             assertNotNull(typedProgram)
@@ -63,8 +64,8 @@ class ArithmeticConstraintTest {
         val code = "let compare = {x, y} -> x == y"
         
         try {
-            val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             
             // The function should type check successfully
             assertNotNull(typedProgram)
@@ -99,8 +100,8 @@ class ArithmeticConstraintTest {
         try {
             // This should fail because String doesn't have NumAdd ability
             assertThrows(TypeCheckError::class.java) {
-                val program = parser.parse(code)
-                typeChecker.typeCheck(program)
+                val parsedModule = parser.parseParsedModule(code, "test.mz")
+                typeChecker.typeCheck(parsedModule, Paths.get("."))
             }
         } finally {
             // Reset the property
@@ -116,8 +117,8 @@ class ArithmeticConstraintTest {
         """.trimIndent()
         
         try {
-            val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             
             // Should succeed because Int has NumAdd ability
             assertNotNull(typedProgram)
@@ -149,8 +150,8 @@ class ArithmeticConstraintTest {
         // This should fail because my_func requires both parameters to be the same type
         // but we're passing Int (5) and Float (8.6)
         assertThrows(TypeCheckError::class.java) {
-            val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

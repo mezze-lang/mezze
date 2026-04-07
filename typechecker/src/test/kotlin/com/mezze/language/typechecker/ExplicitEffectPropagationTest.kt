@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
@@ -35,8 +36,8 @@ class ExplicitEffectPropagationTest {
               Database.query {sql = query}
         """.trimIndent()
         
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         val functionType = typedProgram.getVariableType("useDatabase") as MezzeType.FunctionType
         assertNotNull(functionType.effects)
@@ -59,8 +60,8 @@ class ExplicitEffectPropagationTest {
               Log.log {msg = msg}
         """.trimIndent()
         
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         val functionType = typedProgram.getVariableType("logSomething") as MezzeType.FunctionType
         

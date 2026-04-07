@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -39,7 +40,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "Unknown performer")
         assertContains(error.message, "UnknownHandler")
@@ -68,7 +69,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "Multiple handlers for the same effect")
         assertContains(error.message, "Log")
@@ -93,7 +94,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "Expression is pure")
     }
@@ -126,7 +127,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "None of the provided handlers handle effects")
         assertContains(error.message, "Log")
@@ -175,7 +176,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "DiskFS")
         assertContains(error.message, "FileSystem")
@@ -221,8 +222,8 @@ class HandlerValidationTest {
             perform HttpClient, DiskFS, CompositeLogger in logMsg {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Handler order should work correctly")
     }
@@ -247,8 +248,8 @@ class HandlerValidationTest {
             perform HandlerA, HandlerB in useAB {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram)
     }
@@ -283,7 +284,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         // Expression is pure (with <*>) but handler provided
         assertContains(error.message, "Expression is pure")
@@ -317,8 +318,8 @@ class HandlerValidationTest {
             perform HttpClient in (perform ConsoleLogger in logAndSend {})
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram)
     }
@@ -343,7 +344,7 @@ class HandlerValidationTest {
         """.trimIndent()
 
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parser.parse(source))
+            typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
         assertContains(error.message, "Top-level value")
         assertContains(error.message, "performed effects")
@@ -366,8 +367,8 @@ class HandlerValidationTest {
             let getResult = {} -> perform ConsoleLogger in logMsg {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram)
     }

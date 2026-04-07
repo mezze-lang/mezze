@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -27,10 +28,10 @@ class UndefinedIdentifierTest {
             add
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -45,10 +46,10 @@ class UndefinedIdentifierTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -63,10 +64,10 @@ class UndefinedIdentifierTest {
             compute
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -83,11 +84,11 @@ class UndefinedIdentifierTest {
             value
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should not throw - variant constructors are allowed
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -99,11 +100,11 @@ class UndefinedIdentifierTest {
             identity
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should not throw - x is a parameter
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -116,11 +117,11 @@ class UndefinedIdentifierTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should not throw - value is defined
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -134,11 +135,11 @@ class UndefinedIdentifierTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should not throw - intToString is built-in
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -150,10 +151,10 @@ class UndefinedIdentifierTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -168,10 +169,10 @@ class UndefinedIdentifierTest {
             record
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)

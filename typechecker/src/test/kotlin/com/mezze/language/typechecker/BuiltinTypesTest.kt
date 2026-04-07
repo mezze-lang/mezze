@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -26,11 +27,11 @@ class BuiltinTypesTest {
             x
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // Should not throw an exception if Option type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
     
@@ -41,11 +42,11 @@ class BuiltinTypesTest {
             x
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // Should not throw an exception if List type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
     
@@ -56,11 +57,11 @@ class BuiltinTypesTest {
             x
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // Should not throw an exception if Result type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
     
@@ -71,11 +72,11 @@ class BuiltinTypesTest {
             x
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // Should not throw an exception if Ordering type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

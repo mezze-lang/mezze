@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -21,8 +22,8 @@ class ComparisonAbilityConstraintTest {
     fun `test equality operators generate Eq constraint`() {
         val code = "let eq = {x, y} -> x == y"
         
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -37,8 +38,8 @@ class ComparisonAbilityConstraintTest {
     fun `test inequality operators generate Eq constraint`() {
         val code = "let neq = {x, y} -> x != y"
         
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -53,8 +54,8 @@ class ComparisonAbilityConstraintTest {
     fun `test ordering operators generate Ord constraint`() {
         val code = "let lt = {x, y} -> x < y"
         
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         // Should succeed and return Boolean
         assertNotNull(typedProgram)
@@ -69,8 +70,8 @@ class ComparisonAbilityConstraintTest {
     fun `test concrete type comparison validation for Int`() {
         val code = "1 == 2"
         
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         // Should succeed because Int has Eq ability
         assertNotNull(typedProgram)
@@ -80,8 +81,8 @@ class ComparisonAbilityConstraintTest {
     fun `test concrete type ordering validation for Int`() {
         val code = "1 < 2"
         
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         // Should succeed because Int has Ord ability
         assertNotNull(typedProgram)

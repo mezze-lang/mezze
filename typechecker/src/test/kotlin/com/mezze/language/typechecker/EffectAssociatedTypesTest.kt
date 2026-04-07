@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -27,8 +28,8 @@ class EffectAssociatedTypesTest {
     }
 
     private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -889,9 +890,9 @@ class EffectAssociatedTypesTest {
                     0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -935,9 +936,9 @@ class EffectAssociatedTypesTest {
                     Ok { val = 0 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

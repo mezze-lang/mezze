@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -25,8 +26,8 @@ class FractionDebugTest {
             let third = 1/3
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedResult = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedResult = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val thirdType = getVariableType(typedResult, "third")
         println("third type: $thirdType")

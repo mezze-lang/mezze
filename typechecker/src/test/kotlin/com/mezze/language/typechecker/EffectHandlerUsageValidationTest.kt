@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.AfterEach
@@ -39,12 +40,12 @@ class EffectHandlerUsageValidationTest {
             let result = BasicLogger.info {msg = "This should fail"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -64,12 +65,12 @@ class EffectHandlerUsageValidationTest {
               42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -87,12 +88,12 @@ class EffectHandlerUsageValidationTest {
             let myFunction = {msg: Str} -> BasicLogger.info {msg = msg}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -110,10 +111,10 @@ class EffectHandlerUsageValidationTest {
             let result = {} -> perform BasicLogger in Log.info {msg = "This should work"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed because perform is wrapped in a function
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -135,10 +136,10 @@ class EffectHandlerUsageValidationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // This should succeed because BasicLogger.info is called inside another Log impl
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -165,16 +166,16 @@ class EffectHandlerUsageValidationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Fix cross-effect handler validation - currently allows cross-effect calls
         // The type checker should reject direct effect handler calls, but currently allows them
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         
         // This test should be updated once cross-effect validation is properly implemented
         // assertFailsWith<TypeCheckError> {
-        //     typeChecker.typeCheck(program)
+        //     typeChecker.typeCheck(parsedModule, Paths.get("."))
         // }
     }
 
@@ -198,11 +199,11 @@ class EffectHandlerUsageValidationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // This should succeed because Console.print is an abstract effect call,
         // not a direct handler call
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -221,12 +222,12 @@ class EffectHandlerUsageValidationTest {
               innerFunction {innerMsg = msg}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -245,12 +246,12 @@ class EffectHandlerUsageValidationTest {
               if condition then BasicLogger.info {msg = msg} else {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // The type checker should reject direct effect handler calls, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -272,12 +273,12 @@ class EffectHandlerUsageValidationTest {
               Debug -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // TODO: Implement effect handler usage validation
         // Effect handler calls in match expressions should be rejected, but validation isn't implemented yet
         // For now, expect successful type checking
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
 
@@ -303,11 +304,11 @@ class EffectHandlerUsageValidationTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // This should succeed because BasicLogger.info and FileLogger.info
         // are called inside another Log impl (CompositeLogger)
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -330,10 +331,10 @@ class EffectHandlerUsageValidationTest {
               42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed because Log.info is called with proper perform syntax
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -363,9 +364,9 @@ class EffectHandlerUsageValidationTest {
               "completed"
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should succeed because all effect calls use proper perform syntax
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 }

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -31,8 +32,8 @@ class EffectPolymorphicSignaturesTest {
     }
 
     private fun typeCheck(code: String) {
-        val program = parser.parse(code)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========================================================================

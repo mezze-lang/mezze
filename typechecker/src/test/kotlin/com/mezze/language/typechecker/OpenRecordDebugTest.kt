@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -30,12 +31,12 @@ class OpenRecordDebugTest {
         println("Source: $source")
         println()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         println("Parsed program successfully")
         println()
 
         try {
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("Type checking succeeded!")
         } catch (e: Exception) {
             println("Type checking failed: ${e.message}")

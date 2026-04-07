@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -29,8 +30,8 @@ class OperatorErrorMessageTest {
 
     private fun getErrorMessage(source: String): String? {
         return try {
-            val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             null  // No error
         } catch (e: TypeCheckError) {
             e.message
@@ -262,28 +263,28 @@ class OperatorErrorMessageTest {
         val explicitCode = "let x = 1.add {r = 2}\nx"
 
         // Both should parse and type-check successfully
-        val operatorProgram = parser.parse(operatorCode)
-        val explicitProgram = parser.parse(explicitCode)
+        val operatorParsedModule = parser.parseParsedModule(operatorCode, "test.mz")
+        val explicitParsedModule = parser.parseParsedModule(explicitCode, "test.mz")
 
         assertDoesNotThrow {
-            typeChecker.typeCheck(operatorProgram)
+            typeChecker.typeCheck(operatorParsedModule, Paths.get("."))
         }
 
         // Clear cache for second check
         ModuleResolver.clearCache()
         val typeChecker2 = TypeChecker()
         assertDoesNotThrow {
-            typeChecker2.typeCheck(explicitProgram)
+            typeChecker2.typeCheck(explicitParsedModule, Paths.get("."))
         }
     }
 
     @Test
     fun `test SyntaxMetadata clears between parses`() {
         // Parse first program with operator
-        parser.parse("let x = 1 + 2\nx")
+        parser.parseParsedModule("let x = 1 + 2\nx", "test.mz")
 
         // Parse second program without operator
-        parser.parse("let y = 42\ny")
+        parser.parseParsedModule("let y = 42\ny", "test.mz")
 
         // Both should work correctly - metadata should not leak between parses
         // If metadata leaked, we might get wrong error messages

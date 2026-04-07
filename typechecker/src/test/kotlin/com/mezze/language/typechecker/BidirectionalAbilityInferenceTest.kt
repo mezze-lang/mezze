@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -48,8 +49,8 @@ class BidirectionalAbilityInferenceTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(code)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             assertNotNull(result)
 
@@ -81,8 +82,8 @@ class BidirectionalAbilityInferenceTest {
 
         // This should fail because y is Int but 10.5 + y requires Float
         assertThrows<TypeCheckError> {
-            val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -111,8 +112,8 @@ class BidirectionalAbilityInferenceTest {
 
         // y is Int (receiver x is Int, so 'a = Int). 10.4 + y fails.
         assertThrows<TypeCheckError> {
-            val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -139,8 +140,8 @@ class BidirectionalAbilityInferenceTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(code)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             assertNotNull(result)
 
@@ -167,8 +168,8 @@ class BidirectionalAbilityInferenceTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(code)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             assertNotNull(result)
 
@@ -195,8 +196,8 @@ class BidirectionalAbilityInferenceTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(code)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             assertNotNull(result)
 

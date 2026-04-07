@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.parser.MezzeParser
@@ -24,8 +25,8 @@ class PolymorphicArithmeticMultiparameterTest {
     @Test
     fun `three parameter function with arithmetic should be polymorphic`() {
         val code = "let complex = {x, y, z} -> x + y"
-        val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedAst = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val complexType = typedAst.getVariableType("complex")
         assertNotNull(complexType)
@@ -53,8 +54,8 @@ class PolymorphicArithmeticMultiparameterTest {
     @Test
     fun `four parameter function with arithmetic should be polymorphic`() {
         val code = "let fourParam = {x, y, z, w} -> x + y"
-        val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedAst = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = typedAst.getVariableType("fourParam")
         assertNotNull(funcType)
@@ -76,8 +77,8 @@ class PolymorphicArithmeticMultiparameterTest {
     @Test
     fun `record return with arithmetic should preserve polymorphism`() {
         val code = "let recordResult = {x, y, z} -> {result = x + y, other = z}"
-        val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedAst = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = typedAst.getVariableType("recordResult")
         assertNotNull(funcType)
@@ -106,8 +107,8 @@ class PolymorphicArithmeticMultiparameterTest {
             let intResult = complex { x = 21, y = 42, z = "test" }
         """.trimIndent()
 
-        val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedAst = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val intResultType = typedAst.getVariableType("intResult")
         assertTrue(intResultType is MezzeType.IntType, "intResult should be Int")
@@ -123,8 +124,8 @@ class PolymorphicArithmeticMultiparameterTest {
             let doResult = doMultiple { x = 1, y = 2, z = 3 }
         """.trimIndent()
 
-        val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedAst = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check doMultiple function type
         val doMultipleType = typedAst.getVariableType("doMultiple")

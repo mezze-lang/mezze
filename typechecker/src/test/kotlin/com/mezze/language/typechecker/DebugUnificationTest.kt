@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -21,8 +22,8 @@ class DebugUnificationTest {
     @Test
     fun `debug simple add function`() {
         val code = "let add = {x, y} -> x + y"
-        val ast = parser.parse(code)
-        val result = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val addType = result.getVariableType("add")
         assertNotNull(addType, "add type should not be null")

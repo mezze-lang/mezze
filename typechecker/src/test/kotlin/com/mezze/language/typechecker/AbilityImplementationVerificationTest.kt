@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -32,11 +33,11 @@ class AbilityImplementationVerificationTest {
             add
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because (x + y) > (x - y) is Bool but there's no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Show") == true, "Error should mention Show ability")
@@ -59,10 +60,10 @@ class AbilityImplementationVerificationTest {
             add
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed because impl Show for Bool exists
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         // Just verify it doesn't throw
         assertNotNull(result)
     }
@@ -79,10 +80,10 @@ class AbilityImplementationVerificationTest {
             showResult
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed because x is polymorphic, not a concrete type
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -98,11 +99,11 @@ class AbilityImplementationVerificationTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because 42 is Int but there's no impl Show for Int
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Show") == true)
@@ -121,11 +122,11 @@ class AbilityImplementationVerificationTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because "hello" is String but there's no impl Show for Str
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Show") == true)
@@ -148,11 +149,11 @@ class AbilityImplementationVerificationTest {
             test
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Inner call true.show {} should fail - no impl Show for Bool
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("Show") == true)

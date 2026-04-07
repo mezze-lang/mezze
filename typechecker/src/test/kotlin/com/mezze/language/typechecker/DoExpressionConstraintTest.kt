@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -30,8 +31,8 @@ class DoExpressionConstraintTest {
               sum
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val directType = getVariableType(typedProgram, "direct")
         val withDoType = getVariableType(typedProgram, "withDo")
@@ -69,8 +70,8 @@ class DoExpressionConstraintTest {
               result
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val concatType = getVariableType(typedProgram, "concat") as MezzeType.FunctionType
         val paramType = concatType.paramType as MezzeType.RecordType
@@ -94,8 +95,8 @@ class DoExpressionConstraintTest {
               message
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val complexType = getVariableType(typedProgram, "complex") as MezzeType.FunctionType
         val paramType = complexType.paramType as MezzeType.RecordType
@@ -120,8 +121,8 @@ class DoExpressionConstraintTest {
               inner + 10
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val nestedType = getVariableType(typedProgram, "nested") as MezzeType.FunctionType
         val paramType = nestedType.paramType as MezzeType.RecordType
@@ -141,8 +142,8 @@ class DoExpressionConstraintTest {
               isPositive
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val compareType = getVariableType(typedProgram, "compare") as MezzeType.FunctionType
         val paramType = compareType.paramType as MezzeType.RecordType
@@ -163,8 +164,8 @@ class DoExpressionConstraintTest {
               x + doubled
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val directType = getVariableType(typedProgram, "direct") as MezzeType.FunctionType
         val withDoType = getVariableType(typedProgram, "withDo") as MezzeType.FunctionType
@@ -191,8 +192,8 @@ class DoExpressionConstraintTest {
               message
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mixedType = getVariableType(typedProgram, "mixed") as MezzeType.FunctionType
         val paramType = mixedType.paramType as MezzeType.RecordType
@@ -219,11 +220,11 @@ class DoExpressionConstraintTest {
               val.show {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should fail because val has type Bool, but there's no impl Show for Bool
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -240,8 +241,8 @@ class DoExpressionConstraintTest {
               diff.show {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val noiseAddType = getVariableType(typedProgram, "noiseAdd") as MezzeType.FunctionType
 
@@ -264,8 +265,8 @@ class DoExpressionConstraintTest {
               result
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val polyShowType = getVariableType(typedProgram, "polyShow") as MezzeType.FunctionType
 
@@ -285,8 +286,8 @@ class DoExpressionConstraintTest {
               {val}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = getVariableType(typedProgram, "test") as MezzeType.FunctionType
         val returnType = testType.returnType as MezzeType.RecordType
@@ -312,8 +313,8 @@ class DoExpressionConstraintTest {
               {sum, diff, isPositive, doubleSum}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = getVariableType(typedProgram, "test") as MezzeType.FunctionType
         val returnType = testType.returnType as MezzeType.RecordType
@@ -339,8 +340,8 @@ class DoExpressionConstraintTest {
               val.to_dbg_str {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = getVariableType(typedProgram, "test") as MezzeType.FunctionType
 
@@ -364,8 +365,8 @@ class DoExpressionConstraintTest {
               val.show {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val noiseAddType = getVariableType(typedProgram, "noiseAdd") as MezzeType.FunctionType
 

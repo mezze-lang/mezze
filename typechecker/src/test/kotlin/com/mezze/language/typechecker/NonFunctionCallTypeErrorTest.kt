@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -29,9 +30,9 @@ class NonFunctionCallTypeErrorTest {
      * Helper to check that type checking fails with a TypeCheckError.
      */
     private fun assertTypeCheckFails(source: String, message: String) {
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail<Unit>("Expected TypeCheckError but type checking succeeded. $message")
         } catch (e: TypeCheckError) {
             // Expected - type check should fail
@@ -43,9 +44,9 @@ class NonFunctionCallTypeErrorTest {
      * Helper to check that type checking succeeds.
      */
     private fun assertTypeCheckSucceeds(source: String, message: String) {
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             // Success - no exception thrown
         } catch (e: TypeCheckError) {
             fail<Unit>("Expected type checking to succeed but got TypeCheckError: ${e.message}. $message")

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -30,14 +31,14 @@ class ScopedEffectsComprehensiveTest {
     }
 
     private fun typeCheck(source: String): TypeCheckResult {
-        val ast = parser.parse(source)
-        return typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun typeCheckFails(source: String): Exception {
-        val ast = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         return assertThrows(Exception::class.java) {
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -503,7 +504,7 @@ class ScopedEffectsComprehensiveTest {
 
         // Should fail at parse time
         val error = assertThrows(Exception::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
         assertTrue(
             error.message?.contains("scope") == true &&
@@ -520,7 +521,7 @@ class ScopedEffectsComprehensiveTest {
 
         // Should fail at parse time
         val error = assertThrows(Exception::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
         assertTrue(
             error.message?.contains("scope") == true &&

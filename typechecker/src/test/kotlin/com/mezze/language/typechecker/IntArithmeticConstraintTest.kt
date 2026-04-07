@@ -23,8 +23,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int add constraint propagation`() {
         val code = "let test = {left, right} -> left + right"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -38,8 +38,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int subtract constraint propagation`() {
         val code = "let test = {left, right} -> left - right"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -53,8 +53,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int multiply constraint propagation`() {
         val code = "let test = {left, right} -> left * right"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -68,8 +68,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int divide constraint propagation`() {
         val code = "let test = {left, right} -> left / right"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -83,8 +83,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int modulo constraint propagation`() {
         val code = "let test = {left, right} -> left % right"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -98,8 +98,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test nested int arithmetic constraint propagation`() {
         val code = "let test = {a, b, c} -> (a * b) + c"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType
@@ -114,8 +114,8 @@ class IntArithmeticConstraintTest {
     @Test
     fun `test int arithmetic constraint propagation with result`() {
         val code = "let test = {x, y} -> x + y"
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program, Paths.get("."))
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val functionType = result.getVariableType("test") as MezzeType.FunctionType
         val paramType = functionType.paramType as MezzeType.RecordType

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -22,7 +23,7 @@ class AbilityMethodAccessTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
 
     @Test
     fun `test Inspect to_dbg_str access should return function type`() {

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
@@ -47,8 +48,8 @@ class AbilityOperationEffectsTest {
             42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability operation with no effects should pass")
     }
@@ -67,8 +68,8 @@ class AbilityOperationEffectsTest {
             42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability operation with explicit empty effects should pass")
     }
@@ -91,8 +92,8 @@ class AbilityOperationEffectsTest {
             [1, 2, 3].set {i = 0, v = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability operation with single effect should pass")
     }
@@ -119,8 +120,8 @@ class AbilityOperationEffectsTest {
             "".read_file {path = "/tmp/test.txt"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability operation with multiple effects should pass")
     }
@@ -148,8 +149,8 @@ class AbilityOperationEffectsTest {
             let length = arr.len {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability with mixed pure and effectful operations should pass")
     }
@@ -164,10 +165,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: polymorphic effects not allowed") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assert(error.message?.contains("polymorphic") == true || error.message?.contains("<...>") == true) {
@@ -187,10 +188,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: polymorphic tail not allowed") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assert(error.message?.contains("polymorphic") == true) {
@@ -208,10 +209,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: performed marker not allowed") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assert(error.message?.contains("performed") == true || error.message?.contains("<*>") == true) {
@@ -231,10 +232,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: performed marker not allowed") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assert(error.message?.contains("performed") == true) {
@@ -252,10 +253,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: <...> alone not allowed") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -276,10 +277,10 @@ class AbilityOperationEffectsTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertThrows<TypeCheckError>("Should fail: one operation has invalid effects") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assert(error.message?.contains("bad_op") == true || error.message?.contains("polymorphic") == true) {
@@ -315,8 +316,8 @@ class AbilityOperationEffectsTest {
             arr.set {i = 0, v = 99}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability with effect should compile")
     }
@@ -338,8 +339,8 @@ class AbilityOperationEffectsTest {
             display {x = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Pure ability operation should not add effects")
     }
@@ -365,8 +366,8 @@ class AbilityOperationEffectsTest {
             [1, 2, 3].set {i = 0, v = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Impl with matching effects should pass")
     }
@@ -396,8 +397,8 @@ class AbilityOperationEffectsTest {
             iter.has_next {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability with associated types and effects should work")
     }
@@ -423,8 +424,8 @@ class AbilityOperationEffectsTest {
             "".create_logger {prefix = "INFO"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Ability operation returning function with effects should work")
     }
@@ -449,8 +450,8 @@ class AbilityOperationEffectsTest {
             5.transform {f = {x} -> x + 1}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Complex effect signatures should work")
     }
@@ -488,8 +489,8 @@ class AbilityOperationEffectsTest {
             f.read_all {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Multiple abilities with different effects should work")
     }

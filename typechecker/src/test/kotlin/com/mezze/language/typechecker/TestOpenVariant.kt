@@ -14,9 +14,9 @@ class TestOpenVariant {
         println("Attempting to parse: $code")
         val parser = MezzeParser()
         try {
-            val program = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
             println("SUCCESS: Parsed open variant")
-            println("Program: $program")
+            println("Program: $parsedModule")
         } catch (e: Exception) {
             println("FAILED: ${e.message}")
             e.printStackTrace()

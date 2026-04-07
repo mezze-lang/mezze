@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import kotlin.test.assertNotNull
@@ -15,10 +16,10 @@ class VariantRecordPatternDebugTest {
         """.trimIndent()
 
         val parser = MezzeParser()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
 
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
     }

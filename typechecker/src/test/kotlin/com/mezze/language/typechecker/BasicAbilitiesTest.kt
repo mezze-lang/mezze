@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.typedast.TypedAbilityDecl
 import com.mezze.language.typedast.TypedEffectDecl
@@ -33,8 +34,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify ability declaration is processed via TypedModule
         val abilityDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }
@@ -58,8 +59,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify implementation is processed via TypedModule
         val implDecl = typedProgram.typedModule?.abilityImpls?.firstOrNull()
@@ -75,8 +76,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify multi-parameter ability declaration
         val convertDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Convert" }
@@ -97,8 +98,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify Ord ability was processed
         val ordDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Ord" }
@@ -115,8 +116,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify effect declaration is processed via TypedModule
         val effectDecl = typedProgram.typedModule?.effectDecls?.find { it.name == "Log" }
@@ -138,8 +139,8 @@ class BasicAbilitiesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify performer (effect impl) is processed via TypedModule
         val performerDecl = typedProgram.typedModule?.performerDecls?.firstOrNull()
@@ -154,8 +155,8 @@ class BasicAbilitiesTest {
             let x = 42
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Verify let binding is processed
         val xType = typedProgram.getVariableType("x")

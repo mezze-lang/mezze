@@ -73,10 +73,10 @@ class ModuleResolverTest {
         
         assertDoesNotThrow {
             val typeChecker = TypeChecker()
-            val program = parser.parse("let x = Some { val = 42 }")
+            val parsedModule = parser.parseParsedModule("let x = Some { val = 42 }", "test.mz")
             
             // This should not cause a stack overflow
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

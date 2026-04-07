@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -44,8 +45,8 @@ class ModuleTypePreservationTest {
         val typeChecker = TypeChecker()
 
         try {
-            val program = parser.parse(mainSource)
-            val result = typeChecker.typeCheck(program, tempDir)
+            val parsedModule = parser.parseParsedModule(mainSource, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, tempDir)
 
             println("\n========================================")
             println("RESULTS:")
@@ -109,8 +110,8 @@ class ModuleTypePreservationTest {
         val typeChecker = TypeChecker()
 
         try {
-            val program = parser.parse(mainSource)
-            val result = typeChecker.typeCheck(program, tempDir)
+            val parsedModule = parser.parseParsedModule(mainSource, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, tempDir)
 
             // Get types from the typed result
             val testIntType = result.getVariableType("test_int")

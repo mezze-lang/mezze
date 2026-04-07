@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
@@ -44,8 +45,8 @@ class AbilityImplementationBodyValidationTest {
             display {value = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body returning String should pass")
     }
@@ -68,8 +69,8 @@ class AbilityImplementationBodyValidationTest {
             render {value = 100}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body returning record should pass")
     }
@@ -90,8 +91,8 @@ class AbilityImplementationBodyValidationTest {
             id {x = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body preserving polymorphic type should pass")
     }
@@ -112,8 +113,8 @@ class AbilityImplementationBodyValidationTest {
             d {x = 21}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body with numeric operations should pass")
     }
@@ -134,8 +135,8 @@ class AbilityImplementationBodyValidationTest {
             getSign {x = 5}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body with conditional should pass")
     }
@@ -158,8 +159,8 @@ class AbilityImplementationBodyValidationTest {
             getDefault {d = 0, x = None}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body with pattern matching should pass")
     }
@@ -180,8 +181,8 @@ class AbilityImplementationBodyValidationTest {
             add {x = 10, y = 20}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body with multiple parameters should pass")
     }
@@ -207,8 +208,8 @@ class AbilityImplementationBodyValidationTest {
             p {v = "", s = "123"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Implementation body calling stdlib functions should pass")
     }
@@ -231,10 +232,10 @@ class AbilityImplementationBodyValidationTest {
             display {value = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Body returns Int but signature requires String") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -254,10 +255,10 @@ class AbilityImplementationBodyValidationTest {
             p {x = 5}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Conditional branches have different types") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -279,10 +280,10 @@ class AbilityImplementationBodyValidationTest {
             e {d = 0, x = None}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Some branch returns Int, None branch returns String") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -304,10 +305,10 @@ class AbilityImplementationBodyValidationTest {
             render {value = 100}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Record has 'message' field but signature requires 'text'") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -327,10 +328,10 @@ class AbilityImplementationBodyValidationTest {
             render {value = 100}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Record field 'text' is Int but should be String") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -350,11 +351,11 @@ class AbilityImplementationBodyValidationTest {
             add {x = 10, y = 20}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Note: This should actually PASS because using only 'right' is valid
         // The body type-checks correctly as Int -> Int
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram, "Using subset of parameters is valid")
     }
 
@@ -374,10 +375,10 @@ class AbilityImplementationBodyValidationTest {
             p {x = 5}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: undefinedFunction is not defined") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -397,10 +398,10 @@ class AbilityImplementationBodyValidationTest {
             len {s = "hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Cannot use + on String without concat") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -420,10 +421,10 @@ class AbilityImplementationBodyValidationTest {
             areEqual {x = 5, y = 10}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Body returns Int but signature requires Bool") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -443,10 +444,10 @@ class AbilityImplementationBodyValidationTest {
             g {v = 10}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Body returns function but signature requires Int") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -468,10 +469,10 @@ class AbilityImplementationBodyValidationTest {
             t {x = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: intToString expects Int but receives String") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -498,8 +499,8 @@ class AbilityImplementationBodyValidationTest {
             idBool {x = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Multiple identity implementations should pass")
     }
@@ -522,8 +523,8 @@ class AbilityImplementationBodyValidationTest {
             f {x = 41}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Nested function calls in implementation should pass")
     }
@@ -546,8 +547,8 @@ class AbilityImplementationBodyValidationTest {
             calc {a = 10, b = 15}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Complex arithmetic expression in body should pass")
     }

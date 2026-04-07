@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -31,9 +32,9 @@ class NewtypeTypeCheckerTest {
                 Email {value} -> value
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Simple newtype declaration typechecks")
     }
@@ -46,9 +47,9 @@ class NewtypeTypeCheckerTest {
             let mkUserId = {id} -> UserId {value = id}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Public newtype declaration typechecks")
     }
@@ -61,9 +62,9 @@ class NewtypeTypeCheckerTest {
             let origin = Point {x = 0.0, y = 0.0}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype with record type typechecks")
     }
@@ -78,9 +79,9 @@ class NewtypeTypeCheckerTest {
                 Box {value} -> value
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype with type parameter typechecks")
     }
@@ -93,9 +94,9 @@ class NewtypeTypeCheckerTest {
             let mkHandler = {f} -> Handler {fn = f}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype with function type typechecks")
     }
@@ -108,9 +109,9 @@ class NewtypeTypeCheckerTest {
             let mkNames = {ns} -> Names {list = ns}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype with array type typechecks")
     }
@@ -127,9 +128,9 @@ class NewtypeTypeCheckerTest {
             let mkName = {n} -> Name {value = n}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Multiple newtype declarations typecheck")
     }
@@ -142,9 +143,9 @@ class NewtypeTypeCheckerTest {
             newtype Email = email String
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message!!.contains("must start with an uppercase letter"))
         println("✅ Constructor naming convention enforced")
@@ -156,9 +157,9 @@ class NewtypeTypeCheckerTest {
             newtype MyType = NumAdd String
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message!!.contains("already used by a built-in ability"))
         println("✅ Constructor collision with built-in ability prevented")
@@ -172,9 +173,9 @@ class NewtypeTypeCheckerTest {
             let mkEmail = {s} -> Email {value = s}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Same name for type and constructor allowed")
     }
@@ -187,9 +188,9 @@ class NewtypeTypeCheckerTest {
             let mkEmail = {s} -> MkEmail {value = s}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Different names for type and constructor allowed")
     }
@@ -205,9 +206,9 @@ class NewtypeTypeCheckerTest {
             let email = Email {value = "test@example.com"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype constructor works as a function")
     }
@@ -228,9 +229,9 @@ class NewtypeTypeCheckerTest {
                 Name {value} -> value
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype provides type safety")
     }
@@ -245,9 +246,9 @@ class NewtypeTypeCheckerTest {
             let user = User {id = userId, name = "Alice"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype with nested types typechecks")
     }
@@ -264,9 +265,9 @@ class NewtypeTypeCheckerTest {
                 Point {x, y} -> x
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         println("✅ Newtype pattern matching typechecks")
     }

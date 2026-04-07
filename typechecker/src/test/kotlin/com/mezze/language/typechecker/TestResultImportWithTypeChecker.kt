@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -31,8 +32,8 @@ class TestResultImportWithTypeChecker {
         println("Testing import only (with TypeChecker)")
 
         try {
-            val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(typed)
             println("SUCCESS: Import succeeded with TypeChecker!")
         } catch (e: Exception) {

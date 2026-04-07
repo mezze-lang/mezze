@@ -27,10 +27,10 @@ class TestActualResultFile {
         println("File size: ${source.length} characters")
 
         try {
-            val program = parser.parse(source)
-            println("Parsed successfully, ${program.items.size} items")
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            println("Parsed successfully, ${parsedModule.decls.size} items")
 
-            val result = typeChecker.checkProgram(program, resultFile.toPath().parent, "std::result")
+            val result = typeChecker.checkParsedModule(parsedModule, resultFile.toPath().parent, "std::result")
             when (result) {
                 is TypeChecker.TypeCheckResult.Success -> { /* success */ }
                 is TypeChecker.TypeCheckResult.Failure -> throw RuntimeException(result.errors.joinToString("\n") { e -> e.message })

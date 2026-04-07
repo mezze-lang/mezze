@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -35,8 +36,8 @@ class SeqVsListTypeDistinctionTest {
     @Test
     fun `test array literal has Seq type`() {
         val source = "let arr = [1, 2, 3]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("arr")
 
@@ -53,8 +54,8 @@ class SeqVsListTypeDistinctionTest {
             let lst = Cons { head = 1, tail = Nil }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("lst")
 
@@ -77,11 +78,11 @@ class SeqVsListTypeDistinctionTest {
             let assign_arr_to_list : (List Int) = arr
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because Seq Int cannot be assigned to List Int
         assertThrows<TypeCheckError>("Seq should not unify with List") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -96,11 +97,11 @@ class SeqVsListTypeDistinctionTest {
             let assign_list_to_arr : [Int] = lst
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because List Int cannot be assigned to Seq Int
         assertThrows<TypeCheckError>("List should not unify with Seq") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -125,10 +126,10 @@ class SeqVsListTypeDistinctionTest {
             let result = take_array { arr = lst }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Function expecting Seq should reject List") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -148,10 +149,10 @@ class SeqVsListTypeDistinctionTest {
             let result = take_list { lst = arr }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Function expecting List should reject Array") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -168,10 +169,10 @@ class SeqVsListTypeDistinctionTest {
             let result = get_first { arr = numbers }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - Seq matches Seq
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType)
     }
@@ -190,10 +191,10 @@ class SeqVsListTypeDistinctionTest {
             let result = get_head { lst = numbers }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - List matches List
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType)
     }
@@ -219,10 +220,10 @@ class SeqVsListTypeDistinctionTest {
             let result = process { val = lst }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("List should not match array patterns") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -243,10 +244,10 @@ class SeqVsListTypeDistinctionTest {
             let result = process { val = arr }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Seq should not match list constructor patterns") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -266,10 +267,10 @@ class SeqVsListTypeDistinctionTest {
             let first = get_element { arr = numbers }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - polymorphic function works with arrays
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertTrue(typedProgram.getVariableType("first") is MezzeType.IntType,
                   "Result should be IntType")
@@ -292,10 +293,10 @@ class SeqVsListTypeDistinctionTest {
             let result = get_head { lst = numbers }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - function works with List Int
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = typedProgram.getVariableType("result")
         assertTrue(resultType is MezzeType.IntType,
@@ -319,10 +320,10 @@ class SeqVsListTypeDistinctionTest {
             let result = map_list { lst = arr, f = { x: Int } -> x * 2 }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Seq should not be accepted by List function") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -342,10 +343,10 @@ class SeqVsListTypeDistinctionTest {
             let result = get_element { arr = lst }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("List should not be accepted by Seq function") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -369,10 +370,10 @@ class SeqVsListTypeDistinctionTest {
             let mixed : [[Int]] = list_of_ints
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Nested Seq and List should not unify") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -388,10 +389,10 @@ class SeqVsListTypeDistinctionTest {
             let arr_of_lists = [list1, list2]
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - Seq can contain List elements
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredArrType = typedProgram.getVariableType("arr_of_lists")
         assertTrue(inferredArrType is MezzeType.SeqType,
@@ -418,10 +419,10 @@ class SeqVsListTypeDistinctionTest {
                                      tail = Cons { head = arr2, tail = Nil } }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - List can contain Seq elements
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val lstType = typedProgram.getVariableType("list_of_arrs")
 
@@ -449,12 +450,12 @@ class SeqVsListTypeDistinctionTest {
             let combined = concat { xs = list1, ys = list2 }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This test may fail if std::list is not available,
         // which is acceptable - we're testing the type distinction
         try {
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             val combinedType = typedProgram.getVariableType("combined")
             if (combinedType != null) {
@@ -487,10 +488,10 @@ class SeqVsListTypeDistinctionTest {
             let result = get_first { a = arr1 }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should succeed - seq operations with arrays
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertTrue(typedProgram.getVariableType("result") is MezzeType.IntType,
                   "Result should be IntType")
@@ -514,10 +515,10 @@ class SeqVsListTypeDistinctionTest {
             let result = take_array { x = lst }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error message should mention Seq and List

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -28,8 +29,8 @@ class EffectPolymorphismTest {
     }
 
     private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // getBinding is only used for .inferredType access — use getVariableType instead
@@ -40,8 +41,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
@@ -55,8 +56,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
@@ -70,8 +71,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log, Console, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
@@ -85,8 +86,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
@@ -100,8 +101,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         // Empty effect row <> means no effects, so the annotation should be null
@@ -114,8 +115,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertEquals(null, typeAnnotation.effects, "Function with no effects should have null effect annotation")
@@ -129,8 +130,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects)
@@ -148,8 +149,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[1] as LetBinding // Second item (after effect declaration)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[1] as LetBinding // Second item (after effect declaration)
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects)
@@ -168,8 +169,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[1] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[1] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects)
@@ -185,8 +186,8 @@ class EffectPolymorphismTest {
                 { f, g } -> 42
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         // Check that parameter types have polymorphic effects
@@ -215,8 +216,8 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log, Console, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[2] as LetBinding // Third item (after two effect declarations)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[2] as LetBinding // Third item (after two effect declarations)
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         assertNotNull(typeAnnotation.effects, "Function should have effect annotation")
@@ -231,8 +232,8 @@ class EffectPolymorphismTest {
                 { f } -> 42
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val binding = program.items[0] as LetBinding
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val binding = parser.parse(code).items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
         // Check that the parameter type (a function) has polymorphic effects
@@ -297,8 +298,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         // Should not throw an exception
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram)
     }
 
@@ -316,8 +317,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         // This should pass - effect widening is allowed (pure is a subtype of effectful)
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram)
     }
 
@@ -330,8 +331,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         // Should not throw an exception
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram)
     }
 
@@ -344,8 +345,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         // Should not throw an exception
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram)
     }
 
@@ -372,8 +373,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         // Should not throw an exception
-        val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram)
 
         val resultType = typedProgram.getVariableType("result")

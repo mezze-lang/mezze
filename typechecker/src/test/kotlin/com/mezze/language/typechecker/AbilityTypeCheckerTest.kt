@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.typedast.TypedAbilityDecl
 import com.mezze.language.typedast.TypedAbilityImpl
@@ -28,8 +29,8 @@ class AbilityTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Encoder" }
         assertNotNull(ability)
@@ -52,8 +53,8 @@ class AbilityTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Encoder" }
         assertNotNull(ability)
@@ -77,8 +78,8 @@ class AbilityTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }
         assertNotNull(ability)
@@ -102,8 +103,8 @@ class AbilityTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val ability = typedProgram.typedModule?.abilityDecls?.find { it.name == "Serializer" }
         assertNotNull(ability)
@@ -133,11 +134,11 @@ class AbilityTypeCheckerTest {
             }
         """.trimIndent()
         
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         
         // Should not throw any exceptions
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

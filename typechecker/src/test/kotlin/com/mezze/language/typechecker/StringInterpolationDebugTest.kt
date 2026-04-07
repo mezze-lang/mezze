@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.prettyPrintType
@@ -27,8 +28,8 @@ class StringInterpolationDebugTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("SUCCESS: Str interpolation lambda type checking passed")
 
             val concatType = typedProgram.getVariableType("concat")
@@ -55,8 +56,8 @@ class StringInterpolationDebugTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("SUCCESS: Multiple expression string interpolation type checking passed")
 
             val formatType = typedProgram.getVariableType("format")

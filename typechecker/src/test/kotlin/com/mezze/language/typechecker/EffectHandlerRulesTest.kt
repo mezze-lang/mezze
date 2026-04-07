@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -45,8 +46,8 @@ class EffectHandlerRulesTest {
             perform PostgresDB in runQuery { sql = "SELECT * FROM users" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Handler with exact type match should pass")
     }
@@ -77,8 +78,8 @@ class EffectHandlerRulesTest {
             let test = {} -> perform DiskFS in (perform FileLogger in logMessage { text = "test" })
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Handler adding effects should pass")
     }
@@ -107,8 +108,8 @@ class EffectHandlerRulesTest {
             perform MemCache in useCache { key = "mykey" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Handler implementing all methods should pass")
     }
@@ -141,8 +142,8 @@ class EffectHandlerRulesTest {
             perform PostgresDB in (perform DatabaseAuth in authenticate { token = "abc123" })
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Handler using other effects should pass")
     }
@@ -176,8 +177,8 @@ class EffectHandlerRulesTest {
             fullyHandled { id = "user123" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Partial effect handling should pass")
     }
@@ -216,8 +217,8 @@ class EffectHandlerRulesTest {
             perform HttpClient, DiskFS, CompositeLogger in logMessage { text = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Handler adding multiple effects should pass")
     }
@@ -240,10 +241,10 @@ class EffectHandlerRulesTest {
             perform BadDB in runQuery { sql = "SELECT * FROM users" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -264,10 +265,10 @@ class EffectHandlerRulesTest {
             perform Console in pureFunction { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Console handles Log effect, but pureFunction doesn't use Log") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -295,10 +296,10 @@ class EffectHandlerRulesTest {
             perform PostgresDB in logMessage { text = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: PostgresDB handles Database, not Log") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -322,10 +323,10 @@ class EffectHandlerRulesTest {
             perform EnhancedLogger, BasicLogger in logMessage { text = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError>("Should fail: Can't apply two handlers to the same single effect usage") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

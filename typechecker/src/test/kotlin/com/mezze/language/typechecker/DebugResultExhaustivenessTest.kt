@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -29,10 +30,10 @@ class DebugResultExhaustivenessTest {
         """.trimIndent()
 
         println("Code: $code")
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val typed = typeChecker.typeCheck(program)
+        val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typed)
         println("Type checked successfully!")
     }
@@ -60,10 +61,10 @@ class DebugResultExhaustivenessTest {
         """.trimIndent()
 
         println("Code: $code")
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val typed = typeChecker.typeCheck(program)
+        val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typed)
         println("Type checked successfully!")
     }

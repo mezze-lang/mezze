@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
@@ -35,9 +36,9 @@ class FixtureBasedTypeCheckerTest {
 
     private fun parseAndTypeCheck(source: String): TypeCheckResult {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun extractExpectedTypes(source: String): Map<String, String> {
@@ -56,8 +57,8 @@ class FixtureBasedTypeCheckerTest {
         return expectedTypes
     }
 
-    private fun getActualTypes(program: Program, typeChecker: TypeChecker): Map<String, String> {
-        val result = typeChecker.typeCheck(program)
+    private fun getActualTypes(parsedModule: com.mezze.language.parsedast.ParsedModule, typeChecker: TypeChecker): Map<String, String> {
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         val typeAliases = typeChecker.getTypeAliases()
 
         val actualTypes = mutableMapOf<String, String>()
@@ -217,9 +218,9 @@ class FixtureBasedTypeCheckerTest {
         val expectedTypes = extractExpectedTypes(source)
         val filteredSource = filterComments(source)
 
-        val program = parser.parse(filteredSource)
+        val parsedModule = parser.parseParsedModule(filteredSource, "test.mz")
         val typeChecker = TypeChecker()
-        val actualTypes = getActualTypes(program, typeChecker)
+        val actualTypes = getActualTypes(parsedModule, typeChecker)
 
         for ((varName, expectedType) in expectedTypes) {
             val actualType = actualTypes[varName]
@@ -241,9 +242,9 @@ class FixtureBasedTypeCheckerTest {
         val expectedTypes = extractExpectedTypes(source)
         val filteredSource = filterComments(source)
 
-        val program = parser.parse(filteredSource)
+        val parsedModule = parser.parseParsedModule(filteredSource, "test.mz")
         val typeChecker = TypeChecker()
-        val actualTypes = getActualTypes(program, typeChecker)
+        val actualTypes = getActualTypes(parsedModule, typeChecker)
 
         for ((varName, expectedType) in expectedTypes) {
             val actualType = actualTypes[varName]
@@ -264,9 +265,9 @@ class FixtureBasedTypeCheckerTest {
         val source = loadMezzeFile("${getFixturesPath()}/annotations/$filename")
         val expectedTypes = extractExpectedTypes(source)
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        val actualTypes = getActualTypes(program, typeChecker)
+        val actualTypes = getActualTypes(parsedModule, typeChecker)
 
         for ((varName, expectedType) in expectedTypes) {
             val actualType = actualTypes[varName]

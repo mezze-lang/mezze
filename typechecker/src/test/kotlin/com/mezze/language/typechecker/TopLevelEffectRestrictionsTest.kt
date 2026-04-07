@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -47,8 +48,8 @@ class TopLevelEffectRestrictionsTest {
             let x = 42
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -61,8 +62,8 @@ class TopLevelEffectRestrictionsTest {
             let suspended = Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -79,8 +80,8 @@ class TopLevelEffectRestrictionsTest {
             let performedValue = {} -> perform Console in Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // When wrapped in a function, it should have type {} -> {} <*>
         val funcType = getVariableType(typedProgram, "performedValue") as MezzeType.FunctionType
@@ -106,8 +107,8 @@ class TopLevelEffectRestrictionsTest {
             let myFunc = {} -> perform Console in Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "myFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -121,8 +122,8 @@ class TopLevelEffectRestrictionsTest {
             let pureFunc = {x} -> x + 1
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -135,8 +136,8 @@ class TopLevelEffectRestrictionsTest {
             let effectfulFunc = {} -> Log.println { msg = "hello" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "effectfulFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -161,8 +162,8 @@ class TopLevelEffectRestrictionsTest {
             let main = {} -> perform Console in Log.println { msg = "Hello World" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = getVariableType(typedProgram, "main") as MezzeType.FunctionType
         assertNotNull(mainType.effects)
@@ -176,8 +177,8 @@ class TopLevelEffectRestrictionsTest {
             let main = {} -> 42
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -187,8 +188,8 @@ class TopLevelEffectRestrictionsTest {
             let main = {} -> {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -198,8 +199,8 @@ class TopLevelEffectRestrictionsTest {
             let main = 42
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========================================================================
@@ -230,8 +231,8 @@ class TopLevelEffectRestrictionsTest {
                 Log.println { msg = "Done" }
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val funcType = getVariableType(typedProgram, "myFunc") as MezzeType.FunctionType
         assertNotNull(funcType.effects)
@@ -255,8 +256,8 @@ class TopLevelEffectRestrictionsTest {
             let caller = {} -> helper {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val callerType = getVariableType(typedProgram, "caller") as MezzeType.FunctionType
         assertNotNull(callerType.effects)

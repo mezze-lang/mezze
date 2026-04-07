@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -24,7 +25,7 @@ class OrPatternBindingTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
 
     // ========== VALID OR-PATTERNS (SAME BINDINGS) ==========
 

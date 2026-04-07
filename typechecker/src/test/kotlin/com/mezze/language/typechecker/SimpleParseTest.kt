@@ -146,11 +146,12 @@ let foo = {n, xs} -> bar {x = 1, y = 2}
         println(code)
         println("===== ATTEMPTING PARSE =====")
         try {
-            val ast = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            val v1Ast = parser.parse(code)
             println("SUCCESS! Parsed to AST")
-            assertNotNull(ast, "AST should not be null")
+            assertNotNull(v1Ast, "AST should not be null")
             println("\n===== AST ITEMS =====")
-            ast.items.forEachIndexed { i, item ->
+            v1Ast.items.forEachIndexed { i, item ->
                 println("Item $i: ${item::class.simpleName}")
                 if (item is com.mezze.language.ast.LetBinding) {
                     println("  Pattern: ${item.pattern}")

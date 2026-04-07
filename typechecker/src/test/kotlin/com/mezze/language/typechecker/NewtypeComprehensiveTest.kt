@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -52,7 +53,7 @@ class NewtypeComprehensiveTest {
                 newtype UserId = UserId Int
                 let uid = UserId {value = 42}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -62,7 +63,7 @@ class NewtypeComprehensiveTest {
                 newtype Email = Email String
                 let email = Email {value = "test@example.com"}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -72,7 +73,7 @@ class NewtypeComprehensiveTest {
                 newtype Point = Point { x: Float, y: Float }
                 let p = Point { x = 3.0, y = 4.0 }
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -84,7 +85,7 @@ class NewtypeComprehensiveTest {
                 let uid = UserId {value = 42}
                 let age = Age {value = 25}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
     }
@@ -104,7 +105,7 @@ class NewtypeComprehensiveTest {
                 let val = match uid is
                     UserId {value} -> value
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -116,7 +117,7 @@ class NewtypeComprehensiveTest {
                 let x_val = match p is
                     Point { x, y } -> x
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -128,7 +129,7 @@ class NewtypeComprehensiveTest {
                     Email {value} -> value
                 let result = unwrap {e = Email {value = "test"}}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
     }
@@ -147,7 +148,7 @@ class NewtypeComprehensiveTest {
                 let same = {a: UserId, b: UserId} -> a == b
             """.trimIndent()
             assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(parser.parse(source))
+                typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             }
         }
 
@@ -158,7 +159,7 @@ class NewtypeComprehensiveTest {
                 let cmp = {a: UserId, b: UserId} -> a < b
             """.trimIndent()
             assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(parser.parse(source))
+                typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             }
         }
 
@@ -168,7 +169,7 @@ class NewtypeComprehensiveTest {
                 newtype Email = Email String
                 let dbg = {e: Email} -> e.to_dbg_str {}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -190,7 +191,7 @@ class NewtypeComprehensiveTest {
 
                 let same = {a: UserId, b: UserId} -> a.eq {r = b}
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -200,7 +201,7 @@ class NewtypeComprehensiveTest {
                 type Color = | Red, Green, Blue |
                 let same = {a: Color, b: Color} -> a == b
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -210,7 +211,7 @@ class NewtypeComprehensiveTest {
                 type Wrapper = | Wrap Int |
                 let same = {a: Wrapper, b: Wrapper} -> a == b
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -220,7 +221,7 @@ class NewtypeComprehensiveTest {
                 type Point = { x: Int, y: Int }
                 let same = {a: Point, b: Point} -> a == b
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
     }
@@ -240,7 +241,7 @@ class NewtypeComprehensiveTest {
                 let result = process {uid = 42}
             """.trimIndent()
             assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(parser.parse(source))
+                typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             }
         }
 
@@ -253,7 +254,7 @@ class NewtypeComprehensiveTest {
                 let result = process {uid = Age {value = 25}}
             """.trimIndent()
             assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(parser.parse(source))
+                typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             }
         }
 
@@ -266,7 +267,7 @@ class NewtypeComprehensiveTest {
                 let val = match uid is
                     UserId {value} -> value
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
     }
@@ -286,7 +287,7 @@ class NewtypeComprehensiveTest {
                 let uid = UserId {value = 42}
                 let user = User { id = uid, name = "Alice" }
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
 
@@ -301,7 +302,7 @@ class NewtypeComprehensiveTest {
                     User { id, name } -> match id is
                         UserId {value} -> value
             """.trimIndent()
-            val result = typeChecker.typeCheck(parser.parse(source))
+            val result = typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
             assertNotNull(result)
         }
     }
@@ -329,11 +330,11 @@ class NewtypeComprehensiveTest {
                 let uid = UserId {value = 42}
             """.trimIndent())
 
-            val userProgram = parser.parse(
-                java.nio.file.Files.readString(tempDir.resolve("user.mz"))
+            val userParsedModule = parser.parseParsedModule(
+                java.nio.file.Files.readString(tempDir.resolve("user.mz")), "test.mz"
             )
             assertThrows<TypeCheckError> {
-                typeChecker.typeCheck(userProgram, tempDir)
+                typeChecker.typeCheck(userParsedModule, tempDir)
             }
         }
 
@@ -353,10 +354,10 @@ class NewtypeComprehensiveTest {
                 let result = process {id = uid}
             """.trimIndent())
 
-            val userProgram = parser.parse(
-                java.nio.file.Files.readString(tempDir.resolve("user.mz"))
+            val userParsedModule = parser.parseParsedModule(
+                java.nio.file.Files.readString(tempDir.resolve("user.mz")), "test.mz"
             )
-            val result = typeChecker.typeCheck(userProgram, tempDir)
+            val result = typeChecker.typeCheck(userParsedModule, tempDir)
             assertNotNull(result)
         }
     }

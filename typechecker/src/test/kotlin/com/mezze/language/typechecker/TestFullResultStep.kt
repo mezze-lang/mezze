@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -76,8 +77,8 @@ class TestFullResultStep {
             println("\n[$index] Testing with function: $funcName")
 
             try {
-                val program = parser.parse(accumulated)
-                val typed = typeChecker.typeCheck(program)
+                val parsedModule = parser.parseParsedModule(accumulated, "test.mz")
+                val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
                 assertNotNull(typed)
                 println("  ✓ SUCCESS with $funcName")
             } catch (e: Exception) {

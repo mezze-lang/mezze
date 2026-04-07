@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -29,8 +30,8 @@ class ComprehensiveEffectRowTest {
             let program = Log.info {msg = "Hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = result.getVariableType("program")
 
@@ -54,8 +55,8 @@ class ComprehensiveEffectRowTest {
               42
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = result.getVariableType("program")
 
@@ -85,8 +86,8 @@ class ComprehensiveEffectRowTest {
               "completed"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = result.getVariableType("program")
 
@@ -117,8 +118,8 @@ class ComprehensiveEffectRowTest {
               "outer result"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check nested program - should accumulate both Log and Error effects
         val nestedType = result.getVariableType("nestedProgram")
@@ -149,8 +150,8 @@ class ComprehensiveEffectRowTest {
             let getResult = {} -> perform Logger in program
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check program has effectful type (SuspendedType)
         val programType = result.getVariableType("program")
@@ -195,8 +196,8 @@ class ComprehensiveEffectRowTest {
             let partialResult = perform Logger in program
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check program has both effects
         val programType = result.getVariableType("program")
@@ -243,8 +244,8 @@ class ComprehensiveEffectRowTest {
             let step2 = perform Terminal in step1
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check program has both effects
         val programType = result.getVariableType("program")
@@ -289,8 +290,8 @@ class ComprehensiveEffectRowTest {
             let getResult2 = {} -> perform FileLogger in program
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check program has Log effect (SuspendedType)
         val programType = result.getVariableType("program")
@@ -339,8 +340,8 @@ class ComprehensiveEffectRowTest {
               "processing complete"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check fetchUser function has all three effects
         val fetchUserType = result.getVariableType("fetchUser")
@@ -369,8 +370,8 @@ class ComprehensiveEffectRowTest {
               x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = result.getVariableType("pureComputation")
 
@@ -392,8 +393,8 @@ class ComprehensiveEffectRowTest {
               y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = result.getVariableType("mixedProgram")
 

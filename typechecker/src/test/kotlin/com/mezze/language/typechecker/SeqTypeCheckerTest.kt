@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -20,8 +21,8 @@ class SeqTypeCheckerTest {
     @Test
     fun `test empty Seq type inference`() {
         val source = "let empty = []"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("empty") as MezzeType.SeqType
 
@@ -32,8 +33,8 @@ class SeqTypeCheckerTest {
     @Test
     fun `test integer Seq type inference`() {
         val source = "let numbers = [1, 2, 3, 4, 5]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("numbers") as MezzeType.SeqType
 
@@ -44,8 +45,8 @@ class SeqTypeCheckerTest {
     @Test
     fun `test string Seq type inference`() {
         val source = """let names = ["Alice", "Bob", "Charlie"]"""
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("names") as MezzeType.SeqType
 
@@ -56,8 +57,8 @@ class SeqTypeCheckerTest {
     @Test
     fun `test boolean Seq type inference`() {
         val source = "let flags = [True, False, True]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("flags") as MezzeType.SeqType
 
@@ -72,8 +73,8 @@ class SeqTypeCheckerTest {
     @Test
     fun `test nested Seq type inference`() {
         val source = "let matrix = [[1, 2], [3, 4]]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("matrix") as MezzeType.SeqType
 
@@ -87,8 +88,8 @@ class SeqTypeCheckerTest {
         // This test may fail due to current type system limitations with explicit annotations
         // Let's test basic inference instead
         val source = "let numbers = [1, 2, 3]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("numbers")
 
@@ -103,8 +104,8 @@ class SeqTypeCheckerTest {
     fun `test nested Seq with explicit type annotation`() {
         // Test basic nested inference instead of explicit annotations
         val source = "let matrix = [[1, 2], [3, 4]]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("matrix")
 
@@ -120,19 +121,19 @@ class SeqTypeCheckerTest {
     @Test
     fun `test Seq type mismatch error`() {
         val source = """let mixed = [1, "hello", True]"""
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Arrays must have homogeneous element types - this should fail
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
     @Test
     fun `test Seq with expression elements`() {
         val source = "let computed = [1 + 2, 3 * 4, 5 - 1]"
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val inferredType = typedProgram.getVariableType("computed") as MezzeType.SeqType
 
@@ -148,8 +149,8 @@ class SeqTypeCheckerTest {
             let empty = []
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // numbers should be [Int]
         val numbersType = typedProgram.getVariableType("numbers")
@@ -176,8 +177,8 @@ class SeqTypeCheckerTest {
             let names = ["Alice", "Bob"]
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check that types are inferred correctly
         val numbersType = typedProgram.getVariableType("numbers")!!
@@ -204,12 +205,12 @@ class SeqTypeCheckerTest {
             let combined = arrayConcat {arr1 = numbers1, arr2 = numbers2}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should either type check successfully or fail with a reasonable error
         // The test verifies that the basic structure is sound
         try {
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             // If it doesn't throw, the basic structure is working
             assertTrue(true)
         } catch (e: TypeCheckError) {

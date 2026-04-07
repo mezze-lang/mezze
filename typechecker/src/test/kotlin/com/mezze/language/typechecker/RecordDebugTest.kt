@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -21,8 +22,8 @@ class RecordDebugTest {
             let test = {point} -> point.x
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         println("Simple record access worked!")
     }
@@ -33,8 +34,8 @@ class RecordDebugTest {
             let test = {point} -> point.x + point.y
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         
         println("Double record access worked!")
     }

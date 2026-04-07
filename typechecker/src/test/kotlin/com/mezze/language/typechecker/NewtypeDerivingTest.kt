@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -32,9 +33,9 @@ class NewtypeDerivingTest {
             let compare = {a: UserId, b: UserId} -> a == b
         """.trimIndent()
 
-        val ast = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -45,9 +46,9 @@ class NewtypeDerivingTest {
             let order = {a: UserId, b: UserId} -> a < b
         """.trimIndent()
 
-        val ast = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -58,8 +59,8 @@ class NewtypeDerivingTest {
             let show = {e: Email} -> e.to_dbg_str {}
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val result = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -70,8 +71,8 @@ class NewtypeDerivingTest {
             let compare = {a: Color, b: Color} -> a == b
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val result = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -82,8 +83,8 @@ class NewtypeDerivingTest {
             let compare = {a: Wrapper, b: Wrapper} -> a == b
         """.trimIndent()
 
-        val ast = parser.parse(source)
-        val result = typeChecker.typeCheck(ast)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 }

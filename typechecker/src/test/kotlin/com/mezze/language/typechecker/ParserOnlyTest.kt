@@ -27,11 +27,11 @@ class ParserOnlyTest {
         System.out.flush()
 
         val startTime = System.currentTimeMillis()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val endTime = System.currentTimeMillis()
 
         println("Parsing completed in ${endTime - startTime}ms")
-        println("Program has ${program.items.size} items")
+        println("Program has ${parsedModule.decls.size} items")
         System.out.flush()
     }
 }

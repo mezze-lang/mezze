@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -45,8 +46,8 @@ class VariantUnionTest {
               Green -> Mouse
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should type check successfully")
 
@@ -65,8 +66,8 @@ class VariantUnionTest {
               Epsilon {a, b} -> Zeta {c = a}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should type check successfully with polymorphic payloads")
     }
@@ -80,8 +81,8 @@ class VariantUnionTest {
               Pending -> Loading
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle variants with and without payloads")
     }
@@ -98,8 +99,8 @@ class VariantUnionTest {
                 False -> Mouse
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should infer p as Bool from true/false patterns")
 
@@ -118,8 +119,8 @@ class VariantUnionTest {
               Second -> Gamma
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle nested boolean matches")
     }
@@ -135,8 +136,8 @@ class VariantUnionTest {
               C -> W
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should create variant union with nested boolean match")
     }
@@ -151,8 +152,8 @@ class VariantUnionTest {
               Blue {p} -> if p then Cat {name = "Orange"} else Mouse
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "If-else should create variant union")
 
@@ -170,8 +171,8 @@ class VariantUnionTest {
               Failure {error = "failed"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Top-level if-else should create variant union")
     }
@@ -185,8 +186,8 @@ class VariantUnionTest {
               C -> Epsilon
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Multiple nested if-else should create unified variant union")
     }
@@ -204,8 +205,8 @@ class VariantUnionTest {
               Z -> E
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should combine match and if-else variant unions")
     }
@@ -220,8 +221,8 @@ class VariantUnionTest {
               Second -> Result4
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle three levels of nesting")
     }
@@ -237,8 +238,8 @@ class VariantUnionTest {
               Failure
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle match inside if-else")
     }
@@ -252,8 +253,8 @@ class VariantUnionTest {
               Red -> Dog {breed = "Shepherd"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Single variant should type check")
     }
@@ -266,8 +267,8 @@ class VariantUnionTest {
               B -> Y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Two variants should create minimal union")
     }
@@ -284,8 +285,8 @@ class VariantUnionTest {
               V6 -> R6
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle large variant unions")
     }
@@ -299,8 +300,8 @@ class VariantUnionTest {
               C -> Result3
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Should handle complex nested record payloads")
     }
@@ -311,8 +312,8 @@ class VariantUnionTest {
             let test5 = {flag} -> if flag then Dog {breed = "A"} else Dog {breed = "B"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result, "Same variant in both branches should unify")
     }
@@ -327,10 +328,10 @@ class VariantUnionTest {
               B -> "hello"
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -340,10 +341,10 @@ class VariantUnionTest {
             let fail2 = {flag} -> if flag then 42 else "hello"
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -356,10 +357,10 @@ class VariantUnionTest {
               C -> "hello"
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -373,10 +374,10 @@ class VariantUnionTest {
               Y -> Result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -386,10 +387,10 @@ class VariantUnionTest {
             let fail5 = {x} -> if "not a bool" then Dog else Cat
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -399,10 +400,10 @@ class VariantUnionTest {
             let fail6 = if 42 then 1 else 2
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -415,10 +416,10 @@ class VariantUnionTest {
               C -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

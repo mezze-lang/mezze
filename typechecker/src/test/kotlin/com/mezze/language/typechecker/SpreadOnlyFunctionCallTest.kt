@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -34,8 +35,8 @@ class SpreadOnlyFunctionCallTest {
     }
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========== INVALID: Spread-only in function calls ==========
@@ -136,7 +137,7 @@ class SpreadOnlyFunctionCallTest {
         """.trimIndent()
 
         val exception = assertThrows<com.mezze.language.parser.ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code, "test.mz")
         }
         // Error should mention missing @ placeholder
         assertTrue(exception.message!!.contains("@") || exception.message!!.contains("placeholder"),

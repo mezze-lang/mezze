@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -50,8 +51,8 @@ class ModuleTypePreservationFixtureTest {
             let test_func = add_func
         """.trimIndent()
 
-        val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val parsedModule = parser.parseParsedModule(importingSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         // Verify test_int has type Int (not a type variable)
         val testIntType = getBindingType(typedProgram, "test_int")
@@ -96,8 +97,8 @@ class ModuleTypePreservationFixtureTest {
             let my_func = double
         """.trimIndent()
 
-        val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val parsedModule = parser.parseParsedModule(importingSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         // Verify types exist
         val myNumType = getBindingType(typedProgram, "my_num")
@@ -129,10 +130,10 @@ class ModuleTypePreservationFixtureTest {
             let result = multiply { a = 5, b = 10 }
         """.trimIndent()
 
-        val program = parser.parse(importingSource)
+        val parsedModule = parser.parseParsedModule(importingSource, "test.mz")
 
         // This should not throw any type errors
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         // result should be Int
         val resultType = getBindingType(typedProgram, "result")
@@ -163,8 +164,8 @@ class ModuleTypePreservationFixtureTest {
             let absolute = abs { n = -10 }
         """.trimIndent()
 
-        val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val parsedModule = parser.parseParsedModule(importingSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         // Verify all have appropriate types
         val maxType = getBindingType(typedProgram, "max")

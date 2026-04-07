@@ -22,9 +22,9 @@ fun main() {
     println("About to parse recursive map function...")
     System.out.flush()
 
-    val program = parser.parse(code)
+    val parsedModule = parser.parseParsedModule(code, "test.mz")
 
     println("Parsing completed successfully!")
-    println("Program has ${program.items.size} items")
+    println("Program has ${parsedModule.decls.size} items")
     System.out.flush()
 }

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -31,14 +32,14 @@ class UnreachablePatternTest {
     }
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String): TypeCheckError {
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)
         return error

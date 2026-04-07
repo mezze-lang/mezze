@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -58,8 +59,8 @@ class SuspendedTypeEffectMergeTest {
                 result
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
@@ -97,8 +98,8 @@ class SuspendedTypeEffectMergeTest {
                 result
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
@@ -127,8 +128,8 @@ class SuspendedTypeEffectMergeTest {
                 result
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
@@ -178,8 +179,8 @@ class SuspendedTypeEffectMergeTest {
                         3
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 
@@ -222,8 +223,8 @@ class SuspendedTypeEffectMergeTest {
                 result
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("test") as MezzeType.FunctionType
 

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -11,9 +12,9 @@ class AnnotationTypeCheckingTest {
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parser = MezzeParser()
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast)
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun getVariableType(result: TypeCheckResult, varName: String): MezzeType? {

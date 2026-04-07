@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -45,10 +46,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
         assertNull(impl.abilityName)
         assertNull(impl.abilityRef)
@@ -67,10 +68,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
         assertEquals(2, impl.operations.size)
         assertEquals("zero", impl.operations[0].name)
@@ -95,10 +96,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         assertEquals(2, impls.size)
 
         val abilityImpl = impls.find { !it.isInherent }
@@ -122,12 +123,12 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Content hash is set on the processed copy, not the original parsed AST node.
         // Just assert that typecheck succeeds (which it does if we reach this point).
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
     }
 
@@ -141,11 +142,11 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
-        assertNotNull(impl.sourceLocation)
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
+        assertNotNull(impl.loc)
     }
 
     // ========================================================================
@@ -165,8 +166,8 @@ class InherentImplTest {
             let result = c.is_red {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.BoolType, result.getVariableType("result"))
     }
@@ -184,9 +185,9 @@ class InherentImplTest {
             let result = c.name {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // Should typecheck without error even if exact return type is inferred as type variable
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result.getVariableType("result"))
     }
@@ -204,8 +205,8 @@ class InherentImplTest {
             let result = p.translate {dx = 3, dy = 4}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result.getVariableType("result"))
     }
@@ -223,8 +224,8 @@ class InherentImplTest {
             let result = p.sum {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.IntType, result.getVariableType("result"))
     }
@@ -251,10 +252,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         assertEquals(2, impls.size)
         assertTrue(impls.any { it.abilityName == "Describe" })
         assertTrue(impls.any { it.isInherent })
@@ -274,12 +275,12 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
-        assertEquals("Shape", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Shape", (impl.targetTypes[0] as com.mezze.language.parsedast.ParsedNamedType).name)
     }
 
     // ========================================================================
@@ -301,10 +302,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
             .filter { it.isInherent }
         assertEquals(2, impls.size)
     }
@@ -328,10 +329,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impls = program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impls = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
             .filter { it.isInherent }
         assertEquals(2, impls.size)
         // Content hashes are set on the processed copy, not the original parsed AST nodes.
@@ -350,19 +351,19 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program1 = parser.parse(source)
-        typeChecker.typeCheck(program1)
+        val parsedModule1 = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule1, Paths.get("."))
 
         TypeChecker.clearCache()
         ModuleResolver.clearCache()
 
-        val program2 = parser.parse(source)
-        TypeChecker().typeCheck(program2)
+        val parsedModule2 = parser.parseParsedModule(source, "test.mz")
+        TypeChecker().typeCheck(parsedModule2, Paths.get("."))
 
         // Content hashes are deterministic: same source produces the same hash.
         // We verify this by checking that both parse results have the same structure.
-        val impl1 = program1.items.filterIsInstance<ImplAbilityDeclaration>().first()
-        val impl2 = program2.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl1 = parsedModule1.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
+        val impl2 = parsedModule2.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertEquals(impl1.operations.size, impl2.operations.size, "Same source should produce same impl structure")
         assertEquals(impl1.operations[0].name, impl2.operations[0].name, "Same source should produce same operation names")
     }
@@ -381,10 +382,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.forallVars.isEmpty())
         assertTrue(impl.associatedTypeBindings.isEmpty())
     }
@@ -404,10 +405,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertEquals(2, impl.operations.size)
     }
 
@@ -425,10 +426,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         val op = impl.operations[0]
         assertEquals("get_v", op.name)
         assertNotNull(op.returnType)
@@ -449,10 +450,10 @@ class InherentImplTest {
         """.trimIndent()
 
         // This should at least parse and type check without errors
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
     }
 
@@ -468,9 +469,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("unknown type"))
         assertTrue(error.message!!.contains("NonExistentType"))
@@ -485,9 +486,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Int"))
         assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
@@ -503,9 +504,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("conflict"))
         assertTrue(error.message!!.contains("onClick"))
@@ -525,9 +526,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Duplicate"))
         assertTrue(error.message!!.contains("inherent"))
@@ -541,9 +542,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Str"))
         assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
@@ -557,9 +558,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Bool"))
     }
@@ -574,11 +575,11 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // This should succeed because Foreign IS defined locally
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
         assertTrue(impl.isInherent)
     }
 
@@ -590,9 +591,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Option"))
         assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
@@ -606,9 +607,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Result"))
     }
@@ -630,10 +631,10 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
             .find { !it.isInherent }
         assertNotNull(impl)
         assertEquals("Stringify", impl.abilityName)
@@ -651,9 +652,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // Should not throw — local ability can be implemented for any type
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -669,8 +670,8 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -688,8 +689,8 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -707,9 +708,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("conflict"))
         assertTrue(error.message!!.contains("width"))
@@ -729,9 +730,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("conflict"))
         assertTrue(error.message!!.contains("width"))
@@ -751,9 +752,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("NonExistentAbility"), "Expected error to mention 'NonExistentAbility' but got: ${error.message}")
     }
@@ -777,9 +778,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("missing"))
         assertTrue(error.message!!.contains("debug"))
@@ -800,9 +801,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("extra"))
     }
@@ -826,9 +827,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("parameter count mismatch") || error.message!!.contains("type parameter"),
             "Expected type parameter error but got: ${error.message}")
@@ -850,9 +851,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Duplicate"))
         assertTrue(error.message!!.contains("MyAbility"))
@@ -880,9 +881,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Duplicate"))
         assertTrue(error.message!!.contains("Showable"))
@@ -900,9 +901,9 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("ability-level constraints") || error.message!!.contains("method-level"))
     }

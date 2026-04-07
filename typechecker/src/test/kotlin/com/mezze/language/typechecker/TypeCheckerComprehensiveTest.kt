@@ -32,8 +32,8 @@ class TypeCheckerComprehensiveTest {
         // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         return result
     }
 

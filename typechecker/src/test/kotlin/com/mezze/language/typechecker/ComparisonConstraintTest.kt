@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -22,11 +23,11 @@ class ComparisonConstraintTest {
 
         try {
             println("Parsing code: $code")
-            val program = parser.parse(code)
-            println("Parsed program: $program")
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            println("Parsed program: $parsedModule")
 
             println("Type checking...")
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("Type checked successfully")
 
             // Check the result
@@ -46,11 +47,11 @@ class ComparisonConstraintTest {
         
         try {
             println("Parsing code: $code")
-            val program = parser.parse(code)
-            println("Parsed program: $program")
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            println("Parsed program: $parsedModule")
             
             println("Type checking...")
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("Type checked successfully: $typedProgram")
             
         } catch (e: Exception) {

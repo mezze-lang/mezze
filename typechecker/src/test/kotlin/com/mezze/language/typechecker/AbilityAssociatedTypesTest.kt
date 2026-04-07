@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -30,13 +31,13 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(1, program.items.size)
-        val ability = program.items[0] as AbilityDeclaration
+        assertEquals(1, parsedModule.decls.size)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals("Collection", ability.name)
-        assertEquals("'item", ability.associatedType)
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -55,13 +56,13 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -76,11 +77,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -99,11 +100,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
         // Method-level constraint on 'contains'
@@ -132,13 +133,13 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(3, program.items.size)
+        assertEquals(3, parsedModule.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -150,11 +151,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'product", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'product", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -167,11 +168,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -185,8 +186,8 @@ class AbilityAssociatedTypesTest {
 
         // Parser should reject this
         assertThrows<Exception> {
-            val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -200,11 +201,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'key", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'key", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -221,11 +222,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should have 2 items: ability and impl
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
     }
 
     @Test
@@ -245,11 +246,11 @@ class AbilityAssociatedTypesTest {
             let withInt = intColl.append {element = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should type check without errors
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -263,11 +264,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'elem", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'elem", ability.associatedTypes.firstOrNull())
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
         // Method-level constraints
@@ -285,11 +286,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
-        assertEquals("'item", ability.associatedType)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("'item", ability.associatedTypes.firstOrNull())
     }
 
     @Test
@@ -304,10 +305,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("provides associated type bindings") == true)
@@ -325,11 +326,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(1, program.items.size)
-        val ability = program.items[0] as AbilityDeclaration
+        assertEquals(1, parsedModule.decls.size)
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals("Convert", ability.name)
         assertEquals(2, ability.associatedTypes.size)
         assertTrue(ability.associatedTypes.contains("'to"))
@@ -347,10 +348,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals(3, ability.associatedTypes.size)
         assertTrue(ability.associatedTypes.contains("'a"))
         assertTrue(ability.associatedTypes.contains("'b"))
@@ -371,10 +372,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
     }
 
     @Test
@@ -393,10 +394,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
     }
 
     @Test
@@ -413,11 +414,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Just verify the program type checks successfully
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
     }
 
     @Test
@@ -432,10 +433,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("missing bindings for") == true)
@@ -458,10 +459,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("missing bindings for") == true)
@@ -481,10 +482,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Should catch that 'wrong is not declared and 'error is missing
@@ -505,11 +506,11 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Just verify the program type checks successfully
-        assertEquals(2, program.items.size)
+        assertEquals(2, parsedModule.decls.size)
     }
 
     @Test
@@ -534,15 +535,15 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(4, program.items.size)
+        assertEquals(4, parsedModule.decls.size)
 
-        val ability1 = program.items[0] as AbilityDeclaration
+        val ability1 = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals(2, ability1.associatedTypes.size)
 
-        val ability2 = program.items[1] as AbilityDeclaration
+        val ability2 = parsedModule.decls[1] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals(2, ability2.associatedTypes.size)
     }
 
@@ -555,10 +556,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals(2, ability.associatedTypes.size)
         // No ability-level dependencies
         assertEquals(0, ability.dependencies.size)
@@ -587,10 +588,10 @@ class AbilityAssociatedTypesTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        assertEquals(4, program.items.size)
+        assertEquals(4, parsedModule.decls.size)
     }
 
     // ===== Tests for Associated Type RESOLUTION =====
@@ -612,8 +613,8 @@ class AbilityAssociatedTypesTest {
             let result = arr.get {index = 0}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // The type should be Option Int, not Option 'a
         val resultType = result.getVariableType("result")
@@ -640,11 +641,11 @@ class AbilityAssociatedTypesTest {
             let result = arr.append {element = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should type check without errors - element = 42 should unify with Int (the bound 'item)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -666,8 +667,8 @@ class AbilityAssociatedTypesTest {
             let value = container.getValue {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Find the 'key' binding - should be Int
         assertEquals(MezzeType.IntType, result.getVariableType("key"), "Expected key to be Int")
@@ -691,8 +692,8 @@ class AbilityAssociatedTypesTest {
             let result = arr.toArray {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Find the 'result' binding - should be [Int]
         val resultType = result.getVariableType("result")
@@ -716,8 +717,8 @@ class AbilityAssociatedTypesTest {
             let result = arr.nested {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Find the 'result' binding - should be Option [Int]
         val resultType = result.getVariableType("result")
@@ -744,11 +745,11 @@ class AbilityAssociatedTypesTest {
             let result = arr.add {element = "wrong"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Should fail because "wrong" is String but 'item = Int
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 }

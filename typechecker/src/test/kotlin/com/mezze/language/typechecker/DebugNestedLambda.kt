@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 
@@ -18,14 +19,14 @@ class DebugNestedLambda {
         val typeChecker = TypeChecker()
 
         try {
-            val program = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
             println("=== PARSED PROGRAM ===")
-            println(program)
+            println(parsedModule)
 
             // Enable debug mode if available
             System.setProperty("mezze.typecheck.debug", "true")
 
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("=== SUCCESS ===")
             println("Type of f: ${result.getVariableType("f")}")
         } catch (e: Exception) {

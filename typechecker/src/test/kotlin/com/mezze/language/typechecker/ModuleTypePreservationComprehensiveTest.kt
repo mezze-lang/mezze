@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -70,8 +71,8 @@ class ModuleTypePreservationComprehensiveTest {
         """.trimIndent()
 
         println("\n📝 Testing module imports...")
-        val program = parser.parse(mainSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val parsedModule = parser.parseParsedModule(mainSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         println("\n📊 Type Check Results:")
         println("-".repeat(70))
@@ -157,8 +158,8 @@ class ModuleTypePreservationComprehensiveTest {
             let my_value = value
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
 
         val myValueType = getBindingType(typedProgram, "my_value")
 

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -51,10 +52,10 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertContains(error.message!!, "ability-level constraints")
@@ -77,10 +78,10 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertContains(error.message!!, "ability-level constraints")
@@ -98,11 +99,11 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Both abilities have ability-level constraints, so the first one should fail
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -114,10 +115,10 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -137,14 +138,14 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check via parsed AST that Eq and Ord were processed
-        val eq = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Eq" }
+        val eq = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Eq" }
         assertNotNull(eq)
 
-        val ord = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Ord" }
+        val ord = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Ord" }
         assertNotNull(ord)
         // No ability-level dependencies
         assertEquals(0, ord!!.dependencies.size)
@@ -175,10 +176,10 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val serializable = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Serializable" }
+        val serializable = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Serializable" }
         assertNotNull(serializable)
         assertEquals(0, serializable!!.dependencies.size)
         assertEquals(2, serializable.operations[0].abilityConstraints.size)
@@ -196,10 +197,10 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val show = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Show" }
+        val show = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Show" }
         assertNotNull(show)
         assertEquals(0, show!!.dependencies.size)
         assertEquals(0, show.operations[0].abilityConstraints.size)
@@ -231,8 +232,8 @@ class AbilityDependencyTypeCheckerTest {
             let test = {} -> "Value".print {item = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should type check without errors
         assertNotNull(typedProgram.getVariableType("test"))
@@ -261,10 +262,10 @@ class AbilityDependencyTypeCheckerTest {
             let test = {} -> "Value".print {item = 3.14}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertContains(error.message!!, "Show")
@@ -291,8 +292,8 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // All abilities and impls should type check successfully
         assertNotNull(typedProgram.typedModule?.abilityDecls?.find { it.name == "Eq" })
@@ -318,11 +319,11 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check via parsed AST that Collection operations have the right constraints
-        val collection = program.items.filterIsInstance<AbilityDeclaration>().find { it.name == "Collection" }
+        val collection = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Collection" }
         assertNotNull(collection)
 
         // length has no constraints

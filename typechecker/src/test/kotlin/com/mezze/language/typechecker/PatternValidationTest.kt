@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.TypeCheckResult
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -23,10 +24,10 @@ class PatternValidationTest {
     }
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult =
-        typeChecker.typeCheck(parser.parse(code))
+        typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
 
     private fun parseAndTypeCheckWithWarnings(code: String): Pair<TypeCheckResult, List<String>> {
-        val result = typeChecker.typeCheck(parser.parse(code))
+        val result = typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
         return Pair(result, result.warnings.map { it.message })
     }
 
@@ -345,7 +346,7 @@ class PatternValidationTest {
                     Blue -> "blue"
         """.trimIndent()
 
-        val result = typeChecker.typeCheck(parser.parse(code))
+        val result = typeChecker.typeCheck(parser.parseParsedModule(code, "test.mz"), Paths.get("."))
         assertNotNull(result, "Valid patterns should type check successfully")
     }
 

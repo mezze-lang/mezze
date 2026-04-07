@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -31,8 +32,8 @@ class EffectAnnotationAssociatedTypesTest {
     }
 
     private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -354,9 +355,9 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Str <State having 'state = Int> = {} -> State.get {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -374,9 +375,9 @@ class EffectAnnotationAssociatedTypesTest {
                     State.put { value = x }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -429,9 +430,9 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> Str <State having 'state = Int> = {} -> State.get {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error message should mention the type mismatch (Int vs Str)
@@ -453,9 +454,9 @@ class EffectAnnotationAssociatedTypesTest {
             let getState: {} -> {x: Int} <State having 'state = {x: Str}> = {} -> State.get {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should indicate type mismatch
@@ -478,9 +479,9 @@ class EffectAnnotationAssociatedTypesTest {
                 Operation.succeed { value = 42 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should indicate type mismatch

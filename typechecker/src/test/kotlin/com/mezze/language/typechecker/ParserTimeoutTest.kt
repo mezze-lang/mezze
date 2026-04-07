@@ -38,10 +38,10 @@ class ParserTimeoutTest {
                 println("About to parse...")
                 System.out.flush()
 
-                val program = parser.parse(code)
+                val parsedModule = parser.parseParsedModule(code, "test.mz")
 
                 println("Parsing completed successfully!")
-                println("Program has ${program.items.size} items")
+                println("Program has ${parsedModule.decls.size} items")
                 System.out.flush()
             } catch (e: Exception) {
                 parseException = e

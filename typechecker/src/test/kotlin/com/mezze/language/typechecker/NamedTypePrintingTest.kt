@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.ast.TypeDeclaration
@@ -32,11 +33,11 @@ class NamedTypePrintingTest {
               Node {value, left, right} -> fold {tree = right, acc = f {acc = fold {tree = left, acc, f}, val = value}, f}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Get type declarations from the parsed (v1) program for prettyPrintTypeWithAliases
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
 
         val foldType = result.getVariableType("fold")
         assertNotNull(foldType, "fold type should not be null")
@@ -63,10 +64,10 @@ class NamedTypePrintingTest {
               Just {val} -> Just { val = f {val} }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
 
         val mapType = result.getVariableType("map_maybe")
         assertNotNull(mapType, "map_maybe type should not be null")
@@ -90,10 +91,10 @@ class NamedTypePrintingTest {
               Right {y} -> Right {y}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
 
         val mapType = result.getVariableType("map_left")
         assertNotNull(mapType, "map_left type should not be null")
@@ -118,10 +119,10 @@ class NamedTypePrintingTest {
             let make_node = {v, l, r} -> Node { value = v, left = l, right = r }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
 
         val nodeType = result.getVariableType("make_node")
         assertNotNull(nodeType, "make_node type should not be null")
@@ -143,10 +144,10 @@ class NamedTypePrintingTest {
             let list_test = {x} -> [x, x, x]
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
 
         val listType = result.getVariableType("list_test")
         assertNotNull(listType, "list_test type should not be null")
@@ -172,10 +173,10 @@ class NamedTypePrintingTest {
               Just {val} -> Left {x = val}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = program.items.filterIsInstance<TypeDeclaration>()
+        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
         assertEquals(2, typeDecls.size)
 
         val testType = result.getVariableType("test")
@@ -200,8 +201,8 @@ class NamedTypePrintingTest {
             let some_value = Some { val = 42 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Both bindings should typecheck successfully
         val noneType = result.getVariableType("none_value")

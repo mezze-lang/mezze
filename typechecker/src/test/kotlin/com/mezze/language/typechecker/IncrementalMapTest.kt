@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -26,10 +27,10 @@ class IncrementalMapTest {
             let map = {f: {x: Int} -> Int, xs: [Int]} -> 42
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("STEP 1: Parsed. Typechecking...")
         System.out.flush()
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("STEP 1: SUCCESS")
         System.out.flush()
     }
@@ -46,10 +47,10 @@ class IncrementalMapTest {
                   [head, ...tail] -> [42]
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("STEP 2: Parsed. Typechecking...")
         System.out.flush()
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("STEP 2: SUCCESS")
         System.out.flush()
     }
@@ -66,10 +67,10 @@ class IncrementalMapTest {
                   [head, ...tail] -> [f {x = head}]
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("STEP 3: Parsed. Typechecking...")
         System.out.flush()
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("STEP 3: SUCCESS")
         System.out.flush()
     }
@@ -87,10 +88,10 @@ class IncrementalMapTest {
                   [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("STEP 4: Parsed. Typechecking...")
         System.out.flush()
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("STEP 4: SUCCESS")
         System.out.flush()
     }

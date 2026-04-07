@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -32,8 +33,8 @@ class AbilityConstraintAnnotationsTest {
     }
 
     private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========================================================================
@@ -314,9 +315,9 @@ class AbilityConstraintAnnotationsTest {
                 c.get {index = 0}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -359,9 +360,9 @@ class AbilityConstraintAnnotationsTest {
                 c.get {index = 0}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error message should mention the type mismatch
@@ -387,9 +388,9 @@ class AbilityConstraintAnnotationsTest {
                 c.get {index = 0}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should indicate type mismatch
@@ -417,9 +418,9 @@ class AbilityConstraintAnnotationsTest {
                 c.getKey {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should indicate type mismatch

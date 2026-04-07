@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -17,8 +18,8 @@ class PolymorphicDebugTest {
         // Test bidirectional detection
         testCases.forEach { (code, _) ->
             val parser = MezzeParser()
-            val ast = parser.parse(code)
-            for (item in ast.items) {
+            val v1Program = parser.parse(code)
+            for (item in v1Program.items) {
                 if (item is LetBinding && item.expression is LambdaExpression) {
                     val lambda = item.expression as LambdaExpression
                     val typeChecker = TypeChecker()
@@ -33,10 +34,10 @@ class PolymorphicDebugTest {
             println("Expected: $expected")
 
             val parser = MezzeParser()
-            val ast = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
 
             val typeChecker = TypeChecker()
-            val result = typeChecker.typeCheck(ast)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             val typeAliases = typeChecker.getTypeAliases()
 
             // Extract the variable name from the code (e.g. "complex", "addTwo", "square")

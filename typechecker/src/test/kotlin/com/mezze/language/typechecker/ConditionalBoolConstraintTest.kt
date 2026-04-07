@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -40,8 +41,8 @@ class ConditionalBoolConstraintTest {
             condNum {x = 5, y = 2, p = {t = True}}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // If this typechecks without error, the constraint system worked correctly
         // The condNum function uses p.t as a condition, so p.t must be constrained to Bool
@@ -56,8 +57,8 @@ class ConditionalBoolConstraintTest {
             selectValue {x = 10, y = 20, cond = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should type check successfully - cond is constrained to Bool")
     }
@@ -73,8 +74,8 @@ class ConditionalBoolConstraintTest {
             nestedCond {flags = {outer = True, inner = False}}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // If this typechecks successfully, both flags.outer and flags.inner
         // were correctly constrained to Bool type
@@ -89,8 +90,8 @@ class ConditionalBoolConstraintTest {
             compute {a = 1, b = 2, c = 3, useAdd = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // If this typechecks successfully, useAdd was correctly constrained to Bool
         assertNotNull(typedProgram, "Should type check successfully - useAdd constrained to Bool")
@@ -104,8 +105,8 @@ class ConditionalBoolConstraintTest {
             compareAndCompute {x = 5, y = 3}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Comparison operators return Bool, which satisfies the if condition constraint
         assertNotNull(typedProgram, "Should type check successfully with comparison")
@@ -122,8 +123,8 @@ class ConditionalBoolConstraintTest {
             selector {x = 10, y = 20}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should constrain pred to Bool in nested lambda")
     }
@@ -138,8 +139,8 @@ class ConditionalBoolConstraintTest {
             process {flag = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should constrain flag to Bool in do block")
     }
@@ -155,8 +156,8 @@ class ConditionalBoolConstraintTest {
             doubleCheck {x = 5, cond = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should constrain cond to Bool across multiple if uses")
     }
@@ -171,8 +172,8 @@ class ConditionalBoolConstraintTest {
             deepCheck {config = {settings = {enabled = True}}}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should constrain config.settings.enabled to Bool")
     }
@@ -188,8 +189,8 @@ class ConditionalBoolConstraintTest {
             multiCheck {opts = {first = True, second = False}}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should constrain both opts.first and opts.second to Bool")
     }
@@ -204,8 +205,8 @@ class ConditionalBoolConstraintTest {
             andCheck {x = True, y = False}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with boolean AND")
     }
@@ -218,8 +219,8 @@ class ConditionalBoolConstraintTest {
             orCheck {x = True, y = False}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with boolean OR")
     }
@@ -232,8 +233,8 @@ class ConditionalBoolConstraintTest {
             notCheck {x = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with boolean NOT")
     }
@@ -248,8 +249,8 @@ class ConditionalBoolConstraintTest {
             eqCheck {x = 5, y = 5}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with equality comparison")
     }
@@ -262,8 +263,8 @@ class ConditionalBoolConstraintTest {
             neqCheck {x = 5, y = 3}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with inequality comparison")
     }
@@ -278,8 +279,8 @@ class ConditionalBoolConstraintTest {
             alwaysTrue {x = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with literal boolean true")
     }
@@ -292,8 +293,8 @@ class ConditionalBoolConstraintTest {
             alwaysFalse {x = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with literal boolean false")
     }
@@ -306,8 +307,8 @@ class ConditionalBoolConstraintTest {
             complexCheck {a = True, b = False, c = True}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with complex boolean expression")
     }
@@ -323,8 +324,8 @@ class ConditionalBoolConstraintTest {
             resultInt
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(typedProgram, "Should work with polymorphic if expression")
     }

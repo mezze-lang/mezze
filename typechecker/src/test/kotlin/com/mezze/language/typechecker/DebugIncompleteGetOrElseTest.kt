@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -33,9 +34,9 @@ class DebugIncompleteGetOrElseTest {
         println(code)
 
         val exception = assertThrows<Exception> {
-            val program = parser.parse(code)
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
             println("Parsed successfully")
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         println("CORRECTLY FAILED with: ${exception.message}")

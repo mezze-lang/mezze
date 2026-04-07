@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -19,8 +20,8 @@ class LiteralPatternTypeCheckingTest {
         // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========== Valid Integer Literal Patterns ==========

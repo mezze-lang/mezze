@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -39,8 +40,8 @@ class ImportResolutionTest {
         @Test
         fun `unqualified reference has single-element path`() {
             val source = "perform Console in expr {}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val perform = topLevel.expression as PerformExpression
 
             val handler = perform.handlers[0]
@@ -51,8 +52,8 @@ class ImportResolutionTest {
         @Test
         fun `qualified reference with single segment qualifier`() {
             val source = "perform log::Console in expr {}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val perform = topLevel.expression as PerformExpression
 
             val handler = perform.handlers[0]
@@ -64,8 +65,8 @@ class ImportResolutionTest {
         @Test
         fun `qualified reference with multi-segment qualifier`() {
             val source = "perform std::effects::log::Console in expr {}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val perform = topLevel.expression as PerformExpression
 
             val handler = perform.handlers[0]
@@ -94,8 +95,8 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val implDecl = program.items[1] as ImplDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val implDecl = parser.parse(source).items[1] as ImplDeclaration
 
             assertEquals("Log", implDecl.effect.localName)
             assertFalse(implDecl.effect.isQualified)
@@ -109,8 +110,8 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val implDecl = program.items[0] as ImplDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val implDecl = parser.parse(source).items[0] as ImplDeclaration
 
             assertEquals("Log", implDecl.effect.localName)
             assertEquals(listOf("log"), implDecl.effect.qualifier?.segments)
@@ -125,8 +126,8 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val implDecl = program.items[0] as ImplDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val implDecl = parser.parse(source).items[0] as ImplDeclaration
 
             assertEquals("Log", implDecl.effect.localName)
             assertEquals(listOf("std", "effects", "log"), implDecl.effect.qualifier?.segments)
@@ -144,8 +145,8 @@ class ImportResolutionTest {
         @Test
         fun `unqualified effect call parses correctly`() {
             val source = "perform info {msg = \"hello\"}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val effectCall = topLevel.expression as EffectCallExpression
 
             assertEquals("info", effectCall.operation.localName)
@@ -155,8 +156,8 @@ class ImportResolutionTest {
         @Test
         fun `qualified effect call parses correctly`() {
             val source = "perform Log::info {msg = \"hello\"}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val effectCall = topLevel.expression as EffectCallExpression
 
             assertEquals("info", effectCall.operation.localName)
@@ -167,8 +168,8 @@ class ImportResolutionTest {
         @Test
         fun `fully qualified effect call parses correctly`() {
             val source = "perform std::effects::log::info {msg = \"hello\"}"
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val effectCall = topLevel.expression as EffectCallExpression
 
             assertEquals("info", effectCall.operation.localName)
@@ -229,8 +230,8 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val impl = program.items[0] as ImplDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val impl = parser.parse(source).items[0] as ImplDeclaration
 
             // Stored as structured data
             assertEquals("Log", impl.effect.localName)
@@ -254,8 +255,8 @@ class ImportResolutionTest {
                 perform Console, log::FileLogger, std::Random in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val perform = topLevel.expression as PerformExpression
 
             assertEquals(3, perform.handlers.size)
@@ -286,8 +287,8 @@ class ImportResolutionTest {
         @Test
         fun `simple module import parses as ModulePath`() {
             val source = "use std::effects::log"
-            val program = parser.parse(source)
-            val useDecl = program.items[0] as UseDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val useDecl = parser.parse(source).items[0] as UseDeclaration
 
             val path = useDecl.path as ModulePath
             assertEquals(listOf("std", "effects", "log"), path.segments)
@@ -297,8 +298,8 @@ class ImportResolutionTest {
         @Test
         fun `module import with alias parses correctly`() {
             val source = "use std::effects::log as logging"
-            val program = parser.parse(source)
-            val useDecl = program.items[0] as UseDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val useDecl = parser.parse(source).items[0] as UseDeclaration
 
             val path = useDecl.path as ModulePath
             assertEquals(listOf("std", "effects", "log"), path.segments)
@@ -308,8 +309,8 @@ class ImportResolutionTest {
         @Test
         fun `selective import parses as SelectivePath`() {
             val source = "use std::effects::log::{Console, info}"
-            val program = parser.parse(source)
-            val useDecl = program.items[0] as UseDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val useDecl = parser.parse(source).items[0] as UseDeclaration
 
             val path = useDecl.path as SelectivePath
             assertEquals(listOf("std", "effects", "log"), path.module)
@@ -321,8 +322,8 @@ class ImportResolutionTest {
         @Test
         fun `selective import with aliases parses correctly`() {
             val source = "use std::effects::log::{Console as StdConsole, info as logInfo}"
-            val program = parser.parse(source)
-            val useDecl = program.items[0] as UseDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val useDecl = parser.parse(source).items[0] as UseDeclaration
 
             val path = useDecl.path as SelectivePath
             assertEquals(listOf("std", "effects", "log"), path.module)
@@ -349,8 +350,8 @@ class ImportResolutionTest {
                 perform std::effects::log::Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val topLevel = program.items[0] as TopLevelExpression
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val topLevel = parser.parse(source).items[0] as TopLevelExpression
             val perform = topLevel.expression as PerformExpression
 
             // Handler has full path
@@ -367,8 +368,8 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val impl = program.items[0] as ImplDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val impl = parser.parse(source).items[0] as ImplDeclaration
 
             assertEquals("Log", impl.effect.localName)
             assertEquals(listOf("std", "effects", "log"), impl.effect.qualifier?.segments)
@@ -396,10 +397,10 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
 
-            assertEquals("Show", impl.abilityName)
+            assertEquals("Show", impl.abilityRef!!.localName)
             assertFalse(impl.abilityRef!!.isQualified)
         }
 
@@ -411,12 +412,12 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val impl = program.items[0] as ImplAbilityDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val impl = parser.parse(source).items[0] as ImplDeclaration
 
-            assertEquals("Encode", impl.abilityName)
-            assertEquals(listOf("codec"), impl.abilityRef?.qualifier?.segments)
-            assertTrue(impl.abilityRef!!.isQualified)
+            assertEquals("Encode", impl.effect.localName)
+            assertEquals(listOf("codec"), impl.effect.qualifier?.segments)
+            assertTrue(impl.effect.isQualified)
         }
 
         @Test
@@ -427,17 +428,17 @@ class ImportResolutionTest {
                 }
             """.trimIndent()
 
-            val program = parser.parse(source)
-            val impl = program.items[0] as ImplAbilityDeclaration
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val impl = parser.parse(source).items[0] as ImplDeclaration
 
-            assertEquals("Encode", impl.abilityName)
-            assertEquals(listOf("std", "codec"), impl.abilityRef?.qualifier?.segments)
-            assertTrue(impl.abilityRef!!.isQualified)
+            assertEquals("Encode", impl.effect.localName)
+            assertEquals(listOf("std", "codec"), impl.effect.qualifier?.segments)
+            assertTrue(impl.effect.isQualified)
 
             // Check ability reference structure
-            assertEquals("Encode", impl.abilityName)
-            assertEquals(listOf("std", "codec"), impl.abilityRef?.qualifier?.segments ?: emptyList<String>())
-            assertEquals("std::codec::Encode", "${impl.abilityRef?.qualifier?.fullPath}::${impl.abilityName}")
+            assertEquals("Encode", impl.effect.localName)
+            assertEquals(listOf("std", "codec"), impl.effect.qualifier?.segments ?: emptyList<String>())
+            assertEquals("std::codec::Encode", "${impl.effect.qualifier?.fullPath}::${impl.effect.localName}")
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -36,14 +37,14 @@ class TypeApplicationExpansionTest {
     }
 
     private fun parseAndTypeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)

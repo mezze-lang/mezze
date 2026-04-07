@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
@@ -28,8 +29,8 @@ class ScopedEffectsIntegrationTest {
     }
 
     private fun typeCheck(source: String) {
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -181,7 +182,7 @@ class ScopedEffectsIntegrationTest {
         """.trimIndent()
 
         // Should fail - scope is a reserved word
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source, "test.mz") }
         assertTrue(
             error.message?.contains("scope") == true &&
             error.message?.contains("reserved") == true,

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -120,14 +121,15 @@ class ConstructorResolutionTest {
     }
 
     private fun typeCheckAndGetParsed(source: String): Program {
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program) // runs typechecker to populate resolution fields
-        return program
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get(".")) // runs typechecker to populate resolution fields
+        // Return v1 AST for inspection (resolution fields are set as side effects)
+        return parser.parse(source)
     }
 
     private fun typeCheckAndGetResult(source: String): com.mezze.language.ast.TypeCheckResult {
-        val program = parser.parse(source)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ============================================================================
@@ -201,7 +203,7 @@ class ConstructorResolutionTest {
             }
         """.trimIndent())
 
-        val abilityDecl = parsedProgram.items.filterIsInstance<AbilityDeclaration>()
+        val abilityDecl = parsedProgram.items.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
             .find { it.name == "Show" }
         assertNotNull(abilityDecl, "Should find Show ability declaration in typed program")
         assertEquals("Show", abilityDecl!!.name)
@@ -392,12 +394,12 @@ class ConstructorResolutionTest {
     @Test
     fun `test variant constructor names cannot conflict with builtin abilities`() {
         // The typechecker should reject variant constructors with the same name as builtin abilities
-        val program = parser.parse("""
+        val parsedModule = parser.parseParsedModule("""
             type MyType = | Inspect { data: Int } |
-        """.trimIndent())
+        """.trimIndent(), "test.mz")
 
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("conflicts with built-in ability") == true,

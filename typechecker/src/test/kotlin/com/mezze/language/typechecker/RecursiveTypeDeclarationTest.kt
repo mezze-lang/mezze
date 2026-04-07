@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
@@ -30,8 +31,8 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         // Parse and typecheck to ensure it succeeds
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Validate via the parsed AST
         val module = parser.parseParsedModule(source, "test.mz")
@@ -54,8 +55,8 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         // Parse and typecheck to ensure it succeeds
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Validate via the parsed AST
         val module = parser.parseParsedModule(source, "test.mz")
@@ -92,8 +93,8 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         // Parse and typecheck to ensure it succeeds
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Validate via the parsed AST
         val module = parser.parseParsedModule(source, "test.mz")

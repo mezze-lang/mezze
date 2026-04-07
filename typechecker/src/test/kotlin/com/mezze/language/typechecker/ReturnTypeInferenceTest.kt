@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -28,8 +29,8 @@ class ReturnTypeInferenceTest {
     }
 
     private fun typeCheck(source: String) {
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========================================================================

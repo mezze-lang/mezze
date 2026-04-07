@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -25,7 +26,7 @@ class NewtypeImplTest {
     }
 
     private fun checkPasses(source: String, msg: String) {
-        val result = typeChecker.checkProgram(parser.parse(source))
+        val result = typeChecker.checkParsedModule(parser.parseParsedModule(source, "test.mz"))
         assertTrue(result is TypeChecker.TypeCheckResult.Success, "$msg: $result")
     }
 

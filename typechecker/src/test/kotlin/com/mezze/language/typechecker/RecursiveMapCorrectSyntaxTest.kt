@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Test
@@ -24,13 +25,13 @@ class RecursiveMapCorrectSyntaxTest {
 
         println("Parsing...")
         System.out.flush()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parse successful!")
         System.out.flush()
 
         println("Type checking...")
         System.out.flush()
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type check successful!")
         System.out.flush()
 

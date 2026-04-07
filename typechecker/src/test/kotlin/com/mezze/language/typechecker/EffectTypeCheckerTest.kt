@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
@@ -27,10 +28,10 @@ class EffectTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // Just verify type checking succeeds — v1 Program is empty
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -46,10 +47,10 @@ class EffectTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // Just verify type checking succeeds — v1 Program is empty
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -66,8 +67,8 @@ class EffectTypeCheckerTest {
                 x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val noisyAddType = result.getVariableType("noisyAdd")
         assertNotNull(noisyAddType)
@@ -84,8 +85,8 @@ class EffectTypeCheckerTest {
             let pureAdd : {x: Int, y: Int} -> Int = {x, y} -> x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val pureAddType = result.getVariableType("pureAdd")
         assertNotNull(pureAddType)
@@ -109,8 +110,8 @@ class EffectTypeCheckerTest {
             let myProgram = Random.randInt {min = 1, max = 10}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val myProgramType = result.getVariableType("myProgram")
         assertNotNull(myProgramType)
@@ -140,8 +141,8 @@ class EffectTypeCheckerTest {
             let getResult = {} -> perform Console in myProgram
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val getResultType = result.getVariableType("getResult")
         assertNotNull(getResultType)
@@ -169,8 +170,8 @@ class EffectTypeCheckerTest {
                 n
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val multiEffectType = result.getVariableType("multiEffect")
         assertNotNull(multiEffectType)
@@ -206,10 +207,10 @@ class EffectTypeCheckerTest {
             let result = handler { f = logOnly }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         // This should not throw a type error
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -227,11 +228,11 @@ class EffectTypeCheckerTest {
                 x
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Type check should succeed - effect inference may handle this automatically
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -241,11 +242,11 @@ class EffectTypeCheckerTest {
             let program = UndefinedEffect.operation {arg = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should throw an error because UndefinedEffect is not defined
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Debug: print the actual error message

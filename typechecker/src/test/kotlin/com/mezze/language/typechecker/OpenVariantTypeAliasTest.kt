@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -21,9 +22,9 @@ class OpenVariantTypeAliasTest {
 
     private fun parseAndTypeCheck(code: String): TypeCheckResults {
         val parser = MezzeParser()
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         return TypeCheckResults(result, typeChecker)
     }
 

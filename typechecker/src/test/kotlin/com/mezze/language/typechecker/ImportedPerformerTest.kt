@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
@@ -39,8 +40,8 @@ class ImportedPerformerTest {
                 println { msg = "Hello!" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Find main binding and check its type
         val mainType = result.getVariableType("main")
@@ -68,8 +69,8 @@ class ImportedPerformerTest {
                 info { msg = "Info message" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -95,8 +96,8 @@ class ImportedPerformerTest {
                 logSomething { msg = "Hello!" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -117,10 +118,10 @@ class ImportedPerformerTest {
                 println { msg = "Hello!" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should NOT throw - it was throwing before the fix
-        val result = typeChecker.checkProgram(program)
+        val result = typeChecker.checkParsedModule(parsedModule)
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
@@ -141,8 +142,8 @@ class ImportedPerformerTest {
                 println { msg = "done" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.checkProgram(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.checkParsedModule(parsedModule)
 
         assertTrue(
             result is TypeChecker.TypeCheckResult.Success,
@@ -159,8 +160,8 @@ class ImportedPerformerTest {
             let test = {} -> println { msg = "Hello!" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = result.getVariableType("test") as? MezzeType.FunctionType
         assertNotNull(testType, "test should be a function type")
@@ -191,8 +192,8 @@ class ImportedPerformerTest {
             let main = {} -> perform MyHandler in useEffect { n = 5 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -226,8 +227,8 @@ class ImportedPerformerTest {
             let main = {} -> perform MemoryStorage in useStorage { k = "test", v = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -267,8 +268,8 @@ class ImportedPerformerTest {
             let main = {} -> perform ConsoleLogger, SimpleCounter in doWork {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -306,8 +307,8 @@ class ImportedPerformerTest {
             let main = {} -> perform DiskFS in (perform FileLogger in logMessage { text = "test" })
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main") as? MezzeType.FunctionType
         assertNotNull(mainType, "main should be a function type")
@@ -335,8 +336,8 @@ class ImportedPerformerTest {
             let result = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result.getVariableType("result"), "result should be defined")
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -369,8 +370,8 @@ class ImportedPerformerTest {
             let boolStr = True.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertEquals(MezzeType.StringType, result.getVariableType("intStr"))
         assertEquals(MezzeType.StringType, result.getVariableType("strStr"))
@@ -396,8 +397,8 @@ class ImportedPerformerTest {
             let sum = deserialized + 1
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result.getVariableType("serialized"), "serialized should be defined")
         assertNotNull(result.getVariableType("sum"), "sum should be defined")
@@ -416,8 +417,8 @@ class ImportedPerformerTest {
             let config: CodecConfig = default_config
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should pass type checking
         assertNotNull(result, "Program should type check")
@@ -440,9 +441,9 @@ class ImportedPerformerTest {
             let result = show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         val errorMessage = error.message ?: ""
@@ -472,9 +473,9 @@ class ImportedPerformerTest {
             let result = {} -> doSomething { x = 42 }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         val errorMessage = error.message ?: ""
@@ -498,9 +499,9 @@ class ImportedPerformerTest {
             let main = {} -> perform Console in log { level = Info, msg = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         val errorMessage = error.message ?: ""

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -29,8 +30,8 @@ class UndefinedEffectTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             // If we get here, the typechecker is being too permissive
             println("⚠️  WARNING: TypeChecker allowed undefined effect 'UndefinedEffect'")
@@ -58,8 +59,8 @@ class UndefinedEffectTest {
         """.trimIndent()
 
         try {
-            val program = parser.parse(source)
-            val result = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
             val noiseAddType = result.getVariableType("noise_add")
 

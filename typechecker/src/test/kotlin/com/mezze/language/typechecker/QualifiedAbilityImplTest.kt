@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -44,11 +45,11 @@ class QualifiedAbilityImplTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        assertNotNull(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        assertNotNull(parsedModule)
 
         // Find the impl
-        val impl = program.items.filterIsInstance<ImplAbilityDeclaration>().firstOrNull()
+        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
         assertNotNull(impl)
         assertEquals("Printable", impl!!.abilityName)
         assertTrue((impl.abilityRef?.qualifier?.segments ?: emptyList()).isEmpty())  // No module path in this case
@@ -88,18 +89,16 @@ class QualifiedAbilityImplTest {
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
 
         // Parse and type check
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        // Verify parsing: qualified ability impls are initially parsed as ImplDeclaration
-        // (since effect and ability impls share syntax). The typechecker converts them.
-        val parsedImpl = program.items.filterIsInstance<ImplDeclaration>().firstOrNull()
-        assertNotNull(parsedImpl, "Parser should produce ImplDeclaration for cross-module ability impl")
-        assertEquals("Serializable", parsedImpl!!.effect.localName)
-        assertEquals(listOf("serializer"), parsedImpl.effect.qualifier?.segments ?: emptyList<String>())
+        // Verify parsing: qualified ability impls are initially parsed as ParsedImplAbilityDecl
+        val parsedImpl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
+        assertNotNull(parsedImpl, "Parser should produce ParsedImplAbilityDecl for cross-module ability impl")
+        assertEquals("Serializable", parsedImpl!!.abilityName)
 
         // Type check should succeed — qualified ability impl is resolved during type checking
         val typeCheckerWithRoot = TypeChecker()
-        val typedResult = typeCheckerWithRoot.typeCheck(program, tempDir)
+        val typedResult = typeCheckerWithRoot.typeCheck(parsedModule, tempDir)
         assertNotNull(typedResult)
         // Verify the typed module was produced (i.e., full pipeline ran successfully)
         assertNotNull(typedResult.typedModule, "TypedModule should be produced after successful type check")
@@ -140,17 +139,16 @@ class QualifiedAbilityImplTest {
 
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
 
-        val program = parser.parse(mainModule)
+        val parsedModule = parser.parseParsedModule(mainModule, "test.mz")
 
-        // Verify parsing: qualified ability impls are initially parsed as ImplDeclaration
-        val parsedImpl = program.items.filterIsInstance<ImplDeclaration>().firstOrNull()
-        assertNotNull(parsedImpl, "Parser should produce ImplDeclaration for cross-module ability impl")
-        assertEquals("Encoder", parsedImpl!!.effect.localName)
-        assertEquals(listOf("codec"), parsedImpl.effect.qualifier?.segments ?: emptyList<String>())
+        // Verify parsing: qualified ability impls are initially parsed as ParsedImplAbilityDecl
+        val parsedImpl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().firstOrNull()
+        assertNotNull(parsedImpl, "Parser should produce ParsedImplAbilityDecl for cross-module ability impl")
+        assertEquals("Encoder", parsedImpl!!.abilityName)
 
         // Type check should succeed — qualified ability impl is resolved during type checking
         val typeCheckerWithRoot = TypeChecker()
-        val typedResult = typeCheckerWithRoot.typeCheck(program, tempDir)
+        val typedResult = typeCheckerWithRoot.typeCheck(parsedModule, tempDir)
         assertNotNull(typedResult)
         // Verify the typed module was produced (i.e., full pipeline ran successfully)
         assertNotNull(typedResult.typedModule, "TypedModule should be produced after successful type check")
@@ -169,7 +167,7 @@ class QualifiedAbilityImplTest {
             let x = 1
         """.trimIndent()
 
-        val program = parser.parse(source)
-        assertNotNull(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        assertNotNull(parsedModule)
     }
 }

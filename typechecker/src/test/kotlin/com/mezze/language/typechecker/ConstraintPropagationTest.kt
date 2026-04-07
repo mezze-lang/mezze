@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -24,8 +25,8 @@ class ConstraintPropagationTest {
             let result = add {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - the polymorphic add function should propagate NumAdd constraint
         assertNotNull(result)
@@ -51,8 +52,8 @@ class ConstraintPropagationTest {
             let result2 = compare {x = "hello", y = "world"}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - both Int and String have Eq ability
         assertNotNull(result)
@@ -78,8 +79,8 @@ class ConstraintPropagationTest {
         try {
             // Should fail - Bool doesn't have NumAdd ability
             assertThrows(TypeCheckError::class.java) {
-                val program = parser.parse(code)
-                typeChecker.typeCheck(program)
+                val parsedModule = parser.parseParsedModule(code, "test.mz")
+                typeChecker.typeCheck(parsedModule, Paths.get("."))
             }
         } finally {
             System.clearProperty("mezze.typecheck.strict")
@@ -93,8 +94,8 @@ class ConstraintPropagationTest {
             let result = addAndCompare {x = 1, y = 2, z = 3}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - requires both NumAdd and Eq abilities, Int has both
         assertNotNull(result)
@@ -113,8 +114,8 @@ class ConstraintPropagationTest {
             let addAndCheck = {a, b, c} -> isEqual {x = add {x = a, y = b}, y = c}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - addAndCheck requires both NumAdd and Eq abilities
         assertNotNull(result)
@@ -136,8 +137,8 @@ class ConstraintPropagationTest {
             let result2 = result1 {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - identity should preserve the constraints of add
         assertNotNull(result)
@@ -154,11 +155,11 @@ class ConstraintPropagationTest {
             let result = processRecord {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
 
         // For now, allow either success or failure - the record type system needs improvement
         try {
-            val typeResult = typeChecker.typeCheck(program)
+            val typeResult = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(typeResult)
 
             // If it succeeds, check the result type
@@ -181,8 +182,8 @@ class ConstraintPropagationTest {
             let result = applyBinary {f = add, x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Should succeed - applyBinary should propagate constraints from f
         assertNotNull(result)

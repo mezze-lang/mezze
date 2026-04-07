@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -31,14 +32,14 @@ class StringInterpolationTypeCheckerTest {
     }
 
     private fun assertTypeChecks(source: String) {
-        val program = parser.parse(source)
-        assertDoesNotThrow { typeChecker.typeCheck(program) }
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        assertDoesNotThrow { typeChecker.typeCheck(parsedModule, Paths.get(".")) }
     }
 
     private fun assertTypeCheckFails(source: String, expectedError: String? = null) {
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         if (expectedError != null) {
             assertTrue(

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
@@ -29,8 +30,8 @@ class SeqSpreadTypeCheckTest {
             copy
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Int]
@@ -47,8 +48,8 @@ class SeqSpreadTypeCheckTest {
             extended
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Int]
@@ -66,8 +67,8 @@ class SeqSpreadTypeCheckTest {
             combined
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Int]
@@ -84,8 +85,8 @@ class SeqSpreadTypeCheckTest {
             extended
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Str]
@@ -104,9 +105,9 @@ class SeqSpreadTypeCheckTest {
             arr
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -118,9 +119,9 @@ class SeqSpreadTypeCheckTest {
             mixed
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -133,9 +134,9 @@ class SeqSpreadTypeCheckTest {
             mixed
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
     }
 
@@ -149,8 +150,8 @@ class SeqSpreadTypeCheckTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Int]
@@ -167,8 +168,8 @@ class SeqSpreadTypeCheckTest {
             nums
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [Int]
@@ -187,8 +188,8 @@ class SeqSpreadTypeCheckTest {
             extended
         """.trimIndent()
 
-        val program = parser.parse(code)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // Result should be [[Int]]

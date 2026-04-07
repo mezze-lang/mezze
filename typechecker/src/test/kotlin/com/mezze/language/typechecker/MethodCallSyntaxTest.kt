@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.MezzeType
 import org.junit.jupiter.api.Test
@@ -50,8 +51,8 @@ class MethodCallSyntaxTest {
             let result = x.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -72,8 +73,8 @@ class MethodCallSyntaxTest {
             let result = x.format { style = "decimal" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -93,8 +94,8 @@ class MethodCallSyntaxTest {
             let result = "hello".length {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.IntType, result.getVariableType("result"))
@@ -120,9 +121,9 @@ class MethodCallSyntaxTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(error.message!!.contains("conflict with fields"))
@@ -137,8 +138,8 @@ class MethodCallSyntaxTest {
             let result = ops.show { x = 1 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -162,8 +163,8 @@ class MethodCallSyntaxTest {
             let result = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -190,8 +191,8 @@ class MethodCallSyntaxTest {
             let result = True.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -214,8 +215,8 @@ class MethodCallSyntaxTest {
             let result = f { x = 42 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -236,9 +237,9 @@ class MethodCallSyntaxTest {
             let result = 3.14.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Should mention that Show is not implemented for Float
@@ -265,8 +266,8 @@ class MethodCallSyntaxTest {
             let result = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -286,8 +287,8 @@ class MethodCallSyntaxTest {
             let result = 21.double {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.IntType, result.getVariableType("result"))
@@ -311,8 +312,8 @@ class MethodCallSyntaxTest {
             let result = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("result"))
@@ -324,8 +325,8 @@ class MethodCallSyntaxTest {
             let result = 42.eq { r = 10 }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.BoolType, result.getVariableType("result"))
@@ -348,8 +349,8 @@ class MethodCallSyntaxTest {
             let r2 = 42.display { verbose = True }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         assertNotNull(result)
         assertEquals(MezzeType.StringType, result.getVariableType("r1"))

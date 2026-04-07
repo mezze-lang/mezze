@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -33,10 +34,10 @@ class MinimalMapTest {
 
         println("About to parse...")
         System.out.flush()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsing done. About to typecheck...")
         System.out.flush()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("SUCCESS WITH type annotations")
         System.out.flush()
     }
@@ -57,10 +58,10 @@ class MinimalMapTest {
 
         println("About to parse...")
         System.out.flush()
-        val program = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsing done. About to typecheck...")
         System.out.flush()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("SUCCESS WITHOUT type annotations")
         System.out.flush()
     }

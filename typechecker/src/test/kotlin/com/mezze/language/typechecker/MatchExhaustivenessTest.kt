@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -18,8 +19,8 @@ class MatchExhaustivenessTest {
     }
 
     private fun parseAndTypeCheck(code: String): TypeCheckResult {
-        val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     // ========== EXHAUSTIVE CASES (SHOULD PASS) ==========

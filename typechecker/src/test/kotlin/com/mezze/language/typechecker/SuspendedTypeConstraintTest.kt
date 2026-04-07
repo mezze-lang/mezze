@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -61,8 +62,8 @@ class SuspendedTypeConstraintTest {
                 result.value
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val getValueType = typedProgram.getVariableType("getValue")
 
@@ -97,8 +98,8 @@ class SuspendedTypeConstraintTest {
                 person.name
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("getOrDefault") as MezzeType.FunctionType
 
@@ -121,8 +122,8 @@ class SuspendedTypeConstraintTest {
             let getHost = {} -> (Config.load {}).host
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("getHost") as MezzeType.FunctionType
 
@@ -146,8 +147,8 @@ class SuspendedTypeConstraintTest {
             let getName = {} -> (Database.query {}).data.name
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("getName") as MezzeType.FunctionType
 
@@ -169,9 +170,9 @@ class SuspendedTypeConstraintTest {
             let getValue = {} -> (State.get {}).wrongField
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message!!.contains("wrongField"), "Error should mention the wrong field name")
     }
@@ -197,8 +198,8 @@ class SuspendedTypeConstraintTest {
                     else Ok {val = value}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("maybeThrow") as MezzeType.FunctionType
 
@@ -244,8 +245,8 @@ class SuspendedTypeConstraintTest {
                     Failed {error} -> error
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("processResult") as MezzeType.FunctionType
 
@@ -277,8 +278,8 @@ class SuspendedTypeConstraintTest {
                     Error {message} -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("getName") as MezzeType.FunctionType
 
@@ -305,8 +306,8 @@ class SuspendedTypeConstraintTest {
                 settings.theme
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val fnType = typedProgram.getVariableType("getUserTheme") as MezzeType.FunctionType
 

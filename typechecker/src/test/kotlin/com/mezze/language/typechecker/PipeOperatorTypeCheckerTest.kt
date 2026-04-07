@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
@@ -10,9 +11,9 @@ class PipeOperatorTypeCheckerTest {
     private val parser = MezzeParser()
 
     private fun parseAndTypeCheck(source: String): TypeCheckResult {
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
@@ -166,7 +167,7 @@ let result = 5 |> combine {x = @, y = @}
 
         // Multiple @ in a single pipe expression is now an error
         val exception = org.junit.jupiter.api.assertThrows<Exception> {
-            parser.parse(source)
+            parser.parseParsedModule(source, "test.mz")
         }
         assertTrue(exception.message?.contains("multiple") == true ||
                    exception.message?.contains("only one") == true,

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -35,11 +36,11 @@ class ErrorReportingTest {
             let z = x + y
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles type mismatches gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -55,11 +56,11 @@ class ErrorReportingTest {
             let result = processUser {user = user1}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles closed record constraints gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -74,11 +75,11 @@ class ErrorReportingTest {
             let result = add {a = "hello", b = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles function call type mismatches gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -93,11 +94,11 @@ class ErrorReportingTest {
             let color: Color = Yellow
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles unknown constructors gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -112,11 +113,11 @@ class ErrorReportingTest {
             let z = point.z
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles missing record fields gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -132,11 +133,11 @@ class ErrorReportingTest {
               Some { value } -> value
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles pattern match exhaustiveness gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -155,11 +156,11 @@ class ErrorReportingTest {
               Log.log {message = "hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Effects without handlers should be valid at type checking level
         // Runtime will handle missing handlers with appropriate errors
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
 
         // The test variable should have the Log effect in its type
@@ -175,11 +176,11 @@ class ErrorReportingTest {
             let x = x
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles circular references gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -194,11 +195,11 @@ class ErrorReportingTest {
             let result = add {a = 5}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // This should actually succeed (partial application) but may fail due to type system limitations
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             // If it succeeds, that's good
         } catch (e: TypeCheckError) {
             // If it fails, that's also acceptable for this test
@@ -209,11 +210,11 @@ class ErrorReportingTest {
             let result = add {a = 5, b = 10, c = 15}
         """.trimIndent()
 
-        val program2 = parser.parse(source2)
+        val parsedModule2 = parser.parseParsedModule(source2, "test.mz")
 
         // Our permissive type checker handles arity mismatches gracefully
         try {
-            val result2 = typeChecker.typeCheck(program2)
+            val result2 = typeChecker.typeCheck(parsedModule2, Paths.get("."))
             assertNotNull(result2)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -227,11 +228,11 @@ class ErrorReportingTest {
             let x: Str = 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles type annotation mismatches gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -246,12 +247,12 @@ class ErrorReportingTest {
             let g = {a} -> f {x = a} {y = "hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // For now, just verify that the type checker doesn't crash on this code
         // The specific error detection can be improved later
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             // If it succeeds, that's fine - the type checker is being permissive
             assertNotNull(result)
         } catch (e: TypeCheckError) {
@@ -267,11 +268,11 @@ class ErrorReportingTest {
             let y = True * False
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles multiple errors gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -293,11 +294,11 @@ class ErrorReportingTest {
                 let result = add {a = 10, b = 20}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
 
             // Should not throw any exceptions
             assertDoesNotThrow {
-                val result = typeChecker.typeCheck(program)
+                val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
                 assertNotNull(result)
             }
         } finally {
@@ -319,11 +320,11 @@ class ErrorReportingTest {
               a / b
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Our permissive type checker handles detailed type mismatches gracefully
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(result)
         } catch (e: TypeCheckError) {
             // Accept any error for now - the test is about error reporting structure
@@ -342,10 +343,10 @@ class ErrorReportingTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         try {
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
             println("DEBUG: Wildcard variant test succeeded")
             val processColorType = result.getVariableType("processColor")
             println("DEBUG: processColor type = $processColorType")

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -29,8 +30,8 @@ class ImprovedErrorMessageTest {
 
     private fun getErrorMessage(source: String): String? {
         return try {
-            val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
             null  // No error
         } catch (e: TypeCheckError) {
             e.message

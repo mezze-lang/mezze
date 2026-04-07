@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
@@ -54,8 +55,8 @@ class SuspendedTypeTest {
                 perform Console in demo {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testFnType = result.getVariableType("testFn")
 
@@ -92,8 +93,8 @@ class SuspendedTypeTest {
             let getResult = {} -> perform Console in demo {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val getResultType = result.getVariableType("getResult")
 
@@ -140,8 +141,8 @@ class SuspendedTypeTest {
             let step2 = perform LocalDisk in step1
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // step1 should be a function with FileSystem remaining + <*>
         val step1Type = result.getVariableType("step1")
@@ -178,8 +179,8 @@ class SuspendedTypeTest {
             let result = perform Console in demo
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val resultType = result.getVariableType("result")
 
@@ -212,8 +213,8 @@ class SuspendedTypeTest {
             let funcRef = perform Console in myFunction
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // funcRef should be FunctionType with FileSystem effect and performed marker
         val funcRefType = result.getVariableType("funcRef")
@@ -246,8 +247,8 @@ class SuspendedTypeTest {
             let step3 = perform HandlerC in step2
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // step1: B, C remain
         val step1Type = result.getVariableType("step1")

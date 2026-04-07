@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -33,8 +34,8 @@ class TestMinimalResult {
         println("Testing map function only")
 
         try {
-            val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(typed)
             println("SUCCESS: map function typechecked")
         } catch (e: Exception) {
@@ -56,8 +57,8 @@ class TestMinimalResult {
         println("Testing flat_map function only")
 
         try {
-            val program = parser.parse(source)
-            val typed = typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            val typed = typeChecker.typeCheck(parsedModule, Paths.get("."))
             assertNotNull(typed)
             println("SUCCESS: flat_map function typechecked")
         } catch (e: Exception) {

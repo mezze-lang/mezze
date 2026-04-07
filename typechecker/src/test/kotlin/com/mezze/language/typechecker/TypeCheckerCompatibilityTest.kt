@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -28,10 +29,10 @@ class TypeCheckerCompatibilityTest {
     @Test
     fun `test basic let binding`() {
         val source = "let x = 5"
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
 
         val checker = TypeChecker()
-        val result = checker.typeCheck(program)
+        val result = checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
 
         assertNotNull(result)
         assertNotNull(result)
@@ -44,10 +45,10 @@ class TypeCheckerCompatibilityTest {
             let result = add {a = 5, b = 10}
         """.trimIndent()
 
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
 
         val checker = TypeChecker()
-        val result = checker.typeCheck(program)
+        val result = checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
 
         assertNotNull(result)
         assertNotNull(result)
@@ -61,11 +62,11 @@ class TypeCheckerCompatibilityTest {
             let result = x + y
         """.trimIndent()
 
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
         val checker = TypeChecker()
 
         try {
-            checker.typeCheck(program)
+            checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
             assert(false) { "Expected TypeCheckError to be thrown" }
         } catch (e: TypeCheckError) {
             // Expected behavior - old TypeChecker throws exceptions
@@ -81,9 +82,9 @@ class TypeCheckerCompatibilityTest {
             let b = identity {x = "hello"}
         """.trimIndent()
 
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
         val checker = TypeChecker()
-        val result = checker.typeCheck(program)
+        val result = checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
 
         assertNotNull(result)
     }
@@ -96,9 +97,9 @@ class TypeCheckerCompatibilityTest {
             let xValue = getX {p = point}
         """.trimIndent()
 
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
         val checker = TypeChecker()
-        val result = checker.typeCheck(program)
+        val result = checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
 
         assertNotNull(result)
         assertNotNull(result)
@@ -120,9 +121,9 @@ class TypeCheckerCompatibilityTest {
             let value = getOr {opt = x, default = 0}
         """.trimIndent()
 
-        val program = MezzeParser().parse(source)
+        val parsedModule = MezzeParser().parseParsedModule(source, "test.mz")
         val checker = TypeChecker()
-        val result = checker.typeCheck(program)
+        val result = checker.typeCheck(parsedModule, java.nio.file.Paths.get("."))
 
         assertNotNull(result)
         assertNotNull(result)

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.*
 import org.junit.jupiter.api.Test
@@ -38,9 +39,9 @@ class AbilityEffectErrorsTest {
             let x = 42.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message != null,
             "Should produce an error for calling show on Int without ability: ${exception.message}")
@@ -52,9 +53,9 @@ class AbilityEffectErrorsTest {
             let f = Show.show
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("Show") == true,
             "Error should mention 'Show': ${exception.message}")
@@ -67,9 +68,9 @@ class AbilityEffectErrorsTest {
             let z = 5 |> @.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message != null,
             "Should produce an error for calling show on Int without ability: ${exception.message}")
@@ -81,9 +82,9 @@ class AbilityEffectErrorsTest {
             let x = Insepct.to_dbg_str {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         // Should suggest "Inspect" as similar to "Insepct"
         assertTrue(exception.message?.contains("Insepct") == true,
@@ -97,9 +98,9 @@ class AbilityEffectErrorsTest {
             let x = Inspect.nonexistent {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("nonexistent") == true,
             "Error should mention 'nonexistent': ${exception.message}")
@@ -117,9 +118,9 @@ class AbilityEffectErrorsTest {
             let x = UnknownEffect.operation {arg = 42}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("UnknownEffect") == true,
             "Error should mention 'UnknownEffect': ${exception.message}")
@@ -131,9 +132,9 @@ class AbilityEffectErrorsTest {
             let logMessage = {msg: Str} -> UnknownLog.log {msg = msg}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("UnknownLog") == true,
             "Error should mention 'UnknownLog': ${exception.message}")
@@ -167,8 +168,8 @@ class AbilityEffectErrorsTest {
             let logTest = {} -> Log.info {msg = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val logTestType = result.getVariableType("logTest")
         assertNotNull(logTestType, "logTest binding should exist")
@@ -205,8 +206,8 @@ class AbilityEffectErrorsTest {
                 Outer.outer_op {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val testType = result.getVariableType("test")
         assertNotNull(testType, "test binding should exist")
@@ -235,8 +236,8 @@ class AbilityEffectErrorsTest {
                 Log.info {msg = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         val mainType = result.getVariableType("main")
         assertNotNull(mainType, "main binding should exist")
@@ -261,9 +262,9 @@ class AbilityEffectErrorsTest {
             let y = x.show {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Should produce an error (field access on non-record type)
@@ -279,9 +280,9 @@ class AbilityEffectErrorsTest {
             let c = UndefinedEffect.op {x = a + b}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         // Error should have source location pointing to line 3
@@ -305,9 +306,9 @@ class AbilityEffectErrorsTest {
             let f = Show.show
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("Direct ability access") == true,
             "Error should mention direct ability access: ${exception.message}")
@@ -325,9 +326,9 @@ class AbilityEffectErrorsTest {
             let f = Show.nonexistent
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("Show") == true,
             "Error should mention 'Show': ${exception.message}")
@@ -351,9 +352,9 @@ class AbilityEffectErrorsTest {
                 Log.info {msg = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("UnknownPerformer") == true,
             "Error should mention 'UnknownPerformer': ${exception.message}")
@@ -376,9 +377,9 @@ class AbilityEffectErrorsTest {
                 1 + 1
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("pure") == true ||
                    exception.message?.contains("no effects") == true,
@@ -406,9 +407,9 @@ class AbilityEffectErrorsTest {
                 Log.info {msg = "test"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(exception.message?.contains("IO") == true ||
                    exception.message?.contains("Log") == true,

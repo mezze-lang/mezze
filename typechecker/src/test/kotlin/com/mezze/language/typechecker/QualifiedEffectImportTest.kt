@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -40,8 +41,8 @@ class QualifiedEffectImportTest {
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
-            val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("not defined or not imported") == true,
@@ -60,8 +61,8 @@ class QualifiedEffectImportTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -79,8 +80,8 @@ class QualifiedEffectImportTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -94,8 +95,8 @@ class QualifiedEffectImportTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -110,8 +111,8 @@ class QualifiedEffectImportTest {
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
-            val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            val parsedModule = parser.parseParsedModule(source, "test.mz")
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(exception.message?.contains("not defined or not imported") == true,
@@ -130,8 +131,8 @@ class QualifiedEffectImportTest {
             let test = {} -> log::info { msg = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -143,8 +144,8 @@ class QualifiedEffectImportTest {
             let test = {} -> info { msg = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -164,8 +165,8 @@ class QualifiedEffectImportTest {
             let main = {} -> perform TestLogger {} in log::info { msg = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -181,8 +182,8 @@ class QualifiedEffectImportTest {
             let main = {} -> perform TestLogger {} in info { msg = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -200,8 +201,8 @@ class QualifiedEffectImportTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -219,8 +220,8 @@ class QualifiedEffectImportTest {
             let test = {} -> perform MatchLogger {} in log::info { msg = "hello" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 
@@ -237,8 +238,8 @@ class QualifiedEffectImportTest {
             let test = {} -> perform MultiLogger {} in log::info { msg = "test" }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
     }
 }

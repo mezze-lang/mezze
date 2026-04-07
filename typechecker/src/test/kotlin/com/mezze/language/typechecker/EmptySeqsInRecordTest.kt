@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -25,10 +26,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Extract the type of the 'test' binding
         val testType = result.getVariableType("test")
@@ -60,10 +61,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -79,10 +80,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -98,10 +99,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -122,10 +123,10 @@ class EmptySeqsInRecordTest {
         println("MINIMAL TEST CASE - returns record directly")
         println("=".repeat(80))
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -146,10 +147,10 @@ class EmptySeqsInRecordTest {
         println("MINIMAL TEST CASE - accesses single field")
         println("=".repeat(80))
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -170,10 +171,10 @@ class EmptySeqsInRecordTest {
         println("MINIMAL TEST CASE - rebuilds record from fields (yes first)")
         println("=".repeat(80))
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -194,10 +195,10 @@ class EmptySeqsInRecordTest {
         println("MINIMAL TEST CASE - rebuilds record from fields (no first)")
         println("=".repeat(80))
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -215,10 +216,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -239,10 +240,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 
@@ -264,10 +265,10 @@ class EmptySeqsInRecordTest {
         """.trimIndent()
 
         println("Code: $code")
-        val ast = parser.parse(code)
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
         println("Parsed successfully")
 
-        val result = typeChecker.typeCheck(ast)
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         println("Type checked successfully!")
     }
 }

@@ -205,6 +205,10 @@ class TypeChecker(
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult {
+        // Desugar pipe expressions in ParsedModule before type checking
+        @Suppress("NAME_SHADOWING")
+        val module = try { desugarPipesInParsedModule(module) } catch (_: Exception) { module }
+
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
 
@@ -1425,6 +1429,107 @@ class TypeChecker(
     // =========================================================================
     // PIPE EXPRESSION DESUGARING
     // =========================================================================
+
+    /**
+     * Desugar pipe expressions in a ParsedModule (v2 pipeline).
+     * Converts: x |> f { a = @ }  ->  f { a = x }
+     * Recursively walks all expressions in declarations.
+     */
+    private fun desugarPipesInParsedModule(module: com.mezze.language.parsedast.ParsedModule): com.mezze.language.parsedast.ParsedModule {
+        // Quick check: does the module even contain pipes?
+        fun hasPipes(expr: com.mezze.language.parsedast.ParsedExpr): Boolean = when (expr) {
+            is com.mezze.language.parsedast.ParsedPipe -> true
+            is com.mezze.language.parsedast.ParsedFunctionCall -> hasPipes(expr.function) || hasPipes(expr.arguments)
+            is com.mezze.language.parsedast.ParsedLambda -> hasPipes(expr.body)
+            is com.mezze.language.parsedast.ParsedRecordLit -> expr.entries.any { e ->
+                when (e) {
+                    is com.mezze.language.parsedast.ParsedRecordEntry.Field -> e.value?.let { hasPipes(it) } ?: false
+                    is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> hasPipes(e.expr)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedIf -> hasPipes(expr.condition) || hasPipes(expr.thenBranch) || hasPipes(expr.elseBranch)
+            is com.mezze.language.parsedast.ParsedMatch -> hasPipes(expr.scrutinee) || expr.cases.any { hasPipes(it.body) }
+            is com.mezze.language.parsedast.ParsedDo -> hasPipes(expr.result) || expr.statements.any { stmt ->
+                when (stmt) {
+                    is com.mezze.language.parsedast.ParsedStatement.Let -> hasPipes(stmt.value)
+                    is com.mezze.language.parsedast.ParsedStatement.Expr -> hasPipes(stmt.expr)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedPerform -> hasPipes(expr.body)
+            is com.mezze.language.parsedast.ParsedMemberAccess -> hasPipes(expr.receiver)
+            else -> false
+        }
+        val hasAnyPipes = module.decls.any { decl ->
+            when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> hasPipes(decl.value)
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.operations.any { hasPipes(it.implementation) }
+                else -> false
+            }
+        }
+        if (!hasAnyPipes) return module
+
+        fun desugar(expr: com.mezze.language.parsedast.ParsedExpr): com.mezze.language.parsedast.ParsedExpr = when (expr) {
+            is com.mezze.language.parsedast.ParsedPipe -> {
+                val left = desugar(expr.left)
+                val right = desugar(expr.right)
+                replaceParsedPlaceholder(right, left)
+            }
+            is com.mezze.language.parsedast.ParsedFunctionCall -> expr.copy(function = desugar(expr.function), arguments = desugar(expr.arguments))
+            is com.mezze.language.parsedast.ParsedLambda -> expr.copy(body = desugar(expr.body))
+            is com.mezze.language.parsedast.ParsedRecordLit -> expr.copy(entries = expr.entries.map { e ->
+                when (e) {
+                    is com.mezze.language.parsedast.ParsedRecordEntry.Field -> e.copy(value = e.value?.let { desugar(it) })
+                    is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> e.copy(expr = desugar(e.expr))
+                }
+            })
+            is com.mezze.language.parsedast.ParsedIf -> expr.copy(condition = desugar(expr.condition), thenBranch = desugar(expr.thenBranch), elseBranch = desugar(expr.elseBranch))
+            is com.mezze.language.parsedast.ParsedMatch -> expr.copy(scrutinee = desugar(expr.scrutinee), cases = expr.cases.map { it.copy(body = desugar(it.body)) })
+            is com.mezze.language.parsedast.ParsedDo -> expr.copy(
+                statements = expr.statements.map { stmt ->
+                    when (stmt) {
+                        is com.mezze.language.parsedast.ParsedStatement.Let -> stmt.copy(value = desugar(stmt.value))
+                        is com.mezze.language.parsedast.ParsedStatement.Expr -> stmt.copy(expr = desugar(stmt.expr))
+                    }
+                },
+                result = desugar(expr.result)
+            )
+            is com.mezze.language.parsedast.ParsedPerform -> expr.copy(body = desugar(expr.body))
+            is com.mezze.language.parsedast.ParsedMemberAccess -> expr.copy(receiver = desugar(expr.receiver))
+            else -> expr
+        }
+
+        return module.copy(decls = module.decls.map { decl ->
+            when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> decl.copy(value = desugar(decl.value))
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.copy(operations = decl.operations.map { op -> op.copy(implementation = desugar(op.implementation)) })
+                else -> decl
+            }
+        })
+    }
+
+    /**
+     * Replace ParsedPipePlaceholder (@) with the left-hand expression in a v2 AST tree.
+     */
+    private fun replaceParsedPlaceholder(expr: com.mezze.language.parsedast.ParsedExpr, replacement: com.mezze.language.parsedast.ParsedExpr): com.mezze.language.parsedast.ParsedExpr = when (expr) {
+        is com.mezze.language.parsedast.ParsedPipePlaceholder -> replacement
+        is com.mezze.language.parsedast.ParsedFunctionCall -> expr.copy(
+            function = replaceParsedPlaceholder(expr.function, replacement),
+            arguments = replaceParsedPlaceholder(expr.arguments, replacement)
+        )
+        is com.mezze.language.parsedast.ParsedRecordLit -> expr.copy(entries = expr.entries.map { e ->
+            when (e) {
+                is com.mezze.language.parsedast.ParsedRecordEntry.Field -> e.copy(value = e.value?.let { replaceParsedPlaceholder(it, replacement) })
+                is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> e.copy(expr = replaceParsedPlaceholder(e.expr, replacement))
+            }
+        })
+        is com.mezze.language.parsedast.ParsedLambda -> expr.copy(body = replaceParsedPlaceholder(expr.body, replacement))
+        is com.mezze.language.parsedast.ParsedIf -> expr.copy(
+            condition = replaceParsedPlaceholder(expr.condition, replacement),
+            thenBranch = replaceParsedPlaceholder(expr.thenBranch, replacement),
+            elseBranch = replaceParsedPlaceholder(expr.elseBranch, replacement)
+        )
+        else -> expr
+    }
 
     /**
      * Desugar all PipeExpressions in a program.

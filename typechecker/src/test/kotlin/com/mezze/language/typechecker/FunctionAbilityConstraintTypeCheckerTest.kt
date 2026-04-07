@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import java.nio.file.Paths
 import com.mezze.language.ast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
@@ -27,14 +28,14 @@ class FunctionAbilityConstraintTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val item = program.items[0]
-        assertTrue(item is AbilityDeclaration)
+        val item = parsedModule.decls[0]
+        assertTrue(item is com.mezze.language.parsedast.ParsedAbilityDecl)
 
-        val ability = item as AbilityDeclaration
+        val ability = item as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals("Show", ability.name)
     }
 
@@ -50,12 +51,12 @@ class FunctionAbilityConstraintTypeCheckerTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val abilityDecl = program.items[0] as AbilityDeclaration
-        val implDecl = program.items[1] as ImplAbilityDeclaration
+        val abilityDecl = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        val implDecl = parsedModule.decls[1] as com.mezze.language.parsedast.ParsedImplAbilityDecl
 
         assertEquals("Show", abilityDecl.name)
         assertFalse(implDecl.isInherent)
@@ -71,11 +72,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
             { val: 'a } -> Str with Encoder 'a = {val} -> "test"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val topLevel = program.items[1] as TopLevelExpression
+        val topLevel = parser.parse(source).items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
 
         val lambda = topLevel.expression as LambdaExpression
@@ -100,11 +101,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
             { left: 'a, right: 'a } -> Str with Eq 'a, Show 'a = {left, right} -> "test"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val topLevel = program.items[2] as TopLevelExpression
+        val topLevel = parser.parse(source).items[2] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
 
         val lambda = topLevel.expression as LambdaExpression
@@ -127,11 +128,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
             Show.show
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
 
         // Direct ability access is now blocked
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
         assertTrue(error.message?.contains("Direct ability access") == true,
@@ -150,11 +151,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
             { key: 'a, value: 'b } -> {} with KVStore 'b 'a = {key, value} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val topLevel = program.items[1] as TopLevelExpression
+        val topLevel = parser.parse(source).items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
 
         val lambda = topLevel.expression as LambdaExpression
@@ -176,11 +177,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
             { val: Int } -> Str with Show Int = {val} -> "test"
         """.trimIndent()
 
-        val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val topLevel = program.items[1] as TopLevelExpression
+        val topLevel = parser.parse(source).items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
 
         val lambda = topLevel.expression as LambdaExpression
