@@ -1599,9 +1599,83 @@ class ConstraintSolver(
         typeVars: Set<String> = emptySet(),
         typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
     ): Boolean {
-        return typeMatchesAnnotation(type, com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"), typeVars, typeVarBindings)
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                if (annotation.name in typeVars) {
+                    val existing = typeVarBindings[annotation.name]
+                    if (existing != null) existing == type
+                    else { typeVarBindings[annotation.name] = type; true }
+                } else {
+                    val builtinMatch = PrimitiveTypes.matchesBuiltinType(annotation.name, type)
+                    if (builtinMatch != null) builtinMatch
+                    else {
+                        val typeDecl = typeDeclarations[annotation.name]
+                        if (typeDecl != null) typeMatchesDeclaration(type, typeDecl)
+                        else when (type) {
+                            is MezzeType.RecordType -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.typeName == annotation.name)
+                            is MezzeType.VariantType -> {
+                                val declHash = typeDeclarations[annotation.name]?.contentHash
+                                if (type.typeHash != null && declHash != null) type.typeHash == declHash
+                                else if (type.typeName == annotation.name) true
+                                else if (type.typeName == null && type.constructors.containsKey(annotation.name)) true
+                                else false
+                            }
+                            is MezzeType.TypeApplication -> type.typeHash?.let { it == typeDeclarations[annotation.name]?.contentHash } ?: (type.constructor == annotation.name)
+                            else -> false
+                        }
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                when {
+                    type is MezzeType.TypeApplication && type.constructor == annotation.constructor -> {
+                        type.args.size == annotation.args.size &&
+                        type.args.zip(annotation.args).all { (argType, argAnn) -> typeMatchesAnnotation(argType, argAnn, typeVars, typeVarBindings) }
+                    }
+                    type is MezzeType.VariantType && type.typeName == null -> {
+                        val typeDecl = typeDeclarations[annotation.constructor]
+                        if (typeDecl != null && typeDecl.definition is com.mezze.language.parsedast.ParsedVariantDef) {
+                            val definition = typeDecl.definition as com.mezze.language.parsedast.ParsedVariantDef
+                            val declConstructors = definition.constructors.map { it.name }.toSet()
+                            if (!declConstructors.containsAll(type.constructors.keys)) false
+                            else {
+                                val inferredArgs = inferTypeArgsFromVariant(type, typeDecl, definition)
+                                if (inferredArgs != null && inferredArgs.size == annotation.args.size) {
+                                    inferredArgs.zip(annotation.args).all { (inf, argAnn) -> typeMatchesAnnotation(inf, argAnn, typeVars, typeVarBindings) }
+                                } else false
+                            }
+                        } else false
+                    }
+                    type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ -> annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
+                    type is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST -> annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
+                    type is MezzeType.SetType && annotation.constructor == BuiltinTypes.SET -> annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeVars, typeVarBindings)
+                    type is MezzeType.MapType && annotation.constructor == BuiltinTypes.MAP -> annotation.args.size == 2 && typeMatchesAnnotation(type.keyType, annotation.args[0], typeVars, typeVarBindings) && typeMatchesAnnotation(type.valueType, annotation.args[1], typeVars, typeVarBindings)
+                    else -> false
+                }
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                if (type !is MezzeType.RecordType || type.fields.size != annotation.entries.size) false
+                else annotation.entries.all { entry ->
+                    val fieldType = type.fields[entry.name] ?: return false
+                    typeMatchesAnnotation(fieldType, entry.type, typeVars, typeVarBindings)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                if (type !is MezzeType.VariantType) false
+                else annotation.constructors.all { ctor ->
+                    val concretePayload = type.constructors[ctor.name]
+                    if (ctor.dataType == null) concretePayload == null
+                    else if (concretePayload == null) false
+                    else typeMatchesAnnotation(concretePayload, ctor.dataType!!, typeVars, typeVarBindings)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedSeqType -> type is MezzeType.SeqType && typeMatchesAnnotation(type.elementType, annotation.elementType, typeVars, typeVarBindings)
+            is com.mezze.language.parsedast.ParsedFunctionType -> false // Function types in impl targets are rare
+            is com.mezze.language.parsedast.ParsedQualifiedType -> false // TODO: handle qualified types
+        }
     }
 
+    @Deprecated("Use v2 ParsedTypeAnnotation overload — kept for internal callers")
     private fun typeMatchesAnnotation(
         type: MezzeType,
         annotation: TypeAnnotation,
