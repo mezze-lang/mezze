@@ -901,36 +901,34 @@ class TypeChecker(
         val result = mutableMapOf<String, TypeAliasInfo>()
 
         fun addParsedTypeDecl(typeDecl: com.mezze.language.parsedast.ParsedTypeDecl) {
-            // Convert to v1 TypeDeclaration for the existing helper
-            val v1TypeDecl = contextBuilder.parsedTypeDeclToV1(typeDecl)
-            val definitionType = when (val def = v1TypeDecl.definition) {
-                is VariantDefinition -> {
+            val definitionType = when (val def = typeDecl.definition) {
+                is com.mezze.language.parsedast.ParsedVariantDef -> {
                     val constructors = def.constructors.associate { ctor ->
-                        val dataType = ctor.dataType?.let { contextBuilder.convertTypeAnnotation(it) }
+                        val dataType = ctor.dataType?.let { contextBuilder.convertParsedTypeAnnotation(it) }
                         ctor.name to dataType
                     }
                     MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = if (def.isOpen) RowVar.fresh() else null,
-                        typeName = v1TypeDecl.name
+                        typeName = typeDecl.name
                     )
                 }
-                is RecordDefinition -> {
+                is com.mezze.language.parsedast.ParsedRecordDef -> {
                     val fields = def.fields.associate { field ->
-                        field.name to contextBuilder.convertTypeAnnotation(field.type)
+                        field.name to contextBuilder.convertParsedTypeAnnotation(field.type)
                     }
                     MezzeType.RecordType(
                         fields = fields,
                         rowVar = if (def.isOpen) RowVar.fresh() else null,
-                        typeName = v1TypeDecl.name
+                        typeName = typeDecl.name
                     )
                 }
                 else -> null
             }
             if (definitionType != null) {
-                result[v1TypeDecl.name] = TypeAliasInfo(
-                    name = v1TypeDecl.name,
-                    typeParams = v1TypeDecl.typeParams,
+                result[typeDecl.name] = TypeAliasInfo(
+                    name = typeDecl.name,
+                    typeParams = typeDecl.typeParams,
                     definition = definitionType
                 )
             }

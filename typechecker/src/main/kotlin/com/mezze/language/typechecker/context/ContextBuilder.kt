@@ -1608,104 +1608,6 @@ class ContextBuilder {
 
     private val syntheticLoc = Loc(file = "<v1-bridge>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
 
-    /** Convert v1 TypeAnnotation to v2 ParsedTypeAnnotation (best effort). */
-    private fun v1TypeAnnotationToParsed(ta: TypeAnnotation): ParsedTypeAnnotation = when (ta) {
-        is IdentifierTypeAnnotation -> ParsedNamedType(ta.name, syntheticLoc)
-        is TypeApplicationAnnotation -> ParsedTypeApp(ta.constructor, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
-        is RecordTypeAnnotation -> ParsedRecordType(
-            ta.entries.map { ParsedRecordTypeEntry(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) },
-            ta.isOpen, syntheticLoc
-        )
-        is VariantTypeAnnotation -> ParsedVariantType(
-            ta.constructors.map { ParsedVariantTypeCtor(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
-            ta.isOpen, syntheticLoc
-        )
-        is FunctionTypeAnnotation -> ParsedFunctionType(
-            v1TypeAnnotationToParsed(ta.paramType), v1TypeAnnotationToParsed(ta.returnType),
-            ta.effects?.let { era ->
-                ParsedEffectRow(
-                    era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
-                    era.isPolymorphic, era.isPerformed, syntheticLoc
-                )
-            },
-            ta.abilityConstraints.map { c -> ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) },
-            syntheticLoc
-        )
-        is SeqTypeAnnotation -> ParsedSeqType(v1TypeAnnotationToParsed(ta.elementType), syntheticLoc)
-        is QualifiedTypeAnnotation -> ParsedQualifiedType(ta.modulePath, ta.typeName, ta.args.map { v1TypeAnnotationToParsed(it) }, syntheticLoc)
-        is EffectRowAnnotation -> ParsedNamedType("EffectRow", syntheticLoc)  // shouldn't occur as a type
-    }
-
-    /** Convert v1 TypeDeclaration to v2 ParsedTypeDecl. */
-    private fun v1TypeDeclToParsed(td: TypeDeclaration): ParsedTypeDecl {
-        val def: ParsedTypeDef = when (val d = td.definition) {
-            is RecordDefinition -> ParsedRecordDef(
-                d.fields.map { ParsedRecordFieldDef(it.name, v1TypeAnnotationToParsed(it.type), syntheticLoc) },
-                d.isOpen, syntheticLoc
-            )
-            is VariantDefinition -> ParsedVariantDef(
-                d.constructors.map { ParsedVariantCtorDef(it.name, it.dataType?.let { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
-                d.isOpen, syntheticLoc
-            )
-            is NewtypeDefinition -> ParsedNewtypeDef(d.constructor, v1TypeAnnotationToParsed(d.wrappedType), syntheticLoc)
-        }
-        return ParsedTypeDecl(
-            name = td.name, typeParams = td.typeParams, definition = def,
-            visibility = if (td.visibility == com.mezze.language.ast.Visibility.PUBLIC) ParsedVisibility.PUBLIC else ParsedVisibility.PRIVATE,
-            loc = td.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
-            contentHash = td.contentHash
-        )
-    }
-
-    /** Convert v1 AbilityDeclaration to v2 ParsedAbilityDecl. */
-    private fun v1AbilityDeclToParsed(ad: AbilityDeclaration): ParsedAbilityDecl {
-        return ParsedAbilityDecl(
-            name = ad.name,
-            typeParams = ad.typeParams,
-            receiverTypeParam = ad.receiverTypeParam,
-            associatedTypes = ad.associatedTypes,
-            constraints = ad.constraints.map { ParsedAbilityConstraint(it.abilityName, it.typeParam, it.typeArgs.map { MezzeType -> ParsedNamedType(MezzeType.toString(), syntheticLoc) }, syntheticLoc) },
-            dependencies = ad.dependencies.map { ParsedAbilityDep(it.abilityName, it.typeArgs.map { v1TypeAnnotationToParsed(it) }, syntheticLoc) },
-            operations = ad.operations.map { op ->
-                ParsedAbilityOp(
-                    name = op.name,
-                    paramType = v1TypeAnnotationToParsed(op.paramType),
-                    returnType = v1TypeAnnotationToParsed(op.returnType),
-                    effects = op.effects?.let { era ->
-                        ParsedEffectRow(era.effects, era.effectAnnotations.map { ParsedEffectAnnotation(it.name, it.associatedTypes.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc) }, era.isPolymorphic, era.isPerformed, syntheticLoc)
-                    },
-                    abilityConstraints = op.abilityConstraints.map { c ->
-                        ParsedFnAbilityConstraint(c.abilityName, c.typeArgs.map { v1TypeAnnotationToParsed(it) }, c.associatedTypeBindings.mapValues { (_, v) -> v1TypeAnnotationToParsed(v) }, syntheticLoc)
-                    },
-                    loc = syntheticLoc
-                )
-            },
-            visibility = ParsedVisibility.PUBLIC,
-            loc = ad.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
-            contentHash = ad.contentHash
-        )
-    }
-
-    /** Convert v1 EffectDeclaration to v2 ParsedEffectDecl. */
-    private fun v1EffectDeclToParsed(ed: EffectDeclaration): ParsedEffectDecl {
-        return ParsedEffectDecl(
-            name = ed.name,
-            operations = ed.operations.map { op ->
-                ParsedEffectOp(
-                    name = op.name,
-                    paramType = v1TypeAnnotationToParsed(op.paramType),
-                    returnType = v1TypeAnnotationToParsed(op.returnType),
-                    effects = op.effects,
-                    loc = syntheticLoc
-                )
-            },
-            associatedTypes = ed.associatedTypes,
-            visibility = ParsedVisibility.PUBLIC,
-            loc = ed.sourceLocation?.let { Loc(it.file ?: "<unknown>", it.line, it.column, it.line, it.column + (it.length ?: 0)) } ?: syntheticLoc,
-            contentHash = ed.contentHash
-        )
-    }
-
     /**
      * Convert a ParsedTypeDecl to a v1 TypeDeclaration.
      */
@@ -1798,26 +1700,6 @@ class ContextBuilder {
             }
         )
         val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
-    }
-
-    /**
-     * Convert a ParsedEffectDecl to a v1 EffectDeclaration.
-     */
-    private fun parsedEffectDeclToV1(decl: ParsedEffectDecl, file: String): EffectDeclaration {
-        val result = EffectDeclaration(
-            name = decl.name,
-            operations = decl.operations.map { op ->
-                EffectOperation(
-                    name = op.name,
-                    paramType = ParserBridge.toV1TypeAnnotation(op.paramType, file),
-                    returnType = ParserBridge.toV1TypeAnnotation(op.returnType, file),
-                    effects = op.effects
-                )
-            },
-            associatedTypes = decl.associatedTypes
-        )
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashEffectDeclaration(result)
         return result.copy(contentHash = hash.toFullHexString())
     }
 
