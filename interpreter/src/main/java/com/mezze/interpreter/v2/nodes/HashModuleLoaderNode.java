@@ -117,32 +117,33 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate closure factories.
-        // Uses static cache to avoid re-evaluating across tests.
-        for (int i = 0; i < functionHashes.length; i++) {
-            String hash = functionHashes[i];
-            // Check static cache first
-            Object cached = evaluatedClosureCache.get(hash);
-            if (cached != null) {
-                context.defineGlobal(hash, cached);
-                if (i < functionNames.length && functionNames[i] != null) {
-                    context.defineGlobal(functionNames[i], cached);
-                }
-                continue;
-            }
-            // Evaluate closure factory
-            CallTarget target = functionTargets[i];
-            try {
-                Object result = target.call(new Object[] { emptyRecord });
-                if (result instanceof MezzeFunction closure) {
-                    context.defineGlobal(hash, closure);
+        // Pass 2: Evaluate closure factories (ONLY for small sets to avoid OOM).
+        // With 1000+ functions, eager evaluation causes infinite recursion in some closure factories.
+        // HandlerLookupNode evaluates lazily when needed.
+        if (functionHashes.length < 200) {
+            for (int i = 0; i < functionHashes.length; i++) {
+                String hash = functionHashes[i];
+                Object cached = evaluatedClosureCache.get(hash);
+                if (cached != null) {
+                    context.defineGlobal(hash, cached);
                     if (i < functionNames.length && functionNames[i] != null) {
-                        context.defineGlobal(functionNames[i], closure);
+                        context.defineGlobal(functionNames[i], cached);
                     }
-                    evaluatedClosureCache.put(hash, closure);
+                    continue;
                 }
-            } catch (Exception e) {
-                // Not a closure factory or depends on unavailable captures
+                CallTarget target = functionTargets[i];
+                try {
+                    Object result = target.call(new Object[] { emptyRecord });
+                    if (result instanceof MezzeFunction closure) {
+                        context.defineGlobal(hash, closure);
+                        if (i < functionNames.length && functionNames[i] != null) {
+                            context.defineGlobal(functionNames[i], closure);
+                        }
+                        evaluatedClosureCache.put(hash, closure);
+                    }
+                } catch (Exception e) {
+                    // Not a closure factory or depends on unavailable captures
+                }
             }
         }
 
