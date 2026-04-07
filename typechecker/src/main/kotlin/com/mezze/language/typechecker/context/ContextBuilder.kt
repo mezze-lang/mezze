@@ -271,8 +271,8 @@ class ContextBuilder {
             }
         }
 
-        // Add effect operations to context
-        for (effectDecl in v1EffectDecls.values) {
+        // Add effect operations to context (using v2 ParsedEffectDecl directly)
+        for (effectDecl in effectDecls.values) {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
@@ -537,7 +537,7 @@ class ContextBuilder {
     /**
      * Add effect operations to context
      */
-    private fun addEffectOperations(ctx: TypingContext, effectDecl: EffectDeclaration): TypingContext {
+    private fun addEffectOperations(ctx: TypingContext, effectDecl: ParsedEffectDecl): TypingContext {
         var result = ctx
 
         // CRITICAL: Clear cache once BEFORE converting all operations for this effect
@@ -553,8 +553,8 @@ class ContextBuilder {
                 // Convert the type annotation and strip any effects
                 // Effect operations are stored as plain function types
                 // IMPORTANT: Use internal converter to avoid clearing cache between operations
-                val convertedReturnType = convertTypeAnnotationV1Internal(op.returnType)
-                val convertedParamType = convertTypeAnnotationV1Internal(op.paramType)
+                val convertedReturnType = convertParsedTypeAnnotationInternal(op.returnType)
+                val convertedParamType = convertParsedTypeAnnotationInternal(op.paramType)
                 val plainFunctionType = MezzeType.FunctionType(
                     paramType = convertedParamType,
                     returnType = convertedReturnType,
