@@ -151,6 +151,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
                     }
                     evaluatedClosureCache.put(hash, closure);
                 }
+            } catch (StackOverflowError soe) {
+                // Infinite recursion in closure factory — skip, keep raw MezzeFunction
+            } catch (OutOfMemoryError oom) {
+                // OOM from deep recursion — skip
             } catch (Exception e) {
                 // Not a closure factory or depends on unavailable captures
             }

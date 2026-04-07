@@ -39,6 +39,9 @@ class Monomorphizer {
      */
     private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOpEntry>>()
 
+    /** Guard against infinite recursion when inlining operation bodies in the fallback path */
+    private val currentlyInlining = mutableSetOf<String>()
+
     private data class AbilityOpEntry(
         val implHash: Hash,
         val abilityName: String?,
@@ -573,9 +576,27 @@ class Monomorphizer {
                 }
             }
 
-            // Fallback: inline the op body lambda (creates CallIndirect)
+            // Fallback: inline the op body lambda.
+            // Guard against infinite recursion by checking if we're already inlining this operation.
+            val inlineKey = "${matchingEntry.implHash.hex}_$methodName"
+            if (inlineKey in currentlyInlining) {
+                // Recursive call — can't inline further. Create a call to the operation by hash.
+                val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
+                val opFnHash = computeOpHash(matchingEntry.implHash, methodName)
+                if (opFnHash !in processed) worklist.add(opFnHash)
+                return MonoCall(
+                    MonoVar(methodName, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(opFnHash)), opBody.type, opBody.loc),
+                    wrappedArg,
+                    expr.isTailCall,
+                    expr.type,
+                    expr.loc
+                )
+            }
+
+            currentlyInlining.add(inlineKey)
             val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
             val convertedOpBody = convertExpr(opBody, globalDecls, worklist, processed)
+            currentlyInlining.remove(inlineKey)
 
             return MonoCall(
                 convertedOpBody,
