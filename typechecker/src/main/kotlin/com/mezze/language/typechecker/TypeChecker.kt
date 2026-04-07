@@ -847,17 +847,12 @@ class TypeChecker(
                 val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
                     importContext.importedAbilities[name]?.contentHash
                 }
-                // Convert v2 type annotations to v1 for AbilityImplInfo
-                val v1AllTypeArgs = implDecl.allTypeArgs.map { parserBridge.toV1TypeAnnotation(it, "<import>") }
-                val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
-                    parserBridge.toV1TypeAnnotation(v, "<import>")
-                }
                 val implInfo = TypingContext.AbilityImplInfo(
                     abilityName = implDecl.abilityName,
                     abilityDeclHash = abilityDeclHashForImpl,
-                    targetTypes = v1AllTypeArgs.map { typeAnnotationToString(it) },
-                    targetTypeAnnotations = v1AllTypeArgs,
-                    associatedTypeBindings = v1AssocBindings,
+                    targetTypes = implDecl.allTypeArgs.map { it.toString() },
+                    targetTypeAnnotations = implDecl.allTypeArgs,
+                    associatedTypeBindings = implDecl.associatedTypeBindings,
                     sourceModule = null,
                     contentHash = implKey,
                     typeVars = implTypeVars

@@ -172,16 +172,12 @@ data class CompiledModuleInterface(
                         .filter { it.name.startsWith("'") }
                         .map { it.name }
                         .toSet()
-                    val v1AllTypeArgs = implDecl.allTypeArgs.map { parserBridge.toV1TypeAnnotation(it, "<import>") }
-                    val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
-                        parserBridge.toV1TypeAnnotation(v, "<import>")
-                    }
                     val implInfo = TypingContext.AbilityImplInfo(
                         abilityName = implDecl.abilityName,
                         abilityDeclHash = null,
-                        targetTypes = v1AllTypeArgs.map { it.toString() },
-                        targetTypeAnnotations = v1AllTypeArgs,
-                        associatedTypeBindings = v1AssocBindings,
+                        targetTypes = implDecl.allTypeArgs.map { it.toString() },
+                        targetTypeAnnotations = implDecl.allTypeArgs,
+                        associatedTypeBindings = implDecl.associatedTypeBindings,
                         sourceModule = null,
                         contentHash = implKey,
                         typeVars = implTypeVars

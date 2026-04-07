@@ -82,8 +82,8 @@ data class TypingContext(
         val abilityName: String?,  // null for inherent impls — for error messages and fallback
         val abilityDeclHash: String? = null,  // Content hash of the ability DECLARATION (not the impl)
         val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
-        val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
-        val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
+        val targetTypeAnnotations: List<com.mezze.language.parsedast.ParsedTypeAnnotation>? = null,  // Original annotations for structural matching
+        val associatedTypeBindings: Map<String, com.mezze.language.parsedast.ParsedTypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
         val contentHash: String,  // Content hash of the IMPL (same as the map key)
         val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`

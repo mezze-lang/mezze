@@ -979,13 +979,7 @@ class ContextBuilder {
         val allTargetAnnotations = implDecl.allTypeArgs
         val allTargetNames = allTargetAnnotations.map { getTypeName(it) }
 
-        // Convert v2 type annotations to v1 for AbilityImplInfo (which stores v1 TypeAnnotation)
-        val v1AllTargetAnnotations = allTargetAnnotations.map { ParserBridge.toV1TypeAnnotation(it, file) }
-        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
-            ParserBridge.toV1TypeAnnotation(v, file)
-        }
-
-        // Collect method-level constraints from all operations (convert to v1)
+        // Collect method-level constraints from all operations
         val operationConstraints = implDecl.operations.flatMap { op ->
             op.abilityConstraints.map { c ->
                 FunctionAbilityConstraint(
@@ -1005,8 +999,8 @@ class ContextBuilder {
             abilityName = implDecl.abilityName!!,  // safe: not inherent
             abilityDeclHash = abilityDeclHash,
             targetTypes = allTargetNames,
-            targetTypeAnnotations = v1AllTargetAnnotations,
-            associatedTypeBindings = v1AssocBindings,
+            targetTypeAnnotations = allTargetAnnotations,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
             contentHash = implKey,
             typeVars = typeVars,
@@ -1090,15 +1084,11 @@ class ContextBuilder {
         }
 
         // Also register as a regular impl so the interpreter can find it by content hash
-        val v1TargetTypes = implDecl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) }
-        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
-            ParserBridge.toV1TypeAnnotation(v, file)
-        }
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = null,  // inherent impl
             targetTypes = targetTypeNames,
-            targetTypeAnnotations = v1TargetTypes,
-            associatedTypeBindings = v1AssocBindings,
+            targetTypeAnnotations = implDecl.targetTypes,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
             contentHash = implKey
         )
@@ -1163,15 +1153,11 @@ class ContextBuilder {
         }
 
         // Also register as a regular impl so the interpreter can find it by content hash
-        val v1TargetTypes = implDecl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) }
-        val v1AssocBindings = implDecl.associatedTypeBindings.mapValues { (_, v) ->
-            ParserBridge.toV1TypeAnnotation(v, file)
-        }
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = null,
             targetTypes = targetTypeNames,
-            targetTypeAnnotations = v1TargetTypes,
-            associatedTypeBindings = v1AssocBindings,
+            targetTypeAnnotations = implDecl.targetTypes,
+            associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
             contentHash = implKey
         )

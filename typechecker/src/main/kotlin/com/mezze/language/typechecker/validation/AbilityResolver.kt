@@ -641,6 +641,15 @@ class AbilityResolver(
 
     private fun typeMatchesAnnotation(
         type: MezzeType,
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        typeVars: Set<String> = emptySet(),
+        typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
+    ): Boolean {
+        return typeMatchesAnnotation(type, com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<resolver>"), typeVars, typeVarBindings)
+    }
+
+    private fun typeMatchesAnnotation(
+        type: MezzeType,
         annotation: TypeAnnotation,
         typeVars: Set<String> = emptySet(),
         typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()

@@ -1438,6 +1438,10 @@ class ConstraintSolver(
      * Convert a TypeAnnotation to MezzeType.
      * Used for resolving associated type bindings.
      */
+    private fun typeAnnotationToMezzeType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+        return typeAnnotationToMezzeType(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"))
+    }
+
     private fun typeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
@@ -1590,6 +1594,15 @@ class ConstraintSolver(
      * OPTIMIZATION: Uses memoization cache to avoid repeated matching of same pairs.
      * Note: caching is skipped when type variables are in play (bindings are mutable).
      */
+    private fun typeMatchesAnnotation(
+        type: MezzeType,
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        typeVars: Set<String> = emptySet(),
+        typeVarBindings: MutableMap<String, MezzeType> = mutableMapOf()
+    ): Boolean {
+        return typeMatchesAnnotation(type, com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"), typeVars, typeVarBindings)
+    }
+
     private fun typeMatchesAnnotation(
         type: MezzeType,
         annotation: TypeAnnotation,
@@ -2462,7 +2475,7 @@ class ConstraintSolver(
         // Find implementations that match the pattern using STRUCTURAL matching
         // For NumAdd 'b Int, we want to find NumAdd T Int where T is concrete
         // Uses targetTypeAnnotations for structural comparison (not string-based targetTypes)
-        val matchingImpls = mutableListOf<List<TypeAnnotation>>()
+        val matchingImpls = mutableListOf<List<com.mezze.language.parsedast.ParsedTypeAnnotation>>()
 
         for (impl in allImpls) {
             // Prefer structural matching via targetTypeAnnotations
@@ -2528,6 +2541,10 @@ class ConstraintSolver(
      * Convert a TypeAnnotation to MezzeType for bidirectional inference.
      * This is the structural alternative to parseTypeName().
      */
+    private fun convertAnnotationToType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType? {
+        return convertAnnotationToType(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"))
+    }
+
     private fun convertAnnotationToType(annotation: TypeAnnotation): MezzeType? {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {

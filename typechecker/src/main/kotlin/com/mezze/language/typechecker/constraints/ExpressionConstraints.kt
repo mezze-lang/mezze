@@ -2149,6 +2149,10 @@ class ExpressionConstraintGenerator {
      * Check if a MezzeType matches a TypeAnnotation with bidirectional inference.
      * Type variables in constraintType can match any concrete type in the annotation.
      */
+    private fun typeMatchesAnnotationBidirectional(constraintType: MezzeType, annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
+        return typeMatchesAnnotationBidirectional(constraintType, com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<constraints>"))
+    }
+
     private fun typeMatchesAnnotationBidirectional(constraintType: MezzeType, annotation: TypeAnnotation): Boolean {
         // Type variables can match any concrete type (bidirectional inference)
         if (constraintType is MezzeType.VarType) {
