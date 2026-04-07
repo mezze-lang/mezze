@@ -118,21 +118,9 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 2: Evaluate closure factories.
-        // For large function sets (>200), only evaluate functions needed by performer records
-        // to avoid OOM from infinite recursion in non-performer closure factories.
-        java.util.Set<String> performerOpHashes = new java.util.HashSet<>();
-        for (String[] info : performerInfos) {
-            for (int j = 2; j < info.length; j += 2) {
-                performerOpHashes.add(info[j]); // operation hash
-            }
-        }
-
+        // Catches OutOfMemoryError from infinite recursion in some closure factories.
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
-            // For large sets, only evaluate performer operation functions
-            if (functionHashes.length >= 200 && !performerOpHashes.contains(hash)) {
-                continue;
-            }
             Object cached = evaluatedClosureCache.get(hash);
             if (cached != null) {
                 context.defineGlobal(hash, cached);
@@ -151,6 +139,11 @@ public final class HashModuleLoaderNode extends MezzeNode {
                     }
                     evaluatedClosureCache.put(hash, closure);
                 }
+            } catch (StackOverflowError soe) {
+                // Infinite recursion — this function is NOT a closure factory.
+                // Skip and keep the raw MezzeFunction wrapper.
+            } catch (OutOfMemoryError oom) {
+                // OOM from deep recursion — skip this function.
             } catch (Exception e) {
                 // Not a closure factory or depends on unavailable captures
             }
