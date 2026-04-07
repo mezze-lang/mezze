@@ -112,7 +112,7 @@ class ContextBuilder {
         val v1AbilityDecls = abilityDecls.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
         val v1EffectDecls = effectDecls.mapValues { (_, v) -> parsedEffectDeclToV1(v, file) }
         val v1ImportedAbilities = importedAbilities.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
-        val v1ImportedEffects = importedEffects.mapValues { (_, v) -> parsedEffectDeclToV1(v, file) }
+        // v1ImportedEffects removed — addEffectOperations and addEffectPerformer now use v2 directly
         val v1ImportedTypes = importedTypes.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
 
         // Resolve impl declarations: the parser can't distinguish ability impls from
@@ -214,7 +214,6 @@ class ContextBuilder {
         currentTypeDecls = typeDecls + importedTypes
 
         // v1 effect decls for internal ContextBuilder methods
-        val allV1EffectDecls = v1EffectDecls + v1ImportedEffects
         val allV1AbilityDecls = v1AbilityDecls + v1ImportedAbilities
         val allV1TypeDecls = v1TypeDecls.toMutableMap()
         allV1TypeDecls.putAll(v1ImportedTypes)
