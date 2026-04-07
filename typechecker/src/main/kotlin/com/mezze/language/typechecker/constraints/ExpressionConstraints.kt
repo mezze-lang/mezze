@@ -4345,81 +4345,37 @@ class ExpressionConstraintGenerator {
     // HELPER FUNCTIONS
     // ========================================================================
 
-    /** Convert v2 ParsedTypeAnnotation to MezzeType (via v1 bridge). */
+    /** Convert ParsedTypeAnnotation to MezzeType for field type resolution. */
     private fun convertParsedFieldType(annotation: ParsedTypeAnnotation): MezzeType {
-        val v1 = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<field>")
-        return convertFieldType(v1)
-    }
-
-    /**
-     * Convert TypeAnnotation to MezzeType for validation purposes only.
-     * This is a simple conversion used for type alias field validation.
-     */
-    private fun convertFieldType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+            is com.mezze.language.parsedast.ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
-
-                // Type variable or type constructor
-                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                    MezzeType.VarType(TypeVar(annotation.name))
-                } else {
-                    MezzeType.TypeApplication(annotation.name, emptyList())
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) MezzeType.VarType(TypeVar(annotation.name))
+                else MezzeType.TypeApplication(annotation.name, emptyList())
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(
+                fields = annotation.entries.associate { it.name to convertParsedFieldType(it.type) },
+                rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+            )
+            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(
+                paramType = convertParsedFieldType(annotation.paramType),
+                returnType = convertParsedFieldType(annotation.returnType),
+                effects = annotation.effects?.let {
+                    ContextBuilder.validateHermeticEffects(it.allEffectNames)
+                    MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed)
                 }
-            }
-            is RecordTypeAnnotation -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to convertFieldType(entry.type)
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-                )
-            }
-            is FunctionTypeAnnotation -> {
-                MezzeType.FunctionType(
-                    paramType = convertFieldType(annotation.paramType),
-                    returnType = convertFieldType(annotation.returnType),
-                    effects = annotation.effects?.let {
-                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
-                        // Use allEffectNames to include both simple effects and effect annotations
-                        ContextBuilder.validateHermeticEffects(it.allEffectNames)
-                        MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed)
-                    }
-                )
-            }
-            is TypeApplicationAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { convertFieldType(it) }
-                )
-            }
-            is VariantTypeAnnotation -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertFieldType(it) }
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
-                    // Use synthetic typeName for closed inline annotations to enable validation.
-                    // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
-                    // Open annotations don't need this since they explicitly allow additional constructors.
-                    typeName = if (!annotation.isOpen) "<inline>" else null
-                )
-            }
-            is SeqTypeAnnotation -> {
-                MezzeType.SeqType(
-                    elementType = convertFieldType(annotation.elementType)
-                )
-            }
-            is EffectRowAnnotation -> {
-                MezzeType.EffectRow(annotation.effects.toSet())
-            }
-            is QualifiedTypeAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.qualifiedName,
-                    args = annotation.args.map { convertFieldType(it) }
-                )
-            }
+            )
+            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedFieldType(it) })
+            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(
+                constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedFieldType(dt) } },
+                rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
+                typeName = if (!annotation.isOpen) "<inline>" else null
+            )
+            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertParsedFieldType(annotation.elementType))
+            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication(
+                (annotation.modulePath + annotation.typeName).joinToString("::"),
+                annotation.args.map { convertParsedFieldType(it) }
+            )
         }
     }
 
