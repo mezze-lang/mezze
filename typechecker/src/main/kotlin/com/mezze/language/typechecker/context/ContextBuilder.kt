@@ -124,13 +124,7 @@ class ContextBuilder {
 
         // First, add explicitly parsed ability impls (compute content hashes if needed)
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
-            if (impl.contentHash != null) {
-                resolvedAbilityImplDecls.add(impl)
-            } else {
-                val v1 = parsedImplAbilityDeclToV1(impl, file)
-                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1)
-                resolvedAbilityImplDecls.add(impl.copy(contentHash = hash.toFullHexString()))
-            }
+            resolvedAbilityImplDecls.add(ensureContentHash(impl, file))
         }
 
         // Then resolve ParsedPerformerDecl: ability impl or effect performer?
@@ -159,10 +153,7 @@ class ContextBuilder {
                     loc = perfDecl.loc,
                     contentHash = null
                 )
-                // Compute content hash via v1 conversion
-                val v1 = parsedImplAbilityDeclToV1(converted, file)
-                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(v1)
-                val withHash = converted.copy(contentHash = hash.toFullHexString())
+                val withHash = ensureContentHash(converted, file)
                 resolvedAbilityImplDecls.add(withHash)
                 convertedPerformerDecls[perfDecl] = withHash
             } else {
@@ -1481,6 +1472,13 @@ class ContextBuilder {
         // Compute content hash
         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(result)
         return result.copy(contentHash = hash.toFullHexString())
+    }
+
+    /** Ensure a ParsedImplAbilityDecl has a content hash (compute via v1 bridge if missing). */
+    private fun ensureContentHash(decl: ParsedImplAbilityDecl, file: String): ParsedImplAbilityDecl {
+        if (decl.contentHash != null) return decl
+        val v1 = parsedImplAbilityDeclToV1(decl, file)
+        return decl.copy(contentHash = v1.contentHash)
     }
 
     /**
