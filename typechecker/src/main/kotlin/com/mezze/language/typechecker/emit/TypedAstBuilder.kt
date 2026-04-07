@@ -1068,12 +1068,15 @@ class TypedAstBuilder(
     ): TypedHandlerRef {
         val performerName = handler.performer.localName
 
-        // Look up performer declaration for hash info — check local impls AND imported impls
+        // Look up performer hash — prefer identifierContentHashes (consistent with buildPerformerDecl),
+        // then fall back to implDeclarations/importedImpls
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
-        val rawContentHash = implDecl?.contentHash ?: importedImpl?.contentHash
+        val rawContentHash = identifierContentHashes[BindingKey(null, performerName)]
+            ?: implDecl?.contentHash
+            ?: importedImpl?.contentHash
         val performerHash = Hash.fromV1(rawContentHash)
-        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder] performer=$performerName hash=${rawContentHash?.take(20)}... from=${if (implDecl != null) "local" else "imported"}\n") } catch (_: Exception) {}
+        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder] performer=$performerName hash=${rawContentHash?.take(20)}... from=${if (identifierContentHashes.containsKey(BindingKey(null, performerName))) "identifierHashes" else if (implDecl != null) "local" else "imported"}\n") } catch (_: Exception) {}
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
