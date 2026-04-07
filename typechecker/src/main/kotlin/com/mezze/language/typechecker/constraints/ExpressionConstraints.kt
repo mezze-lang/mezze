@@ -645,27 +645,27 @@ class ExpressionConstraintGenerator {
                     rowVar = if (recordDef.isOpen) RowVar("rest") else null
                 )
 
-                // If resolved type is a closed record, validate fields
-                if (resolvedType.rowVar == null) {
-                    // Expected type is a closed record - validate fields match exactly
-                    // Use `fields.keys` which includes both explicit AND spread fields
-                    val allFieldNames = fields.keys
-                    val missingFields = resolvedType.fields.keys - allFieldNames
-                    if (missingFields.isNotEmpty()) {
-                        val missingList = missingFields.joinToString(", ")
-                        val example = missingFields.take(2).joinToString(", ") { "$it = ..." }
-                        throw TypeCheckError(
-                            message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
-                                    "Add: { ${allFieldNames.joinToString(", ") { "$it = ..." }}, $example }",
-                            sourceLocation = expr.loc.toSL(),
-                            errorType = ErrorType.MISSING_FIELD,
-                            metadata = mapOf(
-                                "missingFields" to missingFields.toList(),
-                                "allFieldNames" to allFieldNames.toList()
-                            )
-                        )
-                    }
+                // Validate record literal fields against the type declaration
+                val allFieldNames = fields.keys
 
+                // Check for missing declared fields (required for BOTH open and closed records)
+                val missingFields = resolvedType.fields.keys - allFieldNames
+                if (missingFields.isNotEmpty()) {
+                    val missingList = missingFields.joinToString(", ")
+                    throw TypeCheckError(
+                        message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
+                                "Expected fields: ${resolvedType.fields.keys.sorted().joinToString(", ")}",
+                        sourceLocation = expr.loc.toSL(),
+                        errorType = ErrorType.MISSING_FIELD,
+                        metadata = mapOf(
+                            "missingFields" to missingFields.toList(),
+                            "allFieldNames" to allFieldNames.toList()
+                        )
+                    )
+                }
+
+                // Check for extra fields (only for CLOSED records — open records allow extras)
+                if (resolvedType.rowVar == null) {
                     val extraFields = allFieldNames - resolvedType.fields.keys
                     if (extraFields.isNotEmpty()) {
                         val extraList = extraFields.joinToString(", ")
