@@ -1563,10 +1563,9 @@ class ConstraintSolver(
             // If this is a generic impl, check method-level constraints with resolved bindings
             if (typeVarBindings.isNotEmpty() && implInfo.operationConstraints.isNotEmpty()) {
                 implInfo.operationConstraints.all { constraint ->
-                    // Resolve the constraint's type args using bindings
                     val resolvedTypeArgs = constraint.typeArgs.map { typeArg ->
                         when (typeArg) {
-                            is IdentifierTypeAnnotation -> {
+                            is com.mezze.language.parsedast.ParsedNamedType -> {
                                 val bound = typeVarBindings[typeArg.name]
                                 if (bound != null) bound
                                 else typeAnnotationToMezzeType(typeArg)

@@ -484,12 +484,12 @@ class AbilityResolver(
                 impl.operationConstraints.all { constraint ->
                     val resolvedTypeArgs = constraint.typeArgs.map { typeArg ->
                         when (typeArg) {
-                            is IdentifierTypeAnnotation -> {
+                            is com.mezze.language.parsedast.ParsedNamedType -> {
                                 val bound = typeVarBindings[typeArg.name]
                                 if (bound != null) bound
-                                else resolveTypeAnnotation(typeArg)
+                                else resolveTypeAnnotation(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(typeArg, "<resolver>"))
                             }
-                            else -> resolveTypeAnnotation(typeArg)
+                            else -> resolveTypeAnnotation(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(typeArg, "<resolver>"))
                         }
                     }
                     val result = checkAbilityImpl(resolvedTypeArgs.first(), constraint.abilityName, resolvedTypeArgs.drop(1))

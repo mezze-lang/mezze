@@ -979,18 +979,8 @@ class ContextBuilder {
         val allTargetAnnotations = implDecl.allTypeArgs
         val allTargetNames = allTargetAnnotations.map { getTypeName(it) }
 
-        // Collect method-level constraints from all operations
-        val operationConstraints = implDecl.operations.flatMap { op ->
-            op.abilityConstraints.map { c ->
-                FunctionAbilityConstraint(
-                    abilityName = c.abilityName,
-                    typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                    associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) ->
-                        ParserBridge.toV1TypeAnnotation(v, file)
-                    }
-                )
-            }
-        }
+        // Collect method-level constraints from all operations (v2 directly)
+        val operationConstraints = implDecl.operations.flatMap { op -> op.abilityConstraints }
 
         // Create impl info — look up ability declaration hash for hash-based index
         val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash

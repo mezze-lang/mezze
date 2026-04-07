@@ -87,7 +87,7 @@ data class TypingContext(
         val sourceModule: String? = null,
         val contentHash: String,  // Content hash of the IMPL (same as the map key)
         val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`
-        val operationConstraints: List<FunctionAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
+        val operationConstraints: List<com.mezze.language.parsedast.ParsedFnAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
     )
 
     /**
