@@ -2150,9 +2150,30 @@ class ExpressionConstraintGenerator {
      * Type variables in constraintType can match any concrete type in the annotation.
      */
     private fun typeMatchesAnnotationBidirectional(constraintType: MezzeType, annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
-        return typeMatchesAnnotationBidirectional(constraintType, com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<constraints>"))
+        if (constraintType is MezzeType.VarType) return true
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                val b = PrimitiveTypes.matchesBuiltinType(annotation.name, constraintType); if (b != null) b
+                else if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) true
+                else when (constraintType) { is MezzeType.TypeApplication -> constraintType.constructor == annotation.name && constraintType.args.isEmpty(); is MezzeType.RecordType -> constraintType.typeName == annotation.name; is MezzeType.VariantType -> constraintType.typeName == annotation.name; else -> false }
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> when (constraintType) {
+                is MezzeType.TypeApplication -> constraintType.constructor == annotation.constructor && constraintType.args.size == annotation.args.size && constraintType.args.zip(annotation.args).all { (a, b) -> typeMatchesAnnotationBidirectional(a, b) }
+                is MezzeType.SeqType -> annotation.constructor == BuiltinTypes.SEQ && annotation.args.size == 1 && typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                is MezzeType.ListType -> annotation.constructor == BuiltinTypes.LIST && annotation.args.size == 1 && typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                is MezzeType.SetType -> annotation.constructor == BuiltinTypes.SET && annotation.args.size == 1 && typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                is MezzeType.MapType -> annotation.constructor == BuiltinTypes.MAP && annotation.args.size == 2 && typeMatchesAnnotationBidirectional(constraintType.keyType, annotation.args[0]) && typeMatchesAnnotationBidirectional(constraintType.valueType, annotation.args[1])
+                else -> false
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> constraintType is MezzeType.RecordType && annotation.entries.all { e -> constraintType.fields[e.name]?.let { typeMatchesAnnotationBidirectional(it, e.type) } ?: false }
+            is com.mezze.language.parsedast.ParsedVariantType -> constraintType is MezzeType.VariantType && annotation.constructors.all { c -> val p = constraintType.constructors[c.name]; if (c.dataType == null) p == null else if (p == null) false else typeMatchesAnnotationBidirectional(p, c.dataType!!) }
+            is com.mezze.language.parsedast.ParsedSeqType -> constraintType is MezzeType.SeqType && typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.elementType)
+            is com.mezze.language.parsedast.ParsedFunctionType -> constraintType is MezzeType.FunctionType && typeMatchesAnnotationBidirectional(constraintType.paramType, annotation.paramType) && typeMatchesAnnotationBidirectional(constraintType.returnType, annotation.returnType)
+            is com.mezze.language.parsedast.ParsedQualifiedType -> constraintType is MezzeType.TypeApplication && constraintType.constructor == (annotation.modulePath + annotation.typeName).joinToString("::") && constraintType.args.size == annotation.args.size && constraintType.args.zip(annotation.args).all { (a, b) -> typeMatchesAnnotationBidirectional(a, b) }
+        }
     }
 
+    @Deprecated("Use v2 ParsedTypeAnnotation overload")
     private fun typeMatchesAnnotationBidirectional(constraintType: MezzeType, annotation: TypeAnnotation): Boolean {
         // Type variables can match any concrete type (bidirectional inference)
         if (constraintType is MezzeType.VarType) {
