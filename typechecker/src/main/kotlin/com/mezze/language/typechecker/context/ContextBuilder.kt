@@ -1164,66 +1164,8 @@ class ContextBuilder {
      * - TypeApplicationAnnotation("Option", [Int]) → "Option_Int"
      * - RecordTypeAnnotation → "{...}" (fallback for complex types)
      */
-    private fun getTypeName(annotation: TypeAnnotation): String {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Remove leading quote for type variables
-                annotation.name.removePrefix("'")
-            }
-            is TypeApplicationAnnotation -> {
-                // For inherent impls with type vars (e.g., `impl Option 'a where { ... }`),
-                // use just the constructor name so methods register under "Option".
-                // For concrete type applications (e.g., ability impl for `Option Int`), include args.
-                val allArgsAreTypeVars = annotation.args.all { arg ->
-                    arg is IdentifierTypeAnnotation && (arg.name.startsWith("'") || arg.name.first().isLowerCase())
-                }
-                if (allArgsAreTypeVars) {
-                    annotation.constructor
-                } else {
-                    val argNames = annotation.args.map { getTypeName(it) }
-                    if (argNames.isEmpty()) {
-                        annotation.constructor
-                    } else {
-                        "${annotation.constructor}_${argNames.joinToString("_")}"
-                    }
-                }
-            }
-            is FunctionTypeAnnotation -> {
-                // Function types are rare as ability targets, but handle them
-                "Function"
-            }
-            is RecordTypeAnnotation -> {
-                // Record types as ability targets are rare
-                "Record"
-            }
-            is VariantTypeAnnotation -> {
-                // Variant types as ability targets are rare
-                "Variant"
-            }
-            is SeqTypeAnnotation -> {
-                // Seq Int → "Seq_Int"
-                "Seq_${getTypeName(annotation.elementType)}"
-            }
-            is EffectRowAnnotation -> {
-                // Shouldn't happen, but handle gracefully
-                "EffectRow"
-            }
-            is QualifiedTypeAnnotation -> {
-                // codec::Entry String Json → "codec_Entry_String_Json"
-                val modulePart = annotation.modulePath.joinToString("_")
-                val argNames = annotation.args.map { getTypeName(it) }
-                if (argNames.isEmpty()) {
-                    "${modulePart}_${annotation.typeName}"
-                } else {
-                    "${modulePart}_${annotation.typeName}_${argNames.joinToString("_")}"
-                }
-            }
-        }
-    }
-
     /**
-     * Extract type name from v2 ParsedTypeAnnotation for impl keys.
-     * Mirrors the v1 getTypeName(TypeAnnotation) logic.
+     * Extract type name from ParsedTypeAnnotation for impl keys.
      */
     private fun getTypeName(annotation: ParsedTypeAnnotation): String {
         return when (annotation) {
