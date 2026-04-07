@@ -155,7 +155,8 @@ object V2PipelineRunner {
         functions: List<com.mezze.language.truffleir.FunctionIR>,
         importedModulePaths: List<String> = emptyList(),
         projectRoot: Path = Path.of("."),
-        performerRecords: List<Array<String>> = emptyList()
+        performerRecords: List<Array<String>> = emptyList(),
+        loadedModules: Map<String, com.mezze.language.typedast.TypedModule> = emptyMap()
     ): CallTarget {
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()
@@ -190,8 +191,57 @@ object V2PipelineRunner {
             }
         }
 
+        // Also include prelude module functions and performers
+        // The entry module's typecheck loaded and cached stdlib modules.
+        // We need to collect their lowered functions and performer records.
+        val allPerformerRecords = performerRecords.toMutableList()
+        // Combine prelude modules with user-imported modules
+        val allModulesToLoad = mutableMapOf<String, com.mezze.language.typedast.TypedModule>()
+        loadedModules.forEach { (k, v) -> allModulesToLoad[k] = v }
+        val preludeModules = com.mezze.language.typechecker.TypeChecker.cachedPreludeLoadedModules
+        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[V2PipelineRunner] preludeModules=${preludeModules?.size ?: "null"}, performerRecords=${performerRecords.size}\n") } catch (_: Exception) {}
+        if (preludeModules != null) {
+            for ((k, v) in preludeModules) {
+                val v2m = v.v2TypedModule
+                if (v2m != null) allModulesToLoad.putIfAbsent(k, v2m)
+            }
+        }
+        for ((modulePath, v2Module) in allModulesToLoad) {
+            if (true) {
+                // Compile prelude module functions through the mono→resolve→lower pipeline
+                try {
+                    val mono = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(v2Module, mapOf(v2Module.hash to v2Module))
+                    val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
+                    val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
+                    for (fn in lowered.functions) {
+                        if (!compiledFunctions.containsKey(fn.hash.hex)) {
+                            val rootNode = compiler.compile(fn)
+                            compiledFunctions[fn.hash.hex] = rootNode.callTarget
+                            if (fn.name != "lambda" && !fn.name.startsWith("__")) {
+                                hashToName[fn.hash.hex] = fn.name
+                            }
+                        }
+                    }
+                    for (pr in lowered.performerRecords) {
+                        val arr = mutableListOf(pr.performerHash, pr.effectHash)
+                        for (i in pr.operationHashes.indices) {
+                            arr.add(pr.operationHashes[i])
+                            arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
+                        }
+                        allPerformerRecords.add(arr.toTypedArray())
+                        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("    performer: ${pr.performerHash.take(20)}... ops=${pr.operationNames}\n") } catch (_: Exception) {}
+                    }
+                    try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("  $modulePath: ${lowered.functions.size} fns, ${lowered.performerRecords.size} performers\n") } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("  $modulePath: FAILED ${e::class.simpleName}: ${e.message?.take(80)}\n") } catch (_: Exception) {}
+                }
+            }
+        }
+
+        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[V2PipelineRunner] Total: ${compiledFunctions.size} fns, ${allPerformerRecords.size} performers\n") } catch (_: Exception) {}
+
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
-        val performerInfos = performerRecords.toTypedArray()
+        val performerInfos = allPerformerRecords.toTypedArray()
         val withV2Functions = HashModuleLoaderNode(bodyNode, compiledFunctions, hashToName, performerInfos)
         val wrapped = MezzeLanguage.createResultCapturingNode(withV2Functions)
 

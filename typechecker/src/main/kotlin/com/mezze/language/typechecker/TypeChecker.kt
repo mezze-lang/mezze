@@ -1029,7 +1029,8 @@ class TypeChecker(
                     importedEffects = emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
-                    performerRecords = result.loweredPerformers
+                    performerRecords = result.loweredPerformers,
+                    loadedModules = result.loadedModules.mapValues { (_, m) -> m.v2TypedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! }
                 )
             }
             is TypeCheckResult.Failure -> {
@@ -1193,7 +1194,8 @@ class TypeChecker(
 
         /** Cached prelude loaded modules — shared across all TypeChecker instances */
         @Volatile
-        private var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
+        @JvmStatic
+        var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
 
         /** Cached v1→v2 TypedModule conversions, keyed by content hash (module.hash.hex).
          *  Hash-based identity means the same module content at different paths shares one cache entry. */

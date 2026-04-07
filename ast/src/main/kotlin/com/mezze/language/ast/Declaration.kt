@@ -90,7 +90,9 @@ data class TypeCheckResult(
     val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
     val typedModule: com.mezze.language.typedast.TypedModule? = null,  // The real typechecker output
     /** Performer record info for effect handler registration: List of [performerHash, effectHash, op1Hash, op1Name, ...] */
-    val performerRecords: List<Array<String>> = emptyList()
+    val performerRecords: List<Array<String>> = emptyList(),
+    /** Loaded modules (from import resolution) — includes their v2 TypedModules for compilation */
+    val loadedModules: Map<String, com.mezze.language.typedast.TypedModule> = emptyMap()
 ) {
     /** Get inferred type of a top-level binding by name */
     fun getVariableType(name: String): MezzeType? {

@@ -299,7 +299,20 @@
       "Bash(./gradlew :interpreter:test --tests \"com.mezze.interpreter.v2.AnonymousImplMethodTest.Seq is_empty\" --info 2>&1 | command grep \"Expected MezzeList\" | head -3)",
       "Bash(./gradlew :interpreter:test --tests \"com.mezze.interpreter.v2.StringInterpolationPatternInterpreterTest\" 2>&1 | tee /tmp/str_interp_test.txt | command grep \"tests completed\")",
       "Bash(command grep:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/ModuleResolver.kt)",
+      "Bash(cp \"$FILE\" /tmp/mr_backup.kt)",
+      "Bash(cp /tmp/mr_new.kt \"$FILE\")",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/solving/ConstraintSolver.kt)",
+      "Bash(cp /tmp/cs_new.kt \"$FILE\")",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/validation/AbilityResolver.kt)",
+      "Bash(cp /tmp/ar_new.kt \"$FILE\")",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/validation/TypeValidator.kt)",
+      "Bash(cp /tmp/tv_new.kt \"$FILE\")",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/constraints/ExpressionConstraints.kt)",
+      "Bash(cp /tmp/ec_new.kt \"$FILE\")",
+      "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/hashing/ContentHashComputer.kt)",
+      "Bash(cp /tmp/chc_new.kt \"$FILE\")"
     ],
     "deny": [],
     "ask": []

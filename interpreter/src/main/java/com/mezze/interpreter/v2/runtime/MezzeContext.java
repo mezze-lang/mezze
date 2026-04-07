@@ -90,6 +90,10 @@ public final class MezzeContext {
         return globals.get(contentHash);
     }
 
+    public java.util.Set<String> getAllGlobalKeys() {
+        return globals.keySet();
+    }
+
     @TruffleBoundary
     public boolean hasGlobal(String contentHash) {
         return globals.containsKey(contentHash);
