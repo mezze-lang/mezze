@@ -110,7 +110,7 @@ class ContextBuilder {
         // Still need v1 types for internal ContextBuilder methods that haven't been migrated yet
         val v1TypeDecls = typeDecls.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
         val v1AbilityDecls = abilityDecls.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
-        val v1EffectDecls = effectDecls.mapValues { (_, v) -> parsedEffectDeclToV1(v, file) }
+        // v1EffectDecls removed — all effect consumers now use v2 ParsedEffectDecl
         val v1ImportedAbilities = importedAbilities.mapValues { (_, v) -> parsedAbilityDeclToV1(v, file) }
         // v1ImportedEffects removed — addEffectOperations and addEffectPerformer now use v2 directly
         val v1ImportedTypes = importedTypes.mapValues { (_, v) -> parsedTypeDeclToV1(v, file) }
@@ -298,7 +298,7 @@ class ContextBuilder {
         AbilityValidator.validateNameCollisions(
             abilityDeclarations = v1AbilityDecls,
             typeDeclarations = allV1TypeDecls,
-            effectDeclarations = v1EffectDecls
+            effectDeclarations = effectDecls
         )
 
         for (abilityDecl in v1AbilityDecls.values) {

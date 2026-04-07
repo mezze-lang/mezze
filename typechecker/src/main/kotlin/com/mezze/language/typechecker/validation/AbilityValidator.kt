@@ -650,7 +650,7 @@ object AbilityValidator {
     fun validateNameCollisions(
         abilityDeclarations: Map<String, AbilityDeclaration>,
         typeDeclarations: Map<String, TypeDeclaration>,
-        effectDeclarations: Map<String, EffectDeclaration>
+        effectDeclarations: Map<String, *>
     ) {
         // Check for built-in ability/type name collisions
         for (typeName in typeDeclarations.keys) {
