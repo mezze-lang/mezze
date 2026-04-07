@@ -123,8 +123,7 @@ class ContextBuilder {
         val allEffectNames = effectDecls.keys + importedEffects.keys +
             importedEffects.values.map { it.name }.toSet()
 
-        val resolvedImplDecls = mutableListOf<ImplDeclaration>()       // real effect performers (v1)
-        val resolvedParsedPerformerDecls = mutableListOf<ParsedPerformerDecl>()  // real effect performers (v2)
+        val resolvedParsedPerformerDecls = mutableListOf<ParsedPerformerDecl>()  // real effect performers
         val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()  // ability impls
         // Track which ParsedPerformerDecl were converted to ability impls (by identity)
         val convertedPerformerDecls = mutableMapOf<ParsedPerformerDecl, ParsedImplAbilityDecl>()
@@ -173,13 +172,15 @@ class ContextBuilder {
                 resolvedAbilityImplDecls.add(withHash)
                 convertedPerformerDecls[perfDecl] = withHash
             } else {
-                // Real effect performer
-                resolvedImplDecls.add(parsedPerformerDeclToV1(perfDecl, file))
-                resolvedParsedPerformerDecls.add(perfDecl)
+                // Real effect performer — compute content hash via v1 bridge
+                val v1Impl = parsedPerformerDeclToV1(perfDecl, file)
+                val perfWithHash = if (perfDecl.contentHash != null) perfDecl
+                    else perfDecl.copy(contentHash = v1Impl.contentHash)
+                resolvedParsedPerformerDecls.add(perfWithHash)
             }
         }
 
-        val implDecls = resolvedImplDecls
+        // v1 implDecls removed — all consumers now use resolvedParsedPerformerDecls
         val abilityImplDecls = resolvedAbilityImplDecls
 
         // Validate duplicates — tolerate prelude duplicates when modules are merged
@@ -218,35 +219,31 @@ class ContextBuilder {
         val allV1TypeDecls = v1TypeDecls.toMutableMap()
         allV1TypeDecls.putAll(v1ImportedTypes)
 
-        // Convert imported v2 performers to v1 ImplDeclarations for internal use
-        val v1ImportedImpls: Map<String, ImplDeclaration> = importedImpls.mapValues { (_, perf) ->
-            parsedPerformerDeclToV1(perf, file)
-        }
+        // v1ImportedImpls removed — all consumers now use importedImpls (v2) directly
 
-        // Build performer to effect mapping
-        // CRITICAL: Merge imported impls with local impls
-        val localMapping = implDecls.associate { impl ->
-            val effectDecl = allEffectDecls[impl.effect.localName]
-            val effectName = effectDecl?.name ?: impl.effect.localName
-            impl.performerName to effectName
+        // Build performer to effect mapping (using v2 types)
+        val localMapping = resolvedParsedPerformerDecls.associate { perf ->
+            val effectDecl = allEffectDecls[perf.effect.localName]
+            val effectName = effectDecl?.name ?: perf.effect.localName
+            perf.performerName to effectName
         }
-        val importedMapping = v1ImportedImpls.mapValues { (_, impl) ->
-            val effectDecl = allEffectDecls[impl.effect.localName]
-            effectDecl?.name ?: impl.effect.localName
+        val importedMapping = importedImpls.mapValues { (_, perf) ->
+            val effectDecl = allEffectDecls[perf.effect.localName]
+            effectDecl?.name ?: perf.effect.localName
         }
         val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
 
         // Build hash-based performer→effect mapping
         val performerToEffectHashMap = mutableMapOf<String, String>()
-        for (impl in implDecls) {
-            val perfHash = impl.contentHash ?: continue
-            val effectDecl = allEffectDecls[impl.effect.localName]
+        for (perf in resolvedParsedPerformerDecls) {
+            val perfHash = perf.contentHash ?: continue
+            val effectDecl = allEffectDecls[perf.effect.localName]
             val effHash = effectDecl?.contentHash ?: continue
             performerToEffectHashMap[perfHash] = effHash
         }
-        for ((_, impl) in v1ImportedImpls) {
-            val perfHash = impl.contentHash ?: continue
-            val effectDecl = allEffectDecls[impl.effect.localName]
+        for ((_, perf) in importedImpls) {
+            val perfHash = perf.contentHash ?: continue
+            val effectDecl = allEffectDecls[perf.effect.localName]
             val effHash = effectDecl?.contentHash ?: continue
             performerToEffectHashMap[perfHash] = effHash
         }
@@ -337,9 +334,11 @@ class ContextBuilder {
             )
         }
 
-        // Build performer added effects mapping
-        val performerAddedEffectsMap = (implDecls + v1ImportedImpls.values).associate { impl ->
-            impl.performerName to extractAddedEffects(impl)
+        // Build performer added effects mapping (using v2 types)
+        val performerAddedEffectsMap = (resolvedParsedPerformerDecls + importedImpls.values).associate { perf ->
+            perf.performerName to perf.operations.flatMap { op ->
+                op.effects?.effects ?: emptyList()
+            }.toSet()
         }.filterValues { it.isNotEmpty() }
 
         // Build implDeclarations map: performer name -> ImplDeclaration
@@ -373,24 +372,6 @@ class ContextBuilder {
         )
     }
 
-
-    /**
-     * Extract effects that an impl handler ADDS (effects in operation signatures).
-     *
-     * Example: For `impl Log for FileLogger where {
-     *            info: { msg: String } -> {} <FileSystem> = ...
-     *          }`
-     * Returns: setOf("FileSystem")
-     *
-     * These effects come from the PerformerOperation.effects field, which is parsed
-     * from the effect annotation in the operation signature (e.g., <FileSystem>).
-     */
-    private fun extractAddedEffects(impl: ImplDeclaration): Set<String> {
-        return impl.operations.flatMap { op ->
-            // Effects are stored directly in PerformerOperation.effects
-            op.effects?.effects ?: emptyList()
-        }.toSet()
-    }
 
     /**
      * Add variant constructors to context.
