@@ -52,4 +52,104 @@ object ParsedASTHasher {
         }
         return result
     }
+
+    /** Hash a ParsedTypeDecl by converting to v1 and using ASTHasher. */
+    fun hashTypeDecl(decl: ParsedTypeDecl, file: String): String? {
+        return try {
+            val v1 = com.mezze.language.typechecker.context.ContextBuilder().parsedTypeDeclToV1(decl, file)
+            ASTHasher.hashTypeDeclaration(v1).toFullHexString()
+        } catch (_: Exception) { null }
+    }
+
+    /** Hash a ParsedAbilityDecl by converting to v1 and using ASTHasher. */
+    fun hashAbilityDecl(decl: ParsedAbilityDecl, file: String): String? {
+        return try {
+            val v1 = com.mezze.language.typechecker.context.ContextBuilder().parsedAbilityDeclToV1(decl, file)
+            ASTHasher.hashAbilityDeclaration(v1).toFullHexString()
+        } catch (_: Exception) { null }
+    }
+
+    /** Hash a ParsedEffectDecl. */
+    fun hashEffectDecl(decl: ParsedEffectDecl, file: String): String? {
+        return try {
+            val v1 = com.mezze.language.ast.EffectDeclaration(
+                name = decl.name,
+                operations = decl.operations.map { op ->
+                    com.mezze.language.ast.EffectOperation(
+                        name = op.name,
+                        paramType = MezzeParser.toV1TypeAnnotation(op.paramType, file),
+                        returnType = MezzeParser.toV1TypeAnnotation(op.returnType, file),
+                        effects = op.effects
+                    )
+                },
+                associatedTypes = decl.associatedTypes
+            )
+            ASTHasher.hashEffectDeclaration(v1).toFullHexString()
+        } catch (_: Exception) { null }
+    }
+
+    /** Hash a ParsedPerformerDecl (effect impl). */
+    fun hashPerformerDecl(decl: ParsedPerformerDecl, file: String): String? {
+        return try {
+            val v1 = com.mezze.language.ast.ImplDeclaration(
+                effect = com.mezze.language.ast.QualifiedRef(
+                    localName = decl.effect.localName,
+                    qualifier = decl.effect.qualifier?.let { com.mezze.language.ast.ModulePath(it.segments) }
+                ),
+                performerName = decl.performerName,
+                operations = decl.operations.map { op ->
+                    com.mezze.language.ast.PerformerOperation(
+                        name = op.name,
+                        paramType = op.paramType?.let { MezzeParser.toV1TypeAnnotation(it, file) },
+                        returnType = op.returnType?.let { MezzeParser.toV1TypeAnnotation(it, file) },
+                        implementation = MezzeParser.toV1Expr(op.implementation, file)
+                    )
+                }
+            )
+            ASTHasher.hashImplDeclaration(v1).toFullHexString()
+        } catch (_: Exception) { null }
+    }
+
+    /** Hash a ParsedImplAbilityDecl. */
+    fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl, file: String): String? {
+        return try {
+            val v1 = com.mezze.language.typechecker.context.ContextBuilder().parsedImplAbilityDeclToV1(decl, file)
+            ASTHasher.hashImplAbilityDeclaration(v1).toFullHexString()
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * Compute ALL content hashes for a ParsedModule.
+     * Returns a new module with contentHash populated on all declarations.
+     */
+    fun computeAllHashes(module: ParsedModule): ParsedModule {
+        val file = module.path
+        val hashedDecls = module.decls.map { decl ->
+            when (decl) {
+                is ParsedLetDecl -> decl // LetDecl doesn't have contentHash field
+                is ParsedTypeDecl -> if (decl.contentHash != null) decl else {
+                    val hash = hashTypeDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+                is ParsedAbilityDecl -> if (decl.contentHash != null) decl else {
+                    val hash = hashAbilityDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+                is ParsedEffectDecl -> if (decl.contentHash != null) decl else {
+                    val hash = hashEffectDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+                is ParsedPerformerDecl -> if (decl.contentHash != null) decl else {
+                    val hash = hashPerformerDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+                is ParsedImplAbilityDecl -> if (decl.contentHash != null) decl else {
+                    val hash = hashImplAbilityDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+                else -> decl
+            }
+        }
+        return module.copy(decls = hashedDecls)
+    }
 }
