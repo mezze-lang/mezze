@@ -825,9 +825,7 @@ class TypeChecker(
 
         // Add imported types (newtype constructors are private — not imported)
         for ((typeName, typeDecl) in importContext.importedTypes) {
-            // Convert to v1 for addTypeConstructors (which still takes v1 TypeDeclaration)
-            val v1TypeDecl = contextBuilder.parsedTypeDeclToV1(typeDecl)
-            context = contextBuilder.addTypeConstructors(context, v1TypeDecl, isImported = true)
+            context = contextBuilder.addParsedTypeConstructors(context, typeDecl, isImported = true)
         }
 
         // Add imported ability implementations

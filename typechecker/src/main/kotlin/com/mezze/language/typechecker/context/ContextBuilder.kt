@@ -251,9 +251,9 @@ class ContextBuilder {
         // Build context with bindings for declarations (uses v1 types internally)
         var ctx = parentContext
 
-        // Add type constructors to context
-        for (typeDecl in v1TypeDecls.values) {
-            ctx = addTypeConstructors(ctx, typeDecl)
+        // Add type constructors to context (v2 types directly)
+        for (typeDecl in typeDecls.values) {
+            ctx = addParsedTypeConstructors(ctx, typeDecl)
         }
 
         // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
@@ -479,6 +479,75 @@ class ContextBuilder {
             null -> resultType // No data, just the type itself
             else -> MezzeType.FunctionType(
                 paramType = convertTypeAnnotationV1Internal(dataType),
+                returnType = resultType
+            )
+        }
+    }
+
+    /**
+     * Add type constructors to context (v2 — takes ParsedTypeDecl directly).
+     */
+    fun addParsedTypeConstructors(ctx: TypingContext, typeDecl: ParsedTypeDecl, isImported: Boolean = false): TypingContext {
+        var result = ctx
+        when (val definition = typeDecl.definition) {
+            is ParsedVariantDef -> {
+                for (constructor in definition.constructors) {
+                    val constructorType = buildParsedConstructorType(typeDecl, constructor)
+                    val typeVars = mutableSetOf<TypeVar>()
+                    collectTypeVarsFromType(constructorType, typeVars)
+                    val scheme = TypeScheme(typeVars.toList(), emptyList(), constructorType)
+                    result = result.extendPoly(constructor.name, scheme)
+                }
+            }
+            is ParsedRecordDef -> { /* Records don't have constructors */ }
+            is ParsedNewtypeDef -> {
+                if (isImported) return result
+                typeVarCache.clear()
+                val wrappedMezzeType = convertParsedTypeAnnotationInternal(definition.wrappedType)
+                val typeArgs = typeDecl.typeParams.map { param ->
+                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
+                }
+                val newtypeResult = MezzeType.TypeApplication(typeDecl.name, typeArgs)
+                val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
+                val typeVars = mutableSetOf<TypeVar>()
+                collectTypeVarsFromType(constructorType, typeVars)
+                result = result.extendPoly(definition.constructor, TypeScheme(typeVars.toList(), emptyList(), constructorType))
+            }
+        }
+        return result
+    }
+
+    private fun buildParsedConstructorType(typeDecl: ParsedTypeDecl, constructor: ParsedVariantCtorDef): MezzeType {
+        typeVarCache.clear()
+        val resultType = if (typeDecl.typeParams.isEmpty()) {
+            when (val def = typeDecl.definition) {
+                is ParsedNewtypeDef -> MezzeType.TypeApplication(typeDecl.name, emptyList())
+                else -> {
+                    val constructors = when (def) {
+                        is ParsedVariantDef -> def.constructors.associate { ctor ->
+                            ctor.name to ctor.dataType?.let { convertParsedTypeAnnotationInternal(it) }
+                        }
+                        is ParsedRecordDef -> emptyMap()
+                        is ParsedNewtypeDef -> emptyMap()
+                    }
+                    MezzeType.VariantType(
+                        constructors = constructors, rowVar = null,
+                        typeName = typeDecl.name, typeHash = typeDecl.contentHash
+                    )
+                }
+            }
+        } else {
+            MezzeType.TypeApplication(
+                constructor = typeDecl.name,
+                args = typeDecl.typeParams.map { param ->
+                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
+                }
+            )
+        }
+        return when (val dataType = constructor.dataType) {
+            null -> resultType
+            else -> MezzeType.FunctionType(
+                paramType = convertParsedTypeAnnotationInternal(dataType),
                 returnType = resultType
             )
         }
