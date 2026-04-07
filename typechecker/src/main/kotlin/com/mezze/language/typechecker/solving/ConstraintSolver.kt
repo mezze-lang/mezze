@@ -1439,50 +1439,14 @@ class ConstraintSolver(
      * Used for resolving associated type bindings.
      */
     private fun typeAnnotationToMezzeType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
-        return typeAnnotationToMezzeType(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"))
-    }
-
-    private fun typeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                // Type application with no args
-                MezzeType.TypeApplication(annotation.name, emptyList())
-            }
-            is TypeApplicationAnnotation -> {
-                MezzeType.TypeApplication(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { typeAnnotationToMezzeType(it) }
-                )
-            }
-            is SeqTypeAnnotation -> {
-                MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
-            }
-            is RecordTypeAnnotation -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to typeAnnotationToMezzeType(entry.type)
-                    }
-                )
-            }
-            is FunctionTypeAnnotation -> {
-                MezzeType.FunctionType(
-                    paramType = typeAnnotationToMezzeType(annotation.paramType),
-                    returnType = typeAnnotationToMezzeType(annotation.returnType)
-                )
-            }
-            is VariantTypeAnnotation -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { constructor ->
-                        constructor.name to constructor.dataType?.let { typeAnnotationToMezzeType(it) }
-                    }
-                )
-            }
-            else -> {
-                // For other annotation types, create a type application
-                MezzeType.TypeApplication(annotation.toString(), emptyList())
-            }
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
+            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
+            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
+            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
+            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
+            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
         }
     }
 
@@ -2328,7 +2292,7 @@ class ConstraintSolver(
                     // Exactly one impl - we can infer the data type!
                     val impl = matchingImpls.first()
                     // Extract the data type from the impl's target types using structural conversion
-                    val inferredType = convertAnnotationToType(impl.targetTypes[0])
+                    val inferredType = convertAnnotationToType(com.mezze.language.parser.MezzeParser.toParsedTypeAnnotation(impl.targetTypes[0]))
 
                     if (inferredType != null) {
                         return Substitution.single(dataType.variable, inferredType)
@@ -2356,7 +2320,7 @@ class ConstraintSolver(
                     // Exactly one impl - we can infer the data type!
                     val impl = matchingImpls.first()
                     // Extract the data type from the impl's target types using structural conversion
-                    val inferredType = convertAnnotationToType(impl.targetTypes[1])
+                    val inferredType = convertAnnotationToType(com.mezze.language.parser.MezzeParser.toParsedTypeAnnotation(impl.targetTypes[1]))
 
                     if (inferredType != null) {
                         return Substitution.single(dataType.variable, inferredType)
@@ -2444,53 +2408,14 @@ class ConstraintSolver(
      * This is the structural alternative to parseTypeName().
      */
     private fun convertAnnotationToType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType? {
-        return convertAnnotationToType(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<solver>"))
-    }
-
-    private fun convertAnnotationToType(annotation: TypeAnnotation): MezzeType? {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                // For non-primitive identifiers, create a TypeApplication
-                // (the type may be from an imported module, so we don't require it in typeDeclarations)
-                MezzeType.TypeApplication(annotation.name, emptyList())
-            }
-            is TypeApplicationAnnotation -> {
-                val args = annotation.args.mapNotNull { convertAnnotationToType(it) }
-                if (args.size != annotation.args.size) {
-                    null  // Some args couldn't be converted
-                } else {
-                    MezzeType.TypeApplication(annotation.constructor, args)
-                }
-            }
-            is SeqTypeAnnotation -> {
-                convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
-            }
-            is RecordTypeAnnotation -> {
-                val fields = mutableMapOf<String, MezzeType>()
-                for (entry in annotation.entries) {
-                    val fieldType = convertAnnotationToType(entry.type) ?: return null
-                    fields[entry.name] = fieldType
-                }
-                MezzeType.RecordType(fields)
-            }
-            is VariantTypeAnnotation -> {
-                val constructors = mutableMapOf<String, MezzeType?>()
-                for (ctor in annotation.constructors) {
-                    val payload = ctor.dataType?.let { convertAnnotationToType(it) }
-                    constructors[ctor.name] = payload
-                }
-                MezzeType.VariantType(constructors)
-            }
-            is FunctionTypeAnnotation -> {
-                val paramType = convertAnnotationToType(annotation.paramType) ?: return null
-                val returnType = convertAnnotationToType(annotation.returnType) ?: return null
-                MezzeType.FunctionType(paramType, returnType)
-            }
-            // These don't convert to simple MezzeType
-            is QualifiedTypeAnnotation,
-            is EffectRowAnnotation -> null
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else MezzeType.TypeApplication(annotation.constructor, args) }
+            is com.mezze.language.parsedast.ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
+            is com.mezze.language.parsedast.ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
+            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
+            is com.mezze.language.parsedast.ParsedFunctionType -> { val p = convertAnnotationToType(annotation.paramType) ?: return null; val r = convertAnnotationToType(annotation.returnType) ?: return null; MezzeType.FunctionType(p, r) }
+            is com.mezze.language.parsedast.ParsedQualifiedType -> null
         }
     }
 
