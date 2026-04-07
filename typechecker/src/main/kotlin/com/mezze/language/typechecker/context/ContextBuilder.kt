@@ -292,16 +292,17 @@ class ContextBuilder {
 
         // VALIDATION PHASE: Run ability validations after context is built
         AbilityValidator.validateNameCollisions(
-            abilityDeclarations = v1AbilityDecls,
-            typeDeclarations = allV1TypeDecls,
+            abilityDeclarations = abilityDecls,
+            typeDeclarations = typeDecls + importedTypes,
             effectDeclarations = effectDecls
         )
 
-        for (abilityDecl in v1AbilityDecls.values) {
-            AbilityValidator.validateAbilityDependencies(abilityDecl, v1AbilityDecls)
+        val allParsedAbilityDecls = abilityDecls + importedAbilities
+        for (abilityDecl in abilityDecls.values) {
+            AbilityValidator.validateAbilityDependencies(abilityDecl, allParsedAbilityDecls)
         }
 
-        for (abilityDecl in v1AbilityDecls.values) {
+        for (abilityDecl in abilityDecls.values) {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 

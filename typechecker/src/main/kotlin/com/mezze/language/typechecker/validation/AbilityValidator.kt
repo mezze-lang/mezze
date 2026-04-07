@@ -27,19 +27,15 @@ object AbilityValidator {
      * @param ability The ability declaration to validate
      * @throws TypeCheckError if validation fails
      */
-    fun validateAbilityDeclaration(ability: AbilityDeclaration) {
-        // Rule 1: No ability-level constraints - use method-level constraints instead
-        // This ensures a simpler, more uniform constraint model where constraints are always on functions
+    fun validateAbilityDeclaration(ability: com.mezze.language.parsedast.ParsedAbilityDecl) {
+        val sourceLocation = SourceLocation(ability.loc.startLine, ability.loc.startCol, ability.loc.file)
         if (ability.constraints.isNotEmpty() || ability.dependencies.isNotEmpty()) {
-            // Format constraints nicely for error message
             val constraintsList = (ability.constraints.map { "${it.abilityName} ${it.typeParam}" } +
                                    ability.dependencies.map { dep ->
-                                       val args = dep.typeArgs.joinToString(" ") { typeAnnotationToString(it) }
-                                       "${dep.abilityName} $args"
+                                       "${dep.abilityName} ${dep.typeArgs.joinToString(" ")}"
                                    })
                 .joinToString(", ")
 
-            // Generate suggestion for method-level constraints
             val suggestion = buildString {
                 append("Move constraints to method signatures. For example:\n\n")
                 append("  ability ${ability.name} ${ability.typeParams.joinToString(" ")} where {\n")
@@ -52,30 +48,26 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Ability '${ability.name}' uses ability-level constraints ('with $constraintsList'), " +
                 "but only method-level constraints are allowed.\n\n$suggestion",
-                ability.sourceLocation
+                sourceLocation
             )
         }
 
         for (operation in ability.operations) {
-            val effects = operation.effects ?: continue  // No effects is fine (pure operation)
-
-            // Rule 1: No polymorphic effects (<...> or <Effect, ...>)
+            val effects = operation.effects ?: continue
             if (effects.isPolymorphic) {
                 throw TypeCheckError(
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have polymorphic effects (<...>). " +
                     "Ability operations must declare concrete effects to define a clear contract. " +
                     "Use specific effects like <Mut> or no effects for pure operations.",
-                    ability.sourceLocation
+                    sourceLocation
                 )
             }
-
-            // Rule 2: No performed marker (<*> or <Effect, *>)
             if (effects.isPerformed) {
                 throw TypeCheckError(
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have performed marker (<*>). " +
                     "Ability operations declare what effects they perform, not that effects are handled. " +
                     "The <*> marker is only valid at call sites where effects are handled with 'perform'.",
-                    ability.sourceLocation
+                    sourceLocation
                 )
             }
         }
@@ -574,8 +566,8 @@ object AbilityValidator {
      * @throws TypeCheckError if circular dependency detected
      */
     fun validateAbilityDependencies(
-        abilityDeclaration: AbilityDeclaration,
-        abilityDeclarations: Map<String, AbilityDeclaration>
+        abilityDeclaration: com.mezze.language.parsedast.ParsedAbilityDecl,
+        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>
     ) {
         // Get dependencies from ability declaration
         val dependencies = abilityDeclaration.dependencies
@@ -648,11 +640,10 @@ object AbilityValidator {
      * @throws TypeCheckError if name collision detected
      */
     fun validateNameCollisions(
-        abilityDeclarations: Map<String, AbilityDeclaration>,
-        typeDeclarations: Map<String, TypeDeclaration>,
+        abilityDeclarations: Map<String, *>,
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
         effectDeclarations: Map<String, *>
     ) {
-        // Check for built-in ability/type name collisions
         for (typeName in typeDeclarations.keys) {
             if (BuiltInAbilities.isBuiltInAbility(typeName)) {
                 throw TypeCheckError(
@@ -661,8 +652,6 @@ object AbilityValidator {
                 )
             }
         }
-
-        // Check for user-defined ability/type name collisions
         for (abilityName in abilityDeclarations.keys) {
             if (typeDeclarations.containsKey(abilityName)) {
                 throw TypeCheckError(
@@ -671,8 +660,6 @@ object AbilityValidator {
                 )
             }
         }
-
-        // Check for ability/effect name collisions
         for (abilityName in abilityDeclarations.keys) {
             if (effectDeclarations.containsKey(abilityName)) {
                 throw TypeCheckError(
@@ -681,8 +668,6 @@ object AbilityValidator {
                 )
             }
         }
-
-        // Check for type/effect name collisions
         for (typeName in typeDeclarations.keys) {
             if (effectDeclarations.containsKey(typeName)) {
                 throw TypeCheckError(
@@ -691,15 +676,12 @@ object AbilityValidator {
                 )
             }
         }
-
-        // Check for variant constructor name collisions with abilities and effects (Bug #8c)
+        // Check for variant constructor name collisions with abilities and effects
         for ((typeName, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 for (constructor in definition.constructors) {
                     val constructorName = constructor.name
-
-                    // Check collision with built-in abilities
                     if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
@@ -707,8 +689,6 @@ object AbilityValidator {
                             "Variant constructors and abilities must have unique names."
                         )
                     }
-
-                    // Check collision with user-defined abilities
                     if (abilityDeclarations.containsKey(constructorName)) {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
@@ -716,8 +696,6 @@ object AbilityValidator {
                             "Variant constructors and abilities must have unique names."
                         )
                     }
-
-                    // Check collision with effects
                     if (effectDeclarations.containsKey(constructorName)) {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
