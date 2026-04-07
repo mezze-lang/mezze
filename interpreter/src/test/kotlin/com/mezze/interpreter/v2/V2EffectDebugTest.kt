@@ -2,7 +2,7 @@ package com.mezze.interpreter.v2
 
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
-import com.mezze.language.typechecker.TypeCheckerV2
+
 import com.mezze.language.typedast.*
 import com.mezze.language.truffleir.*
 import com.mezze.language.typechecker.mono.*
