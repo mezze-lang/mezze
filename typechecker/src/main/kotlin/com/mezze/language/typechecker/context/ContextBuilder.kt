@@ -35,21 +35,21 @@ class ContextBuilder {
 
     /**
      * Effect declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * Populated at the start of build() so that convertTypeAnnotationV1Internal
      * can resolve effect names to their content hashes for EffectRow.effectHashes.
      */
     private var currentEffectDecls: Map<String, ParsedEffectDecl> = emptyMap()
 
     /**
      * Ability declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * Populated at the start of build() so that convertTypeAnnotationV1Internal
      * can resolve ability names to their content hashes for FunctionAbilityConstraint.abilityHash.
      */
     private var currentAbilityDecls: Map<String, ParsedAbilityDecl> = emptyMap()
 
     /**
      * Type declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationInternal
+     * Populated at the start of build() so that convertTypeAnnotationV1Internal
      * can resolve type constructor names to their content hashes for TypeApplication.typeHash.
      */
     private var currentTypeDecls: Map<String, ParsedTypeDecl> = emptyMap()
@@ -202,11 +202,11 @@ class ContextBuilder {
         // Merge local and imported effect declarations for lookups (v2 types)
         val allEffectDecls = effectDecls + importedEffects
 
-        // Make effect declarations available to convertTypeAnnotationInternal so it can
+        // Make effect declarations available to convertTypeAnnotationV1Internal so it can
         // populate EffectRow.effectHashes with content hashes for hermetic checks.
         currentEffectDecls = allEffectDecls
 
-        // Make ability and type declarations available to convertTypeAnnotationInternal
+        // Make ability and type declarations available to convertTypeAnnotationV1Internal
         // so it can populate abilityHash / typeHash content hashes.
         currentAbilityDecls = abilityDecls + importedAbilities
         currentTypeDecls = typeDecls + importedTypes
@@ -428,7 +428,7 @@ class ContextBuilder {
                 // are preserved during unification. NewtypeType is only used in typeDeclarations
                 // for derivation checking.
                 typeVarCache.clear()
-                val wrappedMezzeType = convertTypeAnnotationInternal(definition.wrappedType)
+                val wrappedMezzeType = convertTypeAnnotationV1Internal(definition.wrappedType)
                 val typeArgs = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
                 }
@@ -466,7 +466,7 @@ class ContextBuilder {
                 else -> {
                     val constructors = when (def) {
                         is VariantDefinition -> def.constructors.associate { ctor ->
-                            ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
+                            ctor.name to ctor.dataType?.let { convertTypeAnnotationV1Internal(it) }
                         }
                         is RecordDefinition -> emptyMap()
                         is NewtypeDefinition -> emptyMap() // unreachable
@@ -497,7 +497,7 @@ class ContextBuilder {
         return when (val dataType = constructor.dataType) {
             null -> resultType // No data, just the type itself
             else -> MezzeType.FunctionType(
-                paramType = convertTypeAnnotationInternal(dataType),
+                paramType = convertTypeAnnotationV1Internal(dataType),
                 returnType = resultType
             )
         }
@@ -552,9 +552,9 @@ class ContextBuilder {
             fields = effectDecl.operations.associate { op ->
                 // Convert the type annotation and strip any effects
                 // Effect operations are stored as plain function types
-                // IMPORTANT: Use convertTypeAnnotationInternal to avoid clearing cache between operations
-                val convertedReturnType = convertTypeAnnotationInternal(op.returnType)
-                val convertedParamType = convertTypeAnnotationInternal(op.paramType)
+                // IMPORTANT: Use internal converter to avoid clearing cache between operations
+                val convertedReturnType = convertTypeAnnotationV1Internal(op.returnType)
+                val convertedParamType = convertTypeAnnotationV1Internal(op.paramType)
                 val plainFunctionType = MezzeType.FunctionType(
                     paramType = convertedParamType,
                     returnType = convertedReturnType,
@@ -799,7 +799,7 @@ class ContextBuilder {
             // The binding keys in implDecl should already have the ' prefix (e.g., 'state)
             // but the effectDecl.associatedTypes might not
             val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
-                convertTypeAnnotationInternal(typeAnnotation)
+                convertTypeAnnotationV1Internal(typeAnnotation)
             }
 
             // Store as RecordType with associated type names as field names
@@ -826,7 +826,7 @@ class ContextBuilder {
             val performerFieldsType = if (implDecl.performerParams.isNotEmpty()) {
                 MezzeType.RecordType(
                     fields = implDecl.performerParams.associate { param ->
-                        param.name to convertTypeAnnotationInternal(param.type)
+                        param.name to convertTypeAnnotationV1Internal(param.type)
                     }
                 )
             } else null
@@ -858,7 +858,7 @@ class ContextBuilder {
 
             val performerFieldsType = MezzeType.RecordType(
                 fields = implDecl.performerParams.associate { param ->
-                    param.name to convertTypeAnnotationInternal(param.type)
+                    param.name to convertTypeAnnotationV1Internal(param.type)
                 }
             )
 
@@ -980,7 +980,7 @@ class ContextBuilder {
             // Build method type from annotations if available
             val opParamType = op.paramType
             val paramType = if (opParamType != null) {
-                convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(opParamType, file))
+                convertParsedTypeAnnotation(opParamType)
             } else {
                 // Infer param type from the lambda's parameters (v2 ParsedExpr)
                 val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
@@ -989,7 +989,7 @@ class ContextBuilder {
                         is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> {
                             MezzeType.RecordType(
                                 fields = params.fields.associate { entry ->
-                                    entry.name to convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(entry.type, file))
+                                    entry.name to convertParsedTypeAnnotation(entry.type)
                                 },
                                 rowVar = null
                             )
@@ -1012,7 +1012,7 @@ class ContextBuilder {
 
             val opReturnType = op.returnType
             val returnType = if (opReturnType != null) {
-                convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(opReturnType, file))
+                convertParsedTypeAnnotation(opReturnType)
             } else {
                 // Return type unknown at registration time — use a fresh type variable.
                 // The actual type will be inferred during typechecking of the method call.
@@ -1073,14 +1073,14 @@ class ContextBuilder {
 
         for (op in implDecl.operations) {
             // Build method type from annotations or lambda params
-            val paramType = op.paramType?.let { convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(it, file)) }
+            val paramType = op.paramType?.let { convertParsedTypeAnnotation(it) }
                 ?: run {
                     val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
                     if (lambda != null) {
                         when (val params = lambda.params) {
                             is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> MezzeType.RecordType(
                                 fields = params.fields.associate { entry ->
-                                    entry.name to convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(entry.type, file))
+                                    entry.name to convertParsedTypeAnnotation(entry.type)
                                 },
                                 rowVar = null
                             )
@@ -1094,7 +1094,7 @@ class ContextBuilder {
                         MezzeType.RecordType(fields = emptyMap(), rowVar = null)
                     }
                 }
-            val returnType = op.returnType?.let { convertTypeAnnotation(ParserBridge.toV1TypeAnnotation(it, file)) }
+            val returnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
                 ?: MezzeType.VarType(TypeVar.fresh())
             val methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType)
 
@@ -1229,73 +1229,145 @@ class ContextBuilder {
      * This is the public entry point that clears the type variable cache
      * before conversion to ensure each top-level annotation gets fresh variables.
      */
+    /**
+     * Convert a v1 TypeAnnotation to MezzeType.
+     * Delegates to the v2 converter via bridge for backward compatibility.
+     */
     fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
-        // Clear cache before each top-level conversion
-        // This ensures that type variables in separate annotations don't alias
         typeVarCache.clear()
-        return convertTypeAnnotationInternal(annotation)
+        return convertTypeAnnotationV1Internal(annotation)
     }
 
     /**
      * Convert a v2 ParsedTypeAnnotation to MezzeType.
-     * Bridge method: converts v2 → v1, then calls the existing converter.
+     * This is the primary converter — works directly on v2 types.
      */
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
-        val v1 = ParserBridge.toV1TypeAnnotation(annotation, "<converted>")
-        return convertTypeAnnotationInternal(v1)
+        return convertParsedTypeAnnotationInternal(annotation)
     }
 
     /**
-     * Internal recursive type annotation converter.
+     * Internal recursive v2 type annotation converter.
      * Uses cached type variables to ensure consistency within a single annotation.
      */
-    private fun convertTypeAnnotationInternal(annotation: TypeAnnotation): MezzeType {
+    private fun convertParsedTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first (includes Bool -> MezzeType.BoolType)
+            is com.mezze.language.parsedast.ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
-
-                when (annotation.name) {
-                    else -> {
-                        // Type variable or type constructor
-                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                            // Use cached type variable to ensure all occurrences of 'a refer to the same instance
-                            val varName = annotation.name.removePrefix("'")
-                            val typeVar = typeVarCache.getOrPut(varName) {
-                                TypeVar(varName)
-                            }
-                            MezzeType.VarType(typeVar)
-                        } else {
-                            // Type constructor with no args - treat as type application
-                            MezzeType.TypeApplication(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
-                        }
-                    }
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    val varName = annotation.name.removePrefix("'")
+                    val typeVar = typeVarCache.getOrPut(varName) { TypeVar(varName) }
+                    MezzeType.VarType(typeVar)
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
                 }
             }
-            is FunctionTypeAnnotation -> {
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
                 MezzeType.FunctionType(
-                    paramType = convertTypeAnnotationInternal(annotation.paramType),
-                    returnType = convertTypeAnnotationInternal(annotation.returnType),
+                    paramType = convertParsedTypeAnnotationInternal(annotation.paramType),
+                    returnType = convertParsedTypeAnnotationInternal(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
-                        // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
-                        // Use allEffectNames to include both simple effects and effect annotations
                         validateHermeticEffects(effectRow.allEffectNames)
-
-                        // Build effectHashes: map each effect name to its content hash (if known)
                         val hashes = effectRow.effects.mapNotNull { name ->
                             val hash = currentEffectDecls[name]?.contentHash ?: return@mapNotNull null
                             name to hash
                         }.toMap()
-
-                        // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
                         MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed, hashes)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = constraint.abilityName,
-                            typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) },
+                            typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotationInternal(it) },
+                            abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
+                        )
+                    }
+                )
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                MezzeType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertParsedTypeAnnotationInternal(entry.type)
+                    },
+                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
+                )
+            }
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                MezzeType.VariantType(
+                    constructors = annotation.constructors.associate { ctor ->
+                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotationInternal(it) }
+                    },
+                    rowVar = null
+                )
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                val resolvedTypeHash = currentTypeDecls[annotation.constructor]?.contentHash
+                when (annotation.constructor) {
+                    "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertParsedTypeAnnotationInternal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                    "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertParsedTypeAnnotationInternal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                    "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertParsedTypeAnnotationInternal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                    "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
+                            keyType = convertParsedTypeAnnotationInternal(annotation.args[0]),
+                            valueType = convertParsedTypeAnnotationInternal(annotation.args[1])
+                        ) else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                    else -> MezzeType.TypeApplication(
+                        constructor = annotation.constructor,
+                        args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
+                        typeHash = resolvedTypeHash
+                    )
+                }
+            }
+            is com.mezze.language.parsedast.ParsedSeqType -> {
+                MezzeType.SeqType(elementType = convertParsedTypeAnnotationInternal(annotation.elementType))
+            }
+            is com.mezze.language.parsedast.ParsedQualifiedType -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                MezzeType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
+                    typeHash = currentTypeDecls[qualifiedName]?.contentHash
+                )
+            }
+        }
+    }
+
+    /**
+     * Internal recursive v1 type annotation converter.
+     * Kept for backward compatibility — callers should migrate to convertParsedTypeAnnotation.
+     */
+    private fun convertTypeAnnotationV1Internal(annotation: TypeAnnotation): MezzeType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    val varName = annotation.name.removePrefix("'")
+                    val typeVar = typeVarCache.getOrPut(varName) { TypeVar(varName) }
+                    MezzeType.VarType(typeVar)
+                } else {
+                    MezzeType.TypeApplication(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
+                }
+            }
+            is FunctionTypeAnnotation -> {
+                MezzeType.FunctionType(
+                    paramType = convertTypeAnnotationV1Internal(annotation.paramType),
+                    returnType = convertTypeAnnotationV1Internal(annotation.returnType),
+                    effects = annotation.effects?.let { effectRow ->
+                        validateHermeticEffects(effectRow.allEffectNames)
+                        val hashes = effectRow.effects.mapNotNull { name ->
+                            val hash = currentEffectDecls[name]?.contentHash ?: return@mapNotNull null
+                            name to hash
+                        }.toMap()
+                        val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed, hashes)
+                    },
+                    abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                        MezzeType.FunctionAbilityConstraint(
+                            abilityName = constraint.abilityName,
+                            typeArgs = constraint.typeArgs.map { convertTypeAnnotationV1Internal(it) },
                             abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                         )
                     }
@@ -1304,7 +1376,7 @@ class ContextBuilder {
             is RecordTypeAnnotation -> {
                 MezzeType.RecordType(
                     fields = annotation.entries.associate { entry ->
-                        entry.name to convertTypeAnnotationInternal(entry.type)
+                        entry.name to convertTypeAnnotationV1Internal(entry.type)
                     },
                     rowVar = if (annotation.isOpen) RowVar.userOpen() else null
                 )
@@ -1312,71 +1384,41 @@ class ContextBuilder {
             is VariantTypeAnnotation -> {
                 MezzeType.VariantType(
                     constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertTypeAnnotationInternal(it) }
+                        ctor.name to ctor.dataType?.let { convertTypeAnnotationV1Internal(it) }
                     },
-                    rowVar = null  // Variant annotations don't have extensibility in current AST
+                    rowVar = null
                 )
             }
             is TypeApplicationAnnotation -> {
-                // Special handling for built-in collection types
-                // These have dedicated MezzeType representations for optimization
                 val resolvedTypeHash = currentTypeDecls[annotation.constructor]?.contentHash
                 when (annotation.constructor) {
-                    "List" -> {
-                        if (annotation.args.size == 1) {
-                            MezzeType.ListType(convertTypeAnnotationInternal(annotation.args[0]))
-                        } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
-                        }
-                    }
-                    "Seq" -> {
-                        if (annotation.args.size == 1) {
-                            MezzeType.SeqType(convertTypeAnnotationInternal(annotation.args[0]))
-                        } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
-                        }
-                    }
-                    "Set" -> {
-                        if (annotation.args.size == 1) {
-                            MezzeType.SetType(convertTypeAnnotationInternal(annotation.args[0]))
-                        } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
-                        }
-                    }
-                    "Map" -> {
-                        if (annotation.args.size == 2) {
-                            MezzeType.MapType(
-                                keyType = convertTypeAnnotationInternal(annotation.args[0]),
-                                valueType = convertTypeAnnotationInternal(annotation.args[1])
-                            )
-                        } else {
-                            MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) }, resolvedTypeHash)
-                        }
-                    }
-                    // Note: Deque support will be added when DequeType is defined in MezzeType
-                    else -> {
-                        MezzeType.TypeApplication(
-                            constructor = annotation.constructor,
-                            args = annotation.args.map { convertTypeAnnotationInternal(it) },
-                            typeHash = resolvedTypeHash
-                        )
-                    }
+                    "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertTypeAnnotationV1Internal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationV1Internal(it) }, resolvedTypeHash)
+                    "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertTypeAnnotationV1Internal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationV1Internal(it) }, resolvedTypeHash)
+                    "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertTypeAnnotationV1Internal(annotation.args[0]))
+                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationV1Internal(it) }, resolvedTypeHash)
+                    "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
+                            keyType = convertTypeAnnotationV1Internal(annotation.args[0]),
+                            valueType = convertTypeAnnotationV1Internal(annotation.args[1])
+                        ) else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationV1Internal(it) }, resolvedTypeHash)
+                    else -> MezzeType.TypeApplication(
+                        constructor = annotation.constructor,
+                        args = annotation.args.map { convertTypeAnnotationV1Internal(it) },
+                        typeHash = resolvedTypeHash
+                    )
                 }
             }
             is SeqTypeAnnotation -> {
-                MezzeType.SeqType(
-                    elementType = convertTypeAnnotationInternal(annotation.elementType)
-                )
+                MezzeType.SeqType(elementType = convertTypeAnnotationV1Internal(annotation.elementType))
             }
             is EffectRowAnnotation -> {
-                // Effect rows shouldn't appear as standalone types in well-formed programs
-                // But handle gracefully
                 MezzeType.VarType(TypeVar.fresh())
             }
             is QualifiedTypeAnnotation -> {
                 MezzeType.TypeApplication(
                     constructor = annotation.qualifiedName,
-                    args = annotation.args.map { convertTypeAnnotationInternal(it) },
+                    args = annotation.args.map { convertTypeAnnotationV1Internal(it) },
                     typeHash = currentTypeDecls[annotation.qualifiedName]?.contentHash
                 )
             }
