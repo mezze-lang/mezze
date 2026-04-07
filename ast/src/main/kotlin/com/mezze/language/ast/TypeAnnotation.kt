@@ -271,3 +271,73 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
         }
     }
 }
+
+/**
+ * Convert a v2 ParsedTypeAnnotation to a MezzeType.
+ * Full-fidelity conversion including ability constraints and effect annotations.
+ */
+fun convertParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+    return when (annotation) {
+        is com.mezze.language.parsedast.ParsedNamedType -> {
+            PrimitiveTypes.fromName(annotation.name)?.let { return it }
+            MezzeType.VarType(TypeVar(annotation.name))
+        }
+        is com.mezze.language.parsedast.ParsedFunctionType -> {
+            val paramType = convertParsedTypeAnnotation(annotation.paramType)
+            val returnType = convertParsedTypeAnnotation(annotation.returnType)
+            val effects = annotation.effects?.let { effectRow ->
+                val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                val effectInstances = effectRow.effectAnnotations.map { ea ->
+                    MezzeType.EffectInstance(
+                        name = ea.name,
+                        associatedTypes = ea.associatedTypes.mapValues { (_, ta) -> convertParsedTypeAnnotation(ta) }
+                    )
+                }.toSet()
+                MezzeType.EffectRow(
+                    effects = effectRow.effects.toSet(),
+                    effectInstances = effectInstances,
+                    rowVar = rowVar,
+                    performed = effectRow.isPerformed
+                )
+            }
+            val abilityConstraints = annotation.abilityConstraints.map { c ->
+                MezzeType.FunctionAbilityConstraint(
+                    c.abilityName,
+                    c.typeArgs.map { convertParsedTypeAnnotation(it) },
+                    c.associatedTypeBindings.mapValues { (_, ta) -> convertParsedTypeAnnotation(ta) }
+                )
+            }
+            MezzeType.FunctionType(paramType, returnType, effects, abilityConstraints)
+        }
+        is com.mezze.language.parsedast.ParsedRecordType -> {
+            MezzeType.RecordType(
+                annotation.entries.associate { it.name to convertParsedTypeAnnotation(it.type) },
+                if (annotation.isOpen) RowVar.userOpen() else null
+            )
+        }
+        is com.mezze.language.parsedast.ParsedVariantType -> {
+            MezzeType.VariantType(
+                annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedTypeAnnotation(dt) } },
+                if (annotation.isOpen) RowVar.userOpen() else null
+            )
+        }
+        is com.mezze.language.parsedast.ParsedTypeApp -> {
+            if (annotation.args.isNotEmpty()) {
+                MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+            } else {
+                MezzeType.VarType(TypeVar(annotation.constructor))
+            }
+        }
+        is com.mezze.language.parsedast.ParsedSeqType -> {
+            MezzeType.SeqType(convertParsedTypeAnnotation(annotation.elementType))
+        }
+        is com.mezze.language.parsedast.ParsedQualifiedType -> {
+            val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+            if (annotation.args.isNotEmpty()) {
+                MezzeType.TypeApplication(qualifiedName, annotation.args.map { convertParsedTypeAnnotation(it) })
+            } else {
+                MezzeType.VarType(TypeVar(qualifiedName))
+            }
+        }
+    }
+}
