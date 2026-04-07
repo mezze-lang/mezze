@@ -1350,40 +1350,9 @@ class TypeChecker(
             val resolver = ModuleResolver.create()
 
             for ((modulePath, program) in modules) {
-                // Build type context from the program for exports
-                val typeContext = mutableMapOf<String, MezzeType>()
-
-                for (item in program.items) {
-                    when (item) {
-                        is LetBinding -> {
-                            item.inferredType?.let { type ->
-                                typeContext[item.variableName] = type
-                            }
-                        }
-                        is TypeDeclaration -> {
-                            item.inferredType?.let { type ->
-                                typeContext[item.name] = type
-                            }
-                        }
-                        is EffectDeclaration -> {
-                            item.inferredType?.let { type ->
-                                typeContext[item.name] = type
-                            }
-                        }
-                        is ImplDeclaration -> {
-                            item.inferredType?.let { type ->
-                                typeContext[item.performerName] = type
-                            }
-                        }
-                        else -> {
-                            // Other items don't contribute to type context
-                        }
-                    }
-                }
-
-                // Update ModuleResolver's cache with the preloaded module
-                @Suppress("DEPRECATION")
-                resolver.updateModuleExports(modulePath, program, typeContext)
+                // Convert v1 Program to v2 ParsedModule and use v2 export path
+                val parsedModule = MezzeParser().programToParsedModule(program, modulePath)
+                resolver.updateModuleExportsV2(modulePath, parsedModule)
 
                 // Also cache in ModuleTypeChecker's global cache to prevent re-type-checking.
                 // Without this, the prelude re-type-checks modules from source, which fails
