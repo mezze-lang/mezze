@@ -117,33 +117,42 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate closure factories (ONLY for small sets to avoid OOM).
-        // With 1000+ functions, eager evaluation causes infinite recursion in some closure factories.
-        // HandlerLookupNode evaluates lazily when needed.
-        if (functionHashes.length < 200) {
-            for (int i = 0; i < functionHashes.length; i++) {
-                String hash = functionHashes[i];
-                Object cached = evaluatedClosureCache.get(hash);
-                if (cached != null) {
-                    context.defineGlobal(hash, cached);
+        // Pass 2: Evaluate closure factories.
+        // For large function sets (>200), only evaluate functions needed by performer records
+        // to avoid OOM from infinite recursion in non-performer closure factories.
+        java.util.Set<String> performerOpHashes = new java.util.HashSet<>();
+        for (String[] info : performerInfos) {
+            for (int j = 2; j < info.length; j += 2) {
+                performerOpHashes.add(info[j]); // operation hash
+            }
+        }
+
+        for (int i = 0; i < functionHashes.length; i++) {
+            String hash = functionHashes[i];
+            // For large sets, only evaluate performer operation functions
+            if (functionHashes.length >= 200 && !performerOpHashes.contains(hash)) {
+                continue;
+            }
+            Object cached = evaluatedClosureCache.get(hash);
+            if (cached != null) {
+                context.defineGlobal(hash, cached);
+                if (i < functionNames.length && functionNames[i] != null) {
+                    context.defineGlobal(functionNames[i], cached);
+                }
+                continue;
+            }
+            CallTarget target = functionTargets[i];
+            try {
+                Object result = target.call(new Object[] { emptyRecord });
+                if (result instanceof MezzeFunction closure) {
+                    context.defineGlobal(hash, closure);
                     if (i < functionNames.length && functionNames[i] != null) {
-                        context.defineGlobal(functionNames[i], cached);
+                        context.defineGlobal(functionNames[i], closure);
                     }
-                    continue;
+                    evaluatedClosureCache.put(hash, closure);
                 }
-                CallTarget target = functionTargets[i];
-                try {
-                    Object result = target.call(new Object[] { emptyRecord });
-                    if (result instanceof MezzeFunction closure) {
-                        context.defineGlobal(hash, closure);
-                        if (i < functionNames.length && functionNames[i] != null) {
-                            context.defineGlobal(functionNames[i], closure);
-                        }
-                        evaluatedClosureCache.put(hash, closure);
-                    }
-                } catch (Exception e) {
-                    // Not a closure factory or depends on unavailable captures
-                }
+            } catch (Exception e) {
+                // Not a closure factory or depends on unavailable captures
             }
         }
 
@@ -184,14 +193,15 @@ public final class HashModuleLoaderNode extends MezzeNode {
             opNames[i] = info[2 + i * 2 + 1];
             // Look up the compiled operation function and evaluate to get closure
             Object opFunc = context.lookupGlobal(opHash);
+            try { new java.io.FileWriter("/tmp/pass3_debug.txt", true).append("  op=" + opNames[i] + " hash=" + opHash.substring(0, 20) + " found=" + (opFunc != null ? opFunc.getClass().getSimpleName() : "null") + "\n").close(); } catch (Exception ignored) {}
+            // Don't evaluate operation functions — they take parameters at runtime.
+            // Just use the raw MezzeFunction as the performer record field value.
             if (opFunc instanceof MezzeFunction fn) {
-                try {
-                    Object result = fn.getCallTarget().call(new Object[] { emptyRecord });
-                    if (result instanceof MezzeFunction closure) {
-                        opFunc = closure;
-                    }
-                } catch (Exception e) {
-                    // Keep raw wrapper
+                // Check if it's a closure factory (returns a function when called with empty record)
+                // Only for cached entries — skip evaluation for fresh functions
+                Object cached = evaluatedClosureCache.get(opHash);
+                if (cached instanceof MezzeFunction) {
+                    opFunc = cached;
                 }
             }
             opValues[i] = opFunc != null ? opFunc : com.mezze.interpreter.v2.values.MezzeUnit.INSTANCE;
