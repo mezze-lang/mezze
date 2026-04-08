@@ -58,9 +58,14 @@ class Monomorphizer {
      * @param allModules All loaded TypedModules (by module hash)
      * @return MonoModule with all reachable functions specialized
      */
+    /**
+     * @param preloweredHashes Hashes of functions already pre-lowered (e.g., stdlib).
+     *   These are skipped during monomorphization — they exist in the pre-lowered cache.
+     */
     fun monomorphize(
         entryModule: TypedModule,
-        allModules: Map<Hash, TypedModule>
+        allModules: Map<Hash, TypedModule>,
+        preloweredHashes: Set<String> = emptySet()
     ): MonoModule {
         // Build global index: hash → TypedLetDecl (all functions from all modules)
         val globalDecls = mutableMapOf<Hash, TypedLetDecl>()
@@ -110,6 +115,9 @@ class Monomorphizer {
 
             val decl = globalDecls[hash]
             if (decl != null) {
+                // Skip functions that are already pre-lowered (stdlib)
+                if (hash.hex in preloweredHashes) continue
+
                 val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
                 val monoFn = MonoFunction(
                     hash = decl.hash,
@@ -130,6 +138,7 @@ class Monomorphizer {
             // Ability operation referenced by hash — compile as standalone function
             val opEntry = abilityOpByHash[hash]
             if (opEntry != null) {
+                if (hash.hex in preloweredHashes) continue
                 val opBody = opEntry.opBody
                 val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
                 val monoFn = MonoFunction(
@@ -187,6 +196,7 @@ class Monomorphizer {
             if (hash in processedFunctions) continue
             processedFunctions.add(hash)
             val decl = globalDecls[hash] ?: continue
+            if (hash.hex in preloweredHashes) continue
             val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
             monoFunctions.add(MonoFunction(
                 hash = decl.hash,
