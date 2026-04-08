@@ -129,7 +129,9 @@ class TruffleCompiler(
             is CallDirectIR -> {
                 val argNode = compileNode(node.arg, source)
                 if (node.isTailCall) {
-                    val fnNode = MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, UnitLiteralNode(), false)
+                    // For tail calls, resolve the function without calling it.
+                    // TailCallNode will throw TailCallException with the function's CallTarget.
+                    val fnNode = FunctionLookupNode(node.targetHash.hex)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {
                     MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode, false)
