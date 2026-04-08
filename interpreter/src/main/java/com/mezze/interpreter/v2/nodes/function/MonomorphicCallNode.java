@@ -125,14 +125,15 @@ public final class MonomorphicCallNode extends MezzeNode {
         String lookupKey = contentHash != null ? contentHash : functionName;
         Object value = context.lookupGlobal(lookupKey);
 
+        if (value == null && contentHash != null && !contentHash.equals(functionName)) {
+            // Try by name if hash lookup failed
+            value = context.lookupGlobal(functionName);
+        }
         if (value == null) {
-            if (contentHash != null) {
-                throw new RuntimeException(
-                    "Function not found for content hash: " + contentHash +
-                    " (function name: " + functionName + ")"
-                );
-            }
-            throw new RuntimeException("Function not found: " + functionName);
+            throw new RuntimeException(
+                "Function not found" + (contentHash != null ? " for content hash: " + contentHash : "") +
+                " (function name: " + functionName + ")"
+            );
         }
 
         if (!(value instanceof MezzeFunction)) {
