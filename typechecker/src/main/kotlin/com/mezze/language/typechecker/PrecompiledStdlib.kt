@@ -82,13 +82,22 @@ object PrecompiledStdlib {
             v2Modules = v2
         }
 
-        // Pre-lower all stdlib modules: mono → resolve → lower once at startup
+        // Pre-lower all stdlib modules: mono → resolve → lower once at startup.
+        // Build full module map including transitive deps from ModuleTypeChecker cache.
+        val allV2ForPrelower = HashMap<Hash, com.mezze.language.typedast.TypedModule>(v2Modules)
+        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+            val v2m = cached.v2TypedModule
+            if (v2m != null && v2m.hash !in allV2ForPrelower) {
+                allV2ForPrelower[v2m.hash] = v2m
+            }
+        }
+
         val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
         val prePerformers = mutableListOf<Array<String>>()
-        for ((_, v2Module) in v2Modules) {
+        for ((_, v2Module) in allV2ForPrelower) {
             try {
                 val mono = com.mezze.language.typechecker.mono.Monomorphizer()
-                    .monomorphize(v2Module, mapOf(v2Module.hash to v2Module))
+                    .monomorphize(v2Module, allV2ForPrelower)
                 val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
                 val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
                 for (fn in lowered.functions) {
