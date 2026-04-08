@@ -117,6 +117,7 @@ object PrecompiledStdlib {
         }
         preloweredFunctions = preFunctions
         preloweredPerformerRecords = prePerformers
+
     }
 
     /**

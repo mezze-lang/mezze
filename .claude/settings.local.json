@@ -312,7 +312,9 @@
       "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/constraints/ExpressionConstraints.kt)",
       "Bash(cp /tmp/ec_new.kt \"$FILE\")",
       "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/hashing/ContentHashComputer.kt)",
-      "Bash(cp /tmp/chc_new.kt \"$FILE\")"
+      "Bash(cp /tmp/chc_new.kt \"$FILE\")",
+      "Bash(for f)",
+      "Bash(touch:*)"
     ],
     "deny": [],
     "ask": []
