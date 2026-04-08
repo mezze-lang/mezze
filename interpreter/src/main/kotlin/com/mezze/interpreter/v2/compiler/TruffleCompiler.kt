@@ -125,6 +125,10 @@ class TruffleCompiler(
             is ReadArgIR -> ReadArgumentNode(node.index)
 
             // === Calls ===
+            is FunctionRefIR -> {
+                // Return the function as a value (for storing in locals, passing as args)
+                FunctionLookupNode(node.targetHash.hex)
+            }
             is CallDirectIR -> {
                 val argNode = compileNode(node.arg, source)
                 if (node.isTailCall) {

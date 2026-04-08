@@ -138,6 +138,7 @@ class Lowerer {
             is ResolvedReadParam -> ReadLocalIR(expr.index, expr.kind, src)
             is ResolvedReadCapture -> ReadCaptureIR(expr.index, expr.kind, src)
 
+            is ResolvedFunctionRef -> FunctionRefIR(expr.targetHash, src)
             is ResolvedCallDirect -> CallDirectIR(expr.targetHash, lowerExpr(expr.arg, ft), expr.isTailCall, src)
             is ResolvedCallLocal -> CallLocalIR(expr.slot, lowerExpr(expr.arg, ft), expr.isTailCall, src)
             is ResolvedCallNative -> CallNativeIR(expr.name, lowerExpr(expr.arg, ft), src)

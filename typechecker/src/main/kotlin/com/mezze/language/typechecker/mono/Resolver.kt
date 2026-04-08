@@ -152,24 +152,11 @@ class Resolver {
                         ResolvedReadCapture(binding.index, kind, hash, loc)
                     }
                     is MonoBinding.FunctionRef -> {
-                        // Lambda/function reference: check local slot first, then capture, then CallDirect
-                        val existingSlot = ctx.findLocal(expr.name)
-                        if (existingSlot != null) {
-                            val kind = typeToSlotKind(expr.type)
-                            ResolvedReadLocal(existingSlot, kind, hash, loc)
-                        } else {
-                            // Try capture from parent scope
-                            val kind = typeToSlotKind(expr.type)
-                            val bindingHash = (binding.ref as? MonoFunctionRef.ByHash)?.hash?.hex
-                            val captureIdx = ctx.getOrCreateCapture(expr.name, bindingHash, kind)
-                            if (captureIdx != null) {
-                                ResolvedReadCapture(captureIdx, kind, hash, loc)
-                            } else {
-                                when (val ref = binding.ref) {
-                                    is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, ResolvedUnitLit(hash, loc), false, hash, loc)
-                                    is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
-                                }
-                            }
+                        // Function references resolve by hash — return the function as a value.
+                        // Functions are globally registered; no need for captures.
+                        when (val ref = binding.ref) {
+                            is MonoFunctionRef.ByHash -> ResolvedFunctionRef(ref.hash, hash, loc)
+                            is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, ResolvedUnitLit(hash, loc), hash, loc)
                         }
                     }
                     is MonoBinding.ValueRef -> {
@@ -198,25 +185,11 @@ class Resolver {
                 // Debug removed
                 when {
                     fn is MonoVar && fn.binding is MonoBinding.FunctionRef -> {
+                        // Functions are globally registered by hash — always use CallDirect.
+                        // No local slot or capture lookup needed.
                         val ref = (fn.binding as MonoBinding.FunctionRef).ref
                         when (ref) {
-                            is MonoFunctionRef.ByHash -> {
-                                val localSlot = ctx.findLocal(fn.name)
-                                if (localSlot != null) {
-                                    val kind = typeToSlotKind(fn.type)
-                                    val readFn = ResolvedReadLocal(localSlot, kind, hash, loc)
-                                    ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
-                                } else {
-                                    val kind = typeToSlotKind(fn.type)
-                                    val captureIdx = ctx.getOrCreateCapture(fn.name, ref.hash.hex, kind)
-                                    if (captureIdx != null) {
-                                        val readFn = ResolvedReadCapture(captureIdx, kind, hash, loc)
-                                        ResolvedCallIndirect(readFn, resolvedArg, expr.isTailCall, hash, loc)
-                                    } else {
-                                        ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
-                                    }
-                                }
-                            }
+                            is MonoFunctionRef.ByHash -> ResolvedCallDirect(ref.hash, resolvedArg, expr.isTailCall, hash, loc)
                             is MonoFunctionRef.Native -> ResolvedCallNative(ref.name, resolvedArg, hash, loc)
                         }
                     }
