@@ -58,17 +58,16 @@ class TruffleCompiler(
 
         val section = createSourceSection(source, ir.sourceSection)
 
-        if (ir.paramSlots.isNotEmpty()) {
-            // Function has parameters — use MezzeFunctionRootNode for record unpacking.
-            // The caller passes a single record argument {param1=val1, param2=val2, ...}
-            // and MezzeFunctionRootNode extracts fields into param slots.
+        if (ir.paramSlots.isNotEmpty() && ir.captureSlots.isEmpty()) {
+            // Function has parameters and NO captures — use MezzeFunctionRootNode
+            // for record unpacking. Params go to slots 0..P-1 (matches frame descriptor).
             val rootNode = MezzeFunctionRootNode(
                 language,
                 frameDescriptor,
                 bodyNode,
                 ir.name,
                 ir.paramNames.toTypedArray(),
-                IntArray(ir.captureSlots.size) { it },
+                IntArray(0),  // no closure slots
                 IntArray(0)
             )
             if (section != null) rootNode.setSourceSection(section)
