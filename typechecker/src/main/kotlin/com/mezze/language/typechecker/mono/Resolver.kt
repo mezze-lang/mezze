@@ -44,10 +44,9 @@ class Resolver {
                     inHandlerOperation = true
                     val resolvedBody = resolveExpr(body, ctx)
                     inHandlerOperation = false
-                    // Use pre-computed content hash from TypedASTHasher if available,
-                    // fall back to derived hash for backward compat
+                    // Use pre-computed content hash from TypedASTHasher
                     val opHash = pd.operationHashes[opName]
-                        ?: computeHash("${pd.hash.hex}_op_$idx")
+                        ?: error("Missing operation hash for ${pd.name}::$opName — TypedASTHasher must compute all operation hashes")
                     ResolvedFunction(
                         hash = opHash,
                         name = opName,
