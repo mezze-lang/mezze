@@ -42,6 +42,9 @@ class Monomorphizer {
     /** Index from operation hash → AbilityOpEntry for worklist-based compilation */
     private val abilityOpByHash = mutableMapOf<Hash, AbilityOpEntry>()
 
+    /** Hashes of functions already pre-lowered — don't add to worklist */
+    private var skipHashes: Set<String> = emptySet()
+
     private data class AbilityOpEntry(
         val implHash: Hash,
         val abilityName: String?,
@@ -67,6 +70,7 @@ class Monomorphizer {
         allModules: Map<Hash, TypedModule>,
         preloweredHashes: Set<String> = emptySet()
     ): MonoModule {
+        skipHashes = preloweredHashes
         // Build global index: hash → TypedLetDecl (all functions from all modules)
         val globalDecls = mutableMapOf<Hash, TypedLetDecl>()
         val globalAbilityImpls = mutableListOf<TypedAbilityImpl>()
@@ -164,7 +168,6 @@ class Monomorphizer {
         // from the entry point's reachable functions (via tryResolveMethodCall).
         // Don't eagerly convert ALL operations — that pulls in the entire stdlib.
 
-        // Convert effect decls and performers
         val monoEffectDecls = globalEffectDecls.map { ed ->
             MonoEffectDecl(
                 hash = ed.hash,
@@ -444,7 +447,7 @@ class Monomorphizer {
             is BindingRef.Param -> MonoBinding.Param(binding.index)
             is BindingRef.Capture -> MonoBinding.Capture(binding.index)
             is BindingRef.ByHash -> {
-                if (binding.hash !in processed) {
+                if (binding.hash !in processed && binding.hash.hex !in skipHashes) {
                     worklist.add(binding.hash)
                 }
                 // Check if the declaration's value is a lambda — if so, it's a function ref

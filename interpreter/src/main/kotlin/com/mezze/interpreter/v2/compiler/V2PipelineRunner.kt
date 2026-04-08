@@ -165,14 +165,24 @@ object V2PipelineRunner {
             return MezzeRootNode(language, fd, wrapped).callTarget
         }
 
-        // Compile all functions
+        // Add pre-lowered stdlib functions first
         val compiler = TruffleCompiler(language)
-        compiler.registerFunctions(functions)
+        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
+        for ((hash, fn) in precompiled.preloweredFunctions) {
+            if (!compiledFunctions.containsKey(hash)) {
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[hash] = rootNode.callTarget
+            }
+        }
 
+        // Compile entry module functions (skip those already pre-lowered)
+        compiler.registerFunctions(functions)
         for (fn in functions) {
-            val rootNode = compiler.compile(fn)
-            compiledFunctions[fn.hash.hex] = rootNode.callTarget
+            if (fn.hash.hex !in precompiled.preloweredFunctions) {
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[fn.hash.hex] = rootNode.callTarget
+            }
         }
 
         // Find entry function
@@ -191,17 +201,11 @@ object V2PipelineRunner {
             }
         }
 
-        // Use pre-lowered stdlib functions from PrecompiledStdlib (computed once at startup).
-        // No per-test monomorphization of stdlib modules.
+        // Pre-lowered functions already added above. Add name mappings + performer records.
         val allPerformerRecords = performerRecords.toMutableList()
-        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         for ((hash, fn) in precompiled.preloweredFunctions) {
-            if (!compiledFunctions.containsKey(hash)) {
-                val rootNode = compiler.compile(fn)
-                compiledFunctions[hash] = rootNode.callTarget
-                if (fn.name != "lambda" && !fn.name.startsWith("__")) {
-                    hashToName[hash] = fn.name
-                }
+            if (fn.name != "lambda" && !fn.name.startsWith("__")) {
+                hashToName[hash] = fn.name
             }
         }
         allPerformerRecords.addAll(precompiled.preloweredPerformerRecords)
