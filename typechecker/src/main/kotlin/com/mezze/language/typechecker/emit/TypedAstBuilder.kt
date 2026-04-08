@@ -422,7 +422,6 @@ class TypedAstBuilder(
             ?: implDeclarations[decl.performerName]?.contentHash
             ?: identifierContentHashes[BindingKey(null, decl.performerName)]
         val hash = if (contentHash != null) Hash.fromV1(contentHash) else computeHash("performer_${decl.performerName}")
-        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder.buildPerformerDecl] performer=${decl.performerName} contentHash=${contentHash?.take(20)} hash=${hash.hex.take(20)}\n") } catch (_: Exception) {}
 
         // Resolve effect hash
         val effectName = decl.effect.localName
@@ -1076,7 +1075,6 @@ class TypedAstBuilder(
             ?: implDecl?.contentHash
             ?: importedImpl?.contentHash
         val performerHash = Hash.fromV1(rawContentHash)
-        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[TypedAstBuilder] performer=$performerName hash=${rawContentHash?.take(20)}... from=${if (identifierContentHashes.containsKey(BindingKey(null, performerName))) "identifierHashes" else if (implDecl != null) "local" else "imported"}\n") } catch (_: Exception) {}
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName

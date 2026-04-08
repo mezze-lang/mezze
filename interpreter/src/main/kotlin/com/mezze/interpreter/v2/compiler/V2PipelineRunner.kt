@@ -199,7 +199,6 @@ object V2PipelineRunner {
         val allModulesToLoad = mutableMapOf<String, com.mezze.language.typedast.TypedModule>()
         loadedModules.forEach { (k, v) -> allModulesToLoad[k] = v }
         val preludeModules = com.mezze.language.typechecker.TypeChecker.cachedPreludeLoadedModules
-        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[V2PipelineRunner] preludeModules=${preludeModules?.size ?: "null"}, performerRecords=${performerRecords.size}\n") } catch (_: Exception) {}
         if (preludeModules != null) {
             for ((k, v) in preludeModules) {
                 val v2m = v.v2TypedModule
@@ -207,9 +206,7 @@ object V2PipelineRunner {
             }
         }
         for ((modulePath, v2Module) in allModulesToLoad) {
-            if (true) {
-                // Compile prelude module functions through the mono→resolve→lower pipeline
-                try {
+            try {
                     val mono = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(v2Module, mapOf(v2Module.hash to v2Module))
                     val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
                     val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
@@ -229,16 +226,13 @@ object V2PipelineRunner {
                             arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
                         }
                         allPerformerRecords.add(arr.toTypedArray())
-                        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("    performer: ${pr.performerHash.take(20)}... ops=${pr.operationNames}\n") } catch (_: Exception) {}
+
                     }
-                    try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("  $modulePath: ${lowered.functions.size} fns, ${lowered.performerRecords.size} performers\n") } catch (_: Exception) {}
-                } catch (e: Exception) {
-                    try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("  $modulePath: FAILED ${e::class.simpleName}: ${e.message?.take(80)}\n") } catch (_: Exception) {}
-                }
+
+                } catch (_: Exception) {
+                // Module couldn't be lowered — skip
             }
         }
-
-        try { java.io.File("/tmp/v2pipeline_debug.txt").appendText("[V2PipelineRunner] Total: ${compiledFunctions.size} fns, ${allPerformerRecords.size} performers\n") } catch (_: Exception) {}
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
         val performerInfos = allPerformerRecords.toTypedArray()

@@ -95,7 +95,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
     @CompilerDirectives.TruffleBoundary
     private void loadModules() {
-        try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt"); fw.write("[loadModules] ENTERED fns=" + functionHashes.length + " performers=" + performerInfos.length + "\n"); fw.close(); } catch (Exception ignored) {}
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
         try {
@@ -168,7 +167,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 3: Construct performer records from evaluated closures.
-        try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt", true); fw.write("[Pass3] performerInfos.length=" + performerInfos.length + "\n"); fw.close(); } catch (Exception ignored) {}
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
@@ -189,7 +187,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
         modulesLoaded = true;
         } catch (Exception e) {
-            try { var fw = new java.io.FileWriter("/tmp/pass3_debug.txt", true); fw.write("[loadModules] EXCEPTION: " + e.getClass().getSimpleName() + ": " + e.getMessage() + "\n"); e.printStackTrace(new java.io.PrintWriter(fw)); fw.close(); } catch (Exception ignored) {}
+
             modulesLoaded = true;
         }
     }
@@ -204,7 +202,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             opNames[i] = info[2 + i * 2 + 1];
             // Look up the compiled operation function and evaluate to get closure
             Object opFunc = context.lookupGlobal(opHash);
-            try { new java.io.FileWriter("/tmp/pass3_debug.txt", true).append("  op=" + opNames[i] + " hash=" + opHash.substring(0, 20) + " found=" + (opFunc != null ? opFunc.getClass().getSimpleName() : "null") + "\n").close(); } catch (Exception ignored) {}
+
             // Don't evaluate operation functions — they take parameters at runtime.
             // Just use the raw MezzeFunction as the performer record field value.
             if (opFunc instanceof MezzeFunction fn) {
