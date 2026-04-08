@@ -14,10 +14,12 @@ class PipelineTraceTest {
     @Test
     fun `trace simple program through pipeline`() {
         val source = """
-            let factorialAcc = {n, acc} ->
-                if n == 0 then acc
-                else factorialAcc {n = n - 1, acc = acc * n}
-            factorialAcc {n = 5, acc = 1}
+            use std::result
+            let res: Result Int Str = Ok { val = 5 }
+            let mapped = result::map { result = res, f = { val } -> val * 2 }
+            match mapped is
+                Ok { val } -> val
+                Err { error } -> -1
         """.trimIndent()
 
         val fw = FileWriter("/tmp/pipeline_trace.txt")

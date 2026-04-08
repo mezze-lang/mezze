@@ -155,7 +155,6 @@ public final class MezzeFunctionRootNode extends RootNode {
         if (parameterCount > 0 && args.length > closureCount) {
             Object recordArg = args[closureCount];
             if (recordArg instanceof MezzeRecord record) {
-                debugLog2("UNPACK fn=" + name + " paramNames=" + java.util.Arrays.toString(parameterNames) + " record=" + record + " closureCount=" + closureCount + " paramCount=" + parameterCount);
                 unpackRecordFast(frame, record);
             } else {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
