@@ -538,11 +538,38 @@ class TypeChecker(
                     val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
                     allModules.putAll(preludeV2)
                     allModules[wrapped.hash] = wrapped
+                    // Include direct imports
                     if (loadedModules.isNotEmpty()) {
                         for ((_, v1Module) in loadedModules) {
                             val v2Module = v1Module.v2TypedModule
                             if (v2Module != null) {
                                 allModules[v2Module.hash] = v2Module
+                            }
+                        }
+                    }
+                    // Include transitive dependencies from loaded modules' parsed use-decls
+                    // e.g., exception module imports continuation module — we need continuation's functions
+                    val allCached = com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()
+                    for ((_, v1Module) in loadedModules) {
+                        val parsed = v1Module.parsedModule ?: continue
+                        for (decl in parsed.decls) {
+                            val depPathStr = when (decl) {
+                                is com.mezze.language.parsedast.ParsedUseDecl -> when (val p = decl.path) {
+                                    is com.mezze.language.parsedast.ParsedUsePath.Module -> p.path.toString()
+                                    is com.mezze.language.parsedast.ParsedUsePath.Selective -> p.modulePath.toString()
+                                }
+                                is com.mezze.language.parsedast.ParsedPubUseDecl -> when (val p = decl.path) {
+                                    is com.mezze.language.parsedast.ParsedUsePath.Module -> p.path.toString()
+                                    is com.mezze.language.parsedast.ParsedUsePath.Selective -> p.modulePath.toString()
+                                }
+                                else -> null
+                            }
+                            if (depPathStr != null) {
+                                val cachedDep = allCached[depPathStr]
+                                val depV2 = cachedDep?.v2TypedModule
+                                if (depV2 != null && depV2.hash !in allModules) {
+                                    allModules[depV2.hash] = depV2
+                                }
                             }
                         }
                     }

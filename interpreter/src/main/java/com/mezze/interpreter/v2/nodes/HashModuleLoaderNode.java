@@ -172,7 +172,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
             String performerHash = info[0];
             String effectHash = info[1];
             int opCount = (info.length - 2) / 2;
-            try { new java.io.FileWriter("/tmp/handler_debug_keys.txt", true).append("  performer=" + performerHash.substring(0, 20) + " opCount=" + opCount + " infoLen=" + info.length + "\n").close(); } catch (Exception ignored) {}
             if (opCount > 0) {
                 // Check cache
                 Object cached = evaluatedClosureCache.get(performerHash);

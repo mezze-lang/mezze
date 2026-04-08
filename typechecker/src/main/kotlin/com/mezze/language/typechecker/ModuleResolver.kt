@@ -81,6 +81,14 @@ data class ProgramIndex(
             val hasher = com.mezze.language.typechecker.hashing.ParsedASTHasher
             val file = module.path
 
+            val hashedEffects = effectDecls.mapValues { (_, decl) ->
+                if (decl.contentHash != null) decl
+                else {
+                    val hash = hasher.hashEffectDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+            }
+
             val hashedPerformers = performerDecls.map { perf ->
                 if (perf.contentHash != null) perf
                 else {
@@ -100,7 +108,7 @@ data class ProgramIndex(
             return ProgramIndex(
                 typeDeclarations = typeDecls,
                 abilityDeclarations = abilityDecls,
-                effectDeclarations = effectDecls,
+                effectDeclarations = hashedEffects,
                 performersByName = hashedPerformers.associateBy { it.performerName },
                 performersByEffect = hashedPerformers.groupBy { it.effect.localName },
                 abilityImplsByAbility = hashedAbilityImpls

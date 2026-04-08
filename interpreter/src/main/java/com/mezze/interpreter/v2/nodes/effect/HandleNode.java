@@ -123,19 +123,6 @@ final class HandlerLookupNode extends MezzeNode {
             }
         }
         if (handler == null) {
-            // Debug: dump registered globals to file
-            try {
-                var globals = context.getAllGlobalKeys();
-                var fw = new java.io.FileWriter("/tmp/handler_debug_keys.txt", true);
-                fw.write("[HandleNode] Looking for hash: " + contentHash + " (performer: " + performerName + ")\n");
-                fw.write("[HandleNode] Registered globals count: " + globals.size() + "\n");
-                for (String key : globals) {
-                    if (key.length() > 60 || (performerName != null && key.contains(performerName))) {
-                        fw.write("  key: " + key.substring(0, Math.min(key.length(), 80)) + "\n");
-                    }
-                }
-                fw.close();
-            } catch (Exception ignored) {}
             throw new RuntimeException("Handler not found for: " + contentHash +
                 (performerName != null ? " (performer: " + performerName + ")" : ""));
         }

@@ -110,7 +110,10 @@ class Monomorphizer {
             if (hash in processedFunctions) continue
             processedFunctions.add(hash)
 
-            val decl = globalDecls[hash] ?: continue
+            val decl = globalDecls[hash]
+            if (decl == null) {
+                continue
+            }
 
             // Convert to MonoFunction
             val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)

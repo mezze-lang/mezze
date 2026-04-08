@@ -85,6 +85,17 @@ class ModuleTypeChecker(
         }
 
         /**
+         * Get all cached modules (including transitive dependencies).
+         * Used by the monomorphizer to access all loaded v2 TypedModules.
+         */
+        @JvmStatic
+        fun getAllCachedModules(): Map<String, TypedModule> {
+            synchronized(globalCacheLock) {
+                return globalCache.toMap()
+            }
+        }
+
+        /**
          * Preload a typed module into the global cache from pre-compiled stdlib.
          * Prevents re-type-checking when the prelude loads these modules.
          */

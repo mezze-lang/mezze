@@ -85,6 +85,9 @@ data class MonoPerformerDecl(
     val name: String,
     val params: List<MonoPerformerParam>,
     val operations: Map<String, MonoExpr>,
+    /** Pre-computed content hashes for each operation, keyed by operation name.
+     *  These match the hashes used in abilityOpIndex and BindingRef.ByHash references. */
+    val operationHashes: Map<String, Hash> = emptyMap(),
     val loc: Loc
 )
 

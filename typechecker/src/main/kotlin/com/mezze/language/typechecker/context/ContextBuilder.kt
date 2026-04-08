@@ -106,6 +106,13 @@ class ContextBuilder {
 
         val effectDecls = module.decls.filterIsInstance<ParsedEffectDecl>()
             .associateBy { it.name }
+            .mapValues { (_, decl) ->
+                if (decl.contentHash != null) decl
+                else {
+                    val hash = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashEffectDecl(decl, file)
+                    if (hash != null) decl.copy(contentHash = hash) else decl
+                }
+            }
 
         // v1 conversions completely removed — all consumers now use v2 types directly
 
