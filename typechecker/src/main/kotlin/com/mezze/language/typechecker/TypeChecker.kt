@@ -574,7 +574,8 @@ class TypeChecker(
                         }
                     }
 
-                    val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules)
+                    val preloweredHashes = PrecompiledStdlib.preloweredFunctions.keys
+                    val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules, preloweredHashes)
 
                     v2MonoModule = monoModule
 
