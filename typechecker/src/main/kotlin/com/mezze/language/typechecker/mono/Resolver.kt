@@ -41,6 +41,11 @@ class Resolver {
                 params = emptyList(),
                 operations = pd.operations.entries.mapIndexed { idx, (opName, body) ->
                     val ctx = SlotAllocator()
+                    // Allocate params from operationParams (lambda already unwrapped)
+                    val params = pd.operationParams[opName] ?: emptyList()
+                    for (param in params) {
+                        ctx.allocParam(param.name, typeToSlotKind(param.type))
+                    }
                     inHandlerOperation = true
                     val resolvedBody = resolveExpr(body, ctx)
                     inHandlerOperation = false
@@ -73,35 +78,10 @@ class Resolver {
     private fun resolveFunction(fn: MonoFunction): ResolvedFunction {
         val ctx = SlotAllocator()
 
-        // When the function body IS a lambda whose params match the function's params,
-        // inline the lambda directly: skip the lambda wrapper and compile its body.
-        // This eliminates the closure factory pattern — the function is directly callable.
-        val body = fn.body
-        if (body is MonoLambda && fn.params.size == body.params.size) {
-            // Use the function's declared params (same as lambda params)
-            for (param in fn.params) {
-                ctx.allocParam(param.name, typeToSlotKind(param.type))
-            }
-            // Compile the lambda's INNER body, not the lambda itself
-            val resolvedBody = resolveExpr(body.body, ctx)
-            return ResolvedFunction(
-                hash = fn.hash,
-                name = fn.name,
-                qualifiedName = fn.name,
-                params = ctx.getParams(),
-                locals = ctx.getLocals(),
-                captures = emptyList(),
-                body = resolvedBody,
-                isPublic = fn.isPublic,
-                loc = fn.loc
-            )
-        }
-
-        // Non-lambda body or param count mismatch (curried function)
         for (param in fn.params) {
             ctx.allocParam(param.name, typeToSlotKind(param.type))
         }
-        val resolvedBody = resolveExpr(body, ctx)
+        val resolvedBody = resolveExpr(fn.body, ctx)
 
         return ResolvedFunction(
             hash = fn.hash,

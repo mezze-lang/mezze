@@ -122,13 +122,23 @@ class Monomorphizer {
                 // Skip functions that are already pre-lowered (stdlib)
                 if (hash.hex in preloweredHashes) continue
 
-                val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
+                // When the decl value is a lambda, use its params directly
+                // and convert the lambda's BODY — not the lambda itself.
+                // This avoids the duplicate: MonoFunction(params=[x,y], body=MonoLambda(params=[x,y], body=...))
+                val (monoParams, monoBody) = if (decl.value is TypedLambda) {
+                    val lambda = decl.value as TypedLambda
+                    val params = lambda.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    val body = convertExpr(lambda.body, globalDecls, worklist, processedFunctions)
+                    params to body
+                } else {
+                    emptyList<MonoParam>() to convertExpr(decl.value, globalDecls, worklist, processedFunctions)
+                }
                 val monoFn = MonoFunction(
                     hash = decl.hash,
                     name = decl.name,
                     originalName = decl.name,
                     originalHash = decl.hash,
-                    params = extractParams(decl.value),
+                    params = monoParams,
                     captures = emptyList(),
                     body = monoBody,
                     type = decl.scheme.type,
@@ -144,15 +154,21 @@ class Monomorphizer {
             if (opEntry != null) {
                 if (hash.hex in preloweredHashes) continue
                 val opBody = opEntry.opBody
-                val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
+                val (opParams, opMonoBody) = if (opBody is TypedLambda) {
+                    val params = opBody.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    val body = convertExpr(opBody.body, globalDecls, worklist, processedFunctions)
+                    params to body
+                } else {
+                    emptyList<MonoParam>() to convertExpr(opBody, globalDecls, worklist, processedFunctions)
+                }
                 val monoFn = MonoFunction(
                     hash = opEntry.opHash,
                     name = opEntry.methodName,
                     originalName = opEntry.methodName,
                     originalHash = opEntry.opHash,
-                    params = extractParams(opBody),
+                    params = opParams,
                     captures = emptyList(),
-                    body = monoBody,
+                    body = opMonoBody,
                     type = if (opBody is TypedLambda) opBody.type else MezzeType.VarType(TypeVar("unknown")),
                     isPublic = false,
                     loc = opBody.loc
@@ -179,15 +195,51 @@ class Monomorphizer {
             )
         }
 
-        val monoPerformerDecls = globalPerformerDecls.map { pd ->
+        // Collect performer hashes actually referenced in the processed functions
+        val referencedPerformerHashes = mutableSetOf<Hash>()
+        fun collectPerformerRefs(expr: MonoExpr) {
+            when (expr) {
+                is MonoPerform -> {
+                    for (h in expr.handlers) referencedPerformerHashes.add(h.performerHash)
+                    collectPerformerRefs(expr.body)
+                }
+                is MonoCall -> { collectPerformerRefs(expr.function); collectPerformerRefs(expr.arg) }
+                is MonoLambda -> collectPerformerRefs(expr.body)
+                is MonoBlock -> { for (s in expr.statements) { when (s) { is MonoStatement.Let -> collectPerformerRefs(s.value); is MonoStatement.Expr -> collectPerformerRefs(s.expr) } }; collectPerformerRefs(expr.result) }
+                is MonoIf -> { collectPerformerRefs(expr.condition); collectPerformerRefs(expr.thenBranch); collectPerformerRefs(expr.elseBranch) }
+                is MonoMatch -> { collectPerformerRefs(expr.scrutinee); for (c in expr.cases) { c.guard?.let { collectPerformerRefs(it) }; collectPerformerRefs(c.body) } }
+                is MonoRecord -> for (e in expr.entries) { when (e) { is MonoRecordEntry.Field -> collectPerformerRefs(e.value); is MonoRecordEntry.Spread -> collectPerformerRefs(e.expr) } }
+                is MonoFieldAccess -> collectPerformerRefs(expr.record)
+                is MonoRecordUpdate -> { collectPerformerRefs(expr.record); for (e in expr.updates) { when (e) { is MonoRecordEntry.Field -> collectPerformerRefs(e.value); is MonoRecordEntry.Spread -> collectPerformerRefs(e.expr) } } }
+                is MonoSeq -> for (e in expr.elements) { when (e) { is MonoSeqElement.Regular -> collectPerformerRefs(e.expr); is MonoSeqElement.Spread -> collectPerformerRefs(e.expr) } }
+                is MonoVariantConstruct -> expr.payload?.let { collectPerformerRefs(it) }
+                is MonoPerformOp -> collectPerformerRefs(expr.arg)
+                is MonoStringLit -> for (p in expr.parts) { if (p is MonoStringPart.Interpolation) collectPerformerRefs(p.expr) }
+                else -> {} // literals, vars — no sub-expressions
+            }
+        }
+        for (fn in monoFunctions) collectPerformerRefs(fn.body)
+
+        // Only process performers that are actually referenced
+        val monoPerformerDecls = globalPerformerDecls.filter { it.hash in referencedPerformerHashes }.map { pd ->
+            val opBodies = mutableMapOf<String, MonoExpr>()
+            val opParams = mutableMapOf<String, List<MonoParam>>()
+            for ((opName, body) in pd.operations) {
+                if (body is TypedLambda) {
+                    opParams[opName] = body.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    opBodies[opName] = convertExpr(body.body, globalDecls, worklist, processedFunctions)
+                } else {
+                    opParams[opName] = emptyList()
+                    opBodies[opName] = convertExpr(body, globalDecls, worklist, processedFunctions)
+                }
+            }
             MonoPerformerDecl(
                 hash = pd.hash,
                 effectHash = pd.effectHash,
                 name = pd.name,
                 params = pd.params.map { p -> MonoPerformerParam(p.name, p.type) },
-                operations = pd.operations.mapValues { (_, body) ->
-                    convertExpr(body, globalDecls, worklist, processedFunctions)
-                },
+                operations = opBodies,
+                operationParams = opParams,
                 operationHashes = pd.operationHashes,
                 loc = pd.loc
             )
@@ -200,15 +252,22 @@ class Monomorphizer {
             processedFunctions.add(hash)
             val decl = globalDecls[hash] ?: continue
             if (hash.hex in preloweredHashes) continue
-            val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
+            val (monoParams2, monoBody2) = if (decl.value is TypedLambda) {
+                val lambda = decl.value as TypedLambda
+                val params = lambda.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                val body = convertExpr(lambda.body, globalDecls, worklist, processedFunctions)
+                params to body
+            } else {
+                emptyList<MonoParam>() to convertExpr(decl.value, globalDecls, worklist, processedFunctions)
+            }
             monoFunctions.add(MonoFunction(
                 hash = decl.hash,
                 name = decl.name,
                 originalName = decl.name,
                 originalHash = decl.hash,
-                params = extractParams(decl.value),
+                params = monoParams2,
                 captures = emptyList(),
-                body = monoBody,
+                body = monoBody2,
                 type = decl.scheme.type,
                 isPublic = decl.isPublic,
                 loc = decl.loc
@@ -466,13 +525,6 @@ class Monomorphizer {
     // ========================================================================
     // Helpers
     // ========================================================================
-
-    private fun extractParams(expr: TypedExpr): List<MonoParam> {
-        return when (expr) {
-            is TypedLambda -> expr.params.map { p -> MonoParam(p.name, p.type, p.loc) }
-            else -> emptyList()
-        }
-    }
 
     private fun convertPattern(pattern: TypedPattern?): MonoPattern {
         if (pattern == null) return MonoWildcardPattern(MezzeType.VarType(TypeVar("unknown")), com.mezze.language.parsedast.Loc("<unknown>", 1, 1, 1, 1))

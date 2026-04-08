@@ -116,56 +116,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate ONLY performer operation closure factories.
-        // Non-performer functions are evaluated lazily by MonomorphicCallNode at call time.
-        // This avoids OOM from eagerly evaluating hundreds of closure factories.
-        java.util.Set<String> performerOpHashes = new java.util.HashSet<>();
-        for (String[] info : performerInfos) {
-            for (int j = 2; j < info.length; j += 2) {
-                performerOpHashes.add(info[j]); // operation hash
-            }
-        }
-
-        for (int i = 0; i < functionHashes.length; i++) {
-            String hash = functionHashes[i];
-            // Only evaluate performer operation functions — everything else is lazy
-            if (!performerOpHashes.contains(hash)) {
-                continue;
-            }
-            Object cached = evaluatedClosureCache.get(hash);
-            if (cached != null) {
-                context.defineGlobal(hash, cached);
-                if (i < functionNames.length && functionNames[i] != null) {
-                    context.defineGlobal(functionNames[i], cached);
-                }
-                continue;
-            }
-            CallTarget target = functionTargets[i];
-            try {
-                Object result = target.call(new Object[] { emptyRecord });
-                if (result instanceof MezzeFunction closure) {
-                    context.defineGlobal(hash, closure);
-                    if (i < functionNames.length && functionNames[i] != null) {
-                        context.defineGlobal(functionNames[i], closure);
-                    }
-                    evaluatedClosureCache.put(hash, closure);
-                } else if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord record) {
-                    context.defineGlobal(hash, record);
-                    if (i < functionNames.length && functionNames[i] != null) {
-                        context.defineGlobal(functionNames[i], record);
-                    }
-                    evaluatedClosureCache.put(hash, record);
-                }
-            } catch (StackOverflowError soe) {
-                // Infinite recursion in closure factory — skip, keep raw MezzeFunction
-            } catch (OutOfMemoryError oom) {
-                // OOM from deep recursion — skip
-            } catch (Exception e) {
-                // Not a closure factory or depends on unavailable captures
-            }
-        }
-
-        // Pass 3: Construct performer records from evaluated closures.
+        // Pass 2: Construct performer records.
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
