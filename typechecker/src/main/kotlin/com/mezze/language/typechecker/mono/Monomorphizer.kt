@@ -157,6 +157,7 @@ class Monomorphizer {
                 operations = pd.operations.mapValues { (_, body) ->
                     convertExpr(body, globalDecls, worklist, processedFunctions)
                 },
+                operationHashes = pd.operationHashes,
                 loc = pd.loc
             )
         }

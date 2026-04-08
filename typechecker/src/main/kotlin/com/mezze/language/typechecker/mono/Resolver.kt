@@ -44,8 +44,12 @@ class Resolver {
                     inHandlerOperation = true
                     val resolvedBody = resolveExpr(body, ctx)
                     inHandlerOperation = false
+                    // Use pre-computed content hash from TypedASTHasher if available,
+                    // fall back to derived hash for backward compat
+                    val opHash = pd.operationHashes[opName]
+                        ?: computeHash("${pd.hash.hex}_op_$idx")
                     ResolvedFunction(
-                        hash = computeHash("${pd.hash.hex}_op_$idx"),
+                        hash = opHash,
                         name = opName,
                         qualifiedName = "${pd.name}::$opName",
                         params = ctx.getParams(),

@@ -214,6 +214,9 @@ data class TypedPerformerDecl(
     val params: List<TypedPerformerParam>,
     val associatedTypeBindings: Map<String, MezzeType>,
     val operations: Map<String, TypedExpr>,
+    /** Content hashes for each operation, keyed by operation name.
+     *  Computed from the operation body via TypedASTHasher. */
+    val operationHashes: Map<String, Hash> = emptyMap(),
     val loc: Loc
 )
 

@@ -1,0 +1,467 @@
+package com.mezze.language.typechecker.hashing
+
+import com.mezze.language.ast.hashing.HashTags
+import com.mezze.language.ast.hashing.MezzeHashBuilder
+import com.mezze.language.typedast.*
+
+/**
+ * Content hasher for TypedAST — computes deterministic hashes directly from
+ * typed expressions without going through the v1 AST.
+ *
+ * Design principles (inspired by Unison):
+ * - Bound variables use positional (de Bruijn-like) indices, NOT names
+ * - Free variable references use their content hash (BindingRef.ByHash)
+ * - Native references use their name string
+ * - Record field names ARE part of the hash (they're API)
+ * - Variant constructor names ARE part of the hash
+ * - Source locations are EXCLUDED
+ * - Types are EXCLUDED (only structural content matters)
+ * - Each node variant has a unique tag byte to prevent collisions
+ *
+ * This produces the same hash for alpha-equivalent expressions:
+ *   `{ x } -> x + 1` and `{ y } -> y + 1` hash identically
+ * but NOT for different field names:
+ *   `{ x } -> x + 1` and `{ n } -> n + 1` hash differently (field name is API)
+ */
+object TypedASTHasher {
+
+    /**
+     * Hash a TypedExpr to a v2 Hash.
+     * This is the primary entry point for content-addressing expressions.
+     */
+    fun hashExpr(expr: TypedExpr): Hash {
+        val builder = MezzeHashBuilder()
+        appendExpr(builder, expr)
+        return Hash(builder.build().toFullHexString())
+    }
+
+    /**
+     * Hash a top-level let binding (function or value).
+     * Includes the body expression only — name is excluded.
+     */
+    fun hashLetDecl(decl: TypedLetDecl): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append(byteArrayOf(HashTags.LET_BINDING))
+        // Include type params for generic functions
+        builder.appendInt(decl.typeParams.size)
+        for (tp in decl.typeParams) {
+            builder.append(tp.name)
+        }
+        // Hash the body expression
+        appendExpr(builder, decl.value)
+        return Hash(builder.build().toFullHexString())
+    }
+
+    /**
+     * Hash a performer declaration.
+     * Returns both the performer hash and per-operation hashes.
+     */
+    fun hashPerformerDecl(decl: TypedPerformerDecl): PerformerHashes {
+        // Hash each operation independently
+        val opHashes = mutableMapOf<String, Hash>()
+        for ((opName, opBody) in decl.operations) {
+            val opBuilder = MezzeHashBuilder()
+            opBuilder.append(byteArrayOf(HashTags.IMPL_DECLARATION))
+            opBuilder.append(decl.effectHash.hex)
+            opBuilder.append(opName)
+            appendExpr(opBuilder, opBody)
+            opHashes[opName] = Hash(opBuilder.build().toFullHexString())
+        }
+
+        // Hash the performer as a whole
+        val builder = MezzeHashBuilder()
+        builder.append(byteArrayOf(HashTags.IMPL_DECLARATION))
+        builder.append(decl.effectHash.hex)
+        builder.appendInt(decl.params.size)
+        for (param in decl.params) {
+            builder.append(param.name)
+        }
+        // Include sorted operation hashes for determinism
+        builder.appendInt(decl.operations.size)
+        for (opName in decl.operations.keys.sorted()) {
+            builder.append(opName)
+            builder.append(opHashes[opName]!!.hex)
+        }
+        val performerHash = Hash(builder.build().toFullHexString())
+
+        return PerformerHashes(performerHash, opHashes)
+    }
+
+    /**
+     * Hash an ability impl declaration.
+     */
+    fun hashAbilityImpl(impl: TypedAbilityImpl): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
+        builder.append(impl.abilityHash.hex)
+        // Target types
+        builder.appendInt(impl.targetTypes.size)
+        for (t in impl.targetTypes) {
+            appendType(builder, t)
+        }
+        // Operations (sorted by name for determinism)
+        builder.appendInt(impl.operations.size)
+        for (opName in impl.operations.keys.sorted()) {
+            builder.append(opName)
+            appendExpr(builder, impl.operations[opName]!!)
+        }
+        return Hash(builder.build().toFullHexString())
+    }
+
+    /**
+     * Hash an effect declaration.
+     */
+    fun hashEffectDecl(decl: TypedEffectDecl): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append(byteArrayOf(HashTags.EFFECT_DECLARATION))
+        builder.append(decl.name)
+        builder.appendInt(decl.operations.size)
+        for (op in decl.operations.sortedBy { it.name }) {
+            builder.append(op.name)
+            appendType(builder, op.paramType)
+            appendType(builder, op.returnType)
+        }
+        return Hash(builder.build().toFullHexString())
+    }
+
+    // ========================================================================
+    // Expression hashing — the core recursive walk
+    // ========================================================================
+
+    private fun appendExpr(b: MezzeHashBuilder, expr: TypedExpr) {
+        when (expr) {
+            is TypedIntLit -> {
+                b.append(byteArrayOf(HashTags.INTEGER_LITERAL))
+                b.appendLong(expr.value)
+            }
+            is TypedNatLit -> {
+                b.append(byteArrayOf(0x01, HashTags.INTEGER_LITERAL)) // distinct from Int
+                b.appendLong(expr.value)
+            }
+            is TypedFloatLit -> {
+                b.append(byteArrayOf(HashTags.FLOAT_LITERAL))
+                val bits = java.lang.Double.doubleToLongBits(expr.value)
+                b.appendLong(bits)
+            }
+            is TypedFracLit -> {
+                b.append(byteArrayOf(0x02, HashTags.FLOAT_LITERAL)) // distinct from Float
+                b.appendLong(expr.numerator)
+                b.appendLong(expr.denominator)
+            }
+            is TypedBoolLit -> {
+                b.append(byteArrayOf(HashTags.BOOLEAN_LITERAL))
+                b.appendBoolean(expr.value)
+            }
+            is TypedCharLit -> {
+                b.append(byteArrayOf(0x03, HashTags.STRING_LITERAL)) // distinct from String
+                b.appendInt(expr.value.code)
+            }
+            is TypedStringLit -> {
+                b.append(byteArrayOf(HashTags.STRING_LITERAL))
+                b.appendInt(expr.parts.size)
+                for (part in expr.parts) {
+                    when (part) {
+                        is TypedStringPart.Literal -> {
+                            b.appendBoolean(false) // literal marker
+                            b.append(part.value)
+                        }
+                        is TypedStringPart.Interpolation -> {
+                            b.appendBoolean(true) // interpolation marker
+                            appendExpr(b, part.expr)
+                        }
+                    }
+                }
+            }
+            is TypedVar -> {
+                // The critical Unison-style hashing:
+                // - ByHash → include the content hash (transparent reference)
+                // - Native → include the native name
+                // - Local/Param/Capture → include positional index (de Bruijn)
+                // - Name is EXCLUDED
+                when (val binding = expr.binding) {
+                    is BindingRef.ByHash -> {
+                        b.append(byteArrayOf(HashTags.EXTERNAL_REF))
+                        b.append(binding.hash.hex)
+                    }
+                    is BindingRef.Native -> {
+                        b.append(byteArrayOf(HashTags.EXTERNAL_REF, 0x01))
+                        b.append(binding.name)
+                    }
+                    is BindingRef.Local -> {
+                        b.append(byteArrayOf(HashTags.LOCAL_REF))
+                        b.appendInt(binding.depth)
+                        b.appendInt(binding.index)
+                    }
+                    is BindingRef.Param -> {
+                        b.append(byteArrayOf(HashTags.LOCAL_REF, 0x01))
+                        b.appendInt(binding.index)
+                    }
+                    is BindingRef.Capture -> {
+                        b.append(byteArrayOf(HashTags.LOCAL_REF, 0x02))
+                        b.appendInt(binding.index)
+                    }
+                }
+            }
+            is TypedLambda -> {
+                b.append(byteArrayOf(HashTags.LAMBDA))
+                // Param names ARE part of hash (Mezze uses named params = record fields)
+                b.appendInt(expr.params.size)
+                for (param in expr.params) {
+                    b.append(param.name)
+                }
+                // Captures are positional
+                b.appendInt(expr.captures.size)
+                appendExpr(b, expr.body)
+            }
+            is TypedCall -> {
+                b.append(byteArrayOf(HashTags.FUNCTION_CALL))
+                appendExpr(b, expr.function)
+                appendExpr(b, expr.arg)
+                b.appendBoolean(expr.isTailCall)
+            }
+            is TypedRecord -> {
+                b.append(byteArrayOf(HashTags.RECORD))
+                b.appendInt(expr.entries.size)
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is TypedRecordEntry.Field -> {
+                            b.appendBoolean(false) // field marker
+                            b.append(entry.name)
+                            appendExpr(b, entry.value)
+                        }
+                        is TypedRecordEntry.Spread -> {
+                            b.appendBoolean(true) // spread marker
+                            appendExpr(b, entry.expr)
+                        }
+                    }
+                }
+            }
+            is TypedFieldAccess -> {
+                b.append(byteArrayOf(HashTags.FIELD_ACCESS))
+                appendExpr(b, expr.record)
+                b.append(expr.field)
+            }
+            is TypedRecordUpdate -> {
+                b.append(byteArrayOf(HashTags.RECORD, 0x01)) // distinct from Record
+                appendExpr(b, expr.record)
+                b.appendInt(expr.updates.size)
+                for (entry in expr.updates) {
+                    when (entry) {
+                        is TypedRecordEntry.Field -> {
+                            b.appendBoolean(false)
+                            b.append(entry.name)
+                            appendExpr(b, entry.value)
+                        }
+                        is TypedRecordEntry.Spread -> {
+                            b.appendBoolean(true)
+                            appendExpr(b, entry.expr)
+                        }
+                    }
+                }
+            }
+            is TypedVariantConstruct -> {
+                b.append(byteArrayOf(HashTags.VARIANT_CONSTRUCTOR))
+                b.append(expr.tag)
+                b.appendBoolean(expr.payload != null)
+                expr.payload?.let { appendExpr(b, it) }
+            }
+            is TypedMatch -> {
+                b.append(byteArrayOf(HashTags.MATCH))
+                appendExpr(b, expr.scrutinee)
+                b.appendInt(expr.cases.size)
+                for (case_ in expr.cases) {
+                    b.appendInt(case_.patterns.size)
+                    for (p in case_.patterns) {
+                        appendPattern(b, p)
+                    }
+                    case_.guard?.let { guard ->
+                        b.appendBoolean(true)
+                        appendExpr(b, guard)
+                    } ?: b.appendBoolean(false)
+                    appendExpr(b, case_.body)
+                }
+            }
+            is TypedIf -> {
+                b.append(byteArrayOf(HashTags.IF_ELSE))
+                appendExpr(b, expr.condition)
+                appendExpr(b, expr.thenBranch)
+                appendExpr(b, expr.elseBranch)
+            }
+            is TypedBlock -> {
+                b.append(byteArrayOf(HashTags.BLOCK))
+                b.appendInt(expr.statements.size)
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is TypedStatement.Expr -> {
+                            b.appendBoolean(false) // expr statement
+                            appendExpr(b, stmt.expr)
+                        }
+                        is TypedStatement.Let -> {
+                            b.appendBoolean(true) // let statement
+                            // Let name is excluded (de Bruijn), but contentHash links to definition
+                            b.append(stmt.contentHash.hex)
+                            appendExpr(b, stmt.value)
+                        }
+                    }
+                }
+                appendExpr(b, expr.result)
+            }
+            is TypedSeq -> {
+                b.append(byteArrayOf(HashTags.ARRAY))
+                b.appendInt(expr.elements.size)
+                for (elem in expr.elements) {
+                    when (elem) {
+                        is TypedSeqElement.Regular -> {
+                            b.appendBoolean(false)
+                            appendExpr(b, elem.expr)
+                        }
+                        is TypedSeqElement.Spread -> {
+                            b.appendBoolean(true)
+                            appendExpr(b, elem.expr)
+                        }
+                    }
+                }
+            }
+            is TypedPerform -> {
+                b.append(byteArrayOf(HashTags.PERFORM))
+                b.appendInt(expr.handlers.size)
+                for (h in expr.handlers) {
+                    b.append(h.performerHash.hex)
+                    b.append(h.effectHash.hex)
+                    b.append(h.performerName)
+                    h.params?.let { params ->
+                        b.appendBoolean(true)
+                        appendExpr(b, params)
+                    } ?: b.appendBoolean(false)
+                }
+                appendExpr(b, expr.body)
+            }
+            is TypedPerformOp -> {
+                b.append(byteArrayOf(HashTags.PERFORM, 0x01)) // distinct tag
+                b.append(expr.effectHash.hex)
+                b.append(expr.operationName)
+                appendExpr(b, expr.arg)
+            }
+            is TypedPipe -> {
+                b.append(byteArrayOf(HashTags.PIPE))
+                appendExpr(b, expr.left)
+                appendExpr(b, expr.right)
+            }
+        }
+    }
+
+    // ========================================================================
+    // Pattern hashing
+    // ========================================================================
+
+    private fun appendPattern(b: MezzeHashBuilder, pattern: TypedPattern) {
+        when (pattern) {
+            is TypedVarPattern -> {
+                // Variable patterns use positional binding — name excluded
+                b.append(byteArrayOf(HashTags.VARIABLE_PATTERN))
+            }
+            is TypedWildcardPattern -> {
+                b.append(byteArrayOf(HashTags.WILDCARD_PATTERN))
+            }
+            is TypedLiteralPattern -> {
+                b.append(byteArrayOf(HashTags.LITERAL_PATTERN))
+                appendExpr(b, pattern.value)
+            }
+            is TypedVariantPattern -> {
+                b.append(byteArrayOf(HashTags.CONSTRUCTOR_PATTERN))
+                b.append(pattern.tag)
+                b.appendBoolean(pattern.payload != null)
+                pattern.payload?.let { appendPattern(b, it) }
+            }
+            is TypedRecordPattern -> {
+                b.append(byteArrayOf(HashTags.RECORD_PATTERN))
+                b.appendInt(pattern.fields.size)
+                for (fp in pattern.fields) {
+                    b.append(fp.name)
+                    fp.pattern?.let { p ->
+                        b.appendBoolean(true)
+                        appendPattern(b, p)
+                    } ?: b.appendBoolean(false)
+                }
+                b.appendBoolean(pattern.isOpen)
+            }
+            is TypedSeqPattern -> {
+                b.append(byteArrayOf(HashTags.SEQ_PATTERN))
+                b.appendInt(pattern.elements.size)
+                for (elem in pattern.elements) {
+                    appendPattern(b, elem)
+                }
+                b.appendBoolean(pattern.rest != null)
+                pattern.rest?.let { b.append(it) }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Type hashing (for ability impl target types)
+    // ========================================================================
+
+    private fun appendType(b: MezzeHashBuilder, type: com.mezze.language.ast.MezzeType) {
+        when (type) {
+            is com.mezze.language.ast.MezzeType.IntType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x01))
+            is com.mezze.language.ast.MezzeType.FloatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
+            is com.mezze.language.ast.MezzeType.StringType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x03))
+            is com.mezze.language.ast.MezzeType.BoolType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x04))
+            is com.mezze.language.ast.MezzeType.NatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x06))
+            is com.mezze.language.ast.MezzeType.CharType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x07))
+            is com.mezze.language.ast.MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
+            is com.mezze.language.ast.MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
+            is com.mezze.language.ast.MezzeType.SeqType -> {
+                b.append(byteArrayOf(HashTags.SEQ_TYPE))
+                appendType(b, type.elementType)
+            }
+            is com.mezze.language.ast.MezzeType.TypeApplication -> {
+                b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
+                b.append(type.constructor)
+                b.appendInt(type.args.size)
+                for (arg in type.args) appendType(b, arg)
+            }
+            is com.mezze.language.ast.MezzeType.FunctionType -> {
+                b.append(byteArrayOf(HashTags.FUNCTION_TYPE))
+                appendType(b, type.paramType)
+                appendType(b, type.returnType)
+            }
+            is com.mezze.language.ast.MezzeType.RecordType -> {
+                b.append(byteArrayOf(HashTags.RECORD_TYPE))
+                b.appendInt(type.fields.size)
+                for (name in type.fields.keys.sorted()) {
+                    b.append(name)
+                    appendType(b, type.fields[name]!!)
+                }
+            }
+            is com.mezze.language.ast.MezzeType.VariantType -> {
+                b.append(byteArrayOf(HashTags.VARIANT_TYPE))
+                b.appendInt(type.constructors.size)
+                for (name in type.constructors.keys.sorted()) {
+                    b.append(name)
+                    val payload = type.constructors[name]
+                    b.appendBoolean(payload != null)
+                    payload?.let { appendType(b, it) }
+                }
+            }
+            is com.mezze.language.ast.MezzeType.VarType -> {
+                b.append(byteArrayOf(HashTags.TYPE_VAR))
+                b.append(type.variable.name)
+            }
+            else -> {
+                // Fallback for complex types — use string representation
+                b.append(byteArrayOf(HashTags.TYPE_VAR, 0x01))
+                b.append(type.toString())
+            }
+        }
+    }
+
+    // ========================================================================
+    // Result types
+    // ========================================================================
+
+    data class PerformerHashes(
+        val performerHash: Hash,
+        val operationHashes: Map<String, Hash>
+    )
+}

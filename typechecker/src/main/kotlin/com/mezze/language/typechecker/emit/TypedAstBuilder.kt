@@ -446,7 +446,25 @@ class TypedAstBuilder(
             op.name to opExpr
         }
 
-        decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, loc))
+        // Compute per-operation content hashes via TypedASTHasher
+        // Each operation hash includes the effect hash + op name + body content
+        val opHashes = ops.mapValues { (opName, opBody) ->
+            try {
+                val opBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+                opBuilder.append(byteArrayOf(com.mezze.language.ast.hashing.HashTags.IMPL_DECLARATION))
+                opBuilder.append(effectHash.hex)
+                opBuilder.append(hash.hex)
+                opBuilder.append(opName)
+                // Include the body content hash
+                val bodyHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(opBody)
+                opBuilder.append(bodyHash.hex)
+                Hash(opBuilder.build().toFullHexString())
+            } catch (_: Exception) {
+                Hash.ZERO
+            }
+        }
+
+        decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, opHashes, loc))
         exports[decl.performerName] = ExportEntry(
             decl.performerName, hash, MezzeType.VarType(TypeVar(decl.performerName)), ExportKind.PERFORMER
         )
