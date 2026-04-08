@@ -116,9 +116,9 @@ public final class HashModuleLoaderNode extends MezzeNode {
             }
         }
 
-        // Pass 2: Evaluate closure factories.
-        // For large function sets (>200), only evaluate functions needed by performer records
-        // to avoid OOM from infinite recursion in non-performer closure factories.
+        // Pass 2: Evaluate ONLY performer operation closure factories.
+        // Non-performer functions are evaluated lazily by MonomorphicCallNode at call time.
+        // This avoids OOM from eagerly evaluating hundreds of closure factories.
         java.util.Set<String> performerOpHashes = new java.util.HashSet<>();
         for (String[] info : performerInfos) {
             for (int j = 2; j < info.length; j += 2) {
@@ -128,8 +128,8 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
         for (int i = 0; i < functionHashes.length; i++) {
             String hash = functionHashes[i];
-            // For large sets, only evaluate performer operation functions
-            if (functionHashes.length >= 200 && !performerOpHashes.contains(hash)) {
+            // Only evaluate performer operation functions — everything else is lazy
+            if (!performerOpHashes.contains(hash)) {
                 continue;
             }
             Object cached = evaluatedClosureCache.get(hash);
@@ -150,7 +150,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
                     }
                     evaluatedClosureCache.put(hash, closure);
                 } else if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord record) {
-                    // Closure factory returned a record (e.g., performer constructor)
                     context.defineGlobal(hash, record);
                     if (i < functionNames.length && functionNames[i] != null) {
                         context.defineGlobal(functionNames[i], record);

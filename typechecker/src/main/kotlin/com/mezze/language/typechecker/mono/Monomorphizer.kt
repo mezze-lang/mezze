@@ -39,8 +39,8 @@ class Monomorphizer {
      */
     private val abilityOpIndex = mutableMapOf<String, MutableList<AbilityOpEntry>>()
 
-    /** Guard against infinite recursion when inlining operation bodies in the fallback path */
-    private val currentlyInlining = mutableSetOf<String>()
+    /** Index from operation hash → AbilityOpEntry for worklist-based compilation */
+    private val abilityOpByHash = mutableMapOf<Hash, AbilityOpEntry>()
 
     private data class AbilityOpEntry(
         val implHash: Hash,
@@ -81,12 +81,13 @@ class Monomorphizer {
 
         // Build ability operation index for method call resolution
         abilityOpIndex.clear()
+        abilityOpByHash.clear()
         for (impl in globalAbilityImpls) {
             for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
-                abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
-                    AbilityOpEntry(impl.hash, null, impl.targetTypes, opName, opHash, opBody)
-                )
+                val entry = AbilityOpEntry(impl.hash, null, impl.targetTypes, opName, opHash, opBody)
+                abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(entry)
+                abilityOpByHash[opHash] = entry
             }
         }
 
@@ -111,25 +112,47 @@ class Monomorphizer {
             processedFunctions.add(hash)
 
             val decl = globalDecls[hash]
-            if (decl == null) {
+            if (decl != null) {
+                // Standard function from TypedLetDecl
+                val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
+                val monoFn = MonoFunction(
+                    hash = decl.hash,
+                    name = decl.name,
+                    originalName = decl.name,
+                    originalHash = decl.hash,
+                    params = extractParams(decl.value),
+                    captures = emptyList(),
+                    body = monoBody,
+                    type = decl.scheme.type,
+                    isPublic = decl.isPublic,
+                    loc = decl.loc
+                )
+                monoFunctions.add(monoFn)
                 continue
             }
 
-            // Convert to MonoFunction
-            val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
-            val monoFn = MonoFunction(
-                hash = decl.hash,
-                name = decl.name,
-                originalName = decl.name,
-                originalHash = decl.hash,
-                params = extractParams(decl.value),
-                captures = emptyList(),
-                body = monoBody,
-                type = decl.scheme.type,
-                isPublic = decl.isPublic,
-                loc = decl.loc
-            )
-            monoFunctions.add(monoFn)
+            // Check if it's an ability operation referenced by hash
+            val opEntry = abilityOpByHash[hash]
+            if (opEntry != null) {
+                val opBody = opEntry.opBody
+                val monoBody = convertExpr(opBody, globalDecls, worklist, processedFunctions)
+                val monoFn = MonoFunction(
+                    hash = opEntry.opHash,
+                    name = opEntry.methodName,
+                    originalName = opEntry.methodName,
+                    originalHash = opEntry.opHash,
+                    params = extractParams(opBody),
+                    captures = emptyList(),
+                    body = monoBody,
+                    type = if (opBody is TypedLambda) opBody.type else MezzeType.VarType(TypeVar("unknown")),
+                    isPublic = false,
+                    loc = opBody.loc
+                )
+                monoFunctions.add(monoFn)
+                continue
+            }
+
+            // Unknown hash — skip (could be a performer hash or unresolved reference)
         }
 
         // Ability impl operations are converted on-demand when referenced
@@ -580,22 +603,46 @@ class Monomorphizer {
                 }
             }
 
-            // Fallback: inline the op body lambda.
-            // Guard against infinite recursion by checking if we're already inlining this operation.
-            val inlineKey = "${matchingEntry.implHash.hex}_$methodName"
-            if (inlineKey in currentlyInlining) {
-                // Recursive call — can't inline further. Skip method resolution.
-                return null
+            // Fallback: emit a direct call to the operation function by its hash.
+            // The operation is compiled as a standalone function via the performer declaration.
+            // Do NOT inline the op body — that creates infinite call chains at runtime.
+            val opHash = matchingEntry.opHash
+            if (opHash !in processed) worklist.add(opHash)
+
+            val receiverParamName = if (opBody is TypedLambda) {
+                opBody.params.firstOrNull()?.name ?: Keywords.IT
+            } else Keywords.IT
+
+            // Build the argument: inject receiver if needed
+            val callerArg = expr.arg
+            val callerFields = mutableMapOf<String, TypedExpr>()
+            if (callerArg is TypedRecord) {
+                for (entry in callerArg.entries) {
+                    if (entry is TypedRecordEntry.Field) {
+                        callerFields[entry.name] = entry.value
+                    }
+                }
+            }
+            if (fn is TypedFieldAccess && receiverParamName !in callerFields) {
+                callerFields[receiverParamName] = fn.record
             }
 
-            currentlyInlining.add(inlineKey)
-            val wrappedArg = convertExpr(expr.arg, globalDecls, worklist, processed)
-            val convertedOpBody = convertExpr(opBody, globalDecls, worklist, processed)
-            currentlyInlining.remove(inlineKey)
+            // Convert caller fields to MonoRecord
+            val monoArg = if (callerFields.isNotEmpty()) {
+                MonoRecord(
+                    callerFields.map { (name, value) ->
+                        MonoRecordEntry.Field(name, convertExpr(value, globalDecls, worklist, processed))
+                    },
+                    expr.arg.type,
+                    expr.arg.loc
+                )
+            } else {
+                convertExpr(expr.arg, globalDecls, worklist, processed)
+            }
 
             return MonoCall(
-                convertedOpBody,
-                wrappedArg,
+                MonoVar(methodName, MonoBinding.FunctionRef(MonoFunctionRef.ByHash(opHash)), expr.function.type, expr.function.loc),
+                monoArg,
                 expr.isTailCall,
                 expr.type,
                 expr.loc
