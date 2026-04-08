@@ -51,33 +51,42 @@ class TruffleCompiler(
      * and frame descriptor instead. This avoids creating a closure wrapper
      * that would return a MezzeFunction instead of executing the body.
      */
-    fun compile(ir: FunctionIR): MezzeRootNode {
+    fun compile(ir: FunctionIR): com.oracle.truffle.api.nodes.RootNode {
         val source = getOrCreateSource(ir.sourceFile)
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
-        // Use MezzeRootNode — doesn't try to unpack record args.
-        // Functions registered by HashModuleLoaderNode are evaluated with empty record
-        // to extract closures from MakeLambdaIR. MezzeRootNode tolerates this.
-        // The actual closures (from FunctionDefinitionNode) use MezzeFunctionRootNode
-        // which does proper record unpacking.
-        val rootNode = MezzeRootNode(
-            language,
-            frameDescriptor,
-            bodyNode,
-            ir.name,
-            ir.captureSlots.size,
-            ir.paramSlots.size,
-            IntArray(0)
-        )
-
-        // Attach source section for debugger/profiler integration (Chrome DevTools, VisualVM, etc.)
         val section = createSourceSection(source, ir.sourceSection)
-        if (section != null) {
-            rootNode.setSourceSection(section)
-        }
 
-        return rootNode
+        if (ir.paramSlots.isNotEmpty()) {
+            // Function has parameters — use MezzeFunctionRootNode for record unpacking.
+            // The caller passes a single record argument {param1=val1, param2=val2, ...}
+            // and MezzeFunctionRootNode extracts fields into param slots.
+            val rootNode = MezzeFunctionRootNode(
+                language,
+                frameDescriptor,
+                bodyNode,
+                ir.name,
+                ir.paramNames.toTypedArray(),
+                IntArray(ir.captureSlots.size) { it },
+                IntArray(0)
+            )
+            if (section != null) rootNode.setSourceSection(section)
+            return rootNode
+        } else {
+            // No parameters — use MezzeRootNode (entry functions, thunks)
+            val rootNode = MezzeRootNode(
+                language,
+                frameDescriptor,
+                bodyNode,
+                ir.name,
+                ir.captureSlots.size,
+                ir.paramSlots.size,
+                IntArray(0)
+            )
+            if (section != null) rootNode.setSourceSection(section)
+            return rootNode
+        }
     }
 
     /**
@@ -120,10 +129,10 @@ class TruffleCompiler(
             is CallDirectIR -> {
                 val argNode = compileNode(node.arg, source)
                 if (node.isTailCall) {
-                    val fnNode = MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, UnitLiteralNode(), true)
+                    val fnNode = MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, UnitLiteralNode(), false)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {
-                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode, true)
+                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode, false)
                 }
             }
             is CallLocalIR -> {
