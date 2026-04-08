@@ -551,79 +551,21 @@ class Monomorphizer {
         }
 
         if (matchingEntry != null) {
-            val opBody = matchingEntry.opBody
-
-            // Try to extract a direct call from the op body lambda
-            if (opBody is TypedLambda && opBody.body is TypedCall) {
-                val innerCall = opBody.body as TypedCall
-                val innerFn = innerCall.function
-
-                if (innerFn is TypedVar && (innerFn.binding is BindingRef.ByHash || innerFn.binding is BindingRef.Native)) {
-                    // Resolve the target function reference
-                    val monoFnRef = when (val binding = innerFn.binding) {
-                        is BindingRef.ByHash -> {
-                            if (binding.hash !in processed) worklist.add(binding.hash)
-                            MonoBinding.FunctionRef(MonoFunctionRef.ByHash(binding.hash))
-                        }
-                        is BindingRef.Native -> MonoBinding.FunctionRef(MonoFunctionRef.Native(binding.name))
-                        else -> null
-                    }
-
-                    if (monoFnRef != null) {
-                        val paramNames = opBody.params.map { it.name }
-                        val callerArg = expr.arg
-
-                        val callerFields = mutableMapOf<String, TypedExpr>()
-                        if (callerArg is TypedRecord) {
-                            for (entry in callerArg.entries) {
-                                if (entry is TypedRecordEntry.Field) {
-                                    callerFields[entry.name] = entry.value
-                                }
-                            }
-                        }
-
-                        // If caller didn't inject the receiver (methodCallResolutions didn't
-                        // propagate to TypedAstBuilder), inject it from the TypedFieldAccess
-                        // receiver expression. The first param of the impl method is the receiver.
-                        // Inject when: callerFields is empty, OR the receiver param (usually "it")
-                        // is not present in callerFields (method call where TypedAstBuilder
-                        // didn't wrap the receiver due to missing methodCallResolutions).
-                        val receiverParamName = paramNames.firstOrNull() ?: Keywords.IT
-                        if (fn is TypedFieldAccess && receiverParamName !in callerFields) {
-                            callerFields[receiverParamName] = fn.record
-                        }
-
-                        val innerArg = innerCall.arg
-                        val remappedArg = remapRecordArg(innerArg, paramNames, callerFields, globalDecls, worklist, processed)
-
-                        if (remappedArg != null) {
-                            return MonoCall(
-                                MonoVar(innerFn.name, monoFnRef, innerFn.type, innerFn.loc),
-                                remappedArg,
-                                expr.isTailCall,
-                                expr.type,
-                                expr.loc
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Fallback: emit a direct call to the operation function by its hash.
-            // The operation is compiled as a standalone function via the performer declaration.
-            // Do NOT inline the op body — that creates infinite call chains at runtime.
+            // Emit a direct call to the operation function by its content hash.
+            // The operation is compiled as a standalone MonoFunction (via abilityOpByHash).
+            // No inlining, no body peeking — just: call(opHash, {receiver + args}).
             val opHash = matchingEntry.opHash
             if (opHash !in processed) worklist.add(opHash)
 
+            val opBody = matchingEntry.opBody
             val receiverParamName = if (opBody is TypedLambda) {
                 opBody.params.firstOrNull()?.name ?: Keywords.IT
             } else Keywords.IT
 
-            // Build the argument: inject receiver if needed
-            val callerArg = expr.arg
+            // Build argument record: inject receiver from field access
             val callerFields = mutableMapOf<String, TypedExpr>()
-            if (callerArg is TypedRecord) {
-                for (entry in callerArg.entries) {
+            if (expr.arg is TypedRecord) {
+                for (entry in (expr.arg as TypedRecord).entries) {
                     if (entry is TypedRecordEntry.Field) {
                         callerFields[entry.name] = entry.value
                     }
@@ -633,7 +575,6 @@ class Monomorphizer {
                 callerFields[receiverParamName] = fn.record
             }
 
-            // Convert caller fields to MonoRecord
             val monoArg = if (callerFields.isNotEmpty()) {
                 MonoRecord(
                     callerFields.map { (name, value) ->
@@ -656,52 +597,6 @@ class Monomorphizer {
         }
 
         return null
-    }
-
-    /**
-     * Remap a record argument by substituting lambda param references with caller fields.
-     * e.g., innerArg = { opt = it }, paramNames = [it], callerFields = {it -> receiver}
-     * result = MonoRecord({ opt = convertExpr(receiver) })
-     * Returns null if the pattern doesn't match (non-record arg, complex expressions).
-     */
-    private fun remapRecordArg(
-        innerArg: TypedExpr,
-        paramNames: List<String>,
-        callerFields: Map<String, TypedExpr>,
-        globalDecls: Map<Hash, TypedLetDecl>,
-        worklist: ArrayDeque<Hash>,
-        processed: Set<Hash>
-    ): MonoExpr? {
-        if (innerArg !is TypedRecord) return null
-
-        val remappedEntries = mutableListOf<MonoRecordEntry>()
-        for (entry in innerArg.entries) {
-            when (entry) {
-                is TypedRecordEntry.Field -> {
-                    val value = entry.value
-                    if (value is TypedVar && value.name in paramNames) {
-                        // This field references a lambda param — substitute with caller field
-                        val callerValue = callerFields[value.name]
-                        if (callerValue != null) {
-                            remappedEntries.add(MonoRecordEntry.Field(
-                                entry.name,
-                                convertExpr(callerValue, globalDecls, worklist, processed)
-                            ))
-                        } else {
-                            return null  // param not found in caller arg
-                        }
-                    } else {
-                        // Not a simple param reference — convert as-is
-                        remappedEntries.add(MonoRecordEntry.Field(
-                            entry.name,
-                            convertExpr(value, globalDecls, worklist, processed)
-                        ))
-                    }
-                }
-                is TypedRecordEntry.Spread -> return null  // can't remap spread
-            }
-        }
-        return MonoRecord(remappedEntries, innerArg.type, innerArg.loc)
     }
 
     /** Check if a concrete type matches a target type from an ability impl */
