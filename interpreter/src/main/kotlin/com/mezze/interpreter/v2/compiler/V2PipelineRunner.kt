@@ -191,48 +191,20 @@ object V2PipelineRunner {
             }
         }
 
-        // Also include prelude module functions and performers
-        // The entry module's typecheck loaded and cached stdlib modules.
-        // We need to collect their lowered functions and performer records.
+        // Use pre-lowered stdlib functions from PrecompiledStdlib (computed once at startup).
+        // No per-test monomorphization of stdlib modules.
         val allPerformerRecords = performerRecords.toMutableList()
-        // Combine prelude modules with user-imported modules
-        val allModulesToLoad = mutableMapOf<String, com.mezze.language.typedast.TypedModule>()
-        loadedModules.forEach { (k, v) -> allModulesToLoad[k] = v }
-        val preludeModules = com.mezze.language.typechecker.TypeChecker.cachedPreludeLoadedModules
-        if (preludeModules != null) {
-            for ((k, v) in preludeModules) {
-                val v2m = v.v2TypedModule
-                if (v2m != null) allModulesToLoad.putIfAbsent(k, v2m)
+        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+        for ((hash, fn) in precompiled.preloweredFunctions) {
+            if (!compiledFunctions.containsKey(hash)) {
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[hash] = rootNode.callTarget
+                if (fn.name != "lambda" && !fn.name.startsWith("__")) {
+                    hashToName[hash] = fn.name
+                }
             }
         }
-        for ((modulePath, v2Module) in allModulesToLoad) {
-            try {
-                    val mono = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(v2Module, mapOf(v2Module.hash to v2Module))
-                    val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
-                    val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
-                    for (fn in lowered.functions) {
-                        if (!compiledFunctions.containsKey(fn.hash.hex)) {
-                            val rootNode = compiler.compile(fn)
-                            compiledFunctions[fn.hash.hex] = rootNode.callTarget
-                            if (fn.name != "lambda" && !fn.name.startsWith("__")) {
-                                hashToName[fn.hash.hex] = fn.name
-                            }
-                        }
-                    }
-                    for (pr in lowered.performerRecords) {
-                        val arr = mutableListOf(pr.performerHash, pr.effectHash)
-                        for (i in pr.operationHashes.indices) {
-                            arr.add(pr.operationHashes[i])
-                            arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
-                        }
-                        allPerformerRecords.add(arr.toTypedArray())
-
-                    }
-
-                } catch (_: Exception) {
-                // Module couldn't be lowered — skip
-            }
-        }
+        allPerformerRecords.addAll(precompiled.preloweredPerformerRecords)
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
         val performerInfos = allPerformerRecords.toTypedArray()

@@ -36,6 +36,14 @@ object PrecompiledStdlib {
     /** Pre-converted v2 TypedModules for monomorphizer */
     val v2Modules: Map<Hash, com.mezze.language.typedast.TypedModule>
 
+    /** Pre-lowered stdlib functions: hash → FunctionIR.
+     *  Each stdlib module is mono→resolve→lower'd once at startup.
+     *  Entry modules reference these by hash — no re-monomorphization needed. */
+    val preloweredFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
+
+    /** Pre-lowered performer records from all stdlib modules */
+    val preloweredPerformerRecords: List<Array<String>>
+
     /** Cached ModuleLoader — avoids per-test filesystem traversal (findProjectRoot) */
     val moduleLoader: ModuleLoader
 
@@ -73,6 +81,33 @@ object PrecompiledStdlib {
             }
             v2Modules = v2
         }
+
+        // Pre-lower all stdlib modules: mono → resolve → lower once at startup
+        val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+        val prePerformers = mutableListOf<Array<String>>()
+        for ((_, v2Module) in v2Modules) {
+            try {
+                val mono = com.mezze.language.typechecker.mono.Monomorphizer()
+                    .monomorphize(v2Module, mapOf(v2Module.hash to v2Module))
+                val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
+                val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
+                for (fn in lowered.functions) {
+                    preFunctions.putIfAbsent(fn.hash.hex, fn)
+                }
+                for (pr in lowered.performerRecords) {
+                    val arr = mutableListOf(pr.performerHash, pr.effectHash)
+                    for (i in pr.operationHashes.indices) {
+                        arr.add(pr.operationHashes[i])
+                        arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
+                    }
+                    prePerformers.add(arr.toTypedArray())
+                }
+            } catch (_: Exception) {
+                // Module couldn't be lowered — skip
+            }
+        }
+        preloweredFunctions = preFunctions
+        preloweredPerformerRecords = prePerformers
     }
 
     /**

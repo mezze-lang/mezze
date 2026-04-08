@@ -91,8 +91,6 @@ class Monomorphizer {
             }
         }
 
-        // Phase 1: Collect all specialization requests by walking from entry point
-        val specRequests = mutableSetOf<SpecRequest>()
         val processedFunctions = mutableSetOf<Hash>()
         val monoFunctions = mutableListOf<MonoFunction>()
 
@@ -104,8 +102,7 @@ class Monomorphizer {
             }
         }
 
-        // Phase 2: Process worklist — for each function, convert to MonoFunction
-        // and discover new specialization needs
+        // Process worklist — trace all reachable functions
         while (worklist.isNotEmpty()) {
             val hash = worklist.removeFirst()
             if (hash in processedFunctions) continue
@@ -113,7 +110,6 @@ class Monomorphizer {
 
             val decl = globalDecls[hash]
             if (decl != null) {
-                // Standard function from TypedLetDecl
                 val monoBody = convertExpr(decl.value, globalDecls, worklist, processedFunctions)
                 val monoFn = MonoFunction(
                     hash = decl.hash,
@@ -131,7 +127,7 @@ class Monomorphizer {
                 continue
             }
 
-            // Check if it's an ability operation referenced by hash
+            // Ability operation referenced by hash — compile as standalone function
             val opEntry = abilityOpByHash[hash]
             if (opEntry != null) {
                 val opBody = opEntry.opBody
@@ -152,7 +148,7 @@ class Monomorphizer {
                 continue
             }
 
-            // Unknown hash — skip (could be a performer hash or unresolved reference)
+            // Unknown hash — performer or unresolved reference
         }
 
         // Ability impl operations are converted on-demand when referenced
