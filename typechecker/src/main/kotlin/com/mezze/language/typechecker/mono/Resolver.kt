@@ -42,17 +42,7 @@ class Resolver {
                 operations = pd.operations.entries.mapIndexed { idx, (opName, body) ->
                     val ctx = SlotAllocator()
                     inHandlerOperation = true
-                    // Inline lambda body directly — no closure factory
-                    val actualBody: MonoExpr
-                    if (body is MonoLambda) {
-                        for (param in body.params) {
-                            ctx.allocParam(param.name, typeToSlotKind(param.type))
-                        }
-                        actualBody = body.body
-                    } else {
-                        actualBody = body
-                    }
-                    val resolvedBody = resolveExpr(actualBody, ctx)
+                    val resolvedBody = resolveExpr(body, ctx)
                     inHandlerOperation = false
                     val opHash = pd.operationHashes[opName]
                         ?: error("Missing operation hash for ${pd.name}::$opName — TypedASTHasher must compute all operation hashes")

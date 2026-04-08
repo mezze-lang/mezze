@@ -94,6 +94,8 @@ object PrecompiledStdlib {
 
         val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
         val prePerformers = mutableListOf<Array<String>>()
+
+        // Phase 1: Monomorphize each module (traces from entry point)
         for ((_, v2Module) in allV2ForPrelower) {
             try {
                 val mono = com.mezze.language.typechecker.mono.Monomorphizer()
@@ -115,6 +117,57 @@ object PrecompiledStdlib {
                 // Module couldn't be lowered — skip
             }
         }
+
+        // Phase 2: Eagerly compile ALL ability operations from all modules.
+        // These are referenced by tryResolveMethodCall when user code calls methods
+        // like result.map, option.unwrap_or, list.length, etc.
+        // The monomorphizer traces from entry points, but ability operations are
+        // only reached when user code calls them — so we compile them ALL here.
+        val allAbilityImpls = allV2ForPrelower.values.flatMap { it.abilityImpls }
+        val allGlobalDecls = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedLetDecl>()
+        for (m in allV2ForPrelower.values) {
+            for (d in m.decls) {
+                if (d is com.mezze.language.typedast.TypedLetDecl) allGlobalDecls[d.hash] = d
+            }
+        }
+        for (impl in allAbilityImpls) {
+            for ((opName, opBody) in impl.operations) {
+                val opHash = com.mezze.language.typechecker.mono.Monomorphizer().computeOpHashPublic(impl.hash, opName)
+                if (opHash.hex in preFunctions) continue
+                try {
+                    val monoizer = com.mezze.language.typechecker.mono.Monomorphizer()
+                    val monoBody = monoizer.convertExprPublic(opBody, allGlobalDecls)
+                    val monoFn = com.mezze.language.monoast.MonoFunction(
+                        hash = opHash,
+                        name = opName,
+                        originalName = opName,
+                        originalHash = opHash,
+                        params = if (opBody is com.mezze.language.typedast.TypedLambda) {
+                            opBody.params.map { p -> com.mezze.language.monoast.MonoParam(p.name, p.type, p.loc) }
+                        } else emptyList(),
+                        captures = emptyList(),
+                        body = monoBody,
+                        type = opBody.type,
+                        isPublic = false,
+                        loc = opBody.loc
+                    )
+                    val resolver = com.mezze.language.typechecker.mono.Resolver()
+                    val monoModule = com.mezze.language.monoast.MonoModule(
+                        path = "<ability-op>", hash = opHash,
+                        functions = listOf(monoFn),
+                        effectDecls = emptyList(), performerDecls = emptyList()
+                    )
+                    val resolved = resolver.resolve(monoModule)
+                    val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
+                    for (fn in lowered.functions) {
+                        preFunctions.putIfAbsent(fn.hash.hex, fn)
+                    }
+                } catch (_: Exception) {
+                    // Operation couldn't be compiled — skip
+                }
+            }
+        }
+
         preloweredFunctions = preFunctions
         preloweredPerformerRecords = prePerformers
 

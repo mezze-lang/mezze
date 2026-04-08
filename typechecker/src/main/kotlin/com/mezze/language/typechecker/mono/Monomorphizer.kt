@@ -650,6 +650,16 @@ class Monomorphizer {
         }
     }
 
+    /** Public access for PrecompiledStdlib to compute ability operation hashes */
+    fun computeOpHashPublic(implHash: Hash, opName: String): Hash = computeOpHash(implHash, opName)
+
+    /** Public access for PrecompiledStdlib to convert TypedExpr to MonoExpr */
+    fun convertExprPublic(expr: TypedExpr, globalDecls: Map<Hash, TypedLetDecl>): MonoExpr {
+        val worklist = ArrayDeque<Hash>()
+        val processed = mutableSetOf<Hash>()
+        return convertExpr(expr, globalDecls, worklist, processed)
+    }
+
     private fun computeOpHash(implHash: Hash, opName: String): Hash {
         val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
         builder.append(implHash.hex)
