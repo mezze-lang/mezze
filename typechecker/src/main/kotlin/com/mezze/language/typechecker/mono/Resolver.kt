@@ -253,7 +253,8 @@ class Resolver {
                     innerCtx.allocParam(param.name, typeToSlotKind(param.type))
                 }
                 val resolvedBody = resolveExpr(expr.body, innerCtx)
-                val fnHash = computeHash("lambda_${hash.hex}")
+                // Content-based lambda hash — deterministic across compilation contexts
+                val fnHash = computeExprHash(expr)
 
                 val resolvedCaptures = innerCtx.getCaptures()
 
@@ -553,15 +554,96 @@ class Resolver {
         }
     }
 
+    /** Content-based expression hash — deterministic across compilation contexts.
+     *  Uses structural hashing of MonoExpr (no locations, no types, de Bruijn indices). */
     private fun computeExprHash(expr: MonoExpr): Hash {
         val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-        builder.append(expr.toString())
-        return Hash.fromV1(builder.build().toFullHexString())
+        hashMonoExpr(builder, expr)
+        return Hash(builder.build().toFullHexString())
     }
 
-    private fun computeHash(input: String): Hash {
-        val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-        builder.append(input)
-        return Hash.fromV1(builder.build().toFullHexString())
+    /** Hash a MonoExpr structurally — same content always produces same hash. */
+    private fun hashMonoExpr(b: com.mezze.language.ast.hashing.MezzeHashBuilder, expr: MonoExpr) {
+        when (expr) {
+            is MonoIntLit -> { b.append(byteArrayOf(0x01)); b.appendLong(expr.value) }
+            is MonoNatLit -> { b.append(byteArrayOf(0x02)); b.appendLong(expr.value) }
+            is MonoFloatLit -> { b.append(byteArrayOf(0x03)); b.appendLong(java.lang.Double.doubleToLongBits(expr.value)) }
+            is MonoFracLit -> { b.append(byteArrayOf(0x04)); b.appendLong(expr.numerator); b.appendLong(expr.denominator) }
+            is MonoBoolLit -> { b.append(byteArrayOf(0x05)); b.appendBoolean(expr.value) }
+            is MonoCharLit -> { b.append(byteArrayOf(0x06)); b.appendInt(expr.value.code) }
+            is MonoStringLit -> {
+                b.append(byteArrayOf(0x07)); b.appendInt(expr.parts.size)
+                for (p in expr.parts) when (p) {
+                    is MonoStringPart.Literal -> { b.appendBoolean(false); b.append(p.value) }
+                    is MonoStringPart.Interpolation -> { b.appendBoolean(true); hashMonoExpr(b, p.expr) }
+                }
+            }
+            is MonoVar -> {
+                when (val binding = expr.binding) {
+                    is MonoBinding.FunctionRef -> when (val ref = binding.ref) {
+                        is MonoFunctionRef.ByHash -> { b.append(byteArrayOf(0x10)); b.append(ref.hash.hex) }
+                        is MonoFunctionRef.Native -> { b.append(byteArrayOf(0x11)); b.append(ref.name) }
+                    }
+                    is MonoBinding.ValueRef -> { b.append(byteArrayOf(0x12)); b.append(binding.hash.hex) }
+                    is MonoBinding.Local -> { b.append(byteArrayOf(0x13)); b.appendInt(binding.depth); b.appendInt(binding.index) }
+                    is MonoBinding.Param -> { b.append(byteArrayOf(0x14)); b.appendInt(binding.index) }
+                    is MonoBinding.Capture -> { b.append(byteArrayOf(0x15)); b.appendInt(binding.index) }
+                }
+            }
+            is MonoLambda -> {
+                b.append(byteArrayOf(0x20)); b.appendInt(expr.params.size)
+                for (p in expr.params) b.append(p.name)
+                hashMonoExpr(b, expr.body)
+            }
+            is MonoCall -> { b.append(byteArrayOf(0x21)); hashMonoExpr(b, expr.function); hashMonoExpr(b, expr.arg) }
+            is MonoRecord -> {
+                b.append(byteArrayOf(0x22)); b.appendInt(expr.entries.size)
+                for (e in expr.entries) when (e) {
+                    is MonoRecordEntry.Field -> { b.appendBoolean(false); b.append(e.name); hashMonoExpr(b, e.value) }
+                    is MonoRecordEntry.Spread -> { b.appendBoolean(true); hashMonoExpr(b, e.expr) }
+                }
+            }
+            is MonoFieldAccess -> { b.append(byteArrayOf(0x23)); hashMonoExpr(b, expr.record); b.append(expr.field) }
+            is MonoRecordUpdate -> { b.append(byteArrayOf(0x24)); hashMonoExpr(b, expr.record); b.appendInt(expr.updates.size)
+                for (e in expr.updates) when (e) {
+                    is MonoRecordEntry.Field -> { b.appendBoolean(false); b.append(e.name); hashMonoExpr(b, e.value) }
+                    is MonoRecordEntry.Spread -> { b.appendBoolean(true); hashMonoExpr(b, e.expr) }
+                }
+            }
+            is MonoVariantConstruct -> { b.append(byteArrayOf(0x25)); b.append(expr.tag); b.appendBoolean(expr.payload != null); expr.payload?.let { hashMonoExpr(b, it) } }
+            is MonoMatch -> { b.append(byteArrayOf(0x26)); hashMonoExpr(b, expr.scrutinee); b.appendInt(expr.cases.size)
+                for (c in expr.cases) { hashMonoPattern(b, c.pattern); c.guard?.let { b.appendBoolean(true); hashMonoExpr(b, it) } ?: b.appendBoolean(false); hashMonoExpr(b, c.body) }
+            }
+            is MonoIf -> { b.append(byteArrayOf(0x27)); hashMonoExpr(b, expr.condition); hashMonoExpr(b, expr.thenBranch); hashMonoExpr(b, expr.elseBranch) }
+            is MonoBlock -> { b.append(byteArrayOf(0x28)); b.appendInt(expr.statements.size)
+                for (s in expr.statements) when (s) {
+                    is MonoStatement.Expr -> { b.appendBoolean(false); hashMonoExpr(b, s.expr) }
+                    is MonoStatement.Let -> { b.appendBoolean(true); b.append(s.contentHash.hex); hashMonoExpr(b, s.value) }
+                }
+                hashMonoExpr(b, expr.result)
+            }
+            is MonoSeq -> { b.append(byteArrayOf(0x29)); b.appendInt(expr.elements.size)
+                for (e in expr.elements) when (e) {
+                    is MonoSeqElement.Regular -> { b.appendBoolean(false); hashMonoExpr(b, e.expr) }
+                    is MonoSeqElement.Spread -> { b.appendBoolean(true); hashMonoExpr(b, e.expr) }
+                }
+            }
+            is MonoPerform -> { b.append(byteArrayOf(0x30)); b.appendInt(expr.handlers.size)
+                for (h in expr.handlers) { b.append(h.performerHash.hex); b.append(h.effectHash.hex) }
+                hashMonoExpr(b, expr.body)
+            }
+            is MonoPerformOp -> { b.append(byteArrayOf(0x31)); b.append(expr.effectHash.hex); b.append(expr.operationName); hashMonoExpr(b, expr.arg) }
+        }
+    }
+
+    private fun hashMonoPattern(b: com.mezze.language.ast.hashing.MezzeHashBuilder, p: MonoPattern) {
+        when (p) {
+            is MonoVarPattern -> b.append(byteArrayOf(0x40))
+            is MonoWildcardPattern -> b.append(byteArrayOf(0x41))
+            is MonoLiteralPattern -> { b.append(byteArrayOf(0x42)); hashMonoExpr(b, p.value) }
+            is MonoVariantPattern -> { b.append(byteArrayOf(0x43)); b.append(p.tag); b.appendBoolean(p.payload != null); p.payload?.let { hashMonoPattern(b, it) } }
+            is MonoRecordPattern -> { b.append(byteArrayOf(0x44)); b.appendInt(p.fields.size); for (f in p.fields) { b.append(f.name); b.appendBoolean(f.pattern != null); f.pattern?.let { hashMonoPattern(b, it) } }; b.appendBoolean(p.isOpen) }
+            is MonoSeqPattern -> { b.append(byteArrayOf(0x45)); b.appendInt(p.elements.size); for (e in p.elements) hashMonoPattern(b, e); b.appendBoolean(p.rest != null) }
+        }
     }
 }
