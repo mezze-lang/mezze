@@ -136,15 +136,19 @@ object PrecompiledStdlib {
                 if (opHash.hex in preFunctions) continue
                 try {
                     val monoizer = com.mezze.language.typechecker.mono.Monomorphizer()
-                    val monoBody = monoizer.convertExprPublic(opBody, allGlobalDecls)
+                    // Unwrap lambda: convert the body, not the lambda itself
+                    val (opParams, monoBody) = if (opBody is com.mezze.language.typedast.TypedLambda) {
+                        val params = opBody.params.map { p -> com.mezze.language.monoast.MonoParam(p.name, p.type, p.loc) }
+                        params to monoizer.convertExprPublic(opBody.body, allGlobalDecls)
+                    } else {
+                        emptyList<com.mezze.language.monoast.MonoParam>() to monoizer.convertExprPublic(opBody, allGlobalDecls)
+                    }
                     val monoFn = com.mezze.language.monoast.MonoFunction(
                         hash = opHash,
                         name = opName,
                         originalName = opName,
                         originalHash = opHash,
-                        params = if (opBody is com.mezze.language.typedast.TypedLambda) {
-                            opBody.params.map { p -> com.mezze.language.monoast.MonoParam(p.name, p.type, p.loc) }
-                        } else emptyList(),
+                        params = opParams,
                         captures = emptyList(),
                         body = monoBody,
                         type = opBody.type,
