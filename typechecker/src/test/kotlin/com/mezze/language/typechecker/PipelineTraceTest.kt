@@ -14,9 +14,8 @@ class PipelineTraceTest {
     @Test
     fun `trace simple program through pipeline`() {
         val source = """
-            use std::result
-            let res: Result Int Str = Ok { val = 5 }
-            result::map { result = res, f = { val } -> val * 2 }
+            use std::effects::log::{Console, println}
+            perform Console in println { msg = "hello" }
         """.trimIndent()
 
         val fw = FileWriter("/tmp/pipeline_trace.txt")
