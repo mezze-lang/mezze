@@ -555,27 +555,42 @@ class TypeChecker(
                         if (d is com.mezze.language.typedast.TypedLetDecl) declIndex[d.hash] = d
                     }
 
+                    // Collect ALL prelude decl hashes to skip during compilation
+                    val preludeHashes = mutableSetOf<String>()
+                    preludeHashes.addAll(PrecompiledStdlib.preloweredFunctions.keys)
+                    for ((_, v2m) in PrecompiledStdlib.v2Modules) {
+                        for (d in v2m.decls) {
+                            if (d is com.mezze.language.typedast.TypedLetDecl) preludeHashes.add(d.hash.hex)
+                        }
+                    }
+
                     // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
                     val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
                         abilityImpls = allAbilityImpls,
-                        stdlibHashes = PrecompiledStdlib.preloweredFunctions.keys
+                        stdlibHashes = preludeHashes
                     )
                     compiler.setDeclIndex(declIndex)
 
-                    // Collect imported modules and performers
+                    // Collect imported modules and performers (non-prelude only)
+                    val preludeModuleHashes = PrecompiledStdlib.v2Modules.keys
                     val importedModules = mutableListOf<com.mezze.language.typedast.TypedModule>()
                     val importedPerformers = mutableListOf<com.mezze.language.typedast.TypedPerformerDecl>()
+                    val seenHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
                     for ((_, v1Module) in loadedModules) {
                         val v2m = v1Module.v2TypedModule ?: continue
+                        if (v2m.hash in preludeModuleHashes) continue  // skip prelude
+                        if (v2m.hash in seenHashes) continue
+                        seenHashes.add(v2m.hash)
                         importedModules.add(v2m)
                         importedPerformers.addAll(v2m.performerDecls)
                     }
                     for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
                         val v2m = cached.v2TypedModule ?: continue
-                        if (v2m.hash !in importedModules.map { it.hash }.toSet()) {
-                            importedModules.add(v2m)
-                            importedPerformers.addAll(v2m.performerDecls)
-                        }
+                        if (v2m.hash in preludeModuleHashes) continue  // skip prelude
+                        if (v2m.hash in seenHashes) continue
+                        seenHashes.add(v2m.hash)
+                        importedModules.add(v2m)
+                        importedPerformers.addAll(v2m.performerDecls)
                     }
 
                     val result = compiler.compile(wrapped, importedModules, importedPerformers)
