@@ -489,6 +489,9 @@ class TypedASTCompiler(
 
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
+            try { java.io.FileWriter("/tmp/field_access_calls.txt", true).use { fw ->
+                fw.write("FieldAccess call: ${fn.field} receiverType=${fn.record.type::class.simpleName} receiverTypeDetail=${fn.record.type}\n")
+            } } catch (_: Exception) {}
             val methodName = fn.field
             val receiverType = fn.record.type
 
@@ -500,10 +503,8 @@ class TypedASTCompiler(
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
-            // Try ability method resolution
-            // Skip for VarType + inlineable ops (TruffleCompiler handles those via CallIndirectIR)
-            val skipAbilityForVarType = receiverType is VarType && methodName in inlineableOps
-            val opHash = if (!skipAbilityForVarType) tryResolveAbilityOp(methodName, receiverType) else null
+            // Try ability method resolution (skip VarType — let runtime dispatch handle it)
+            val opHash = if (receiverType !is VarType) tryResolveAbilityOp(methodName, receiverType) else null
             if (opHash != null) {
                 val receiverIR = compileExpr(fn.record)
                 // Build arg with receiver injected
@@ -788,8 +789,9 @@ class TypedASTCompiler(
             concreteType is BytesType && targetType is TypeApplication && targetType.constructor == "Bytes" -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.typeName == targetType.constructor -> true
-            targetType is VarType -> true
-            concreteType is VarType -> true
+            // VarType: don't match — let runtime handle dispatch
+            // targetType is VarType -> true
+            // concreteType is VarType -> true
             else -> false
         }
     }
