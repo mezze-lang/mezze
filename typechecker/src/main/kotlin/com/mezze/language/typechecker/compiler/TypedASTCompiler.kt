@@ -129,6 +129,19 @@ class TypedASTCompiler(
         // Add extracted lambdas
         functions.addAll(extractedFunctions)
 
+        // Debug dump
+        try { java.io.FileWriter("/tmp/typed_compiler_debug.txt").use { fw ->
+            fw.write("Functions: ${functions.size}\n")
+            for (fn in functions) {
+                fw.write("  ${fn.name} (${fn.qualifiedName}) hash=${fn.hash.hex.take(16)} params=${fn.paramNames} locals=${fn.localNames} captures=${fn.captureNames}\n")
+                dumpNodeIR(fw, fn.body, "    ")
+            }
+            fw.write("PerformerRecords: ${performerRecords.size}\n")
+            for (pr in performerRecords) {
+                fw.write("  performer=${pr.performerHash.take(16)} effect=${pr.effectHash.take(16)} ops=${pr.operationNames}\n")
+            }
+        } } catch (_: Exception) {}
+
         return CompileResult(functions, performerRecords.toList())
     }
 
@@ -361,7 +374,10 @@ class TypedASTCompiler(
             is BindingRef.Local -> {
                 if (binding.depth == 0 && binding.index < currentParamCount) {
                     // Lambda param → ReadLocal at param slot
-                    ReadLocalIR(binding.index, typeToSlotKind(expr.type), src)
+                    // Use NAME-based lookup because TypedAstBuilder may assign wrong indices
+                    val paramIdx = currentParamNames.indexOf(expr.name)
+                    val slot = if (paramIdx >= 0) paramIdx else binding.index
+                    ReadLocalIR(slot, typeToSlotKind(expr.type), src)
                 } else {
                     // Local variable — check if already allocated
                     val slot = localsByName[expr.name]
@@ -717,6 +733,36 @@ class TypedASTCompiler(
     private fun locToSourceInfo(loc: Loc): SourceInfo {
         val fileIndex = files.indexOf(loc.file).let { if (it >= 0) it else { files.add(loc.file); files.size - 1 } }
         return SourceInfo(fileIndex, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
+    }
+
+    private fun dumpNodeIR(fw: java.io.FileWriter, node: NodeIR, indent: String) {
+        when (node) {
+            is CallDirectIR -> { fw.write("${indent}CallDirect(${node.targetHash.hex.take(16)} tail=${node.isTailCall})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
+            is CallIndirectIR -> { fw.write("${indent}CallIndirect\n"); dumpNodeIR(fw, node.function, "$indent  fn: "); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
+            is CallNativeIR -> { fw.write("${indent}CallNative(${node.name})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
+            is CallLocalIR -> fw.write("${indent}CallLocal(slot=${node.slot})\n")
+            is ReadLocalIR -> fw.write("${indent}ReadLocal(slot=${node.slot})\n")
+            is ReadCaptureIR -> fw.write("${indent}ReadCapture(idx=${node.index})\n")
+            is WriteLocalIR -> { fw.write("${indent}WriteLocal(slot=${node.slot})\n"); dumpNodeIR(fw, node.value, "$indent  ") }
+            is ReadContextIR -> fw.write("${indent}ReadContext(${node.name})\n")
+            is LongLitIR -> fw.write("${indent}Long(${node.value})\n")
+            is DoubleLitIR -> fw.write("${indent}Double(${node.value})\n")
+            is BoolLitIR -> fw.write("${indent}Bool(${node.value})\n")
+            is StringLitIR -> fw.write("${indent}String(\"${node.value}\")\n")
+            is UnitLitIR -> fw.write("${indent}Unit\n")
+            is MakeRecordIR -> { fw.write("${indent}MakeRecord(${node.fields.map { it.name }})\n"); for (f in node.fields) dumpNodeIR(fw, f.value, "$indent  ${f.name}: ") }
+            is MakeLambdaIR -> fw.write("${indent}MakeLambda(fnHash=${node.functionHash.hex.take(16)} captures=${node.captures.size})\n")
+            is MakeVariantIR -> fw.write("${indent}MakeVariant(${node.tagName})\n")
+            is InlineBinaryOpIR -> { fw.write("${indent}InlineOp(${node.op})\n"); dumpNodeIR(fw, node.left, "$indent  L: "); dumpNodeIR(fw, node.right, "$indent  R: ") }
+            is PerformOpIR -> { fw.write("${indent}PerformOp(${node.operationName} effect=${node.effectHash.hex.take(16)})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
+            is HandleIR -> { fw.write("${indent}Handle(${node.handlers.map { it.performerName }})\n"); dumpNodeIR(fw, node.body, "$indent  body: ") }
+            is MatchIR -> { fw.write("${indent}Match\n"); dumpNodeIR(fw, node.scrutinee, "$indent  scrut: ") }
+            is IfIR -> { fw.write("${indent}If\n"); dumpNodeIR(fw, node.cond, "$indent  cond: "); dumpNodeIR(fw, node.thenBr, "$indent  then: "); dumpNodeIR(fw, node.elseBr, "$indent  else: ") }
+            is BlockIR -> { fw.write("${indent}Block(${node.stmts.size} stmts)\n"); for (s in node.stmts) { when (s) { is StmtIR.Let -> { fw.write("$indent  let slot=${s.slot} ${s.name}\n"); dumpNodeIR(fw, s.value, "$indent    ") }; is StmtIR.Expr -> dumpNodeIR(fw, s.node, "$indent  ") } }; dumpNodeIR(fw, node.result, "$indent  result: ") }
+            is InterpolatedStringIR -> fw.write("${indent}InterpolatedString(${node.parts.size} parts)\n")
+            is ReadFieldIR -> { fw.write("${indent}ReadField(${node.fieldName})\n"); dumpNodeIR(fw, node.record, "$indent  ") }
+            else -> fw.write("${indent}${node::class.simpleName}\n")
+        }
     }
 
     /** Find a TypedLetDecl by hash — used to determine if a ByHash ref is a function */
