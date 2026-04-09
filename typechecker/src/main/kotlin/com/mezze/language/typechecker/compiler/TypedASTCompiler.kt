@@ -129,6 +129,22 @@ class TypedASTCompiler(
             compilePerformerDecl(pd)
         }
 
+        // Compile ability impl operations as standalone functions
+        // These are needed for method calls like list.length, result.map, etc.
+        val compiledOpHashes = compiledHashes.toMutableSet()
+        for (impl in abilityImpls) {
+            for ((opName, opBody) in impl.operations) {
+                val opHash = computeOpHash(impl.hash, opName)
+                if (opHash.hex in compiledOpHashes || opHash.hex in stdlibHashes) continue
+                compiledOpHashes.add(opHash.hex)
+                if (opBody is TypedLambda) {
+                    functions.add(compileFunctionBody(opHash, opName, opBody.params, opBody.body, opBody.loc))
+                } else {
+                    functions.add(compileFunctionBody(opHash, opName, emptyList(), opBody, opBody.loc))
+                }
+            }
+        }
+
         // Add extracted lambdas
         functions.addAll(extractedFunctions)
 
