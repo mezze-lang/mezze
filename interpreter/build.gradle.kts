@@ -62,7 +62,7 @@ tasks.test {
         "--add-modules=jdk.incubator.vector"
     )
 
-    maxHeapSize = "4g"
+    maxHeapSize = "2g"
 
     // Pass mezze.pipeline system property from gradle command line
     // Usage: ./gradlew :interpreter:test -Dmezze.pipeline=v2
@@ -90,7 +90,7 @@ tasks.register<Test>("testV2") {
         "--add-opens=java.base/sun.misc=ALL-UNNAMED",
         "--add-modules=jdk.incubator.vector"
     )
-    maxHeapSize = "4g"
+    maxHeapSize = "2g"
 }
 
 // Compile stdlib to SQLite — produces build/stdlib-compiled.sqlite
