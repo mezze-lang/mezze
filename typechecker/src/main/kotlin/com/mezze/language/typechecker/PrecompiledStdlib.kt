@@ -95,17 +95,18 @@ object PrecompiledStdlib {
         val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
         val prePerformers = mutableListOf<Array<String>>()
 
-        // Phase 1: Monomorphize each module (traces from entry point)
+        // Compile each prelude module using TypedASTCompiler (single-pass, no old pipeline)
+        val allAbilityImpls = allV2ForPrelower.values.flatMap { it.abilityImpls }
         for ((_, v2Module) in allV2ForPrelower) {
             try {
-                val mono = com.mezze.language.typechecker.mono.Monomorphizer()
-                    .monomorphize(v2Module, allV2ForPrelower)
-                val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(mono)
-                val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
-                for (fn in lowered.functions) {
+                val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
+                    abilityImpls = allAbilityImpls
+                )
+                val result = compiler.compile(v2Module)
+                for (fn in result.functions) {
                     preFunctions.putIfAbsent(fn.hash.hex, fn)
                 }
-                for (pr in lowered.performerRecords) {
+                for (pr in result.performerRecords) {
                     val arr = mutableListOf(pr.performerHash, pr.effectHash)
                     for (i in pr.operationHashes.indices) {
                         arr.add(pr.operationHashes[i])
@@ -114,12 +115,9 @@ object PrecompiledStdlib {
                     prePerformers.add(arr.toTypedArray())
                 }
             } catch (_: Exception) {
-                // Module couldn't be lowered — skip
+                // Module couldn't be compiled — skip
             }
         }
-
-        // Phase 2 removed — ability operations are compiled by TypedASTCompiler
-        // when user code references them via method calls.
 
         preloweredFunctions = preFunctions
         preloweredPerformerRecords = prePerformers
