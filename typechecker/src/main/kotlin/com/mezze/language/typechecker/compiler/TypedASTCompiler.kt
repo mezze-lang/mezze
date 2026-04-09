@@ -48,8 +48,11 @@ class TypedASTCompiler(
     /** Next local slot index (starts after params) */
     private var nextLocalSlot = 0
 
-    /** Local variable name → slot index */
+    /** Local variable name → slot index (current scope) */
     private val localsByName = mutableMapOf<String, Int>()
+
+    /** Scope stack for nested match bindings: each entry maps name → slot */
+    private val scopeStack = ArrayDeque<MutableMap<String, Int>>()
 
     /** Current function's param names */
     private var currentParamNames = listOf<String>()
@@ -395,18 +398,36 @@ class TypedASTCompiler(
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
             is BindingRef.Local -> {
-                // Check if this is a param reference (by name, not by index)
+                // Use depth to find the right scope
+                if (binding.depth == 0 && scopeStack.isNotEmpty()) {
+                    // Innermost scope (current match bindings)
+                    val scope = scopeStack.last()
+                    val slot = scope[expr.name]
+                    if (slot != null) {
+                        return ReadLocalIR(slot, typeToSlotKind(expr.type), src)
+                    }
+                }
+                if (binding.depth > 0 && scopeStack.size > binding.depth) {
+                    // Outer scope — look up by depth from the end
+                    val scopeIdx = scopeStack.size - 1 - binding.depth
+                    if (scopeIdx >= 0) {
+                        val scope = scopeStack[scopeIdx]
+                        val slot = scope[expr.name]
+                        if (slot != null) {
+                            return ReadLocalIR(slot, typeToSlotKind(expr.type), src)
+                        }
+                    }
+                }
+                // Check if it's a param
                 val paramIdx = currentParamNames.indexOf(expr.name)
                 if (paramIdx >= 0) {
-                    // It's a param — use name-based index
                     ReadLocalIR(paramIdx, typeToSlotKind(expr.type), src)
                 } else {
-                    // Local variable — check if already allocated
+                    // Check any scope level
                     val slot = localsByName[expr.name]
                     if (slot != null) {
                         ReadLocalIR(slot, typeToSlotKind(expr.type), src)
                     } else {
-                        // Allocate new local
                         val newSlot = allocLocal(expr.name)
                         ReadLocalIR(newSlot, typeToSlotKind(expr.type), src)
                     }
@@ -505,17 +526,12 @@ class TypedASTCompiler(
                 }
                 is BindingRef.Native -> CallNativeIR(binding.name, argIR, src)
                 is BindingRef.Local -> {
-                    // Use name-based param lookup (same as compileVar)
-                    val paramIdx = currentParamNames.indexOf(fn.name)
-                    if (paramIdx >= 0) {
-                        CallIndirectIR(ReadLocalIR(paramIdx, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
+                    // Resolve using the same scope logic as compileVar
+                    val resolvedSlot = resolveLocalSlot(fn.name, binding.depth)
+                    if (resolvedSlot >= 0) {
+                        CallIndirectIR(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
-                        val slot = localsByName[fn.name]
-                        if (slot != null) {
-                            CallIndirectIR(ReadLocalIR(slot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
-                        } else {
-                            CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
-                        }
+                        CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
                     }
                 }
                 is BindingRef.Param -> CallIndirectIR(ReadLocalIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
@@ -585,21 +601,25 @@ class TypedASTCompiler(
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
         val scrutineeIR = compileExpr(expr.scrutinee)
         val cases = expr.cases.map { case ->
-            // Save scope — each match case gets its own bindings
-            val savedLocals = localsByName.toMap()
+            // Push a new scope for this match case's bindings
+            val caseScope = mutableMapOf<String, Int>()
 
             // Allocate slots for pattern bindings (always fresh)
             val bindings = case.bindings.map { b ->
                 val slot = forceAllocLocal(b.name)
+                caseScope[b.name] = slot
                 BindingIR(slot, typeToSlotKind(b.type))
             }
+
+            // Push scope so nested expressions use these bindings at depth 0
+            scopeStack.addLast(caseScope)
+
             val patternIR = compilePattern(case.patterns.firstOrNull())
             val guardIR = case.guard?.let { compileExpr(it) }
             val bodyIR = compileExpr(case.body)
 
-            // Restore scope — bindings from this case don't leak to siblings
-            localsByName.clear()
-            localsByName.putAll(savedLocals)
+            // Pop scope
+            scopeStack.removeLast()
 
             CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc))
         }
@@ -754,6 +774,27 @@ class TypedASTCompiler(
     // ========================================================================
     // Helpers
     // ========================================================================
+
+    /** Resolve a local variable to its frame slot using depth + name */
+    private fun resolveLocalSlot(name: String, depth: Int): Int {
+        // Check scope stack with depth
+        if (depth == 0 && scopeStack.isNotEmpty()) {
+            val slot = scopeStack.last()[name]
+            if (slot != null) return slot
+        }
+        if (depth > 0 && scopeStack.size > depth) {
+            val scopeIdx = scopeStack.size - 1 - depth
+            if (scopeIdx >= 0) {
+                val slot = scopeStack[scopeIdx][name]
+                if (slot != null) return slot
+            }
+        }
+        // Check params
+        val paramIdx = currentParamNames.indexOf(name)
+        if (paramIdx >= 0) return paramIdx
+        // Check locals
+        return localsByName[name] ?: -1
+    }
 
     private fun allocLocal(name: String): Int {
         localsByName[name]?.let { return it }

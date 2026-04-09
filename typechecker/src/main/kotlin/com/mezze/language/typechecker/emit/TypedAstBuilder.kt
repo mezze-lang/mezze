@@ -147,7 +147,7 @@ class TypedAstBuilder(
     private var precomputedHashes: Map<BindingKey, String>? = null
 
     /** Stack of lambda parameter names — these shadow content hashes */
-    private val lambdaParamScopes = ArrayDeque<Set<String>>()
+    private val lambdaParamScopes = ArrayDeque<List<String>>()
 
     /** Get the effective identifier content hashes (precomputed if available) */
     private val effectiveContentHashes: Map<BindingKey, String>
@@ -575,7 +575,7 @@ class TypedAstBuilder(
                 }
 
                 // Track lambda params so resolveBinding prefers Local over ByHash
-                lambdaParamScopes.addLast(params.map { it.name }.toSet())
+                lambdaParamScopes.addLast(params.map { it.name })
 
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
@@ -974,7 +974,7 @@ class TypedAstBuilder(
         }
 
         // Push pattern bindings so case body sees them as locals, not globals
-        lambdaParamScopes.addLast(bindingNames.toSet())
+        lambdaParamScopes.addLast(bindingNames)
 
         val caseGuard = case.guard
         val guard = if (caseGuard != null) {
@@ -1169,9 +1169,16 @@ class TypedAstBuilder(
      * 4. Fallback → Local(0, 0)
      */
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
-        // Lambda params always shadow global bindings (unqualified only)
-        if (qualifier == null && lambdaParamScopes.any { name in it }) {
-            return BindingRef.Local(0, 0)
+        // Lambda params / match bindings — search from innermost scope outward
+        if (qualifier == null) {
+            for (i in lambdaParamScopes.indices.reversed()) {
+                val scope = lambdaParamScopes[i]
+                if (name in scope) {
+                    val depth = lambdaParamScopes.size - 1 - i  // 0 = innermost
+                    val index = scope.indexOf(name)  // position within scope
+                    return BindingRef.Local(depth, index)
+                }
+            }
         }
 
         val hashes = effectiveContentHashes
