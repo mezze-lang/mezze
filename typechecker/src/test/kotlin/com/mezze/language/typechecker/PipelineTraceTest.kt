@@ -16,10 +16,7 @@ class PipelineTraceTest {
         val source = """
             use std::result
             let res: Result Int Str = Ok { val = 5 }
-            let mapped = result::map { result = res, f = { val } -> val * 2 }
-            match mapped is
-                Ok { val } -> val
-                Err { error } -> -1
+            result::map { result = res, f = { val } -> val * 2 }
         """.trimIndent()
 
         val fw = FileWriter("/tmp/pipeline_trace.txt")
@@ -96,6 +93,18 @@ class PipelineTraceTest {
         for (fn in lowered.functions) {
             fw.write("  FN ${fn.name} hash=${fn.hash.hex.take(16)}... params=${fn.paramNames} captures=${fn.captureNames}\n")
             dumpNodeIR(fw, fn.body, "    ")
+        }
+
+        // Also dump the pre-lowered result::map function
+        fw.write("\n=== PRE-LOWERED result::map ===\n")
+        for ((hash, fn) in PrecompiledStdlib.preloweredFunctions) {
+            if (fn.name == "map" && fn.qualifiedName.contains("map") && fn.paramNames.contains("result")) {
+                fw.write("  FN ${fn.name} (${fn.qualifiedName}) hash=${hash.take(16)}...\n")
+                fw.write("    paramNames=${fn.paramNames} paramSlots=${fn.paramSlots}\n")
+                fw.write("    localNames=${fn.localNames} localSlots=${fn.localSlots}\n")
+                fw.write("    captureNames=${fn.captureNames}\n")
+                dumpNodeIR(fw, fn.body, "    ")
+            }
         }
 
         fw.close()

@@ -45,6 +45,9 @@ class Monomorphizer {
     /** Hashes of functions already pre-lowered — don't add to worklist */
     private var skipHashes: Set<String> = emptySet()
 
+    /** When > 0, Local(depth=0) in convertBinding means Param (inside unwrapped lambda body) */
+    private var unwrappedLambdaParamCount = 0
+
     private data class AbilityOpEntry(
         val implHash: Hash,
         val abilityName: String?,
@@ -128,7 +131,11 @@ class Monomorphizer {
                 val (monoParams, monoBody) = if (decl.value is TypedLambda) {
                     val lambda = decl.value as TypedLambda
                     val params = lambda.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    // Set flag so Local(depth=0) in the body maps to Param
+                    val prevParamCount = unwrappedLambdaParamCount
+                    unwrappedLambdaParamCount = params.size
                     val body = convertExpr(lambda.body, globalDecls, worklist, processedFunctions)
+                    unwrappedLambdaParamCount = prevParamCount
                     params to body
                 } else {
                     emptyList<MonoParam>() to convertExpr(decl.value, globalDecls, worklist, processedFunctions)
@@ -156,7 +163,10 @@ class Monomorphizer {
                 val opBody = opEntry.opBody
                 val (opParams, opMonoBody) = if (opBody is TypedLambda) {
                     val params = opBody.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    val prevPC = unwrappedLambdaParamCount
+                    unwrappedLambdaParamCount = params.size
                     val body = convertExpr(opBody.body, globalDecls, worklist, processedFunctions)
+                    unwrappedLambdaParamCount = prevPC
                     params to body
                 } else {
                     emptyList<MonoParam>() to convertExpr(opBody, globalDecls, worklist, processedFunctions)
@@ -226,8 +236,12 @@ class Monomorphizer {
             val opParams = mutableMapOf<String, List<MonoParam>>()
             for ((opName, body) in pd.operations) {
                 if (body is TypedLambda) {
-                    opParams[opName] = body.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    val pList = body.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                    opParams[opName] = pList
+                    val prevPC = unwrappedLambdaParamCount
+                    unwrappedLambdaParamCount = pList.size
                     opBodies[opName] = convertExpr(body.body, globalDecls, worklist, processedFunctions)
+                    unwrappedLambdaParamCount = prevPC
                 } else {
                     opParams[opName] = emptyList()
                     opBodies[opName] = convertExpr(body, globalDecls, worklist, processedFunctions)
@@ -255,7 +269,10 @@ class Monomorphizer {
             val (monoParams2, monoBody2) = if (decl.value is TypedLambda) {
                 val lambda = decl.value as TypedLambda
                 val params = lambda.params.map { p -> MonoParam(p.name, p.type, p.loc) }
+                val prevParamCount = unwrappedLambdaParamCount
+                unwrappedLambdaParamCount = params.size
                 val body = convertExpr(lambda.body, globalDecls, worklist, processedFunctions)
+                unwrappedLambdaParamCount = prevParamCount
                 params to body
             } else {
                 emptyList<MonoParam>() to convertExpr(decl.value, globalDecls, worklist, processedFunctions)
@@ -502,7 +519,14 @@ class Monomorphizer {
         processed: Set<Hash>
     ): MonoBinding {
         return when (binding) {
-            is BindingRef.Local -> MonoBinding.Local(binding.depth, binding.index)
+            is BindingRef.Local -> {
+                // Inside an unwrapped lambda body, depth=0 references are lambda params
+                if (unwrappedLambdaParamCount > 0 && binding.depth == 0 && binding.index < unwrappedLambdaParamCount) {
+                    MonoBinding.Param(binding.index)
+                } else {
+                    MonoBinding.Local(binding.depth, binding.index)
+                }
+            }
             is BindingRef.Param -> MonoBinding.Param(binding.index)
             is BindingRef.Capture -> MonoBinding.Capture(binding.index)
             is BindingRef.ByHash -> {
@@ -709,10 +733,14 @@ class Monomorphizer {
     fun computeOpHashPublic(implHash: Hash, opName: String): Hash = computeOpHash(implHash, opName)
 
     /** Public access for PrecompiledStdlib to convert TypedExpr to MonoExpr */
-    fun convertExprPublic(expr: TypedExpr, globalDecls: Map<Hash, TypedLetDecl>): MonoExpr {
+    fun convertExprPublic(expr: TypedExpr, globalDecls: Map<Hash, TypedLetDecl>, paramCount: Int = 0): MonoExpr {
         val worklist = ArrayDeque<Hash>()
         val processed = mutableSetOf<Hash>()
-        return convertExpr(expr, globalDecls, worklist, processed)
+        val prev = unwrappedLambdaParamCount
+        unwrappedLambdaParamCount = paramCount
+        val result = convertExpr(expr, globalDecls, worklist, processed)
+        unwrappedLambdaParamCount = prev
+        return result
     }
 
     private fun computeOpHash(implHash: Hash, opName: String): Hash {
