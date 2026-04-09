@@ -585,9 +585,9 @@ class TypedASTCompiler(
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
         val scrutineeIR = compileExpr(expr.scrutinee)
         val cases = expr.cases.map { case ->
-            // Allocate slots for pattern bindings
+            // Allocate slots for pattern bindings (always fresh, even if name reused)
             val bindings = case.bindings.map { b ->
-                val slot = allocLocal(b.name)
+                val slot = forceAllocLocal(b.name)
                 BindingIR(slot, typeToSlotKind(b.type))
             }
             val patternIR = compilePattern(case.patterns.firstOrNull())
@@ -751,6 +751,13 @@ class TypedASTCompiler(
         localsByName[name]?.let { return it }
         val slot = nextLocalSlot++
         localsByName[name] = slot
+        return slot
+    }
+
+    /** Force-allocate a new slot, even if name already exists (for match bindings) */
+    private fun forceAllocLocal(name: String): Int {
+        val slot = nextLocalSlot++
+        localsByName[name] = slot  // overwrites existing entry
         return slot
     }
 
