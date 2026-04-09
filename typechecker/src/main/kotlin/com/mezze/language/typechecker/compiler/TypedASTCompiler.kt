@@ -634,19 +634,24 @@ class TypedASTCompiler(
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
                 val tag = pattern.tag.hashCode() and 0x7FFFFFFF
-                // Extract field names and slots from the payload pattern
                 val fieldNames = mutableListOf<String>()
                 val fieldSlots = mutableListOf<Int>()
                 val payload = pattern.payload
                 if (payload is TypedRecordPattern) {
                     for (fp in payload.fields) {
-                        fieldNames.add(fp.name)
-                        val slot = localsByName[fp.name] ?: allocLocal(fp.name)
+                        fieldNames.add(fp.name)  // record field name (for extraction at runtime)
+                        // Binding name: { val = ys } → "ys", { val } → "val"
+                        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+                        val slot = scopeStack.lastOrNull()?.get(bindingName)
+                            ?: localsByName[bindingName]
+                            ?: forceAllocLocal(bindingName)
                         fieldSlots.add(slot)
                     }
                 } else if (payload is TypedVarPattern) {
                     fieldNames.add(payload.name)
-                    val slot = localsByName[payload.name] ?: allocLocal(payload.name)
+                    val slot = scopeStack.lastOrNull()?.get(payload.name)
+                        ?: localsByName[payload.name]
+                        ?: forceAllocLocal(payload.name)
                     fieldSlots.add(slot)
                 }
                 PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots)
