@@ -217,12 +217,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         );
     }
 
-    private CallTarget compileProgramV2(String sourceCode, Path projectRoot) {
-        return com.mezze.interpreter.v2.compiler.V2PipelineRunner.tryCompile(
-            this, sourceCode, projectRoot, null
-        );
-    }
-
     /**
      * Extract module paths from UseDeclarations in the program.
      */

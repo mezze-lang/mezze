@@ -60,7 +60,7 @@ import java.nio.file.Paths
  *
  * **PHASE 4: Emit TypedAST + V2 Pipeline**
  * - Input: ParsedModule, Substitution, ConstraintResults
- * - Output: TypedModule -> MonoModule -> ResolvedModule -> TruffleIR
+ * - Output: TypedModule -> FunctionIR (via TypedASTCompiler)
  * - What: Build typed AST, monomorphize, resolve, lower to TruffleIR
  * - Files: TypedAstBuilder.kt, Monomorphizer.kt, Resolver.kt, Lowerer.kt
  *
@@ -507,7 +507,6 @@ class TypeChecker(
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                 var loweredPerformers: List<Array<String>> = emptyList()
-                var v2MonoModule: com.mezze.language.monoast.MonoModule? = null
                 try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
