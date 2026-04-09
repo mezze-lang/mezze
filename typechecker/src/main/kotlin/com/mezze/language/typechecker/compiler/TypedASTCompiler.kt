@@ -500,8 +500,10 @@ class TypedASTCompiler(
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
-            // Try ability method resolution (only for concrete types, not VarType)
-            val opHash = if (receiverType !is VarType) tryResolveAbilityOp(methodName, receiverType) else null
+            // Try ability method resolution
+            // Skip for VarType + inlineable ops (TruffleCompiler handles those via CallIndirectIR)
+            val skipAbilityForVarType = receiverType is VarType && methodName in inlineableOps
+            val opHash = if (!skipAbilityForVarType) tryResolveAbilityOp(methodName, receiverType) else null
             if (opHash != null) {
                 val receiverIR = compileExpr(fn.record)
                 // Build arg with receiver injected
