@@ -180,7 +180,21 @@ public final class MezzeFunctionRootNode extends RootNode {
             }
         }
 
-        return bodyNode.execute(frame);
+        // Execute body with tail call loop
+        while (true) {
+            try {
+                return bodyNode.execute(frame);
+            } catch (TailCallException e) {
+                // Tail call: re-execute with new arguments
+                Object[] newArgs = e.getArguments();
+                if (parameterCount > 0 && newArgs.length > 0) {
+                    Object recordArg = newArgs[0];
+                    if (recordArg instanceof MezzeRecord record) {
+                        unpackRecordFast(frame, record);
+                    }
+                }
+            }
+        }
     }
 
     /**
