@@ -441,8 +441,8 @@ class TypedASTCompiler(
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
-            // Try ability method resolution
-            val opHash = tryResolveAbilityOp(methodName, receiverType)
+            // Try ability method resolution (only for concrete types, not VarType)
+            val opHash = if (receiverType !is VarType) tryResolveAbilityOp(methodName, receiverType) else null
             if (opHash != null) {
                 val receiverIR = compileExpr(fn.record)
                 // Build arg with receiver injected
@@ -582,7 +582,22 @@ class TypedASTCompiler(
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
                 val tag = pattern.tag.hashCode() and 0x7FFFFFFF
-                PatternIR.Variant(tag, pattern.tag, emptyList(), emptyList())
+                // Extract field names and slots from the payload pattern
+                val fieldNames = mutableListOf<String>()
+                val fieldSlots = mutableListOf<Int>()
+                val payload = pattern.payload
+                if (payload is TypedRecordPattern) {
+                    for (fp in payload.fields) {
+                        fieldNames.add(fp.name)
+                        val slot = localsByName[fp.name] ?: allocLocal(fp.name)
+                        fieldSlots.add(slot)
+                    }
+                } else if (payload is TypedVarPattern) {
+                    fieldNames.add(payload.name)
+                    val slot = localsByName[payload.name] ?: allocLocal(payload.name)
+                    fieldSlots.add(slot)
+                }
+                PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots)
             }
             is TypedRecordPattern -> {
                 PatternIR.Record(
