@@ -86,25 +86,43 @@ class TypedASTCompiler(
     )
 
     /**
-     * Compile a TypedModule to FunctionIR list.
-     * Only compiles the module's own declarations — stdlib refs are hash references.
+     * Compile a TypedModule and its imports to FunctionIR list.
+     * @param additionalModules imported modules to also compile (non-prelude)
+     * @param additionalPerformers performers from imported modules
      */
-    fun compile(module: TypedModule): CompileResult {
+    fun compile(
+        module: TypedModule,
+        additionalModules: List<TypedModule> = emptyList(),
+        additionalPerformers: List<TypedPerformerDecl> = emptyList()
+    ): CompileResult {
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()
 
         val functions = mutableListOf<FunctionIR>()
+        val compiledHashes = mutableSetOf<String>()
 
-        // Compile each let declaration
+        // Compile entry module declarations
         for (decl in module.decls) {
-            if (decl is TypedLetDecl) {
+            if (decl is TypedLetDecl && decl.hash.hex !in stdlibHashes) {
                 functions.add(compileLetDecl(decl))
+                compiledHashes.add(decl.hash.hex)
             }
         }
 
-        // Compile performer declarations (only referenced ones will be included)
-        for (pd in module.performerDecls) {
+        // Compile imported module declarations (non-prelude, non-already-compiled)
+        for (importedModule in additionalModules) {
+            for (decl in importedModule.decls) {
+                if (decl is TypedLetDecl && decl.hash.hex !in stdlibHashes && decl.hash.hex !in compiledHashes) {
+                    functions.add(compileLetDecl(decl))
+                    compiledHashes.add(decl.hash.hex)
+                }
+            }
+        }
+
+        // Compile performer declarations from entry module + imports
+        val allPerformers = module.performerDecls + additionalPerformers
+        for (pd in allPerformers) {
             compilePerformerDecl(pd)
         }
 

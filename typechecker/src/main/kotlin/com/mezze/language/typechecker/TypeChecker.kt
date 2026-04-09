@@ -534,55 +534,54 @@ class TypeChecker(
                 if (!isStdlibModule && emittedTypedModule != null) try {
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(emittedTypedModule!!)
 
-                    val preludeV2 = PrecompiledStdlib.v2Modules
-                    val allModules = HashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>(preludeV2.size + loadedModules.size + 1)
-                    allModules.putAll(preludeV2)
-                    allModules[wrapped.hash] = wrapped
-                    // Include direct imports
-                    if (loadedModules.isNotEmpty()) {
-                        for ((_, v1Module) in loadedModules) {
-                            val v2Module = v1Module.v2TypedModule
-                            if (v2Module != null) {
-                                allModules[v2Module.hash] = v2Module
-                            }
-                        }
+                    // Collect all ability impls from all visible modules
+                    val allAbilityImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
+                    allAbilityImpls.addAll(wrapped.abilityImpls)
+                    for ((_, v2) in PrecompiledStdlib.v2Modules) {
+                        allAbilityImpls.addAll(v2.abilityImpls)
                     }
-                    // Include transitive dependencies from loaded modules' parsed use-decls
-                    // e.g., exception module imports continuation module — we need continuation's functions
-                    val allCached = com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()
                     for ((_, v1Module) in loadedModules) {
-                        val parsed = v1Module.parsedModule ?: continue
-                        for (decl in parsed.decls) {
-                            val depPathStr = when (decl) {
-                                is com.mezze.language.parsedast.ParsedUseDecl -> when (val p = decl.path) {
-                                    is com.mezze.language.parsedast.ParsedUsePath.Module -> p.path.toString()
-                                    is com.mezze.language.parsedast.ParsedUsePath.Selective -> p.modulePath.toString()
-                                }
-                                is com.mezze.language.parsedast.ParsedPubUseDecl -> when (val p = decl.path) {
-                                    is com.mezze.language.parsedast.ParsedUsePath.Module -> p.path.toString()
-                                    is com.mezze.language.parsedast.ParsedUsePath.Selective -> p.modulePath.toString()
-                                }
-                                else -> null
-                            }
-                            if (depPathStr != null) {
-                                val cachedDep = allCached[depPathStr]
-                                val depV2 = cachedDep?.v2TypedModule
-                                if (depV2 != null && depV2.hash !in allModules) {
-                                    allModules[depV2.hash] = depV2
-                                }
-                            }
+                        val v2m = v1Module.v2TypedModule ?: continue
+                        allAbilityImpls.addAll(v2m.abilityImpls)
+                    }
+                    for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                        val v2m = cached.v2TypedModule ?: continue
+                        allAbilityImpls.addAll(v2m.abilityImpls)
+                    }
+
+                    // Build decl index for ByHash resolution
+                    val declIndex = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedLetDecl>()
+                    for (d in wrapped.decls) {
+                        if (d is com.mezze.language.typedast.TypedLetDecl) declIndex[d.hash] = d
+                    }
+
+                    // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
+                    val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
+                        abilityImpls = allAbilityImpls,
+                        stdlibHashes = PrecompiledStdlib.preloweredFunctions.keys
+                    )
+                    compiler.setDeclIndex(declIndex)
+
+                    // Collect imported modules and performers
+                    val importedModules = mutableListOf<com.mezze.language.typedast.TypedModule>()
+                    val importedPerformers = mutableListOf<com.mezze.language.typedast.TypedPerformerDecl>()
+                    for ((_, v1Module) in loadedModules) {
+                        val v2m = v1Module.v2TypedModule ?: continue
+                        importedModules.add(v2m)
+                        importedPerformers.addAll(v2m.performerDecls)
+                    }
+                    for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                        val v2m = cached.v2TypedModule ?: continue
+                        if (v2m.hash !in importedModules.map { it.hash }.toSet()) {
+                            importedModules.add(v2m)
+                            importedPerformers.addAll(v2m.performerDecls)
                         }
                     }
 
-                    val preloweredHashes = PrecompiledStdlib.preloweredFunctions.keys
-                    val monoModule = com.mezze.language.typechecker.mono.Monomorphizer().monomorphize(wrapped, allModules, preloweredHashes)
+                    val result = compiler.compile(wrapped, importedModules, importedPerformers)
 
-                    v2MonoModule = monoModule
-
-                    val resolved = com.mezze.language.typechecker.mono.Resolver().resolve(monoModule)
-                    val lowered = com.mezze.language.typechecker.mono.Lowerer().lower(resolved)
-                    loweredFns = lowered.functions
-                    loweredPerformers = lowered.performerRecords.map { pr ->
+                    loweredFns = result.functions
+                    loweredPerformers = result.performerRecords.map { pr ->
                         val arr = mutableListOf(pr.performerHash, pr.effectHash)
                         for (i in pr.operationHashes.indices) {
                             arr.add(pr.operationHashes[i])
@@ -591,13 +590,10 @@ class TypeChecker(
                         arr.toTypedArray()
                     }
                 } catch (pipelineEx: Exception) {
-                    System.err.println("V2 pipeline: ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
+                    System.err.println("V2 pipeline (TypedASTCompiler): ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
                 }
 
-                // V2 validation on MonoAST
-                if (v2MonoModule != null) {
-                    com.mezze.language.typechecker.mono.V2Validator(allTypeDeclarations).validate(v2MonoModule)
-                }
+                // V2 validation skipped — TypedASTCompiler doesn't produce MonoAST
 
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
