@@ -86,7 +86,6 @@ sealed interface StringPartIR {
 @Serializable data class ReadContextIR(val name: String, override val src: SourceInfo) : NodeIR
 
 // Calls
-@Serializable data class FunctionRefIR(val targetHash: Hash, override val src: SourceInfo) : NodeIR
 @Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 @Serializable data class CallNativeIR(val name: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR

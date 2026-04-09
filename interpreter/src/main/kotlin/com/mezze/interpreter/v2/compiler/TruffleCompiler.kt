@@ -61,7 +61,6 @@ class TruffleCompiler(
         if (ir.paramSlots.isNotEmpty() && ir.captureSlots.isEmpty()) {
             // Function has parameters and NO captures — use MezzeFunctionRootNode
             // for record unpacking. Params go to slots 0..P-1 (matches frame descriptor).
-            val paramSlotTypes = ir.paramSlots.map { slotKindToInt(it) }.toIntArray()
             val rootNode = MezzeFunctionRootNode(
                 language,
                 frameDescriptor,
@@ -69,7 +68,7 @@ class TruffleCompiler(
                 ir.name,
                 ir.paramNames.toTypedArray(),
                 IntArray(0),  // no closure slots
-                paramSlotTypes
+                IntArray(0)
             )
             if (section != null) rootNode.setSourceSection(section)
             return rootNode
@@ -126,10 +125,6 @@ class TruffleCompiler(
             is ReadArgIR -> ReadArgumentNode(node.index)
 
             // === Calls ===
-            is FunctionRefIR -> {
-                // Return the function as a value (for storing in locals, passing as args)
-                FunctionLookupNode(node.targetHash.hex)
-            }
             is CallDirectIR -> {
                 val argNode = compileNode(node.arg, source)
                 if (node.isTailCall) {

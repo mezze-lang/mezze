@@ -83,9 +83,6 @@ sealed interface ResolvedExpr {
 @Serializable data class ResolvedReadContext(val name: String, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 @Serializable data class ResolvedReadCapture(val index: Int, val kind: SlotKind, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 
-// Function lookup — returns MezzeFunction as a value (for passing as argument, storing in local)
-@Serializable data class ResolvedFunctionRef(val targetHash: Hash, override val hash: Hash, override val loc: Loc) : ResolvedExpr
-
 // Calls
 @Serializable data class ResolvedCallDirect(val targetHash: Hash, val arg: ResolvedExpr, val isTailCall: Boolean, override val hash: Hash, override val loc: Loc) : ResolvedExpr
 @Serializable data class ResolvedCallLocal(val slot: Int, val arg: ResolvedExpr, val isTailCall: Boolean, override val hash: Hash, override val loc: Loc) : ResolvedExpr

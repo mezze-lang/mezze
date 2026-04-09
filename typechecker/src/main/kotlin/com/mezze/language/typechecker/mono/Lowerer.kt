@@ -18,8 +18,6 @@ class Lowerer {
     private var nextTempSlot = 0
     /** Capture count for current function — used to offset param slots in frame */
     private var currentCaptureCount = 0
-    /** Param count for current function — locals are offset by this amount in the frame */
-    private var currentParamCount = 0
 
     fun lower(resolvedModule: ResolvedModule): LoweredModule {
         val fileTable = buildFileTable(resolvedModule)
@@ -71,7 +69,6 @@ class Lowerer {
         // Reset temp slot counter — locals start after fn.locals, temps are appended
         nextTempSlot = fn.locals.size
         currentCaptureCount = fn.captures.size
-        currentParamCount = fn.params.size
         val body = lowerExpr(fn.body, fileTable)
         // Collect extra temp slots that were allocated during lowering
         val extraTempCount = nextTempSlot - fn.locals.size
@@ -141,7 +138,6 @@ class Lowerer {
             is ResolvedReadParam -> ReadLocalIR(expr.index, expr.kind, src)
             is ResolvedReadCapture -> ReadCaptureIR(expr.index, expr.kind, src)
 
-            is ResolvedFunctionRef -> FunctionRefIR(expr.targetHash, src)
             is ResolvedCallDirect -> CallDirectIR(expr.targetHash, lowerExpr(expr.arg, ft), expr.isTailCall, src)
             is ResolvedCallLocal -> CallLocalIR(expr.slot, lowerExpr(expr.arg, ft), expr.isTailCall, src)
             is ResolvedCallNative -> CallNativeIR(expr.name, lowerExpr(expr.arg, ft), src)

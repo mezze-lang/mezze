@@ -155,6 +155,7 @@ public final class MezzeFunctionRootNode extends RootNode {
         if (parameterCount > 0 && args.length > closureCount) {
             Object recordArg = args[closureCount];
             if (recordArg instanceof MezzeRecord record) {
+                debugLog2("UNPACK fn=" + name + " paramNames=" + java.util.Arrays.toString(parameterNames) + " record=" + record + " closureCount=" + closureCount + " paramCount=" + parameterCount);
                 unpackRecordFast(frame, record);
             } else {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -179,23 +180,7 @@ public final class MezzeFunctionRootNode extends RootNode {
             }
         }
 
-        // Execute body with tail call loop
-        while (true) {
-            try {
-                return bodyNode.execute(frame);
-            } catch (TailCallException e) {
-                // Tail call: re-execute with new arguments
-                args = e.getArguments();
-                // Re-bind params from the new record argument
-                if (parameterCount > 0 && args.length > closureCount) {
-                    Object recordArg = args[closureCount];
-                    if (recordArg instanceof MezzeRecord record) {
-                        unpackRecordFast(frame, record);
-                    }
-                }
-                // Continue loop — re-execute body with updated frame
-            }
-        }
+        return bodyNode.execute(frame);
     }
 
     /**

@@ -139,7 +139,7 @@ object PrecompiledStdlib {
                     // Unwrap lambda: convert the body, not the lambda itself
                     val (opParams, monoBody) = if (opBody is com.mezze.language.typedast.TypedLambda) {
                         val params = opBody.params.map { p -> com.mezze.language.monoast.MonoParam(p.name, p.type, p.loc) }
-                        params to monoizer.convertExprPublic(opBody.body, allGlobalDecls, params.size)
+                        params to monoizer.convertExprPublic(opBody.body, allGlobalDecls)
                     } else {
                         emptyList<com.mezze.language.monoast.MonoParam>() to monoizer.convertExprPublic(opBody, allGlobalDecls)
                     }
