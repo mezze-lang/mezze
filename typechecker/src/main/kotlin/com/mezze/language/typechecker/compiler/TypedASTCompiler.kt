@@ -142,6 +142,14 @@ class TypedASTCompiler(
             }
         } } catch (_: Exception) {}
 
+        // Debug: dump compiled functions
+        try { java.io.FileWriter("/tmp/compiler_debug.txt", true).use { fw ->
+            fw.write("=== compile() produced ${functions.size} functions ===\n")
+            for (fn in functions) {
+                fw.write("  ${fn.name} params=${fn.paramNames} locals=${fn.localNames}\n")
+            }
+        } } catch (_: Exception) {}
+
         return CompileResult(functions, performerRecords.toList())
     }
 
@@ -211,7 +219,7 @@ class TypedASTCompiler(
         localsByName.putAll(prevLocals)
         currentParamNames = prevParamNames
 
-        return FunctionIR(
+        val fnIR = FunctionIR(
             hash = hash,
             name = name,
             qualifiedName = name,
@@ -225,6 +233,14 @@ class TypedASTCompiler(
             sourceFile = loc.file,
             sourceSection = locToSourceInfo(loc)
         )
+        // Debug: dump map function
+        if (name == "map" && paramNames.contains("result")) {
+            try { java.io.FileWriter("/tmp/compiler_map_debug.txt", true).use { fw ->
+                fw.write("FN $name params=$paramNames locals=$localNames\n")
+                dumpNodeIR(fw, bodyIR, "  ")
+            } } catch (_: Exception) {}
+        }
+        return fnIR
     }
 
     private fun compilePerformerDecl(pd: TypedPerformerDecl) {

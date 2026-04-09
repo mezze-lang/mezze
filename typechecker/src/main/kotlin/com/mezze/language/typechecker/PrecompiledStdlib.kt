@@ -96,6 +96,10 @@ object PrecompiledStdlib {
         val prePerformers = mutableListOf<Array<String>>()
 
         // Compile each prelude module using TypedASTCompiler (single-pass, no old pipeline)
+        try { java.io.FileWriter("/tmp/precompile_init.txt").use { fw ->
+            fw.write("allV2ForPrelower: ${allV2ForPrelower.size} modules\n")
+            for ((h, m) in allV2ForPrelower) fw.write("  ${h.hex.take(16)} ${m.path}\n")
+        } } catch (_: Exception) {}
         val allAbilityImpls = allV2ForPrelower.values.flatMap { it.abilityImpls }
         for ((_, v2Module) in allV2ForPrelower) {
             try {
@@ -114,8 +118,10 @@ object PrecompiledStdlib {
                     }
                     prePerformers.add(arr.toTypedArray())
                 }
-            } catch (_: Exception) {
-                // Module couldn't be compiled — skip
+            } catch (e: Exception) {
+                try { java.io.FileWriter("/tmp/precompile_errors.txt", true).use { fw ->
+                    fw.write("ERROR compiling ${v2Module.path}: ${e::class.simpleName}: ${e.message}\n")
+                } } catch (_: Exception) {}
             }
         }
 
