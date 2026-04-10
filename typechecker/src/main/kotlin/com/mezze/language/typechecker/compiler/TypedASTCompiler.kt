@@ -489,9 +489,6 @@ class TypedASTCompiler(
 
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
-            try { java.io.FileWriter("/tmp/field_access_calls.txt", true).use { fw ->
-                fw.write("FieldAccess call: ${fn.field} receiverType=${fn.record.type::class.simpleName} receiverTypeDetail=${fn.record.type}\n")
-            } } catch (_: Exception) {}
             val methodName = fn.field
             val receiverType = fn.record.type
 
@@ -529,6 +526,25 @@ class TypedASTCompiler(
                 return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
             }
 
+            // VarType receiver + arg has "it" field = TypedAstBuilder confirmed this is a method call.
+            // Emit dynamic dispatch — resolved at runtime based on actual receiver type.
+            // SKIP inlineable ops (add, sub, mul, etc.) — TruffleCompiler handles those
+            // via tryCompileInlineOp on the CallIndirect(ReadField(...)) pattern.
+            if (receiverType is VarType && methodName !in inlineableOps) {
+                val argHasIt = expr.arg is TypedRecord &&
+                    (expr.arg as TypedRecord).entries.any { it is TypedRecordEntry.Field && it.name == Keywords.IT }
+                if (argHasIt) {
+                    val opCandidates = abilityOpIndex[methodName]
+                    if (opCandidates != null && opCandidates.isNotEmpty()) {
+                        val receiverIR = compileExpr(fn.record)
+                        val hashes = opCandidates.map { it.opHash.hex }
+                        val tags = opCandidates.map { op ->
+                            op.targetTypes.firstOrNull()?.let { getTypeTag(it) } ?: "Any"
+                        }
+                        return DynamicMethodCallIR(methodName, receiverIR, argIR, hashes, tags, src)
+                    }
+                }
+            }
         }
 
         // Regular call
@@ -842,6 +858,23 @@ class TypedASTCompiler(
         is FloatType -> SlotKind.DOUBLE
         is BoolType -> SlotKind.BOOLEAN
         else -> SlotKind.OBJECT
+    }
+
+    private fun getTypeTag(type: MezzeType): String = when (type) {
+        is IntType -> "Int"
+        is FloatType -> "Float"
+        is StringType -> "Str"
+        is BoolType -> "Bool"
+        is NatType -> "Nat"
+        is CharType -> "Char"
+        is FracType -> "Frac"
+        is SeqType -> "Seq"
+        is BytesType -> "Bytes"
+        is TypeApplication -> type.constructor
+        is VariantType -> type.typeName ?: type.constructors.keys.sorted().joinToString(",")
+        is RecordType -> type.typeName ?: "Record"
+        is VarType -> "Any"
+        else -> type::class.simpleName ?: "Unknown"
     }
 
     private fun computeOpHash(implHash: Hash, opName: String): Hash {
