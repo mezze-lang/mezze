@@ -64,6 +64,13 @@ class ModuleTypeChecker(
             synchronized(globalCacheLock) {
                 globalCache.clear()
             }
+            // Re-populate from PrecompiledStdlib so stdlib modules don't need re-type-checking
+            try {
+                val stdlib = com.mezze.language.typechecker.PrecompiledStdlib
+                for ((modulePath, module) in stdlib.loadedModules) {
+                    preloadIntoGlobalCache(modulePath, module)
+                }
+            } catch (_: Exception) { /* PrecompiledStdlib not initialized yet */ }
         }
 
         /**
