@@ -617,8 +617,21 @@ class TypedASTCompiler(
                     val slot = allocLocal(stmt.name)
                     val stmtValue = stmt.value
                     val valueIR = if (stmtValue is TypedLambda) {
-                        // Let-bound lambda: extract and create MakeLambda
-                        compileLambda(stmtValue, locToSourceInfo(stmt.loc))
+                        // Let-bound lambda: check if it matches a top-level function.
+                        // If so, reference the top-level function's hash (not a re-hashed copy).
+                        val topLevelDecl = declIndex?.values?.find { it.name == stmt.name }
+                        if (topLevelDecl != null && topLevelDecl.value is TypedLambda) {
+                            // Top-level function — reference it directly (don't re-compile)
+                            val captures = stmtValue.captures.mapNotNull { c ->
+                                val s = localsByName[c.name]
+                                if (s != null) CaptureIR(s, typeToSlotKind(c.type))
+                                else if (c.name in currentParamNames) CaptureIR(currentParamNames.indexOf(c.name), typeToSlotKind(c.type))
+                                else null
+                            }
+                            MakeLambdaIR(topLevelDecl.hash, captures, locToSourceInfo(stmt.loc))
+                        } else {
+                            compileLambda(stmtValue, locToSourceInfo(stmt.loc))
+                        }
                     } else {
                         compileExpr(stmtValue)
                     }

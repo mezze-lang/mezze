@@ -398,6 +398,8 @@ public final class HandleNode extends MezzeNode {
         // Evaluate the handler (may be parameterized impl call)
         Object handler = handlerNode.execute(frame);
 
+        // Handler resolved
+
         // Cache slot validity on first execution - becomes constant for JIT
         if (!slotValidityChecked) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
