@@ -599,10 +599,13 @@ class TypedAstBuilder(
                 }
                 val funcType = MezzeType.FunctionType(paramRecordType, body.type)
 
+                // Compute captures: variables in the body that reference outer scopes
+                val captures = collectCaptures(body, params.map { it.name }.toSet())
+
                 TypedLambda(
                     params = params,
                     body = body,
-                    captures = emptyList(), // filled by resolver later
+                    captures = captures,
                     type = funcType,
                     loc = loc
                 )
@@ -1055,6 +1058,45 @@ class TypedAstBuilder(
     // ========================================================================
     // Lambda parameter building
     // ========================================================================
+
+    /**
+     * Collect captures from a typed expression body.
+     * A capture is any TypedVar with BindingRef.Local(depth > 0) — it references
+     * a variable from an outer lambda scope, not the current lambda's params.
+     */
+    private fun collectCaptures(body: TypedExpr, paramNames: Set<String>): List<TypedCapture> {
+        val captures = mutableListOf<TypedCapture>()
+        val seen = mutableSetOf<String>()
+        walkForCaptures(body, paramNames, captures, seen)
+        return captures
+    }
+
+    private fun walkForCaptures(expr: TypedExpr, paramNames: Set<String>, captures: MutableList<TypedCapture>, seen: MutableSet<String>) {
+        if (expr is TypedVar) {
+            val binding = expr.binding
+            if (binding is BindingRef.Local && binding.depth > 0 && expr.name !in seen) {
+                seen.add(expr.name)
+                captures.add(TypedCapture(expr.name, expr.type, binding))
+            }
+            return
+        }
+        if (expr is TypedLambda) return // nested lambdas compute their own captures
+        if (expr is TypedCall) { walkForCaptures(expr.function, paramNames, captures, seen); walkForCaptures(expr.arg, paramNames, captures, seen); return }
+        if (expr is TypedIf) { walkForCaptures(expr.condition, paramNames, captures, seen); walkForCaptures(expr.thenBranch, paramNames, captures, seen); walkForCaptures(expr.elseBranch, paramNames, captures, seen); return }
+        if (expr is TypedBlock) {
+            for (s in expr.statements) { if (s is TypedStatement.Let) walkForCaptures(s.value, paramNames, captures, seen) else if (s is TypedStatement.Expr) walkForCaptures(s.expr, paramNames, captures, seen) }
+            walkForCaptures(expr.result, paramNames, captures, seen); return
+        }
+        if (expr is TypedRecord) { for (entry in expr.entries) { if (entry is TypedRecordEntry.Field) walkForCaptures(entry.value, paramNames, captures, seen) }; return }
+        if (expr is TypedFieldAccess) { walkForCaptures(expr.record, paramNames, captures, seen); return }
+        if (expr is TypedMatch) { walkForCaptures(expr.scrutinee, paramNames, captures, seen); for (c in expr.cases) { c.guard?.let { walkForCaptures(it, paramNames, captures, seen) }; walkForCaptures(c.body, paramNames, captures, seen) }; return }
+        if (expr is TypedPerform) { walkForCaptures(expr.body, paramNames, captures, seen); return }
+        if (expr is TypedPerformOp) { walkForCaptures(expr.arg, paramNames, captures, seen); return }
+        if (expr is TypedVariantConstruct) { expr.payload?.let { walkForCaptures(it, paramNames, captures, seen) }; return }
+        if (expr is TypedRecordUpdate) { walkForCaptures(expr.record, paramNames, captures, seen); for (entry in expr.updates) { if (entry is TypedRecordEntry.Field) walkForCaptures(entry.value, paramNames, captures, seen) }; return }
+        if (expr is TypedPipe) { walkForCaptures(expr.left, paramNames, captures, seen); walkForCaptures(expr.right, paramNames, captures, seen); return }
+        // leaf nodes: IntLit, StringLit, BoolLit, etc. — no children
+    }
 
     private fun buildLambdaParams(
         params: ParsedLambdaParams,
