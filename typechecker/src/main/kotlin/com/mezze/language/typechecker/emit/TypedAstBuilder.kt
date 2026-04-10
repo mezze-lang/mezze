@@ -147,7 +147,7 @@ class TypedAstBuilder(
     private var precomputedHashes: Map<BindingKey, String>? = null
 
     /** Stack of lambda parameter names — these shadow content hashes */
-    private val lambdaParamScopes = ArrayDeque<List<String>>()
+    private val lambdaParamScopes = ArrayDeque<MutableList<String>>()
 
     /** Get the effective identifier content hashes (precomputed if available) */
     private val effectiveContentHashes: Map<BindingKey, String>
@@ -575,7 +575,7 @@ class TypedAstBuilder(
                 }
 
                 // Track lambda params so resolveBinding prefers Local over ByHash
-                lambdaParamScopes.addLast(params.map { it.name })
+                lambdaParamScopes.addLast(params.map { it.name }.toMutableList())
 
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
@@ -867,6 +867,9 @@ class TypedAstBuilder(
                                 val value = buildExpr(stmt.value, file, valueType)
                                 val resolvedType = substitution.apply(value.type)
                                 identifierContext[destrName] = resolvedType
+                                if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
+                                    lambdaParamScopes.last().add(destrName)
+                                }
                                 val destrHash = computeHash("do_let_$destrName:${typeToString(resolvedType)}")
                                 stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
 
@@ -886,6 +889,14 @@ class TypedAstBuilder(
 
                                 // Register binding for later references in this block
                                 identifierContext[name] = resolvedType
+
+                                // Also add to current lambda scope so inner lambdas can capture it
+                                if (lambdaParamScopes.isNotEmpty()) {
+                                    val currentScope = lambdaParamScopes.last()
+                                    if (name !in currentScope) {
+                                        currentScope.add(name)
+                                    }
+                                }
 
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
@@ -991,7 +1002,7 @@ class TypedAstBuilder(
         }
 
         // Push pattern bindings so case body sees them as locals, not globals
-        lambdaParamScopes.addLast(bindingNames)
+        lambdaParamScopes.addLast(bindingNames.toMutableList())
 
         val caseGuard = case.guard
         val guard = if (caseGuard != null) {
