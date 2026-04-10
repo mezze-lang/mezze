@@ -17,7 +17,6 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
-    implementation(project(":codebase"))
 
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
@@ -45,63 +44,23 @@ tasks.test {
     useJUnitPlatform()
 
     testLogging {
-        events("passed", "skipped", "failed")
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.SHORT
-    }
-
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
-
-    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
-    systemProperty("junit.jupiter.execution.timeout.default", "120s")
-    systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
-
-    jvmArgs(
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/sun.misc=ALL-UNNAMED",
-        "--add-modules=jdk.incubator.vector"
-    )
-
-    maxHeapSize = "4g"
-
-    // Pass mezze.pipeline system property from gradle command line
-    // Usage: ./gradlew :interpreter:test -Dmezze.pipeline=v2
-    systemProperty("mezze.pipeline", System.getProperty("mezze.pipeline") ?: "")
-}
-
-// V2 pipeline test task — runs all interpreter tests through the v2 pipeline
-tasks.register<Test>("testV2") {
-    useJUnitPlatform()
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    testLogging {
         events("started", "passed", "skipped", "failed")
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.SHORT
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = true
     }
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
+
+    maxParallelForks = 1
+
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
-    systemProperty("mezze.pipeline", "v2")
+
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/sun.misc=ALL-UNNAMED",
         "--add-modules=jdk.incubator.vector"
     )
-    maxHeapSize = "4g"
-}
 
-// Compile stdlib to SQLite — produces build/stdlib-compiled.sqlite
-tasks.register<JavaExec>("compileStdlib") {
-    group = "build"
-    description = "Pre-compile stdlib modules to SQLite for faster runtime loading"
-    dependsOn("classes")
-
-    mainClass.set("com.mezze.language.codebase.StdlibCompilerCLI")
-    classpath = sourceSets["main"].runtimeClasspath
-    args = listOf("${project.layout.buildDirectory.get()}/stdlib-compiled.sqlite")
-
-    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+    maxHeapSize = "2g"
 }

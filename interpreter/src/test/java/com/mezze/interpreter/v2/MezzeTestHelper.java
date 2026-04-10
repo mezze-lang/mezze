@@ -72,11 +72,21 @@ public final class MezzeTestHelper {
             Source source = Source.newBuilder(MezzeLanguage.ID, sourceCode, sourcePath)
                 .buildLiteral();
 
-            context.eval(source);
-
-            return MezzeLanguage.getLastExecutionResult();
+            // Schedule a watchdog to force-close the context if it hangs
+            var timer = new java.util.Timer(true);
+            timer.schedule(new java.util.TimerTask() {
+                @Override public void run() {
+                    try { context.close(true); } catch (Exception ignored) {}
+                }
+            }, 2000); // 2 second timeout
+            try {
+                context.eval(source);
+                return MezzeLanguage.getLastExecutionResult();
+            } finally {
+                timer.cancel();
+            }
         } finally {
-            context.close(true);
+            try { context.close(true); } catch (Exception ignored) {}
         }
     }
 
