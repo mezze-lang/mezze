@@ -1113,9 +1113,40 @@ class TypedAstBuilder(
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
         val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
-        // Look up effect hash from effect declaration
         val effectContentHash = effectDecl?.contentHash
-        val effectHash = Hash.fromV1(effectContentHash)
+        val effectHash = if (effectContentHash != null) {
+            Hash.fromV1(effectContentHash)
+        } else {
+            // Fallback: look up from PrecompiledStdlib v2Modules' performer decls
+            // These have the correct effectHash already computed
+            val precompiled = try { com.mezze.language.typechecker.PrecompiledStdlib } catch (_: Exception) { null }
+            var found: Hash? = null
+            if (precompiled != null) {
+                for ((_, v2m) in precompiled.v2Modules) {
+                    for (pd in v2m.performerDecls) {
+                        if (pd.name == performerName) {
+                            found = pd.effectHash
+                            break
+                        }
+                    }
+                    if (found != null) break
+                }
+            }
+            // Also search in ModuleTypeChecker's cached modules (non-prelude imports)
+            if (found == null) {
+                for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                    val v2m = cachedModule.v2TypedModule ?: continue
+                    for (pd in v2m.performerDecls) {
+                        if (pd.name == performerName) {
+                            found = pd.effectHash
+                            break
+                        }
+                    }
+                    if (found != null) break
+                }
+            }
+            found ?: Hash.ZERO
+        }
 
         // Build params if present
         val paramsExpr = handler.params?.let { buildExpr(it, file) }

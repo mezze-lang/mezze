@@ -71,6 +71,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
     // ThreadLocal for direct TruffleIR execution (bypasses parsing)
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
+    private static final ThreadLocal<List<String[]>> directExecutionPerformers = new ThreadLocal<>();
     private static final ThreadLocal<Path> directExecutionRoot = new ThreadLocal<>();
 
     @Override
@@ -109,6 +110,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         List<FunctionIR> directFunctions = directExecutionFunctions.get();
         if (directFunctions != null) {
             directExecutionFunctions.remove();
+            List<String[]> performers = directExecutionPerformers.get();
+            directExecutionPerformers.remove();
             Path projectRoot = directExecutionRoot.get();
             directExecutionRoot.remove();
             if (projectRoot == null) {
@@ -117,7 +120,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
             // All modules are already included in the FunctionIR list — no import extraction needed
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
-                this, directFunctions, Collections.emptyList(), projectRoot
+                this, directFunctions, Collections.emptyList(), projectRoot,
+                performers != null ? performers : Collections.emptyList(),
+                Collections.emptyMap()
             );
         }
 
@@ -593,6 +598,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     public static void setFunctionsForDirectExecution(List<FunctionIR> functions, Path projectRoot) {
         directExecutionFunctions.set(functions);
+        directExecutionPerformers.set(null);
+        directExecutionRoot.set(projectRoot);
+    }
+
+    /**
+     * Set pre-lowered TruffleIR functions AND performer records for direct execution.
+     */
+    public static void setFunctionsForDirectExecution(List<FunctionIR> functions, List<String[]> performers, Path projectRoot) {
+        directExecutionFunctions.set(functions);
+        directExecutionPerformers.set(performers);
         directExecutionRoot.set(projectRoot);
     }
 
