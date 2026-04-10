@@ -275,7 +275,9 @@ data class ConstraintResult(
         val methodHash: String?,         // Content hash of the resolved method (from impl)
         val receiverFieldName: String,   // The field name the receiver maps to (e.g., "it" for ability methods)
         val isInherentMethod: Boolean = false,
-        val implContentHash: String? = null  // Content hash of the impl declaration (for inherent methods)
+        val implContentHash: String? = null,  // Content hash of the impl declaration (for inherent methods)
+        val implStartLine: Int = 0,      // Loc of impl declaration — for computing TypedAbilityImpl hash
+        val implStartCol: Int = 0
     )
     /**
      * Information about an undefined variable.

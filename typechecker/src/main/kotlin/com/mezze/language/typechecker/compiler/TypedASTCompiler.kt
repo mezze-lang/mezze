@@ -528,6 +528,7 @@ class TypedASTCompiler(
                 val recordIR = MakeRecordIR(fields, src)
                 return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
             }
+
         }
 
         // Regular call

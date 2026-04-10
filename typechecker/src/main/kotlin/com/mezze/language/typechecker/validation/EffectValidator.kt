@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.validation
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.ParsedEffectDecl
+import com.mezze.language.parsedast.ParsedPerformerDecl
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.scope.ScopedEffectConstants
 
@@ -106,44 +108,7 @@ class EffectValidator(
         }
     }
 
-    /**
-     * Validate that a perform block handles the effects it claims to.
-     *
-     * Example: perform expr with IO {read = ..., write = ...}
-     * Must provide handlers for all operations of IO effect.
-     */
-    fun validatePerformBlock(
-        expression: PerformExpression,
-        expressionEffects: Set<String>
-    ): List<ValidationError> {
-        val errors = mutableListOf<ValidationError>()
-
-        // Get effects being handled
-        val handledEffects = expression.handlers.map { it.performer.localName }.toSet()
-
-        // Check if all handlers correspond to actual effects used
-        for (handler in expression.handlers) {
-            if (handler.performer.localName !in expressionEffects) {
-                // Warning: handler provided but effect not used
-                // This is not an error, just inefficient
-            }
-        }
-
-        // Check if all used effects have handlers
-        val unhandledEffects = expressionEffects - handledEffects
-        for (effect in unhandledEffects) {
-            errors.add(
-                ValidationError.EffectNotHandled(
-                    effectName = effect,
-                    usedBy = expression.expression,
-                    availableHandlers = handledEffects.toList(),
-                    sourceLocation = null
-                )
-            )
-        }
-
-        return errors
-    }
+    // validatePerformBlock removed — was dead code using v1 PerformExpression
 
     /**
      * Check if an effect is universal (always allowed).
@@ -226,7 +191,7 @@ class EffectValidator(
      *
      * Ensures effect operations are well-formed.
      */
-    fun validateEffectDeclaration(effectDecl: EffectDeclaration): List<ValidationError> {
+    fun validateEffectDeclaration(effectDecl: ParsedEffectDecl): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
         // Check for duplicate operation names
@@ -254,8 +219,8 @@ class EffectValidator(
      * Matches OldTypeChecker.kt lines 12740-12779
      */
     fun validateEffectImpl(
-        implDecl: ImplDeclaration,
-        effectDecl: com.mezze.language.parsedast.ParsedEffectDecl
+        implDecl: ParsedPerformerDecl,
+        effectDecl: ParsedEffectDecl
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 

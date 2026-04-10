@@ -117,7 +117,9 @@ data class TypingContext(
         val methodType: MezzeType,      // The function type of the method (without receiver)
         val implContentHash: String,    // Content hash of the impl declaration
         val sourceModule: String? = null,
-        val targetTypeHash: String? = null  // Content hash of the target type declaration (stable across renames)
+        val targetTypeHash: String? = null,  // Content hash of the target type declaration (stable across renames)
+        val implStartLine: Int = 0,     // Loc of the impl declaration — for computing TypedAbilityImpl hash
+        val implStartCol: Int = 0
     )
 
     /**

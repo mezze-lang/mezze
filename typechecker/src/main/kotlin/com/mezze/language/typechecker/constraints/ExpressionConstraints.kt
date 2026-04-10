@@ -1268,7 +1268,7 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = mapOf(expr.loc to methodCallInfo)
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf(expr.loc to methodCallInfo)
         )
     }
 
@@ -1361,10 +1361,12 @@ class ExpressionConstraintGenerator {
             ConstraintResult.MethodCallInfo(
                 abilityName = null,  // Inherent methods have no ability
                 methodName = methodName,
-                methodHash = null,   // Resolved at TypedAstBuilder time
+                methodHash = null,   // Resolved at TypedAstBuilder time via impl loc
                 receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
                 isInherentMethod = true,
-                implContentHash = methodInfo.implContentHash
+                implContentHash = methodInfo.implContentHash,
+                implStartLine = methodInfo.implStartLine,
+                implStartCol = methodInfo.implStartCol
             )
         } else null
 
@@ -1377,7 +1379,7 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = if (inherentMethodCallInfo != null) mapOf(expr.loc to inherentMethodCallInfo) else emptyMap()
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf(expr.loc to inherentMethodCallInfo) else emptyMap())
         )
     }
 

@@ -649,7 +649,7 @@ class TypedAstBuilder(
                     val receiverExpr = buildExpr(memberAccess.receiver, file)
                     val argExpr = buildExpr(expr.arguments, file)
 
-                    // Build the function reference — use ByHash if available, fall back to field access
+                    // Build the function reference — use ByHash
                     val fn = if (methodInfo.methodHash != null) {
                         // Direct call by hash — no field access, no lambda wrapper
                         val hash = Hash.fromV1(methodInfo.methodHash!!)
@@ -659,8 +659,22 @@ class TypedAstBuilder(
                             type = substitution.apply(contextType),
                             loc = memberAccess.loc
                         )
+                    } else if (methodInfo.isInherentMethod && (methodInfo.implStartLine > 0 || methodInfo.implStartCol > 0)) {
+                        // Inherent method: compute op hash from impl loc + method name
+                        // This matches TypedAstBuilder.buildAbilityImpl's hash computation
+                        val implHash = computeHash("impl_${methodInfo.implStartLine}_${methodInfo.implStartCol}")
+                        val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+                        builder.append(implHash.hex)
+                        builder.append(methodInfo.methodName)
+                        val opHash = Hash(builder.build().toFullHexString())
+                        TypedVar(
+                            name = methodInfo.methodName,
+                            binding = BindingRef.ByHash(opHash),
+                            type = substitution.apply(contextType),
+                            loc = memberAccess.loc
+                        )
                     } else {
-                        // No hash — fall back to field access (Monomorphizer resolves later)
+                        // No hash — fall back to field access
                         buildExpr(expr.function, file)
                     }
 

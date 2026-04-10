@@ -139,15 +139,13 @@ class TypeValidator(
                     errors.addAll(exprPatternErrors)
                 }
                 is com.mezze.language.parsedast.ParsedEffectDecl -> {
-                    val v1EffectDecl = parsedEffectDeclToV1(decl, file)
-                    val declErrors = effectValidator.validateEffectDeclaration(v1EffectDecl)
+                    val declErrors = effectValidator.validateEffectDeclaration(decl)
                     errors.addAll(declErrors)
                 }
                 is com.mezze.language.parsedast.ParsedPerformerDecl -> {
                     val effectDecl = effectDeclarations[decl.effect.localName]
                     if (effectDecl != null) {
-                        val v1Impl = parsedPerformerDeclToV1(decl, file)
-                        val implErrors = effectValidator.validateEffectImpl(v1Impl, effectDecl)
+                        val implErrors = effectValidator.validateEffectImpl(decl, effectDecl)
                         errors.addAll(implErrors)
                     }
                 }
@@ -185,10 +183,197 @@ class TypeValidator(
             errors.addAll(performErrors)
         }
 
+        // V2 match exhaustiveness pass — walks ParsedExpr directly, gets scrutinee type
+        // from constraint results. Only checks matches that the v1 path can't handle:
+        // matches where no constructor patterns exist (so v1 can't infer scrutinee type).
+        for (decl in module.decls) {
+            val expr = when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> decl.value
+                is com.mezze.language.parsedast.ParsedTopLevelExpr -> decl.expression
+                else -> null
+            }
+            if (expr != null) {
+                val matchErrors = validateParsedMatchesInExpr(expr, substitution, constraintResults)
+                errors.addAll(matchErrors)
+            }
+        }
+
         return if (errors.isEmpty()) {
             ValidationResult.Success(warnings)
         } else {
             ValidationResult.Failure(errors)
+        }
+    }
+
+    /**
+     * Walk a ParsedExpr tree and validate exhaustiveness for all ParsedMatch nodes.
+     * Uses constraint results to infer scrutinee types (no v1 inferredType needed).
+     */
+    private fun validateParsedMatchesInExpr(
+        expr: com.mezze.language.parsedast.ParsedExpr,
+        substitution: Substitution,
+        constraintResults: Map<String, ConstraintResult>
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+        walkParsedExpr(expr) { node ->
+            if (node is com.mezze.language.parsedast.ParsedMatch) {
+                // Only check matches that have NO constructor patterns — the v1 path handles
+                // matches with constructors fine. This catches wildcard/variable-only matches
+                // where the v1 path can't infer the scrutinee type.
+                val hasConstructorPattern = node.cases.any { case ->
+                    case.patterns.any { it is com.mezze.language.parsedast.ParsedConstructorPattern }
+                }
+                if (!hasConstructorPattern) {
+                    val scrutineeType = inferParsedScrutineeType(node, substitution, constraintResults)
+                    if (scrutineeType != null) {
+                        val result = validateParsedExhaustiveness(node, scrutineeType)
+                        if (result is ValidationResult.Failure) {
+                            errors.addAll(result.errors)
+                        }
+                    }
+                }
+            }
+        }
+        return errors
+    }
+
+    /** Infer the scrutinee type for a ParsedMatch from patterns or type declarations. */
+    private fun inferParsedScrutineeType(
+        matchExpr: com.mezze.language.parsedast.ParsedMatch,
+        substitution: Substitution,
+        constraintResults: Map<String, ConstraintResult>
+    ): MezzeType? {
+        // Try inferring from constructor patterns in the match cases
+        val constructorNames = mutableSetOf<String>()
+        for (case in matchExpr.cases) {
+            for (pattern in case.patterns) {
+                if (pattern is com.mezze.language.parsedast.ParsedConstructorPattern) {
+                    constructorNames.add(pattern.constructor)
+                }
+            }
+        }
+
+        if (constructorNames.isNotEmpty()) {
+            // Find a type declaration that contains these constructors
+            for ((_, typeDecl) in typeDeclarations) {
+                val definition = typeDecl.definition
+                if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
+                    val variantConstructors = definition.constructors.map { it.name }.toSet()
+                    if (constructorNames.all { it in variantConstructors }) {
+                        return MezzeType.VariantType(
+                            constructors = definition.constructors.associate { ctor ->
+                                ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
+                            },
+                            rowVar = if (definition.isOpen) RowVar.fresh() else null
+                        )
+                    }
+                }
+            }
+        }
+
+        // Try inferring from scrutinee variable's type in enclosing function parameters
+        val scrutinee = matchExpr.scrutinee
+        if (scrutinee is com.mezze.language.parsedast.ParsedIdentifier) {
+            val varName = scrutinee.localName
+            // Search constraint results for a function type that has this parameter
+            for ((_, result) in constraintResults) {
+                val resolvedType = substitution.apply(result.type)
+                val paramType = extractParamType(resolvedType, varName)
+                if (paramType != null) {
+                    val finalType = substitution.apply(paramType)
+                    // Expand type applications to variant types
+                    val expanded = when (finalType) {
+                        is MezzeType.TypeApplication ->
+                            expandTypeApplicationToVariant(finalType, typeDeclarations) ?: finalType
+                        else -> finalType
+                    }
+                    if (expanded is MezzeType.VariantType) return expanded
+                }
+            }
+        }
+
+        return null
+    }
+
+    /** Extract a named parameter's type from a FunctionType's param record. */
+    private fun extractParamType(type: MezzeType, paramName: String): MezzeType? {
+        return when (type) {
+            is MezzeType.FunctionType -> {
+                val paramType = type.paramType
+                if (paramType is MezzeType.RecordType) {
+                    paramType.fields[paramName]
+                } else null
+            }
+            else -> null
+        }
+    }
+
+    /** Walk all sub-expressions of a ParsedExpr, calling visitor for each. */
+    private fun walkParsedExpr(expr: com.mezze.language.parsedast.ParsedExpr, visitor: (com.mezze.language.parsedast.ParsedExpr) -> Unit) {
+        visitor(expr)
+        when (expr) {
+            is com.mezze.language.parsedast.ParsedLambda -> walkParsedExpr(expr.body, visitor)
+            is com.mezze.language.parsedast.ParsedFunctionCall -> {
+                walkParsedExpr(expr.function, visitor)
+                walkParsedExpr(expr.arguments, visitor)
+            }
+            is com.mezze.language.parsedast.ParsedMatch -> {
+                walkParsedExpr(expr.scrutinee, visitor)
+                for (case in expr.cases) {
+                    case.guard?.let { walkParsedExpr(it, visitor) }
+                    walkParsedExpr(case.body, visitor)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedIf -> {
+                walkParsedExpr(expr.condition, visitor)
+                walkParsedExpr(expr.thenBranch, visitor)
+                walkParsedExpr(expr.elseBranch, visitor)
+            }
+            is com.mezze.language.parsedast.ParsedDo -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is com.mezze.language.parsedast.ParsedStatement.Let -> walkParsedExpr(stmt.value, visitor)
+                        is com.mezze.language.parsedast.ParsedStatement.Expr -> walkParsedExpr(stmt.expr, visitor)
+                    }
+                }
+                walkParsedExpr(expr.result, visitor)
+            }
+            is com.mezze.language.parsedast.ParsedRecordLit -> {
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is com.mezze.language.parsedast.ParsedRecordEntry.Field -> entry.value?.let { walkParsedExpr(it, visitor) }
+                        is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> walkParsedExpr(entry.expr, visitor)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.value?.let { walkParsedExpr(it, visitor) }
+            is com.mezze.language.parsedast.ParsedMemberAccess -> walkParsedExpr(expr.receiver, visitor)
+            is com.mezze.language.parsedast.ParsedSeqLit -> {
+                for (elem in expr.elements) {
+                    when (elem) {
+                        is com.mezze.language.parsedast.ParsedSeqElement.Regular -> walkParsedExpr(elem.expr, visitor)
+                        is com.mezze.language.parsedast.ParsedSeqElement.Spread -> walkParsedExpr(elem.expr, visitor)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedPerform -> {
+                walkParsedExpr(expr.body, visitor)
+                // Handlers are just performer references — no sub-expressions to walk
+            }
+            is com.mezze.language.parsedast.ParsedPipe -> {
+                walkParsedExpr(expr.left, visitor)
+                walkParsedExpr(expr.right, visitor)
+            }
+            is com.mezze.language.parsedast.ParsedStringLit -> {
+                for (part in expr.parts) {
+                    if (part is com.mezze.language.parsedast.ParsedStringPart.Interpolation) {
+                        walkParsedExpr(part.expr, visitor)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedParens -> walkParsedExpr(expr.expr, visitor)
+            // Leaf nodes and other types — no children to walk
+            else -> { }
         }
     }
 
@@ -1677,6 +1862,105 @@ class TypeValidator(
         } else {
             ValidationResult.Failure(errors)
         }
+    }
+
+    /**
+     * V2 exhaustiveness check — operates on ParsedMatch directly (no v1 conversion).
+     */
+    fun validateParsedExhaustiveness(
+        matchExpr: com.mezze.language.parsedast.ParsedMatch,
+        scrutineeType: MezzeType
+    ): ValidationResult {
+        val errors = mutableListOf<ValidationError>()
+
+        val expandedType = when (scrutineeType) {
+            is MezzeType.TypeApplication ->
+                expandTypeApplicationToVariant(scrutineeType, typeDeclarations) ?: scrutineeType
+            is MezzeType.BoolType -> MezzeType.VariantType(
+                constructors = mapOf("True" to null, "False" to null), rowVar = null
+            )
+            else -> scrutineeType
+        }
+
+        if (expandedType !is MezzeType.VariantType) return ValidationResult.Success()
+
+        val isOpenVariant = expandedType.rowVar != null
+        val allConstructors = expandedType.constructors.keys
+        val coveredConstructors = mutableSetOf<String>()
+        var hasWildcard = false
+
+        for (case in matchExpr.cases) {
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is com.mezze.language.parsedast.ParsedConstructorPattern -> {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
+                            coveredConstructors.add(pattern.constructor)
+                        }
+                        val constructorPayload = expandedType.constructors[pattern.constructor]
+                        if (constructorPayload == null && pattern.payload != null) {
+                            errors.add(ValidationError.UnitVariantPayloadMismatch(
+                                constructorName = pattern.constructor,
+                                variantType = expandedType,
+                                sourceLocation = SourceLocation(case.body.loc.startLine, case.body.loc.startCol, case.body.loc.file)
+                            ))
+                        }
+                    }
+                    is com.mezze.language.parsedast.ParsedWildcardPattern -> {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) hasWildcard = true
+                    }
+                    is com.mezze.language.parsedast.ParsedVariablePattern -> {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) hasWildcard = true
+                    }
+                    is com.mezze.language.parsedast.ParsedLiteralPattern -> {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
+                            val lit = pattern.value
+                            if (lit is com.mezze.language.parsedast.ParsedLiteralValue.BoolValue) {
+                                coveredConstructors.add(if (lit.value) "True" else "False")
+                            }
+                        }
+                    }
+                    else -> { /* Other patterns don't cover specific constructors */ }
+                }
+            }
+        }
+
+        val uncoveredConstructors = allConstructors - coveredConstructors
+
+        if (isOpenVariant) {
+            if (!hasWildcard) {
+                errors.add(ValidationError.NonExhaustiveMatch(
+                    coveredConstructors = coveredConstructors.toList(),
+                    missingConstructors = listOf("_ (wildcard required for open variant)"),
+                    sourceLocation = SourceLocation(matchExpr.loc.startLine, matchExpr.loc.startCol, matchExpr.loc.file)
+                ))
+            }
+        } else {
+            if (uncoveredConstructors.isNotEmpty() && !hasWildcard) {
+                errors.add(ValidationError.NonExhaustiveMatch(
+                    coveredConstructors = coveredConstructors.toList(),
+                    missingConstructors = uncoveredConstructors.toList(),
+                    sourceLocation = SourceLocation(matchExpr.loc.startLine, matchExpr.loc.startCol, matchExpr.loc.file)
+                ))
+            }
+            if (hasWildcard && uncoveredConstructors.isEmpty()) {
+                for (case in matchExpr.cases) {
+                    for (pattern in case.patterns) {
+                        if ((pattern is com.mezze.language.parsedast.ParsedWildcardPattern ||
+                             pattern is com.mezze.language.parsedast.ParsedVariablePattern) &&
+                            case.guard == null && case.ifLetBindings.isEmpty()) {
+                            errors.add(ValidationError.UnreachablePattern(
+                                reason = "All constructors of this closed variant are already matched: " +
+                                    "${allConstructors.sorted().joinToString(", ")}. This pattern will never execute.",
+                                sourceLocation = SourceLocation(case.body.loc.startLine, case.body.loc.startCol, case.body.loc.file)
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+
+        return if (errors.isEmpty()) ValidationResult.Success()
+        else ValidationResult.Failure(errors)
     }
 
     /**

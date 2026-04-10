@@ -953,7 +953,9 @@ class ContextBuilder {
                 targetTypeName = targetTypeName,
                 methodName = op.name,
                 methodType = methodType,
-                implContentHash = implKey
+                implContentHash = implKey,
+                implStartLine = implDecl.loc.startLine,
+                implStartCol = implDecl.loc.startCol
             )
 
             result = result.extendWithAnonymousMethod(methodInfo)
@@ -1023,7 +1025,9 @@ class ContextBuilder {
                 targetTypeName = targetTypeName,
                 methodName = op.name,
                 methodType = methodType,
-                implContentHash = implKey
+                implContentHash = implKey,
+                implStartLine = implDecl.loc.startLine,
+                implStartCol = implDecl.loc.startCol
             )
             result = result.extendWithAnonymousMethod(methodInfo)
         }

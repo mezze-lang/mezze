@@ -1,6 +1,9 @@
 package com.mezze.language.typechecker.validation
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.ast.SourceLocation
+import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.typechecker.util.StringDistance
 
 /**
@@ -83,7 +86,7 @@ sealed interface ValidationError {
      */
     data class EffectNotHandled(
         val effectName: String,
-        val usedBy: Expression? = null,
+        @Deprecated("Unused — was for v1 PerformExpression") val usedBy: Any? = null,
         val availableHandlers: List<String> = emptyList(),
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
@@ -107,7 +110,7 @@ sealed interface ValidationError {
      * Example: match x { Some {val} -> ... } missing None case
      */
     data class NonExhaustiveMatch(
-        val expression: Expression,
+        val expression: Any? = null,
         val coveredConstructors: List<String>,
         val missingConstructors: List<String>,
         val sourceLocation: SourceLocation? = null
@@ -130,7 +133,7 @@ sealed interface ValidationError {
      * Example: match y is true -> 1 | false -> 0 | _ -> -1 (wildcard unreachable after true/false)
      */
     data class UnreachablePattern(
-        val pattern: Pattern,
+        val pattern: Any? = null,
         val reason: String,
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
@@ -149,7 +152,7 @@ sealed interface ValidationError {
      */
     data class NonExhaustiveRecordPattern(
         val missingFields: List<String>,
-        val pattern: RecordPattern,
+        val pattern: Any? = null,
         val recordType: MezzeType,
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {

@@ -44,10 +44,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilationFinal
     private boolean modulesLoaded = false;
 
-    /** Static cache of evaluated closures — shared across tests within same JVM.
-     *  Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers) */
-    private static final java.util.concurrent.ConcurrentHashMap<String, Object> evaluatedClosureCache
-        = new java.util.concurrent.ConcurrentHashMap<>();
+    // Closure cache moved to MezzeContext (per-context) to avoid sharing CallTargets across Polyglot contexts.
 
     public HashModuleLoaderNode(
             MezzeNode bodyNode,
@@ -99,9 +96,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
         try {
 
-        // Clear the static closure cache to avoid sharing CallTargets across Polyglot contexts.
-        // Each test creates a new context, and Truffle requires CallTargets to be context-specific.
-        evaluatedClosureCache.clear();
+        // Closure cache is now per-context (MezzeContext.closureCache) — no clearing needed.
 
         // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
@@ -124,7 +119,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             int opCount = (info.length - 2) / 2;
             if (opCount > 0) {
                 // Check cache
-                Object cached = evaluatedClosureCache.get(performerHash);
+                Object cached = context.getCachedClosure(performerHash);
                 if (cached instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
                     context.defineGlobal(performerHash, cached);
                     if (!effectHash.isEmpty()) context.defineGlobal(effectHash, cached);
@@ -157,7 +152,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
             if (opFunc instanceof MezzeFunction fn) {
                 // Check if it's a closure factory (returns a function when called with empty record)
                 // Only for cached entries — skip evaluation for fresh functions
-                Object cached = evaluatedClosureCache.get(opHash);
+                Object cached = context.getCachedClosure(opHash);
                 if (cached instanceof MezzeFunction) {
                     opFunc = cached;
                 }
@@ -174,7 +169,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
         var record = com.mezze.interpreter.v2.values.MezzeRecord.withAllObjects(shape, opValues);
         // Register under performer hash AND effect hash, and cache
         context.defineGlobal(performerHash, record);
-        evaluatedClosureCache.put(performerHash, record);
+        context.putCachedClosure(performerHash, record);
         if (!effectHash.isEmpty()) {
             context.defineGlobal(effectHash, record);
         }

@@ -44,6 +44,10 @@ public final class MezzeContext {
     // Persistent compiled node cache with disk backing
     private final CompiledNodeCache compiledNodeCache;
 
+    // Per-context closure cache — replaces the static evaluatedClosureCache in HashModuleLoaderNode.
+    // Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers)
+    private final ConcurrentHashMap<String, Object> closureCache = new ConcurrentHashMap<>();
+
     // Polyglot support (lazy initialization)
     private volatile MezzePolyglotSupport polyglotSupport;
 
@@ -66,6 +70,20 @@ public final class MezzeContext {
 
     public Env getEnv() {
         return env;
+    }
+
+    // ========================
+    // Closure cache (per-context)
+    // ========================
+
+    @TruffleBoundary
+    public Object getCachedClosure(String hash) {
+        return closureCache.get(hash);
+    }
+
+    @TruffleBoundary
+    public void putCachedClosure(String hash, Object value) {
+        closureCache.put(hash, value);
     }
 
     // ========================
