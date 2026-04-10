@@ -55,7 +55,10 @@ public final class MezzeTestHelper {
 
         String sourcePath = root.resolve("__test__.mz").toString();
 
-        // Keep module caches for performance — only clear execution state
+        // Clear module cache for clean state between tests.
+        com.mezze.language.typechecker.ModuleResolver.clearCache();
+        com.mezze.language.typechecker.TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
@@ -94,7 +97,10 @@ public final class MezzeTestHelper {
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
 
-        // Keep module caches for performance — only clear execution state
+        // Clear module cache for clean state between tests.
+        com.mezze.language.typechecker.ModuleResolver.clearCache();
+        com.mezze.language.typechecker.TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
@@ -261,7 +267,10 @@ public final class MezzeTestHelper {
 
         String sourcePath = root.resolve("__test__.mz").toString();
 
-        // Keep module caches for performance — only clear execution state
+        // Clear module cache for clean state between tests.
+        com.mezze.language.typechecker.ModuleResolver.clearCache();
+        com.mezze.language.typechecker.TypeChecker.clearCache();
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
         MezzeLanguage.clearLastResult();
 
