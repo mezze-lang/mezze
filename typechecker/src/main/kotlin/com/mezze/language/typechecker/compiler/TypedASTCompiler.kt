@@ -98,6 +98,9 @@ class TypedASTCompiler(
         additionalModules: List<TypedModule> = emptyList(),
         additionalPerformers: List<TypedPerformerDecl> = emptyList()
     ): CompileResult {
+        try { java.io.FileWriter("/tmp/compiler_start.txt", true).use { fw ->
+            fw.write("TypedASTCompiler.compile: module=${module.path} decls=${module.decls.size} imports=${additionalModules.size}\n")
+        } } catch (_: Exception) {}
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()

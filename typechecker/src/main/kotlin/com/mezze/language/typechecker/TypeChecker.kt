@@ -191,6 +191,7 @@ class TypeChecker(
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult {
+        System.err.println("[TC] checkParsedModule: ${currentModulePath ?: module.path} decls=${module.decls.size}")
         // Desugar pipe expressions in ParsedModule before type checking
         @Suppress("NAME_SHADOWING")
         val module = desugarPipesInParsedModule(module)
@@ -592,7 +593,13 @@ class TypeChecker(
                         importedPerformers.addAll(v2m.performerDecls)
                     }
 
+                    try { java.io.FileWriter("/tmp/compile_trace.txt", true).use { fw ->
+                        fw.write("COMPILE: module=${currentModulePath ?: "<entry>"} imports=${importedModules.size} preludeSkip=${preludeHashes.size}\n")
+                    } } catch (_: Exception) {}
                     val result = compiler.compile(wrapped, importedModules, importedPerformers)
+                    try { java.io.FileWriter("/tmp/compile_trace.txt", true).use { fw ->
+                        fw.write("  RESULT: ${result.functions.size} functions, ${result.performerRecords.size} performers\n")
+                    } } catch (_: Exception) {}
 
                     loweredFns = result.functions
                     loweredPerformers = result.performerRecords.map { pr ->
