@@ -147,7 +147,45 @@ class TruffleCompiler(
             }
             is CallNativeIR -> {
                 val argNode = compileNode(node.arg, source)
-                NativeDispatch.create(node.name, argNode)
+                // Use dedicated Truffle nodes for continuation primitives
+                // (matching main branch's convertNativeFunctionCall)
+                when (node.name) {
+                    "__native_continuation_delimit" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationDelimitNode.create()
+                    "__native_continuation_activate" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationActivateNode.create(argNode)
+                    "__native_continuation_capture" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationCaptureNode.create(argNode)
+                    "__native_continuation_suspend" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendNode.create()
+                    "__native_continuation_suspend_with" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendWithNode(argNode)
+                    "__native_continuation_resume" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationResumeNode.create(argNode)
+                    "__native_continuation_abort" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationAbortNode.create(argNode)
+                    "__native_continuation_extract_suspended" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationExtractSuspendedNode.create(argNode)
+                    "__native_continuation_deactivate" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationDeactivateNode.create(argNode)
+                    "__native_continuation_run_suspendable" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationRunSuspendableNode.create(argNode)
+                    "__native_continuation_suspend_and_resume" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendAndResumeNode.create(argNode)
+                    "__native_continuation_get_collected" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationGetCollectedNode.create(argNode)
+                    "__native_continuation_take_collected" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationTakeCollectedNode.create(argNode)
+                    "__native_continuation_collected_count" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationCollectedCountNode.create(argNode)
+                    "__native_continuation_snapshot" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationSnapshotNode.create(argNode)
+                    "__native_continuation_restore" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationRestoreNode.create(argNode)
+                    "__native_continuation_is_serializable" ->
+                        com.mezze.interpreter.v2.nodes.continuation.ContinuationIsSerializableNode.create(argNode)
+                    else -> NativeDispatch.create(node.name, argNode)
+                }
             }
             is CallIndirectIR -> {
                 // Check for inline operator pattern: CallIndirect(ReadField(receiver, "add"), {r=...})
