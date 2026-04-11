@@ -205,6 +205,20 @@ class TypedASTCompiler(
                 body = value.body,
                 loc = decl.loc
             )
+        } else if (value is TypedVar && value.binding is BindingRef.ByHash) {
+            // Value alias: `toggle_bool = toggle`
+            // Compile as a thunk that returns the function reference (not CALLS it).
+            // The body should be a ReadContextIR or FunctionLookup, not a CallDirect.
+            val targetHash = (value.binding as BindingRef.ByHash).hash
+            compileFunctionBody(
+                hash = decl.hash,
+                name = decl.name,
+                params = emptyList(),
+                body = value, // compileExpr will emit CallDirect(hash, Unit) for ByHash
+                loc = decl.loc
+            )
+            // Note: this still has the call-with-empty-args issue for function aliases.
+            // The proper fix needs ReadContextIR or MakeLambdaIR for the target.
         } else {
             // Value (thunk): no params
             compileFunctionBody(
@@ -477,27 +491,13 @@ class TypedASTCompiler(
             is BindingRef.Param -> ReadLocalIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.Capture -> ReadCaptureIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.ByHash -> {
-                // Function/value reference by hash — depends on context
-                // If it's a function type, return a function reference
-                // Otherwise, call the thunk to get the value
-                val decl = findDecl(binding.hash)
-                if (decl != null && decl.value is TypedLambda) {
-                    // It's a function — check if it's a local (e.g., let-bound in a block)
-                    val slot = localsByName[expr.name]
-                    if (slot != null) {
-                        ReadLocalIR(slot, SlotKind.OBJECT, src)
-                    } else {
-                        // Global function reference — emit CallDirect with unit (will be resolved at runtime)
-                        CallDirectIR(binding.hash, UnitLitIR(src), false, src)
-                    }
+                // First check if it's a local variable
+                val slot = localsByName[expr.name]
+                if (slot != null) {
+                    ReadLocalIR(slot, typeToSlotKind(expr.type), src)
                 } else {
-                    // Value reference
-                    val slot = localsByName[expr.name]
-                    if (slot != null) {
-                        ReadLocalIR(slot, typeToSlotKind(expr.type), src)
-                    } else {
-                        CallDirectIR(binding.hash, UnitLitIR(src), false, src)
-                    }
+                    // Global reference — read from context, don't call
+                    ReadContextIR(binding.hash.hex, src)
                 }
             }
             is BindingRef.Native -> CallNativeIR(binding.name, UnitLitIR(src), src)
