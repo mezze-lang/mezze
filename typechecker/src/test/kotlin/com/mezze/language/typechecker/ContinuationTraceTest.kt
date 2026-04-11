@@ -11,11 +11,13 @@ class ContinuationTraceTest {
         val source = """
             use std::control::continuation
 
-            let test = {} -> do
-                let c = continuation::new {}
-                42
+            use std::effects::exception::{Exception, ExceptionToResult}
 
-            test {}
+            let safe_div = {a, b} ->
+                if b == 0 then Exception.throw {error = "Div by zero"} else a / b
+
+            let handle = {} -> perform ExceptionToResult in Ok {val = safe_div {a = 10, b = 2}}
+            handle {}
         """.trimIndent()
 
         val fw = FileWriter("/tmp/cont_trace.txt")
@@ -44,6 +46,22 @@ class ContinuationTraceTest {
                     fw.write("  typedModule: ${result.typedModule != null}\n")
                     fw.write("  loweredFns: ${result.loweredFunctions?.size}\n")
                 }
+            }
+            // Dump the IR for handle function
+            if (result is TypeChecker.TypeCheckResult.Success && result.loweredFunctions != null) {
+                fw.write("\n=== KEY FUNCTIONS ===\n")
+                for (fn in result.loweredFunctions!!) {
+                    if (fn.name in listOf("handle", "__entry__", "initialize_scope", "throw")) {
+                        fw.write("${fn.name} hash=${fn.hash.hex.take(16)} params=${fn.paramNames} locals=${fn.localNames} captures=${fn.captureNames}\n")
+                    }
+                }
+                fw.write("\nPerformerRecords from loweredPerformers:\n")
+                val performers = result.loweredPerformers
+                fw.write("  count: ${performers.size}\n")
+                for (pr in performers) {
+                    fw.write("  ${pr.toList()}\n")
+                }
+                fw.flush()
             }
         } catch (e: Exception) {
             fw.write("EXCEPTION: ${e::class.simpleName}: ${e.message}\n")

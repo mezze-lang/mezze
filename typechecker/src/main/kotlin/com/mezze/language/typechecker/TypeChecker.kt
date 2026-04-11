@@ -191,7 +191,6 @@ class TypeChecker(
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult {
-        System.err.println("[TC] checkParsedModule: ${currentModulePath ?: module.path} decls=${module.decls.size}")
         // Desugar pipe expressions in ParsedModule before type checking
         @Suppress("NAME_SHADOWING")
         val module = desugarPipesInParsedModule(module)
