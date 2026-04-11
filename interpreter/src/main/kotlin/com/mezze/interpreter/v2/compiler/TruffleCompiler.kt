@@ -147,7 +147,13 @@ class TruffleCompiler(
             }
             is CallNativeIR -> {
                 val argNode = compileNode(node.arg, source)
-                NativeDispatch.create(node.name, argNode)
+                // Use dedicated Truffle nodes for continuation primitives that need
+                // special control flow (ContinuationSuspendedException throw)
+                if (node.name == "__native_continuation_suspend_with") {
+                    com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendWithNode(argNode)
+                } else {
+                    NativeDispatch.create(node.name, argNode)
+                }
             }
             is CallIndirectIR -> {
                 // Check for inline operator pattern: CallIndirect(ReadField(receiver, "add"), {r=...})
