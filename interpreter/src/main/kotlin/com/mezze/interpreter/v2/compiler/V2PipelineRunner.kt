@@ -62,16 +62,11 @@ object V2PipelineRunner {
             return MezzeRootNode(language, fd, wrapped).callTarget
         }
 
-        // Add pre-lowered stdlib functions first
+        // Add pre-lowered stdlib functions — use Language-level cache to avoid recompilation
         val compiler = TruffleCompiler(language)
         val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
-        for ((hash, fn) in precompiled.preloweredFunctions) {
-            if (!compiledFunctions.containsKey(hash)) {
-                val rootNode = compiler.compile(fn)
-                compiledFunctions[hash] = rootNode.callTarget
-            }
-        }
+        compiledFunctions.putAll(language.getOrCompileStdlibCallTargets())
 
         // Compile entry module functions (skip those already pre-lowered)
         compiler.registerFunctions(functions)

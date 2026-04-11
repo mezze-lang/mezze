@@ -69,6 +69,30 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private static final MezzeParser sharedParser = new MezzeParser();
     private static final TypeChecker sharedTypeChecker = new TypeChecker();
 
+    // Cached stdlib CallTargets — compiled once per Language instance (shared Engine).
+    // This avoids recompiling 1044 stdlib functions on every test (232ms × N tests).
+    private volatile Map<String, CallTarget> cachedStdlibCallTargets = null;
+
+    /**
+     * Get cached stdlib CallTargets. Compiled on first call, then reused.
+     * Must be called from within a parse() or context method (not static).
+     */
+    public Map<String, CallTarget> getOrCompileStdlibCallTargets() {
+        if (cachedStdlibCallTargets != null) return cachedStdlibCallTargets;
+        synchronized (this) {
+            if (cachedStdlibCallTargets != null) return cachedStdlibCallTargets;
+            var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
+            var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
+            var result = new java.util.HashMap<String, CallTarget>();
+            for (var entry : precompiled.getPreloweredFunctions().entrySet()) {
+                var rootNode = compiler.compile(entry.getValue());
+                result.put(entry.getKey(), rootNode.getCallTarget());
+            }
+            cachedStdlibCallTargets = result;
+            return result;
+        }
+    }
+
     // ThreadLocal for direct TruffleIR execution (bypasses parsing)
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<List<String[]>> directExecutionPerformers = new ThreadLocal<>();
