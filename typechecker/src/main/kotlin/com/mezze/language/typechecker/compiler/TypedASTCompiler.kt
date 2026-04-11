@@ -428,6 +428,10 @@ class TypedASTCompiler(
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
             is BindingRef.Local -> {
+                // "scope" is a runtime-injected variable from HandleNode (scoped effects)
+                if (expr.name == "scope") {
+                    return ReadContextIR("scope", src)
+                }
                 // Check if this is a captured variable (Local with depth > 0 inside a lambda)
                 if (binding.depth > 0) {
                     val captureIdx = currentCaptureNames[expr.name]
