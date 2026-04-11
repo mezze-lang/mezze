@@ -34,7 +34,6 @@ class TruffleCompiler(
 ) {
     private val sourceCache = mutableMapOf<String, Source>()
     private val functionRegistry = mutableMapOf<String, FunctionIR>()
-    private var currentFunctionSlotCount = 0
 
     /** Register all FunctionIRs so MakeLambdaIR can find them */
     fun registerFunctions(functions: List<FunctionIR>) {
@@ -54,7 +53,6 @@ class TruffleCompiler(
      */
     fun compile(ir: FunctionIR): com.oracle.truffle.api.nodes.RootNode {
         val source = getOrCreateSource(ir.sourceFile)
-        currentFunctionSlotCount = ir.paramSlots.size + ir.localSlots.size + ir.captureSlots.size
         val frameDescriptor = buildFrameDescriptor(ir)
         val bodyNode = compileNode(ir.body, source)
 
@@ -356,10 +354,7 @@ class TruffleCompiler(
                 if (fnIR != null) {
                     // Compile the lambda's body from its FunctionIR
                     val fnSource = getOrCreateSource(fnIR.sourceFile)
-                    val prevSlotCount = currentFunctionSlotCount
-                    currentFunctionSlotCount = fnIR.paramSlots.size + fnIR.localSlots.size + fnIR.captureSlots.size
                     val bodyNode = compileNode(fnIR.body, fnSource)
-                    currentFunctionSlotCount = prevSlotCount
                     val innerFd = buildFrameDescriptor(fnIR)
                     FunctionDefinitionNode(
                         fnIR.name,
@@ -390,21 +385,18 @@ class TruffleCompiler(
 
             // === Effects ===
             is HandleIR -> {
+                val bodyNode = compileNode(node.body, source)
                 if (node.handlers.isNotEmpty()) {
                     val handler = node.handlers.first()
                     val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
+                    // HandlerLookupNode: tries content hash first, then performer name.
+                    // For both parameterized and non-parameterized handlers, lookup returns
+                    // either a MezzeRecord (performer record) or MezzeFunction (closure factory).
+                    // HandlerLookupNode handles MezzeFunction → MezzeRecord evaluation internally.
                     val handlerNode: MezzeNode = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
-
-                    // Transform BlockIR body into StateMachineNode for continuation support
-                    val bodyNode = if (node.body is BlockIR) {
-                        compileBlockAsStateMachine(node.body as BlockIR, source)
-                    } else {
-                        compileNode(node.body, source)
-                    }
-
                     HandleNode(
                         -1,                     // no local slot
-                        arrayOf(handler.effectHash.hex),
+                        arrayOf(handler.effectHash.hex),  // effect hashes for context registration
                         handler.performerName,
                         contentHashes,
                         handlerNode,
@@ -416,7 +408,7 @@ class TruffleCompiler(
                         false   // no finalize
                     )
                 } else {
-                    compileNode(node.body, source)
+                    bodyNode
                 }
             }
             is PerformOpIR -> {
@@ -471,74 +463,6 @@ class TruffleCompiler(
         }
     }
 
-    /**
-     * Transform a BlockIR into a StateMachineNode for continuation support.
-     *
-     * Each let-statement becomes a COMPUTE state where the state node is the
-     * WriteLocalWithContextNode (which both writes to frame AND returns the value).
-     * The result expression becomes a COMPLETE state.
-     * All let-binding slots are captured variables for suspend/resume.
-     */
-    private fun compileBlockAsStateMachine(block: BlockIR, source: com.oracle.truffle.api.source.Source): MezzeNode {
-        val stateNodes = mutableListOf<MezzeNode>()
-        val stateTypes = mutableListOf<Int>()
-        val nextStates = mutableListOf<Int>()
-        val capturedSlots = mutableListOf<Int>()
-        val capturedNames = mutableListOf<String>()
-
-        var stateIdx = 0
-        for (stmt in block.stmts) {
-            when (stmt) {
-                is StmtIR.Let -> {
-                    val valueNode = compileNode(stmt.value, source)
-                    // WriteLocalWithContextNode both writes to frame AND returns value
-                    val writeNode = WriteLocalWithContextNode.create(
-                        valueNode, stmt.slot, slotKindToInt(stmt.kind),
-                        stmt.name, stmt.contentHash.hex
-                    )
-                    stateNodes.add(writeNode)
-                    stateTypes.add(0) // STATE_COMPUTE
-                    nextStates.add(stateIdx + 1)
-                    capturedSlots.add(stmt.slot)
-                    capturedNames.add(stmt.name)
-                    stateIdx++
-                }
-                is StmtIR.Expr -> {
-                    stateNodes.add(compileNode(stmt.node, source))
-                    stateTypes.add(0) // STATE_COMPUTE
-                    nextStates.add(stateIdx + 1)
-                    stateIdx++
-                }
-            }
-        }
-
-        // Result = COMPLETE state
-        stateNodes.add(compileNode(block.result, source))
-        stateTypes.add(2) // STATE_COMPLETE
-        nextStates.add(-1)
-
-        // Find the highest slot used by this block to place state machine slots after it
-        var maxSlot = -1
-        for (stmt in block.stmts) {
-            if (stmt is StmtIR.Let && stmt.slot > maxSlot) maxSlot = stmt.slot
-        }
-        // State machine slots go right after the highest used slot
-        // (these are reserved in buildFrameDescriptor as the last 2 slots)
-        val inputSlot = currentFunctionSlotCount
-        val stateIndexSlot = currentFunctionSlotCount + 1
-
-        return com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode(
-            stateNodes.toTypedArray(),
-            stateTypes.toIntArray(),
-            nextStates.toIntArray(),
-            inputSlot,
-            stateIndexSlot,
-            capturedSlots.toIntArray(),
-            capturedNames.toTypedArray(),
-            0
-        )
-    }
-
     private fun buildFrameDescriptor(ir: FunctionIR): FrameDescriptor {
         // Declare typed slot kinds so Truffle/Graal can specialize frame access.
         // ReadLocalNode/WriteLocalNode catch FrameSlotTypeException and fall back
@@ -553,10 +477,6 @@ class TruffleCompiler(
         for (i in ir.captureSlots.indices) {
             builder.addSlot(slotKindToFrameKind(ir.captureSlots[i]), ir.captureNames.getOrElse(i) { "capture_$i" }, null)
         }
-        // Reserve slots for state machine (input + state index) — used when
-        // a do-block inside perform is compiled as StateMachineNode
-        builder.addSlot(FrameSlotKind.Object, "__sm_input__", null)
-        builder.addSlot(FrameSlotKind.Long, "__sm_state_idx__", null)
         return builder.build()
     }
 
