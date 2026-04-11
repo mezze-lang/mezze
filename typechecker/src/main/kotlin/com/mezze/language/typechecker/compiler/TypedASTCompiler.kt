@@ -57,6 +57,9 @@ class TypedASTCompiler(
     /** Current function's param names */
     private var currentParamNames = listOf<String>()
 
+    /** Capture name → capture index (for the current lambda being compiled) */
+    private var currentCaptureNames = mapOf<String, Int>()
+
     /** File table for source info */
     private val files = mutableSetOf<String>()
 
@@ -140,6 +143,7 @@ class TypedASTCompiler(
                 val opHash = computeOpHash(impl.hash, opName)
                 if (opHash.hex in compiledOpHashes || opHash.hex in stdlibHashes) continue
                 compiledOpHashes.add(opHash.hex)
+                currentCaptureNames = emptyMap() // ability ops aren't closures
                 if (opBody is TypedLambda) {
                     functions.add(compileFunctionBody(opHash, opName, opBody.params, opBody.body, opBody.loc))
                 } else {
@@ -181,6 +185,8 @@ class TypedASTCompiler(
 
     private fun compileLetDecl(decl: TypedLetDecl): FunctionIR {
         files.add(decl.loc.file)
+        // Top-level functions don't have captures — reset capture context
+        currentCaptureNames = emptyMap()
 
         val value = decl.value
         // Debug: check if map is a lambda
@@ -216,18 +222,22 @@ class TypedASTCompiler(
         name: String,
         params: List<TypedParam>,
         body: TypedExpr,
-        loc: Loc
+        loc: Loc,
+        captureInfo: List<Pair<String, SlotKind>> = emptyList()
     ): FunctionIR {
         // Save and reset state
         val prevParamCount = currentParamCount
         val prevNextLocal = nextLocalSlot
         val prevLocals = localsByName.toMap()
         val prevParamNames = currentParamNames
+        val prevCaptureNames = currentCaptureNames
 
         currentParamCount = params.size
         nextLocalSlot = params.size  // locals start after params
         localsByName.clear()
         currentParamNames = params.map { it.name }
+        // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
+        // For non-lambda functions (called from compileLetDecl), it should be empty.
 
         // Compile body
         val bodyIR = compileExpr(body)
@@ -246,6 +256,7 @@ class TypedASTCompiler(
         nextLocalSlot = prevNextLocal
         localsByName.clear()
         localsByName.putAll(prevLocals)
+        currentCaptureNames = prevCaptureNames
         currentParamNames = prevParamNames
 
         val fnIR = FunctionIR(
@@ -256,8 +267,8 @@ class TypedASTCompiler(
             paramNames = paramNames,
             localSlots = localSlots,
             localNames = localNames,
-            captureSlots = emptyList(),
-            captureNames = emptyList(),
+            captureSlots = captureInfo.map { it.second },
+            captureNames = captureInfo.map { it.first },
             body = bodyIR,
             sourceFile = loc.file,
             sourceSection = locToSourceInfo(loc)
@@ -417,6 +428,13 @@ class TypedASTCompiler(
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
             is BindingRef.Local -> {
+                // Check if this is a captured variable (Local with depth > 0 inside a lambda)
+                if (binding.depth > 0) {
+                    val captureIdx = currentCaptureNames[expr.name]
+                    if (captureIdx != null) {
+                        return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
+                    }
+                }
                 // Use depth to find the right scope
                 if (binding.depth == 0 && scopeStack.isNotEmpty()) {
                     // Innermost scope (current match bindings)
@@ -585,14 +603,23 @@ class TypedASTCompiler(
     // ========================================================================
 
     private fun compileLambda(expr: TypedLambda, src: SourceInfo): NodeIR {
+        // Build capture name → index map so compileVar can emit ReadCaptureIR
+        val captureNameMap = mutableMapOf<String, Int>()
+        for ((i, c) in expr.captures.withIndex()) {
+            captureNameMap[c.name] = i
+        }
+        currentCaptureNames = captureNameMap
+
         // Extract lambda as a separate FunctionIR
         val lambdaHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(expr)
+        val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) }
         val fnIR = compileFunctionBody(
             hash = lambdaHash,
             name = "lambda",
             params = expr.params,
             body = expr.body,
-            loc = expr.loc
+            loc = expr.loc,
+            captureInfo = lambdaCaptureInfo
         )
         extractedFunctions.add(fnIR)
 
