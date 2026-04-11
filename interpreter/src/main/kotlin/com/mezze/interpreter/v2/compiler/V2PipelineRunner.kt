@@ -68,10 +68,10 @@ object V2PipelineRunner {
         val compiledFunctions = mutableMapOf<String, CallTarget>()
         compiledFunctions.putAll(language.getOrCompileStdlibCallTargets())
 
-        // Compile entry module functions (skip those already pre-lowered)
+        // Compile entry module functions (skip those already in stdlib cache)
         compiler.registerFunctions(functions)
         for (fn in functions) {
-            if (fn.hash.hex !in precompiled.preloweredFunctions) {
+            if (fn.hash.hex !in compiledFunctions) {
                 val rootNode = compiler.compile(fn)
                 compiledFunctions[fn.hash.hex] = rootNode.callTarget
             }

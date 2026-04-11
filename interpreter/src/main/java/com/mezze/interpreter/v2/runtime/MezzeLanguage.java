@@ -93,6 +93,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
     }
 
+    // Cache for imported module CallTargets (non-entry, non-stdlib functions)
+    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> importedCallTargetCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    public CallTarget getCachedCallTarget(String hash) {
+        return importedCallTargetCache.get(hash);
+    }
+
+    public void cacheCallTarget(String hash, CallTarget ct) {
+        importedCallTargetCache.put(hash, ct);
+    }
+
     // ThreadLocal for direct TruffleIR execution (bypasses parsing)
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<List<String[]>> directExecutionPerformers = new ThreadLocal<>();
