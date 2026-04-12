@@ -330,6 +330,8 @@ public final class FunctionDefinitionNode extends MezzeNode {
      * closure capture across threads where Truffle's type specialization differs).
      */
     private static Object readSlotTyped(VirtualFrame frame, int slot, int kind) {
+        // Try the declared kind first, then try all typed reads as fallback.
+        // This handles captures where the parent wrote LONG but we read OBJECT.
         try {
             return switch (kind) {
                 case KIND_LONG -> frame.getLong(slot);
@@ -338,9 +340,11 @@ public final class FunctionDefinitionNode extends MezzeNode {
                 default -> frame.getObject(slot);
             };
         } catch (FrameSlotTypeException e) {
-            // Slot type mismatch - fall back to generic read
-            // This can happen when closures are captured across threads
-            // where type specialization may differ
+            // Slot was written with a different kind — try typed reads in order
+            try { return frame.getLong(slot); } catch (FrameSlotTypeException e2) { /* not long */ }
+            try { return frame.getDouble(slot); } catch (FrameSlotTypeException e2) { /* not double */ }
+            try { return frame.getObject(slot); } catch (FrameSlotTypeException e2) { /* not object */ }
+            // Last resort
             return frame.getValue(slot);
         }
     }
