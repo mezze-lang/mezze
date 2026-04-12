@@ -49,10 +49,12 @@ tasks.test {
         showStandardStreams = true
     }
 
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
+    // Sequential execution like main branch — parallel forks multiply memory
+    // (each fork loads 100MB+ PrecompiledStdlib + 4GB heap = OOM on 8GB machines)
+    maxParallelForks = 1
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
-    systemProperty("junit.jupiter.execution.timeout.default", "120s")
+    systemProperty("junit.jupiter.execution.timeout.default", "30s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
 
     jvmArgs(

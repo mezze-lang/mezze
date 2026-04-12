@@ -72,19 +72,8 @@ public final class MezzeTestHelper {
             Source source = Source.newBuilder(MezzeLanguage.ID, sourceCode, sourcePath)
                 .buildLiteral();
 
-            // Schedule a watchdog to force-close the context if it hangs
-            var timer = new java.util.Timer(true);
-            timer.schedule(new java.util.TimerTask() {
-                @Override public void run() {
-                    try { context.close(true); } catch (Exception ignored) {}
-                }
-            }, 5000); // 5 second timeout
-            try {
-                context.eval(source);
-                return MezzeLanguage.getLastExecutionResult();
-            } finally {
-                timer.cancel();
-            }
+            context.eval(source);
+            return MezzeLanguage.getLastExecutionResult();
         } finally {
             try { context.close(true); } catch (Exception ignored) {}
         }

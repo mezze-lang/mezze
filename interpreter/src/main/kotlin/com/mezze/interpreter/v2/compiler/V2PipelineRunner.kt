@@ -62,13 +62,28 @@ object V2PipelineRunner {
             return MezzeRootNode(language, fd, wrapped).callTarget
         }
 
-        // Add pre-lowered stdlib functions — use Language-level cache to avoid recompilation
+        // Compile user functions and only the stdlib functions they reference.
+        // This avoids compiling ALL 1000+ stdlib functions upfront — only what's needed.
         val compiler = TruffleCompiler(language)
         val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
-        compiledFunctions.putAll(language.getOrCompileStdlibCallTargets())
 
-        // Compile entry module functions (skip those already in stdlib cache)
+        // Collect all hashes referenced by user code (transitive)
+        val userHashes = functions.map { it.hash.hex }.toSet()
+        val referencedHashes = collectReferencedHashes(functions, precompiled.preloweredFunctions)
+
+        // Compile only referenced stdlib functions
+        for (hash in referencedHashes) {
+            if (hash !in userHashes) {
+                val stdlibFn = precompiled.preloweredFunctions[hash]
+                if (stdlibFn != null) {
+                    val rootNode = compiler.compile(stdlibFn)
+                    compiledFunctions[hash] = rootNode.callTarget
+                }
+            }
+        }
+
+        // Compile entry module functions
         compiler.registerFunctions(functions)
         for (fn in functions) {
             if (fn.hash.hex !in compiledFunctions) {
@@ -93,13 +108,15 @@ object V2PipelineRunner {
             }
         }
 
-        // Pre-lowered functions already added above. Add name mappings + performer records.
+        // Add name mappings for referenced stdlib functions + all performer records
         val allPerformerRecords = performerRecords.toMutableList()
-        for ((hash, fn) in precompiled.preloweredFunctions) {
-            if (fn.name != "lambda" && !fn.name.startsWith("__")) {
+        for (hash in referencedHashes) {
+            val fn = precompiled.preloweredFunctions[hash]
+            if (fn != null && fn.name != "lambda" && !fn.name.startsWith("__")) {
                 hashToName[hash] = fn.name
             }
         }
+        // Performer records need to be complete for handler resolution
         allPerformerRecords.addAll(precompiled.preloweredPerformerRecords)
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
@@ -124,6 +141,132 @@ object V2PipelineRunner {
             0,
             IntArray(0)
         ).callTarget
+    }
+
+    /**
+     * Collect all function hashes referenced transitively by the user's FunctionIRs.
+     * Walks the IR tree to find CallDirectIR, MakeLambdaIR, HandleIR, and PerformOpIR
+     * references, then follows them into stdlib to collect the full transitive closure.
+     */
+    private fun collectReferencedHashes(
+        userFunctions: List<com.mezze.language.truffleir.FunctionIR>,
+        stdlibFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
+    ): Set<String> {
+        val referenced = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+
+        // Seed with user function hashes
+        for (fn in userFunctions) {
+            referenced.add(fn.hash.hex)
+            collectHashesFromNode(fn.body, queue)
+        }
+
+        // BFS: follow references into stdlib
+        while (queue.isNotEmpty()) {
+            val hash = queue.removeFirst()
+            if (hash in referenced) continue
+            referenced.add(hash)
+            val stdlibFn = stdlibFunctions[hash]
+            if (stdlibFn != null) {
+                collectHashesFromNode(stdlibFn.body, queue)
+            }
+        }
+
+        return referenced
+    }
+
+    private fun collectHashesFromNode(node: com.mezze.language.truffleir.NodeIR, queue: ArrayDeque<String>) {
+        when (node) {
+            is com.mezze.language.truffleir.CallDirectIR -> {
+                queue.add(node.targetHash.hex)
+                collectHashesFromNode(node.arg, queue)
+            }
+            is com.mezze.language.truffleir.MakeLambdaIR -> queue.add(node.functionHash.hex)
+            is com.mezze.language.truffleir.HandleIR -> {
+                collectHashesFromNode(node.body, queue)
+                for (h in node.handlers) {
+                    queue.add(h.handlerHash.hex)
+                    queue.add(h.effectHash.hex)
+                }
+            }
+            is com.mezze.language.truffleir.PerformOpIR -> {
+                queue.add(node.effectHash.hex)
+                collectHashesFromNode(node.arg, queue)
+            }
+            is com.mezze.language.truffleir.BlockIR -> {
+                for (stmt in node.stmts) {
+                    when (stmt) {
+                        is com.mezze.language.truffleir.StmtIR.Let -> collectHashesFromNode(stmt.value, queue)
+                        is com.mezze.language.truffleir.StmtIR.Expr -> collectHashesFromNode(stmt.node, queue)
+                    }
+                }
+                collectHashesFromNode(node.result, queue)
+            }
+            is com.mezze.language.truffleir.CallLocalIR -> collectHashesFromNode(node.arg, queue)
+            is com.mezze.language.truffleir.CallNativeIR -> collectHashesFromNode(node.arg, queue)
+            is com.mezze.language.truffleir.CallIndirectIR -> {
+                collectHashesFromNode(node.function, queue)
+                collectHashesFromNode(node.arg, queue)
+            }
+            is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { collectHashesFromNode(it.value, queue) }
+            is com.mezze.language.truffleir.ReadFieldIR -> collectHashesFromNode(node.record, queue)
+            is com.mezze.language.truffleir.RecordUpdateIR -> {
+                collectHashesFromNode(node.record, queue)
+                node.updates.forEach { collectHashesFromNode(it.value, queue) }
+            }
+            is com.mezze.language.truffleir.MakeVariantIR -> node.payload?.let { collectHashesFromNode(it, queue) }
+            is com.mezze.language.truffleir.MatchIR -> {
+                collectHashesFromNode(node.scrutinee, queue)
+                for (c in node.cases) {
+                    collectHashesFromNode(c.body, queue)
+                    c.guard?.let { collectHashesFromNode(it, queue) }
+                }
+            }
+            is com.mezze.language.truffleir.IfIR -> {
+                collectHashesFromNode(node.cond, queue)
+                collectHashesFromNode(node.thenBr, queue)
+                collectHashesFromNode(node.elseBr, queue)
+            }
+            is com.mezze.language.truffleir.WriteLocalIR -> collectHashesFromNode(node.value, queue)
+            is com.mezze.language.truffleir.InlineBinaryOpIR -> {
+                collectHashesFromNode(node.left, queue)
+                collectHashesFromNode(node.right, queue)
+            }
+            is com.mezze.language.truffleir.InterpolatedStringIR -> {
+                for (part in node.parts) {
+                    if (part is com.mezze.language.truffleir.StringPartIR.Expr) collectHashesFromNode(part.node, queue)
+                }
+            }
+            is com.mezze.language.truffleir.MakeSeqIR -> {
+                for (elem in node.elements) {
+                    when (elem) {
+                        is com.mezze.language.truffleir.SeqElementIR.Regular -> collectHashesFromNode(elem.node, queue)
+                        is com.mezze.language.truffleir.SeqElementIR.Spread -> collectHashesFromNode(elem.node, queue)
+                    }
+                }
+            }
+            is com.mezze.language.truffleir.SeqGetIR -> {
+                collectHashesFromNode(node.seq, queue)
+                collectHashesFromNode(node.index, queue)
+            }
+            is com.mezze.language.truffleir.DynamicMethodCallIR -> {
+                collectHashesFromNode(node.receiver, queue)
+                collectHashesFromNode(node.arg, queue)
+                node.candidateHashes.forEach { queue.add(it) }
+            }
+            // Leaf nodes — no children to walk
+            is com.mezze.language.truffleir.ReadLocalIR -> {}
+            is com.mezze.language.truffleir.ReadCaptureIR -> {}
+            is com.mezze.language.truffleir.ReadArgIR -> {}
+            is com.mezze.language.truffleir.ReadContextIR -> {}
+            is com.mezze.language.truffleir.LongLitIR -> {}
+            is com.mezze.language.truffleir.DoubleLitIR -> {}
+            is com.mezze.language.truffleir.BoolLitIR -> {}
+            is com.mezze.language.truffleir.StringLitIR -> {}
+            is com.mezze.language.truffleir.UnitLitIR -> {}
+            is com.mezze.language.truffleir.CharLitIR -> {}
+            is com.mezze.language.truffleir.FracLitIR -> {}
+        }
     }
 
     private fun slotKindToFrameKind(kind: SlotKind): FrameSlotKind = when (kind) {
