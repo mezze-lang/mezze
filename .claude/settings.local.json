@@ -314,7 +314,8 @@
       "Bash(FILE=typechecker/src/main/kotlin/com/mezze/language/typechecker/hashing/ContentHashComputer.kt)",
       "Bash(cp /tmp/chc_new.kt \"$FILE\")",
       "Bash(for f)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(javap:*)"
     ],
     "deny": [],
     "ask": []

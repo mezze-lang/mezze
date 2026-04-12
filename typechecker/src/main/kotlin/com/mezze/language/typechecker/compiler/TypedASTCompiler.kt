@@ -630,14 +630,17 @@ class TypedASTCompiler(
         )
         extractedFunctions.add(fnIR)
 
-        // Create MakeLambda with captures
+        // Create MakeLambda with captures — always use OBJECT kind.
+        // The parent frame may have typed slots (LONG, DOUBLE) but the robust
+        // readSlotTyped fallback in FunctionDefinitionNode handles type mismatches.
+        // Using OBJECT avoids issues with VarType captures that should be LONG.
         val captures = expr.captures.mapNotNull { c ->
             val slot = localsByName[c.name]
             if (slot != null) {
-                CaptureIR(slot, typeToSlotKind(c.type))
+                CaptureIR(slot, SlotKind.OBJECT)
             } else if (c.name in currentParamNames) {
                 val paramIdx = currentParamNames.indexOf(c.name)
-                CaptureIR(paramIdx, typeToSlotKind(c.type))
+                CaptureIR(paramIdx, SlotKind.OBJECT)
             } else null
         }
         return MakeLambdaIR(lambdaHash, captures, src)
