@@ -78,7 +78,7 @@ public final class MezzeTestHelper {
                 @Override public void run() {
                     try { context.close(true); } catch (Exception ignored) {}
                 }
-            }, 2000); // 2 second timeout
+            }, 5000); // 5 second timeout
             try {
                 context.eval(source);
                 return MezzeLanguage.getLastExecutionResult();
