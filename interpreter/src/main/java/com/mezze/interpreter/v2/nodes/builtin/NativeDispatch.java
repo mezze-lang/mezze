@@ -2058,7 +2058,8 @@ public final class NativeDispatch extends MezzeNode {
     private static long getLong(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof Long l) return l;
-        throw new RuntimeException("Expected Long for field '" + name + "'");
+        throw new RuntimeException("Expected Long for field '" + name + "', got: " +
+            (val == null ? "null" : val.getClass().getName() + "=" + val));
     }
 
     private static double getDouble(MezzeRecord r, String name) {
