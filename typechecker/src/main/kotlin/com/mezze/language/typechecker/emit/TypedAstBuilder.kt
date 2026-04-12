@@ -1089,6 +1089,22 @@ class TypedAstBuilder(
                 seen.add(expr.name)
                 captures.add(TypedCapture(expr.name, expr.type, binding))
             }
+            // Also capture ByHash refs that are actually outer scope locals/params
+            // (The TypedAstBuilder may resolve local params as ByHash if they have content hashes)
+            if (binding is BindingRef.ByHash && expr.name !in seen && expr.name !in paramNames) {
+                // Check if this name is in an outer lambda scope
+                if (lambdaParamScopes.size >= 2) {
+                    for (i in 0 until lambdaParamScopes.size - 1) {
+                        if (expr.name in lambdaParamScopes[i]) {
+                            seen.add(expr.name)
+                            val depth = lambdaParamScopes.size - 1 - i
+                            val index = lambdaParamScopes[i].indexOf(expr.name)
+                            captures.add(TypedCapture(expr.name, expr.type, BindingRef.Local(depth, index)))
+                            break
+                        }
+                    }
+                }
+            }
             return
         }
         if (expr is TypedLambda) return // nested lambdas compute their own captures

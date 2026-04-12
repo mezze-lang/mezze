@@ -494,13 +494,24 @@ class TypedASTCompiler(
             is BindingRef.Param -> ReadLocalIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.Capture -> ReadCaptureIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.ByHash -> {
-                // First check if it's a local variable
+                // Check if it's a local variable or param first
                 val slot = localsByName[expr.name]
                 if (slot != null) {
                     ReadLocalIR(slot, typeToSlotKind(expr.type), src)
                 } else {
-                    // Global reference — read from context, don't call
-                    ReadContextIR(binding.hash.hex, src)
+                    val paramIdx = currentParamNames.indexOf(expr.name)
+                    if (paramIdx >= 0) {
+                        ReadLocalIR(paramIdx, typeToSlotKind(expr.type), src)
+                    } else {
+                        // Check captures (for ByHash refs inside lambdas)
+                        val captureIdx = currentCaptureNames[expr.name]
+                        if (captureIdx != null) {
+                            ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
+                        } else {
+                            // Global reference — read from context
+                            ReadContextIR(binding.hash.hex, src)
+                        }
+                    }
                 }
             }
             is BindingRef.Native -> CallNativeIR(binding.name, UnitLitIR(src), src)
