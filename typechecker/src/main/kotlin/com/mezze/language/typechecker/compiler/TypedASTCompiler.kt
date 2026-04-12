@@ -247,7 +247,10 @@ class TypedASTCompiler(
         val prevCaptureNames = currentCaptureNames
 
         currentParamCount = params.size
-        nextLocalSlot = params.size  // locals start after params
+        // Locals start after captures + params:
+        // Frame layout: [capture0..captureN, param0..paramM, local0..localK]
+        val captureCount = captureInfo.size
+        nextLocalSlot = captureCount + params.size
         localsByName.clear()
         currentParamNames = params.map { it.name }
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
