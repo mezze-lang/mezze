@@ -60,6 +60,9 @@ class TypedASTCompiler(
     /** Capture name → capture index (for the current lambda being compiled) */
     private var currentCaptureNames = mapOf<String, Int>()
 
+    /** Number of captures in the current function — offsets param slots in the frame */
+    private var currentCaptureCount = 0
+
     /** File table for source info */
     private val files = mutableSetOf<String>()
 
@@ -245,11 +248,13 @@ class TypedASTCompiler(
         val prevLocals = localsByName.toMap()
         val prevParamNames = currentParamNames
         val prevCaptureNames = currentCaptureNames
+        val prevCaptureCount = currentCaptureCount
 
         currentParamCount = params.size
         // Locals start after captures + params:
         // Frame layout: [capture0..captureN, param0..paramM, local0..localK]
         val captureCount = captureInfo.size
+        currentCaptureCount = captureCount
         nextLocalSlot = captureCount + params.size
         localsByName.clear()
         currentParamNames = params.map { it.name }
@@ -262,10 +267,10 @@ class TypedASTCompiler(
         // Collect slot info
         val paramSlots = params.map { typeToSlotKind(it.type) }
         val paramNames = params.map { it.name }
-        val localCount = nextLocalSlot - params.size
+        val localCount = nextLocalSlot - captureCount - params.size
         val localSlots = (0 until localCount).map { SlotKind.OBJECT }
         val localNames = (0 until localCount).map { i ->
-            localsByName.entries.find { it.value == params.size + i }?.key ?: "local_$i"
+            localsByName.entries.find { it.value == captureCount + params.size + i }?.key ?: "local_$i"
         }
 
         // Restore state
@@ -275,6 +280,7 @@ class TypedASTCompiler(
         localsByName.putAll(prevLocals)
         currentCaptureNames = prevCaptureNames
         currentParamNames = prevParamNames
+        currentCaptureCount = prevCaptureCount
 
         val fnIR = FunctionIR(
             hash = hash,
@@ -476,10 +482,10 @@ class TypedASTCompiler(
                         }
                     }
                 }
-                // Check if it's a param
+                // Check if it's a param — params start after captures in the frame
                 val paramIdx = currentParamNames.indexOf(expr.name)
                 if (paramIdx >= 0) {
-                    ReadLocalIR(paramIdx, typeToSlotKind(expr.type), src)
+                    ReadLocalIR(currentCaptureCount + paramIdx, typeToSlotKind(expr.type), src)
                 } else {
                     // Check any scope level
                     val slot = localsByName[expr.name]
@@ -491,7 +497,7 @@ class TypedASTCompiler(
                     }
                 }
             }
-            is BindingRef.Param -> ReadLocalIR(binding.index, typeToSlotKind(expr.type), src)
+            is BindingRef.Param -> ReadLocalIR(currentCaptureCount + binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.Capture -> ReadCaptureIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.ByHash -> {
                 // Check if it's a local variable or param first
@@ -501,7 +507,7 @@ class TypedASTCompiler(
                 } else {
                     val paramIdx = currentParamNames.indexOf(expr.name)
                     if (paramIdx >= 0) {
-                        ReadLocalIR(paramIdx, typeToSlotKind(expr.type), src)
+                        ReadLocalIR(currentCaptureCount + paramIdx, typeToSlotKind(expr.type), src)
                     } else {
                         // Check captures (for ByHash refs inside lambdas)
                         val captureIdx = currentCaptureNames[expr.name]
@@ -609,7 +615,7 @@ class TypedASTCompiler(
                         CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Param -> CallIndirectIR(ReadLocalIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
+                is BindingRef.Param -> CallIndirectIR(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                 is BindingRef.Capture -> CallIndirectIR(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
             }
         }
@@ -650,8 +656,9 @@ class TypedASTCompiler(
             if (slot != null) {
                 CaptureIR(slot, SlotKind.OBJECT)
             } else if (c.name in currentParamNames) {
+                // Parent param slot is offset by parent's capture count
                 val paramIdx = currentParamNames.indexOf(c.name)
-                CaptureIR(paramIdx, SlotKind.OBJECT)
+                CaptureIR(currentCaptureCount + paramIdx, SlotKind.OBJECT)
             } else null
         }
         return MakeLambdaIR(lambdaHash, captures, src)
@@ -676,7 +683,7 @@ class TypedASTCompiler(
                             val captures = stmtValue.captures.mapNotNull { c ->
                                 val s = localsByName[c.name]
                                 if (s != null) CaptureIR(s, typeToSlotKind(c.type))
-                                else if (c.name in currentParamNames) CaptureIR(currentParamNames.indexOf(c.name), typeToSlotKind(c.type))
+                                else if (c.name in currentParamNames) CaptureIR(currentCaptureCount + currentParamNames.indexOf(c.name), typeToSlotKind(c.type))
                                 else null
                             }
                             MakeLambdaIR(topLevelDecl.hash, captures, locToSourceInfo(stmt.loc))
@@ -895,9 +902,9 @@ class TypedASTCompiler(
                 if (slot != null) return slot
             }
         }
-        // Check params
+        // Check params — offset by capture count since params start after captures in frame
         val paramIdx = currentParamNames.indexOf(name)
-        if (paramIdx >= 0) return paramIdx
+        if (paramIdx >= 0) return currentCaptureCount + paramIdx
         // Check locals
         return localsByName[name] ?: -1
     }

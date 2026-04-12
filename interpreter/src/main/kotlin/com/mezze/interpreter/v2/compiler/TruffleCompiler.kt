@@ -464,18 +464,19 @@ class TruffleCompiler(
     }
 
     private fun buildFrameDescriptor(ir: FunctionIR): FrameDescriptor {
-        // Declare typed slot kinds so Truffle/Graal can specialize frame access.
-        // ReadLocalNode/WriteLocalNode catch FrameSlotTypeException and fall back
-        // to getValue() if the runtime type doesn't match the declared kind.
+        // Frame layout must match MezzeFunctionRootNode's runtime layout:
+        //   [capture0..captureN, param0..paramM, local0..localK]
+        // Captures are bound first (closure values), then params (from record unpacking),
+        // then locals (from let bindings in the body).
         val builder = FrameDescriptor.newBuilder()
+        for (i in ir.captureSlots.indices) {
+            builder.addSlot(slotKindToFrameKind(ir.captureSlots[i]), ir.captureNames.getOrElse(i) { "capture_$i" }, null)
+        }
         for (i in ir.paramSlots.indices) {
             builder.addSlot(slotKindToFrameKind(ir.paramSlots[i]), ir.paramNames.getOrElse(i) { "param_$i" }, null)
         }
         for (i in ir.localSlots.indices) {
             builder.addSlot(slotKindToFrameKind(ir.localSlots[i]), ir.localNames.getOrElse(i) { "local_$i" }, null)
-        }
-        for (i in ir.captureSlots.indices) {
-            builder.addSlot(slotKindToFrameKind(ir.captureSlots[i]), ir.captureNames.getOrElse(i) { "capture_$i" }, null)
         }
         return builder.build()
     }

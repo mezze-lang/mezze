@@ -1467,6 +1467,7 @@ class TypeChecker(
             when (decl) {
                 is com.mezze.language.parsedast.ParsedLetDecl -> hasPipes(decl.value)
                 is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.operations.any { hasPipes(it.implementation) }
+                is com.mezze.language.parsedast.ParsedTopLevelExpr -> hasPipes(decl.expression)
                 else -> false
             }
         }
@@ -1508,6 +1509,12 @@ class TypeChecker(
                 }
             })
             is com.mezze.language.parsedast.ParsedEffectCall -> expr.copy(arguments = desugar(expr.arguments))
+            is com.mezze.language.parsedast.ParsedStringLit -> expr.copy(parts = expr.parts.map { part ->
+                when (part) {
+                    is com.mezze.language.parsedast.ParsedStringPart.Interpolation -> part.copy(expr = desugar(part.expr))
+                    else -> part
+                }
+            })
             else -> expr
         }
 
@@ -1515,6 +1522,7 @@ class TypeChecker(
             when (decl) {
                 is com.mezze.language.parsedast.ParsedLetDecl -> decl.copy(value = desugar(decl.value))
                 is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.copy(operations = decl.operations.map { op -> op.copy(implementation = desugar(op.implementation)) })
+                is com.mezze.language.parsedast.ParsedTopLevelExpr -> decl.copy(expression = desugar(decl.expression))
                 else -> decl
             }
         })
@@ -1543,6 +1551,34 @@ class TypeChecker(
         )
         is com.mezze.language.parsedast.ParsedParens -> expr.copy(expr = replaceParsedPlaceholder(expr.expr, replacement))
         is com.mezze.language.parsedast.ParsedMemberAccess -> expr.copy(receiver = replaceParsedPlaceholder(expr.receiver, replacement))
+        is com.mezze.language.parsedast.ParsedMatch -> expr.copy(
+            scrutinee = replaceParsedPlaceholder(expr.scrutinee, replacement),
+            cases = expr.cases.map { it.copy(body = replaceParsedPlaceholder(it.body, replacement)) }
+        )
+        is com.mezze.language.parsedast.ParsedDo -> expr.copy(
+            statements = expr.statements.map { stmt ->
+                when (stmt) {
+                    is com.mezze.language.parsedast.ParsedStatement.Let -> stmt.copy(value = replaceParsedPlaceholder(stmt.value, replacement))
+                    is com.mezze.language.parsedast.ParsedStatement.Expr -> stmt.copy(expr = replaceParsedPlaceholder(stmt.expr, replacement))
+                }
+            },
+            result = replaceParsedPlaceholder(expr.result, replacement)
+        )
+        is com.mezze.language.parsedast.ParsedSeqLit -> expr.copy(elements = expr.elements.map { elem ->
+            when (elem) {
+                is com.mezze.language.parsedast.ParsedSeqElement.Regular -> elem.copy(expr = replaceParsedPlaceholder(elem.expr, replacement))
+                is com.mezze.language.parsedast.ParsedSeqElement.Spread -> elem.copy(expr = replaceParsedPlaceholder(elem.expr, replacement))
+            }
+        })
+        is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.copy(value = expr.value?.let { replaceParsedPlaceholder(it, replacement) })
+        is com.mezze.language.parsedast.ParsedPerform -> expr.copy(body = replaceParsedPlaceholder(expr.body, replacement))
+        is com.mezze.language.parsedast.ParsedEffectCall -> expr.copy(arguments = replaceParsedPlaceholder(expr.arguments, replacement))
+        is com.mezze.language.parsedast.ParsedStringLit -> expr.copy(parts = expr.parts.map { part ->
+            when (part) {
+                is com.mezze.language.parsedast.ParsedStringPart.Interpolation -> part.copy(expr = replaceParsedPlaceholder(part.expr, replacement))
+                else -> part
+            }
+        })
         else -> expr
     }
 
