@@ -37,14 +37,18 @@ object PrecompiledStdlib {
     val v2Modules: Map<Hash, com.mezze.language.typedast.TypedModule>
 
     /** Pre-lowered stdlib functions: hash → FunctionIR.
-     *  Each stdlib module is mono→resolve→lower'd once at startup.
-     *  Entry modules reference these by hash — no re-monomorphization needed.
-     *  Cleared after CallTargets are compiled to free memory. */
+     *  Cleared after CallTargets are compiled to free ~100MB of IR data. */
     var preloweredFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
         private set
 
-    /** Clear FunctionIR data after compilation — frees significant memory. */
+    /** Just the hash keys — kept after FunctionIRs are cleared, for TypeChecker prelude detection. */
+    var preloweredFunctionHashes: Set<String> = emptySet()
+        private set
+
+    /** Clear FunctionIR data after compilation — frees significant memory.
+     *  Keeps only the hash set for TypeChecker prelude detection. */
     fun clearPreloweredFunctions() {
+        preloweredFunctionHashes = preloweredFunctions.keys.toSet()
         preloweredFunctions = emptyMap()
     }
 

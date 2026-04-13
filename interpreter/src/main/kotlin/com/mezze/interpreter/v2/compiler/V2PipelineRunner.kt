@@ -66,7 +66,6 @@ object V2PipelineRunner {
         // After first test, stdlib CallTargets are reused without re-compilation.
         // Only user code CallTargets go into HashModuleLoaderNode (per-test context).
         val compiler = TruffleCompiler(language)
-        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
 
         // Bulk-compile all stdlib on first invocation — then FunctionIRs can be GC'd
@@ -95,10 +94,10 @@ object V2PipelineRunner {
             }
         }
 
-        // Add stdlib name mappings (cached at Language level) + performer records
+        // Add stdlib name mappings + performer records (both cached at Language level)
         val allPerformerRecords = performerRecords.toMutableList()
         hashToName.putAll(language.stdlibHashToName)
-        allPerformerRecords.addAll(precompiled.preloweredPerformerRecords)
+        allPerformerRecords.addAll(language.stdlibPerformerRecords)
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name
         val performerInfos = allPerformerRecords.toTypedArray()

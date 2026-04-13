@@ -74,6 +74,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         new java.util.concurrent.ConcurrentHashMap<>();
     // Stdlib hash → name map (built during compilation, kept for performer/handler resolution)
     private volatile java.util.Map<String, String> stdlibHashToName = null;
+    // Stdlib performer records (cached from PrecompiledStdlib before clear)
+    private volatile java.util.List<String[]> stdlibPerformerRecords = null;
     private volatile boolean stdlibCompiled = false;
 
     /**
@@ -102,7 +104,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 }
             }
             stdlibHashToName = nameMap;
-            // Keep FunctionIR data — performer records may need functions not in user code's IR tree
+            stdlibPerformerRecords = precompiled.getPreloweredPerformerRecords();
+            // TODO: Clear FunctionIR data after resolving hash mapping mismatch
+            // (ability op hashes ≠ FunctionIR hashes, so lookup fails after clear)
             stdlibCompiled = true;
         }
     }
@@ -110,6 +114,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     /** Get stdlib hash→name map (available after ensureStdlibCompiled). */
     public java.util.Map<String, String> getStdlibHashToName() {
         return stdlibHashToName != null ? stdlibHashToName : java.util.Collections.emptyMap();
+    }
+
+    /** Get stdlib performer records (available after ensureStdlibCompiled). */
+    public java.util.List<String[]> getStdlibPerformerRecords() {
+        return stdlibPerformerRecords != null ? stdlibPerformerRecords : java.util.Collections.emptyList();
     }
 
     // Cache for imported module CallTargets (non-entry, non-stdlib functions)

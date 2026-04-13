@@ -556,7 +556,9 @@ class TypeChecker(
 
                     // Collect ALL prelude decl hashes to skip during compilation
                     val preludeHashes = mutableSetOf<String>()
-                    preludeHashes.addAll(PrecompiledStdlib.preloweredFunctions.keys)
+                    // Use hash set (survives FunctionIR cleanup) OR keys if not yet cleared
+                    val fnHashes = PrecompiledStdlib.preloweredFunctionHashes.ifEmpty { PrecompiledStdlib.preloweredFunctions.keys }
+                    preludeHashes.addAll(fnHashes)
                     for ((_, v2m) in PrecompiledStdlib.v2Modules) {
                         for (d in v2m.decls) {
                             if (d is com.mezze.language.typedast.TypedLetDecl) preludeHashes.add(d.hash.hex)
