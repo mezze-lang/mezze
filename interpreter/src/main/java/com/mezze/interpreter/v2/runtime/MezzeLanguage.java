@@ -69,12 +69,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private static final MezzeParser sharedParser = new MezzeParser();
     private static final TypeChecker sharedTypeChecker = new TypeChecker();
 
-    // Stdlib CallTargets — compiled once per Language instance, reused across all tests.
+    // Stdlib CallTargets — compiled once per Language instance.
+    // Truffle creates a new Language instance per Context, so each Context recompiles stdlib.
+    // This is unavoidable — CallTargets are tied to their creating Language instance.
     private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
-    // Stdlib hash → name map (built during compilation, kept for performer/handler resolution)
     private volatile java.util.Map<String, String> stdlibHashToName = null;
-    // Stdlib performer records (cached from PrecompiledStdlib before clear)
     private volatile java.util.List<String[]> stdlibPerformerRecords = null;
     private volatile boolean stdlibCompiled = false;
 
@@ -86,28 +86,35 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * Compile ALL stdlib functions on first call, then clear the FunctionIR data
-     * from PrecompiledStdlib to free memory. After this, only CallTargets remain.
+     * Compile referenced stdlib functions on demand (lazy, per-Language instance).
+     * Each Language instance (=each Context) compiles only the stdlib functions
+     * needed by the current test. ~35 functions per test instead of 1044.
      */
-    public void ensureStdlibCompiled(com.mezze.interpreter.v2.compiler.TruffleCompiler compiler) {
-        if (stdlibCompiled) return;
-        synchronized (this) {
-            if (stdlibCompiled) return;
-            var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
+    public void compileReferencedStdlib(
+            com.mezze.interpreter.v2.compiler.TruffleCompiler compiler,
+            java.util.Set<String> referencedHashes,
+            java.util.Set<String> userHashes) {
+        var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
+        for (String hash : referencedHashes) {
+            if (!userHashes.contains(hash) && !stdlibCallTargetCache.containsKey(hash)) {
+                var fn = precompiled.getPreloweredFunctions().get(hash);
+                if (fn != null) {
+                    var rootNode = compiler.compile(fn);
+                    stdlibCallTargetCache.put(hash, rootNode.getCallTarget());
+                }
+            }
+        }
+        // Build name map + performer records if not done
+        if (stdlibHashToName == null) {
             var nameMap = new java.util.HashMap<String, String>();
             for (var entry : precompiled.getPreloweredFunctions().entrySet()) {
                 var fn = entry.getValue();
-                var rootNode = compiler.compile(fn);
-                stdlibCallTargetCache.put(entry.getKey(), rootNode.getCallTarget());
                 if (!fn.getName().equals("lambda") && !fn.getName().startsWith("__")) {
                     nameMap.put(entry.getKey(), fn.getName());
                 }
             }
             stdlibHashToName = nameMap;
             stdlibPerformerRecords = precompiled.getPreloweredPerformerRecords();
-            // TODO: Clear FunctionIR data after resolving hash mapping mismatch
-            // (ability op hashes ≠ FunctionIR hashes, so lookup fails after clear)
-            stdlibCompiled = true;
         }
     }
 

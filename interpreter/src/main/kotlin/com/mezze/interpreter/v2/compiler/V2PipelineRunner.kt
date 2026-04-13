@@ -62,14 +62,15 @@ object V2PipelineRunner {
             return MezzeRootNode(language, fd, wrapped).callTarget
         }
 
-        // Compile ALL stdlib on first test (cached at Language level), then clear FunctionIR data.
-        // After first test, stdlib CallTargets are reused without re-compilation.
-        // Only user code CallTargets go into HashModuleLoaderNode (per-test context).
+        // Compile only REFERENCED stdlib functions (lazy, per-Language instance).
+        // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
         val compiler = TruffleCompiler(language)
+        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
 
-        // Bulk-compile all stdlib on first invocation — then FunctionIRs can be GC'd
-        language.ensureStdlibCompiled(compiler)
+        val userHashes = functions.map { it.hash.hex }.toSet()
+        val referencedHashes = collectReferencedHashes(functions, precompiled.preloweredFunctions)
+        language.compileReferencedStdlib(compiler, referencedHashes, userHashes)
 
         // Compile user code functions only — these go into HashModuleLoaderNode
         compiler.registerFunctions(functions)
