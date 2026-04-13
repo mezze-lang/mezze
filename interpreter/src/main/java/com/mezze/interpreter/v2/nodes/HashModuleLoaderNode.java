@@ -145,14 +145,18 @@ public final class HashModuleLoaderNode extends MezzeNode {
         for (int i = 0; i < opCount; i++) {
             String opHash = info[2 + i * 2];
             opNames[i] = info[2 + i * 2 + 1];
-            // Look up the compiled operation function and evaluate to get closure
+            // Look up the compiled operation function — try context, then Language cache
             Object opFunc = context.lookupGlobal(opHash);
+            if (opFunc == null) {
+                // Fall back to Language-level stdlib cache
+                var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+                var ct = lang.getCachedStdlibCallTarget(opHash);
+                if (ct != null) {
+                    opFunc = MezzeFunction.create(ct, opHash);
+                }
+            }
 
-            // Don't evaluate operation functions — they take parameters at runtime.
-            // Just use the raw MezzeFunction as the performer record field value.
             if (opFunc instanceof MezzeFunction fn) {
-                // Check if it's a closure factory (returns a function when called with empty record)
-                // Only for cached entries — skip evaluation for fresh functions
                 Object cached = context.getCachedClosure(opHash);
                 if (cached instanceof MezzeFunction) {
                     opFunc = cached;
