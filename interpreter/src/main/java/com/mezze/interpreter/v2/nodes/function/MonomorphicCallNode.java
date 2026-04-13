@@ -2,6 +2,7 @@ package com.mezze.interpreter.v2.nodes.function;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.runtime.MezzeLanguage;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -89,6 +90,16 @@ public final class MonomorphicCallNode extends MezzeNode {
         if (value == null && contentHash != null && !contentHash.equals(functionName)) {
             value = context.lookupGlobal(functionName);
         }
+
+        // Fall back to Language-level stdlib cache — these are compiled once, not per-test.
+        // This avoids registering all stdlib CallTargets in every test's context.
+        if (value == null && contentHash != null) {
+            CallTarget stdlibCT = MezzeLanguage.get(this).getCachedStdlibCallTarget(contentHash);
+            if (stdlibCT != null) {
+                value = MezzeFunction.create(stdlibCT, contentHash);
+            }
+        }
+
         if (value == null) {
             throw new RuntimeException(
                 "Function not found" + (contentHash != null ? " for content hash: " + contentHash : "") +

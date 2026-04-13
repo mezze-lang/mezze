@@ -38,8 +38,15 @@ object PrecompiledStdlib {
 
     /** Pre-lowered stdlib functions: hash → FunctionIR.
      *  Each stdlib module is mono→resolve→lower'd once at startup.
-     *  Entry modules reference these by hash — no re-monomorphization needed. */
-    val preloweredFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
+     *  Entry modules reference these by hash — no re-monomorphization needed.
+     *  Cleared after CallTargets are compiled to free memory. */
+    var preloweredFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
+        private set
+
+    /** Clear FunctionIR data after compilation — frees significant memory. */
+    fun clearPreloweredFunctions() {
+        preloweredFunctions = emptyMap()
+    }
 
     /** Pre-lowered performer records from all stdlib modules */
     val preloweredPerformerRecords: List<Array<String>>

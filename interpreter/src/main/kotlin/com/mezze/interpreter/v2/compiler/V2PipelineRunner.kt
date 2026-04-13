@@ -62,34 +62,21 @@ object V2PipelineRunner {
             return MezzeRootNode(language, fd, wrapped).callTarget
         }
 
-        // Compile user functions and only the stdlib functions they reference.
-        // This avoids compiling ALL 1000+ stdlib functions upfront — only what's needed.
+        // Compile ALL stdlib on first test (cached at Language level), then clear FunctionIR data.
+        // After first test, stdlib CallTargets are reused without re-compilation.
+        // Only user code CallTargets go into HashModuleLoaderNode (per-test context).
         val compiler = TruffleCompiler(language)
         val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
         val compiledFunctions = mutableMapOf<String, CallTarget>()
 
-        // Collect all hashes referenced by user code (transitive)
-        val userHashes = functions.map { it.hash.hex }.toSet()
-        val referencedHashes = collectReferencedHashes(functions, precompiled.preloweredFunctions)
+        // Bulk-compile all stdlib on first invocation — then FunctionIRs can be GC'd
+        language.ensureStdlibCompiled(compiler)
 
-        // Compile only referenced stdlib functions
-        for (hash in referencedHashes) {
-            if (hash !in userHashes) {
-                val stdlibFn = precompiled.preloweredFunctions[hash]
-                if (stdlibFn != null) {
-                    val rootNode = compiler.compile(stdlibFn)
-                    compiledFunctions[hash] = rootNode.callTarget
-                }
-            }
-        }
-
-        // Compile entry module functions
+        // Compile user code functions only — these go into HashModuleLoaderNode
         compiler.registerFunctions(functions)
         for (fn in functions) {
-            if (fn.hash.hex !in compiledFunctions) {
-                val rootNode = compiler.compile(fn)
-                compiledFunctions[fn.hash.hex] = rootNode.callTarget
-            }
+            val rootNode = compiler.compile(fn)
+            compiledFunctions[fn.hash.hex] = rootNode.callTarget
         }
 
         // Find entry function
@@ -108,15 +95,9 @@ object V2PipelineRunner {
             }
         }
 
-        // Add name mappings for referenced stdlib functions + all performer records
+        // Add stdlib name mappings (cached at Language level) + performer records
         val allPerformerRecords = performerRecords.toMutableList()
-        for (hash in referencedHashes) {
-            val fn = precompiled.preloweredFunctions[hash]
-            if (fn != null && fn.name != "lambda" && !fn.name.startsWith("__")) {
-                hashToName[hash] = fn.name
-            }
-        }
-        // Performer records need to be complete for handler resolution
+        hashToName.putAll(language.stdlibHashToName)
         allPerformerRecords.addAll(precompiled.preloweredPerformerRecords)
 
         // HashModuleLoaderNode registers v2-compiled functions by hash AND name

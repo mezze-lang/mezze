@@ -94,6 +94,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
     private void loadModules() {
         MezzeContext context = MezzeContext.get(this);
         var emptyRecord = com.mezze.interpreter.v2.values.MezzeRecord.empty();
+        // Functions are pre-compiled (stdlib cached at Language level, user code fresh per test)
         try {
 
         // Closure cache is now per-context (MezzeContext.closureCache) — no clearing needed.

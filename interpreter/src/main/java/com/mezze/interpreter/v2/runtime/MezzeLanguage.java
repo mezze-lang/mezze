@@ -69,28 +69,47 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private static final MezzeParser sharedParser = new MezzeParser();
     private static final TypeChecker sharedTypeChecker = new TypeChecker();
 
-    // Cached stdlib CallTargets — compiled once per Language instance (shared Engine).
-    // This avoids recompiling 1044 stdlib functions on every test (232ms × N tests).
-    private volatile Map<String, CallTarget> cachedStdlibCallTargets = null;
+    // Stdlib CallTargets — compiled once per Language instance, reused across all tests.
+    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> stdlibCallTargetCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    // Stdlib hash → name map (built during compilation, kept for performer/handler resolution)
+    private volatile java.util.Map<String, String> stdlibHashToName = null;
+    private volatile boolean stdlibCompiled = false;
 
     /**
-     * Get cached stdlib CallTargets. Compiled on first call, then reused.
-     * Must be called from within a parse() or context method (not static).
+     * Get a cached stdlib CallTarget by hash, or null if not yet compiled.
      */
-    public Map<String, CallTarget> getOrCompileStdlibCallTargets() {
-        if (cachedStdlibCallTargets != null) return cachedStdlibCallTargets;
+    public CallTarget getCachedStdlibCallTarget(String hash) {
+        return stdlibCallTargetCache.get(hash);
+    }
+
+    /**
+     * Compile ALL stdlib functions on first call, then clear the FunctionIR data
+     * from PrecompiledStdlib to free memory. After this, only CallTargets remain.
+     */
+    public void ensureStdlibCompiled(com.mezze.interpreter.v2.compiler.TruffleCompiler compiler) {
+        if (stdlibCompiled) return;
         synchronized (this) {
-            if (cachedStdlibCallTargets != null) return cachedStdlibCallTargets;
-            var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
+            if (stdlibCompiled) return;
             var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
-            var result = new java.util.HashMap<String, CallTarget>();
+            var nameMap = new java.util.HashMap<String, String>();
             for (var entry : precompiled.getPreloweredFunctions().entrySet()) {
-                var rootNode = compiler.compile(entry.getValue());
-                result.put(entry.getKey(), rootNode.getCallTarget());
+                var fn = entry.getValue();
+                var rootNode = compiler.compile(fn);
+                stdlibCallTargetCache.put(entry.getKey(), rootNode.getCallTarget());
+                if (!fn.getName().equals("lambda") && !fn.getName().startsWith("__")) {
+                    nameMap.put(entry.getKey(), fn.getName());
+                }
             }
-            cachedStdlibCallTargets = result;
-            return result;
+            stdlibHashToName = nameMap;
+            // Keep FunctionIR data — performer records may need functions not in user code's IR tree
+            stdlibCompiled = true;
         }
+    }
+
+    /** Get stdlib hash→name map (available after ensureStdlibCompiled). */
+    public java.util.Map<String, String> getStdlibHashToName() {
+        return stdlibHashToName != null ? stdlibHashToName : java.util.Collections.emptyMap();
     }
 
     // Cache for imported module CallTargets (non-entry, non-stdlib functions)
