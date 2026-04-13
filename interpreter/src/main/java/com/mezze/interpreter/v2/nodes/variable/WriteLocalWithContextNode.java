@@ -1,8 +1,7 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.nodes.continuation.ContinuationSuspendedException;
-import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
+// ContinuationSuspendedException is NOT caught here — must propagate to HandleNode
 import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.mezze.interpreter.v2.values.MezzeUnit;
@@ -73,13 +72,10 @@ public final class WriteLocalWithContextNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        Object value;
-        try {
-            value = valueNode.execute(frame);
-        } catch (ContinuationSuspendedException e) {
-            // Effect was performed without a handler - extract the suspended value
-            value = e.getSuspendedValue();
-        }
+        // ContinuationSuspendedException MUST propagate to HandleNode.
+        // Do NOT catch it here — it's the mechanism for suspend_with to escape
+        // back to the perform boundary (e.g., Exception.throw, Return.return).
+        Object value = valueNode.execute(frame);
 
         // Write to frame slot with correct type (fast path)
         // Switch order matches ReadLocalNode: 0=Long, 1=Double, 2=Boolean, 3=Object
@@ -105,12 +101,8 @@ public final class WriteLocalWithContextNode extends MezzeNode {
             defineGlobalOnce(value);
         }
 
-        // Return MezzeUnit for suspended values to prevent early return in BlockNode
-        // This allows suspended computations to be stored in variables without triggering
-        // BlockNode's early return mechanism.
-        // - MezzeContinuationSuspended: from suspend_with (e.g., Exception.throw inside handler)
-        // - MezzeSuspended: from effect calls without handler (lazy effects)
-        if (value instanceof MezzeContinuationSuspended || value instanceof MezzeSuspended) {
+        // Return MezzeUnit for lazy suspended effects to prevent early return in BlockNode
+        if (value instanceof MezzeSuspended) {
             return MezzeUnit.INSTANCE;
         }
         return value;
