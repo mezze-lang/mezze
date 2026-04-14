@@ -349,6 +349,8 @@ class TypedAstBuilder(
         impls: MutableList<TypedAbilityImpl>
     ) {
         val loc = decl.loc
+        // Location-based hash — must match the hash computed in buildFunctionCall
+        // for inherent method resolution (line 678). Both use impl_line_col.
         val hash = computeHash("impl_${decl.loc.startLine}_${decl.loc.startCol}")
 
         // Resolve ability hash from target
@@ -664,7 +666,6 @@ class TypedAstBuilder(
                         )
                     } else if (methodInfo.isInherentMethod && (methodInfo.implStartLine > 0 || methodInfo.implStartCol > 0)) {
                         // Inherent method: compute op hash from impl loc + method name
-                        // This matches TypedAstBuilder.buildAbilityImpl's hash computation
                         val implHash = computeHash("impl_${methodInfo.implStartLine}_${methodInfo.implStartCol}")
                         val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
                         builder.append(implHash.hex)
@@ -1590,6 +1591,19 @@ class TypedAstBuilder(
     // ========================================================================
     // Hashing utilities
     // ========================================================================
+
+    /** Stable string representation of a type annotation for hashing (no location info). */
+    private fun typeAnnotationToString(ann: ParsedTypeAnnotation): String = when (ann) {
+        is ParsedNamedType -> ann.name
+        is ParsedQualifiedType -> ann.modulePath.joinToString("::") + "::" + ann.typeName +
+            if (ann.args.isNotEmpty()) " " + ann.args.joinToString(" ") { typeAnnotationToString(it) } else ""
+        is ParsedFunctionType -> "(" + typeAnnotationToString(ann.paramType) + " -> " + typeAnnotationToString(ann.returnType) + ")"
+        is ParsedRecordType -> "{" + ann.entries.joinToString(", ") { it.name + ": " + typeAnnotationToString(it.type) } + "}"
+        is ParsedTypeApp -> ann.constructor + " " + ann.args.joinToString(" ") { typeAnnotationToString(it) }
+        is ParsedSeqType -> "[" + typeAnnotationToString(ann.elementType) + "]"
+        is ParsedVariantType -> "|" + ann.constructors.joinToString(",") { it.name } + "|"
+        else -> ann.javaClass.simpleName
+    }
 
     private fun computeHash(input: String): Hash {
         val builder = MezzeHashBuilder()

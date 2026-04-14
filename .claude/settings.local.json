@@ -315,7 +315,8 @@
       "Bash(cp /tmp/chc_new.kt \"$FILE\")",
       "Bash(for f)",
       "Bash(touch:*)",
-      "Bash(javap:*)"
+      "Bash(javap:*)",
+      "Bash(sleep:*)"
     ],
     "deny": [],
     "ask": []

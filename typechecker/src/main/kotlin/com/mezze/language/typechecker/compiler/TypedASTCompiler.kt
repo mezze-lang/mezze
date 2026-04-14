@@ -537,6 +537,9 @@ class TypedASTCompiler(
             val methodName = fn.field
             val receiverType = fn.record.type
 
+            if (methodName == "is_empty" || methodName == "filter") {
+                try { java.io.FileWriter("/tmp/method-debug.log", true).use { it.write("METHOD: $methodName receiverType=${receiverType::class.simpleName}:${receiverType} opHash=${tryResolveAbilityOp(methodName, receiverType)?.hex?.take(16)}\n") } } catch (_: Exception) {}
+            }
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
             if (inlineOp != null) {
@@ -571,23 +574,30 @@ class TypedASTCompiler(
                 return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
             }
 
-            // VarType receiver + arg has "it" field = TypedAstBuilder confirmed this is a method call.
-            // Emit dynamic dispatch — resolved at runtime based on actual receiver type.
-            // SKIP inlineable ops (add, sub, mul, etc.) — TruffleCompiler handles those
-            // via tryCompileInlineOp on the CallIndirect(ReadField(...)) pattern.
+            // VarType receiver — emit dynamic dispatch.
+            // Inject receiver as "it" if not already present, then dispatch at runtime.
             if (receiverType is VarType && methodName !in inlineableOps) {
-                val argHasIt = expr.arg is TypedRecord &&
-                    (expr.arg as TypedRecord).entries.any { it is TypedRecordEntry.Field && it.name == Keywords.IT }
-                if (argHasIt) {
-                    val opCandidates = abilityOpIndex[methodName]
-                    if (opCandidates != null && opCandidates.isNotEmpty()) {
-                        val receiverIR = compileExpr(fn.record)
-                        val hashes = opCandidates.map { it.opHash.hex }
-                        val tags = opCandidates.map { op ->
-                            op.targetTypes.firstOrNull()?.let { getTypeTag(it) } ?: "Any"
+                val opCandidates = abilityOpIndex[methodName]
+                if (opCandidates != null && opCandidates.isNotEmpty()) {
+                    val receiverIR = compileExpr(fn.record)
+                    // Build arg with receiver injected as "it"
+                    val fields = mutableListOf<FieldIR>()
+                    if (expr.arg is TypedRecord) {
+                        for (entry in (expr.arg as TypedRecord).entries) {
+                            if (entry is TypedRecordEntry.Field) {
+                                fields.add(FieldIR(entry.name, compileExpr(entry.value)))
+                            }
                         }
-                        return DynamicMethodCallIR(methodName, receiverIR, argIR, hashes, tags, src)
                     }
+                    if (fields.none { it.name == Keywords.IT }) {
+                        fields.add(0, FieldIR(Keywords.IT, receiverIR))
+                    }
+                    val recordIR = MakeRecordIR(fields, src)
+                    val hashes = opCandidates.map { it.opHash.hex }
+                    val tags = opCandidates.map { op ->
+                        op.targetTypes.firstOrNull()?.let { getTypeTag(it) } ?: "Any"
+                    }
+                    return DynamicMethodCallIR(methodName, receiverIR, recordIR, hashes, tags, src)
                 }
             }
         }
@@ -599,6 +609,9 @@ class TypedASTCompiler(
             return when (binding) {
                 is BindingRef.ByHash -> {
                     val slot = localsByName[fn.name]
+                    if (fn.name == "is_empty" || fn.name == "filter") {
+                        try { java.io.FileWriter("/tmp/method-debug.log", true).use { it.write("BYHASH: ${fn.name} hash=${binding.hash.hex.take(16)} slot=$slot argFields=${if (expr.arg is TypedRecord) (expr.arg as TypedRecord).entries.filterIsInstance<TypedRecordEntry.Field>().map{it.name} else "non-record"}\n") } } catch (_: Exception) {}
+                    }
                     if (slot != null) {
                         CallIndirectIR(ReadLocalIR(slot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {

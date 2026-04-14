@@ -1,0 +1,49 @@
+# 03 — Abilities: Mezze's trait/typeclass system
+#
+# Abilities define interfaces. Types implement them.
+# Operators like +, ==, < desugar to ability method calls.
+
+use std::effects::log::{Log, Console, println}
+
+# Define a custom ability
+ability Printable for 'a where {
+    display: {it: 'a} -> Str
+}
+
+# A simple 2D vector type
+type Vec2 = | Vec2 { x: Int, y: Int } |
+
+# Implement Printable for Vec2
+impl Printable for Vec2 where {
+    display = {it} -> match it is
+        Vec2 {x, y} -> "($(x.to_dbg_str {}), $(y.to_dbg_str {}))"
+}
+
+# Inherent impl — gives dot-method syntax
+impl Vec2 where {
+    mag_sq = {it} -> match it is
+        Vec2 {x, y} -> x * x + y * y,
+    add_vec = {it, r} -> match it is
+        Vec2 {x, y} -> match r is
+            Vec2 {x = rx, y = ry} -> Vec2 {x = x + rx, y = y + ry}
+}
+
+# Use ability via dot syntax
+let show = {x} -> x.display {}
+
+let main = {} ->
+    perform Console in do
+        let a = Vec2 {x = 3, y = 4}
+        let b = Vec2 {x = 1, y = 2}
+        let c = a.add_vec {r = b}
+
+        println {msg = "a = $(show {x = a})"}
+        println {msg = "b = $(show {x = b})"}
+        println {msg = "a + b = $(show {x = c})"}
+
+        let m = a.mag_sq {}
+        println {msg = "|a|^2 = $(m.to_dbg_str {})"}
+
+        # Built-in Inspect ability gives .to_dbg_str {}
+        println {msg = "42 = $(42.to_dbg_str {})"}
+        println {msg = "True = $(True.to_dbg_str {})"}

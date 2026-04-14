@@ -1,0 +1,57 @@
+# 01 — Basics: bindings, functions, records, strings
+#
+# Mezze is a functional language. Everything is immutable by default.
+# Functions take record-style named parameters: {x, y} -> x + y
+use std::effects::log::{ Log, Console, println }
+use std::collections::seq
+# Let bindings
+# Let bindings
+# Let bindings
+# Let bindings
+# Let bindings
+# Let bindings
+# Let bindings
+# Let bindings
+
+let name = "Mezze"
+
+let year = 2025
+
+let pi = 3.14
+
+let flag = True
+# Functions always take a record argument
+
+let greet = { who } -> "Hello, $(who)!"
+
+let add = { x, y } -> x + y
+# Partial application — supply some fields, get a new function
+
+let add10 = add { x = 10 }
+# Records and field access
+
+let point = { x = 3, y = 4 }
+# Record spread
+
+let moved = { ...point, x = point.x + 1 }
+# Sequences (immutable arrays)
+
+let nums = [10, 20, 30, 40, 50]
+
+let main = {} -> perform Console in do
+  println { msg = greet { who = name } }
+  let r1 = add { x = 3, y = 5 }
+  println { msg = "add 3 5 = $(r1.to_dbg_str {})" }
+  let r2 = add10 { y = 7 }
+  println { msg = "partial: add10 7 = $(r2.to_dbg_str {})" }
+  println { msg = "point = $(point.to_dbg_str {})" }
+  println { msg = "moved = $(moved.to_dbg_str {})" }
+  println { msg = "nums = $(nums.to_dbg_str {})" }
+  let doubled = seq::map { xs = nums, f = { x } -> x * 2 }
+  println { msg = "doubled = $(doubled.to_dbg_str {})" }
+  let big = seq::filter { xs = nums, p = { x } -> x > 25 }
+  println { msg = "big = $(big.to_dbg_str {})" }
+  let sum = seq::fold { xs = nums, init = 0, f = { acc, x } -> acc + x }
+  println { msg = "sum = $(sum.to_dbg_str {})" }
+
+# Higher-order: map, filter, fold

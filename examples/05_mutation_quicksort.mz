@@ -1,0 +1,61 @@
+# 05 — Mutation Effect: in-place quicksort
+#
+# The Mut effect allows safe local mutation. It's "hermetic" — no other
+# effects can run inside a mutation block, guaranteeing no data races.
+# Mutable data stays local; you convert to/from immutable at boundaries.
+
+use std::effects::mutation::{
+    LocalMut, seq_to_mut, seq_to_immut,
+    get, set, swap, len,
+    int_to_mut, read_int, incr, while
+}
+use std::effects::log::{Log, Console, println}
+
+let partition = {arr, low, high} -> do
+    let pivot_val = match get {seq = arr, i = high} is
+        Some {val} -> val
+        None -> 0
+    let i = int_to_mut {n = low - 1}
+    let j = int_to_mut {n = low}
+    while {
+        cond = {} -> read_int {n = j} < high,
+        body = {} -> do
+            let j_val = read_int {n = j}
+            let elem = match get {seq = arr, i = j_val} is
+                Some {val} -> val
+                None -> 0
+            if elem <= pivot_val then do
+                incr {n = i, delta = 1}
+                let i_val = read_int {n = i}
+                let _ = swap {seq = arr, i = i_val, j = j_val}
+                {}
+            else {}
+            incr {n = j, delta = 1}
+    }
+    let i_val = read_int {n = i}
+    let pivot_idx = i_val + 1
+    let _ = swap {seq = arr, i = pivot_idx, j = high}
+    pivot_idx
+
+let qsort_range = {arr, low, high} ->
+    if low < high then do
+        let p = partition {arr = arr, low = low, high = high}
+        qsort_range {arr = arr, low = low, high = p - 1}
+        qsort_range {arr = arr, low = p + 1, high = high}
+    else {}
+
+let quicksort = {seq} ->
+    perform LocalMut in do
+        let arr = seq_to_mut {seq = seq}
+        let n = len {seq = arr}
+        if n > 1 then
+            qsort_range {arr = arr, low = 0, high = n - 1}
+        else {}
+        seq_to_immut {seq = arr}
+
+let main = {} ->
+    perform Console in do
+        let input = [38, 27, 43, 3, 9, 82, 10]
+        println {msg = "input:  $(input.to_dbg_str {})"}
+        let sorted = quicksort {seq = input}
+        println {msg = "sorted: $(sorted.to_dbg_str {})"}

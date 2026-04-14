@@ -1,0 +1,27 @@
+> Task :cli:run
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.oracle.truffle.api.dsl.InlineSupport$UnsafeField (file:/Users/shriyans/.gradle/caches/modules-2/files-2.1/org.graalvm.truffle/truffle-api/24.2.2/871f6780f70f2e74d3f20de5300ed25b27e659b2/truffle-api-24.2.2.jar)
+WARNING: Please consider reporting this to the maintainers of class com.oracle.truffle.api.dsl.InlineSupport$UnsafeField
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+--- spawn + await ---
+  [A] computing sum 1..100
+  [B] computing sum 1..200
+  [A] done -> 5050
+  [B] done -> 20100
+A + B = 25150
+--- join (structured) ---
+  [R] computing sum 1..75
+  [L] computing sum 1..50
+  [R] done -> 2850
+  [L] done -> 1275
+L + R = 4125
+--- all (wait for multiple) ---
+  [X] computing sum 1..10
+  [Y] computing sum 1..20
+  [Z] computing sum 1..30
+  [X] done -> 55
+  [Z] done -> 465
+  [Y] done -> 210
+all results = [55, 210, 465]
+
+[Incubating] Problems report is available at: file:///Users/shriyans/Projects/funk/build/reports/problems/problems-report.html

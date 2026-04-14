@@ -1,0 +1,50 @@
+# 02 — Types: variants, pattern matching, Option, Result
+#
+# Mezze has algebraic types (closed variants) with exhaustive matching.
+
+use std::effects::log::{Log, Console, println}
+use std::collections::seq
+
+# Closed variant type
+type Shape =
+    | Circle { radius: Int },
+      Rect { w: Int, h: Int },
+      Triangle { base: Int, height: Int }
+    |
+
+# Pattern matching must be exhaustive for closed variants
+let area = {shape} -> match shape is
+    Circle {radius} -> radius * radius * 3
+    Rect {w, h} -> w * h
+    Triangle {base, height} -> base * height / 2
+
+let describe = {shape} -> match shape is
+    Circle {radius} -> "circle r=$(radius.to_dbg_str {})"
+    Rect {w, h} -> "rect $(w.to_dbg_str {})x$(h.to_dbg_str {})"
+    Triangle {base, height} -> "triangle b=$(base.to_dbg_str {})"
+
+# Option and Result are built-in
+let safe_div = {a, b} ->
+    if b == 0 then None
+    else Some {val = a / b}
+
+let show_option = {opt} -> match opt is
+    Some {val} -> "Some($(val.to_dbg_str {}))"
+    None -> "None"
+
+let main = {} ->
+    perform Console in do
+        let shapes = [
+            Circle {radius = 5},
+            Rect {w = 4, h = 6},
+            Triangle {base = 3, height = 8}
+        ]
+
+        seq::for_each {xs = shapes, f = {x} -> do
+            let a = area {shape = x}
+            let d = describe {shape = x}
+            println {msg = "$(d) -> area = $(a.to_dbg_str {})"}
+        }
+
+        println {msg = "10 / 3 = $(show_option {opt = safe_div {a = 10, b = 3}})"}
+        println {msg = "10 / 0 = $(show_option {opt = safe_div {a = 10, b = 0}})"}

@@ -50,8 +50,8 @@ use std::int
 # - loop: efficient imperative looping with condition and body (both can use Mut)
 
 effect Mut where {
-  mutate: { act: {} -> 'a } -> 'a,
-  loop: { cond: {} -> Bool <Mut>, body: {} -> {} <Mut> } -> {}
+  mutate: { act: {} -> 'a } -> 'a <Mut>,
+  loop: { cond: {} -> Bool <Mut>, body: {} -> {} <Mut> } -> {} <Mut>
 }
 # Execute an act within the mutation context
 # The act is wrapped to enable interception by DebugLocalMut
