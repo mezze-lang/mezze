@@ -511,7 +511,9 @@ class TypedASTCompiler(
                         if (captureIdx != null) {
                             ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
                         } else {
-                            // Global reference — read from context
+                            // Global reference — read from context.
+                            // Note: for value references like trig::pi, this returns MezzeFunction.
+                            // Method receivers are auto-called via compileReceiverExpr instead.
                             ReadContextIR(binding.hash.hex, src)
                         }
                     }
@@ -525,6 +527,25 @@ class TypedASTCompiler(
     // Call compilation (with method resolution)
     // ========================================================================
 
+    /** Compile a receiver expression for a method call. Global ByHash references
+     *  are auto-called (thunk evaluation) since top-level values like `trig::pi`
+     *  are compiled as zero-param FunctionIRs that need to be called to get the value. */
+    private fun compileReceiverExpr(expr: TypedExpr): NodeIR {
+        if (expr is TypedVar && expr.binding is BindingRef.ByHash) {
+            val binding = expr.binding as BindingRef.ByHash
+            // Check if it's a local/param/capture first
+            val slot = localsByName[expr.name]
+            if (slot != null) return ReadLocalIR(slot, typeToSlotKind(expr.type), locToSourceInfo(expr.loc))
+            val paramIdx = currentParamNames.indexOf(expr.name)
+            if (paramIdx >= 0) return ReadLocalIR(currentCaptureCount + paramIdx, typeToSlotKind(expr.type), locToSourceInfo(expr.loc))
+            val captureIdx = currentCaptureNames[expr.name]
+            if (captureIdx != null) return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), locToSourceInfo(expr.loc))
+            // Global reference — auto-call thunk to get value
+            return CallDirectIR(binding.hash, UnitLitIR(locToSourceInfo(expr.loc)), false, locToSourceInfo(expr.loc))
+        }
+        return compileExpr(expr)
+    }
+
     private fun compileCall(expr: TypedCall, src: SourceInfo): NodeIR {
         val fn = expr.function
         val argIR = compileExpr(expr.arg)
@@ -537,7 +558,7 @@ class TypedASTCompiler(
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
             if (inlineOp != null) {
-                val receiverIR = compileExpr(fn.record)
+                val receiverIR = compileReceiverExpr(fn.record)
                 // Extract 'r' or 'it' field from arg record for binary ops
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
@@ -545,7 +566,7 @@ class TypedASTCompiler(
             // Try ability method resolution (skip VarType — let runtime dispatch handle it)
             val opHash = if (receiverType !is VarType) tryResolveAbilityOp(methodName, receiverType) else null
             if (opHash != null) {
-                val receiverIR = compileExpr(fn.record)
+                val receiverIR = compileReceiverExpr(fn.record)
                 // Build arg with receiver injected
                 val opBody = findAbilityOpBody(methodName, receiverType)
                 val receiverParamName = if (opBody is TypedLambda) {
@@ -573,7 +594,7 @@ class TypedASTCompiler(
             if (receiverType is VarType && methodName !in inlineableOps) {
                 val opCandidates = abilityOpIndex[methodName]
                 if (opCandidates != null && opCandidates.isNotEmpty()) {
-                    val receiverIR = compileExpr(fn.record)
+                    val receiverIR = compileReceiverExpr(fn.record)
                     // Build arg with receiver injected as "it"
                     val fields = mutableListOf<FieldIR>()
                     if (expr.arg is TypedRecord) {
