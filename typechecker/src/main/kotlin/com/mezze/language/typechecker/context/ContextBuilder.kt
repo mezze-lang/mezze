@@ -955,7 +955,8 @@ class ContextBuilder {
                 methodType = methodType,
                 implContentHash = implKey,
                 implStartLine = implDecl.loc.startLine,
-                implStartCol = implDecl.loc.startCol
+                implStartCol = implDecl.loc.startCol,
+                implSourceFile = implDecl.loc.file
             )
 
             result = result.extendWithAnonymousMethod(methodInfo)
@@ -1027,7 +1028,8 @@ class ContextBuilder {
                 methodType = methodType,
                 implContentHash = implKey,
                 implStartLine = implDecl.loc.startLine,
-                implStartCol = implDecl.loc.startCol
+                implStartCol = implDecl.loc.startCol,
+                implSourceFile = implDecl.loc.file
             )
             result = result.extendWithAnonymousMethod(methodInfo)
         }

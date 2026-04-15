@@ -471,7 +471,7 @@ class TypeChecker(
                     .toSet()
 
                 val allMethodCallResolutions = constraintResults.values
-                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo>()) { acc, r ->
+                    .fold(emptyMap<Pair<com.mezze.language.parsedast.Loc, String>, com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo>()) { acc, r ->
                         acc + r.methodCallResolutions
                     }
 
@@ -507,6 +507,7 @@ class TypeChecker(
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                 var loweredPerformers: List<Array<String>> = emptyList()
+
                 try {
                     val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
                         substitution = substitution,
@@ -594,13 +595,7 @@ class TypeChecker(
                         importedPerformers.addAll(v2m.performerDecls)
                     }
 
-                    try { java.io.FileWriter("/tmp/compile_trace.txt", true).use { fw ->
-                        fw.write("COMPILE: module=${currentModulePath ?: "<entry>"} imports=${importedModules.size} preludeSkip=${preludeHashes.size}\n")
-                    } } catch (_: Exception) {}
                     val result = compiler.compile(wrapped, importedModules, importedPerformers)
-                    try { java.io.FileWriter("/tmp/compile_trace.txt", true).use { fw ->
-                        fw.write("  RESULT: ${result.functions.size} functions, ${result.performerRecords.size} performers\n")
-                    } } catch (_: Exception) {}
 
                     loweredFns = result.functions
                     loweredPerformers = result.performerRecords.map { pr ->

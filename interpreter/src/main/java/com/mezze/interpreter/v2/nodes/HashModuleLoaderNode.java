@@ -179,4 +179,5 @@ public final class HashModuleLoaderNode extends MezzeNode {
             context.defineGlobal(effectHash, record);
         }
     }
+
 }

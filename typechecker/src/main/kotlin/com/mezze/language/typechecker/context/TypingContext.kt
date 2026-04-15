@@ -119,7 +119,8 @@ data class TypingContext(
         val sourceModule: String? = null,
         val targetTypeHash: String? = null,  // Content hash of the target type declaration (stable across renames)
         val implStartLine: Int = 0,     // Loc of the impl declaration — for computing TypedAbilityImpl hash
-        val implStartCol: Int = 0
+        val implStartCol: Int = 0,
+        val implSourceFile: String = "" // Source file of impl — disambiguates same line/col in different files
     )
 
     /**

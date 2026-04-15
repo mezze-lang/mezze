@@ -104,9 +104,6 @@ class TypedASTCompiler(
         additionalModules: List<TypedModule> = emptyList(),
         additionalPerformers: List<TypedPerformerDecl> = emptyList()
     ): CompileResult {
-        try { java.io.FileWriter("/tmp/compiler_start.txt", true).use { fw ->
-            fw.write("TypedASTCompiler.compile: module=${module.path} decls=${module.decls.size} imports=${additionalModules.size}\n")
-        } } catch (_: Exception) {}
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()
@@ -537,9 +534,6 @@ class TypedASTCompiler(
             val methodName = fn.field
             val receiverType = fn.record.type
 
-            if (methodName == "is_empty" || methodName == "filter") {
-                try { java.io.FileWriter("/tmp/method-debug.log", true).use { it.write("METHOD: $methodName receiverType=${receiverType::class.simpleName}:${receiverType} opHash=${tryResolveAbilityOp(methodName, receiverType)?.hex?.take(16)}\n") } } catch (_: Exception) {}
-            }
             // Try inline ops for primitives
             val inlineOp = tryInlineOp(methodName, receiverType)
             if (inlineOp != null) {
@@ -609,9 +603,6 @@ class TypedASTCompiler(
             return when (binding) {
                 is BindingRef.ByHash -> {
                     val slot = localsByName[fn.name]
-                    if (fn.name == "is_empty" || fn.name == "filter") {
-                        try { java.io.FileWriter("/tmp/method-debug.log", true).use { it.write("BYHASH: ${fn.name} hash=${binding.hash.hex.take(16)} slot=$slot argFields=${if (expr.arg is TypedRecord) (expr.arg as TypedRecord).entries.filterIsInstance<TypedRecordEntry.Field>().map{it.name} else "non-record"}\n") } } catch (_: Exception) {}
-                    }
                     if (slot != null) {
                         CallIndirectIR(ReadLocalIR(slot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
@@ -888,6 +879,11 @@ class TypedASTCompiler(
             }
             concreteType is SeqType && targetType is TypeApplication && targetType.constructor == "Seq" -> true
             concreteType is BytesType && targetType is TypeApplication && targetType.constructor == "Bytes" -> true
+            concreteType is ListType && targetType is TypeApplication && targetType.constructor == "List" -> true
+            concreteType is SetType && targetType is TypeApplication && targetType.constructor == "Set" -> true
+            concreteType is MapType && targetType is TypeApplication && targetType.constructor == "Map" -> true
+            concreteType is SortedSetType && targetType is TypeApplication && targetType.constructor == "SortedSet" -> true
+            concreteType is SortedMapType && targetType is TypeApplication && targetType.constructor == "SortedMap" -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.typeName == targetType.constructor -> true
             // VarType: don't match — let runtime handle dispatch
@@ -961,11 +957,14 @@ class TypedASTCompiler(
         else -> type::class.simpleName ?: "Unknown"
     }
 
-    private fun computeOpHash(implHash: Hash, opName: String): Hash {
-        val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-        builder.append(implHash.hex)
-        builder.append(opName)
-        return Hash(builder.build().toFullHexString())
+    companion object {
+        @JvmStatic
+        fun computeOpHash(implHash: Hash, opName: String): Hash {
+            val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+            builder.append(implHash.hex)
+            builder.append(opName)
+            return Hash(builder.build().toFullHexString())
+        }
     }
 
     private fun locToSourceInfo(loc: Loc): SourceInfo {

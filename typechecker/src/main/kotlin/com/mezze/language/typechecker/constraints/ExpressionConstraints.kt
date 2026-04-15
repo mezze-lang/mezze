@@ -187,7 +187,7 @@ class ExpressionConstraintGenerator {
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val usedVars = mutableSetOf<String>()
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
-        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
+        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
 
         var interpolationIndex = 0
         for (part in expr.parts) {
@@ -250,7 +250,7 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
-        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
+        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
 
         var elementIndex = 0
         for (element in expr.elements) {
@@ -497,7 +497,7 @@ class ExpressionConstraintGenerator {
         val usedVars = mutableSetOf<String>()
         val effects = mutableSetOf<String>()  // Collect effects from field expressions
         val effectInstances = mutableSetOf<MezzeType.EffectInstance>()  // Collect effect instances
-        val methodCallResolutions = mutableMapOf<Loc, ConstraintResult.MethodCallInfo>()
+        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -1268,7 +1268,7 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf(expr.loc to methodCallInfo)
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo)
         )
     }
 
@@ -1366,7 +1366,8 @@ class ExpressionConstraintGenerator {
                 isInherentMethod = true,
                 implContentHash = methodInfo.implContentHash,
                 implStartLine = methodInfo.implStartLine,
-                implStartCol = methodInfo.implStartCol
+                implStartCol = methodInfo.implStartCol,
+                implSourceFile = methodInfo.implSourceFile
             )
         } else null
 
@@ -1379,7 +1380,7 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf(expr.loc to inherentMethodCallInfo) else emptyMap())
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap())
         )
     }
 
@@ -3165,7 +3166,7 @@ class ExpressionConstraintGenerator {
         // Track pattern-related warnings (e.g., float literal patterns)
         val patternWarnings = mutableListOf<String>()
         // Track method call resolutions from sub-expressions (scrutinee + case bodies)
-        val methodCallResolutions = mutableMapOf<com.mezze.language.parsedast.Loc, ConstraintResult.MethodCallInfo>()
+        val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
         methodCallResolutions.putAll(scrutineeResult.methodCallResolutions)
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
@@ -3416,7 +3417,7 @@ class ExpressionConstraintGenerator {
         // Track used variables for unused variable warnings
         val usedVars = mutableSetOf<String>()
         // Track method call resolutions from sub-expressions
-        val methodCallResolutions = mutableMapOf<com.mezze.language.parsedast.Loc, ConstraintResult.MethodCallInfo>()
+        val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()

@@ -261,7 +261,7 @@ data class ConstraintResult(
     val unusedVariables: List<UnusedVariable> = emptyList(),  // Unused pattern bindings (warnings)
     val patternWarnings: List<String> = emptyList(),  // Warnings from pattern analysis (e.g., float literal patterns)
     val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),  // Module-qualified references for dependency tracking
-    val methodCallResolutions: Map<Loc, MethodCallInfo> = emptyMap()  // Method call resolutions keyed by ParsedFunctionCall loc
+    val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap()  // Method call resolutions keyed by (ParsedFunctionCall loc, methodName)
 ) {
     /**
      * Information about a resolved method call (ability method or inherent method).
@@ -277,7 +277,8 @@ data class ConstraintResult(
         val isInherentMethod: Boolean = false,
         val implContentHash: String? = null,  // Content hash of the impl declaration (for inherent methods)
         val implStartLine: Int = 0,      // Loc of impl declaration — for computing TypedAbilityImpl hash
-        val implStartCol: Int = 0
+        val implStartCol: Int = 0,
+        val implSourceFile: String = ""  // Source file of impl declaration — disambiguates same line/col in different files
     )
     /**
      * Information about an undefined variable.

@@ -78,11 +78,46 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private volatile java.util.List<String[]> stdlibPerformerRecords = null;
     private volatile boolean stdlibCompiled = false;
 
+    // User function IR registry — FunctionIRs registered per-test, compiled on demand.
+    // Unlike stdlibCallTargetCache (which persists across tests), this is cleared per test.
+    private final java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.truffleir.FunctionIR>
+        userFunctionIRRegistry = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Register a user FunctionIR for lazy compilation. */
+    public void registerFunctionIR(String hash, com.mezze.language.truffleir.FunctionIR ir) {
+        userFunctionIRRegistry.put(hash, ir);
+    }
+
+    /** Clear user function registry between tests. */
+    public void clearUserFunctionRegistry() {
+        userFunctionIRRegistry.clear();
+    }
+
+    // User function CallTarget cache — compiled on demand, cleared between tests.
+    // Separate from stdlibCallTargetCache to prevent accumulation across tests.
+    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> userCallTargetCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * Get a cached stdlib CallTarget by hash, or null if not yet compiled.
+     * Get a cached CallTarget by hash — checks stdlib cache first, then compiles user IR on demand.
      */
     public CallTarget getCachedStdlibCallTarget(String hash) {
-        return stdlibCallTargetCache.get(hash);
+        CallTarget ct = stdlibCallTargetCache.get(hash);
+        if (ct != null) return ct;
+        ct = userCallTargetCache.get(hash);
+        if (ct != null) return ct;
+        // Try user function IR — compile on demand with full function registry
+        var ir = userFunctionIRRegistry.get(hash);
+        if (ir != null) {
+            var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
+            // Register ALL user functions so MakeLambdaIR can find lambda bodies
+            compiler.registerFunctions(new java.util.ArrayList<>(userFunctionIRRegistry.values()));
+            var rootNode = compiler.compile(ir);
+            ct = rootNode.getCallTarget();
+            userCallTargetCache.put(hash, ct);
+            return ct;
+        }
+        return null;
     }
 
     /**
@@ -176,6 +211,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     protected CallTarget parse(ParsingRequest request) throws Exception {
         Source source = request.getSource();
         String sourceCode = source.getCharacters().toString();
+
+        // Clear previous test's user function state — each test gets fresh functions.
+        // This prevents CallTarget accumulation that causes OOM over thousands of tests.
+        userFunctionIRRegistry.clear();
+        userCallTargetCache.clear();
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();

@@ -72,11 +72,13 @@ object V2PipelineRunner {
         val referencedHashes = collectReferencedHashes(functions, precompiled.preloweredFunctions)
         language.compileReferencedStdlib(compiler, referencedHashes, userHashes)
 
-        // Compile user code functions only — these go into HashModuleLoaderNode
+        // Register user functions for lazy compilation — DON'T pre-compile CallTargets.
+        // Each test has unique functions; pre-compiling creates CallTargets that persist on
+        // the shared Engine and cause OOM over thousands of tests. Instead, register FunctionIRs
+        // and let MonomorphicCallNode compile on-demand via Language.getCachedStdlibCallTarget.
         compiler.registerFunctions(functions)
         for (fn in functions) {
-            val rootNode = compiler.compile(fn)
-            compiledFunctions[fn.hash.hex] = rootNode.callTarget
+            language.registerFunctionIR(fn.hash.hex, fn)
         }
 
         // Find entry function

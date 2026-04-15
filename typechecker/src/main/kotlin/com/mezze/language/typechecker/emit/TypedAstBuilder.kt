@@ -47,12 +47,8 @@ class TypedAstBuilder(
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
     private val tailCallLocations: Set<SourceLocation>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
-    private val methodCallResolutions: Map<Loc, MethodCallInfo> = emptyMap()
+    private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap()
 ) {
-
-    // ========================================================================
-    // Internal state
-    // ========================================================================
 
     /**
      * Local identifier type context — populated as we process let-bindings.
@@ -343,21 +339,18 @@ class TypedAstBuilder(
         exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.ABILITY)
     }
 
+
     private fun buildAbilityImpl(
         decl: ParsedImplAbilityDecl,
         file: String,
         impls: MutableList<TypedAbilityImpl>
     ) {
         val loc = decl.loc
-        // Location-based hash — must match the hash computed in buildFunctionCall
-        // for inherent method resolution (line 678). Both use impl_line_col.
-        val hash = computeHash("impl_${decl.loc.startLine}_${decl.loc.startCol}")
 
         // Resolve ability hash from target
         val abilityHash = when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 val abilityName = target.ability.localName
-                // Look up from abilityDeclarations (v1) or importContext
                 val v1AbilityDecl = abilityDeclarations[abilityName]
                     ?: importContext?.importedAbilities?.get(abilityName)
                 Hash.fromV1(v1AbilityDecl?.contentHash)
@@ -379,11 +372,15 @@ class TypedAstBuilder(
             op.name to opExpr
         }
 
+        // File+location hash — includes file path to disambiguate impls at same line/col in different files.
+        // TODO: migrate to TypedASTHasher.hashAbilityImpl for true content-based hashing (requires cache rebuild)
+        val hash = computeHash("impl_${loc.file}_${loc.startLine}_${loc.startCol}")
+
         impls.add(TypedAbilityImpl(
             hash = hash,
             abilityHash = abilityHash,
             targetTypes = targetTypes,
-            forallVars = emptyList(), // TODO: extract from forallVars
+            forallVars = emptyList(),
             associatedTypeBindings = assocTypeBindings,
             operations = ops,
             loc = loc
@@ -645,8 +642,10 @@ class TypedAstBuilder(
                 // Method call resolution is handled by the Monomorphizer's tryResolveMethodCall.
                 // TypedAstBuilder emits TypedCall(TypedFieldAccess(receiver, method), args)
                 // and the Monomorphizer detects this pattern and resolves to direct ByHash call.
-                val methodInfo = methodCallResolutions[expr.loc]
-                if (methodInfo != null && expr.function is ParsedMemberAccess) {
+                val fnIsMemberAccess = expr.function is ParsedMemberAccess
+                val memberName = if (fnIsMemberAccess) (expr.function as ParsedMemberAccess).member else null
+                var methodInfo = if (memberName != null) methodCallResolutions[expr.loc to memberName] else null
+                if (methodInfo != null && fnIsMemberAccess) {
                     // Method-syntax call: x.is_some {} → resolved to direct function call.
                     // The constraint solver already resolved the method to a concrete impl
                     // operation with a content hash. Emit CallByHash instead of FieldAccess.
@@ -664,9 +663,9 @@ class TypedAstBuilder(
                             type = substitution.apply(contextType),
                             loc = memberAccess.loc
                         )
-                    } else if (methodInfo.isInherentMethod && (methodInfo.implStartLine > 0 || methodInfo.implStartCol > 0)) {
-                        // Inherent method: compute op hash from impl loc + method name
-                        val implHash = computeHash("impl_${methodInfo.implStartLine}_${methodInfo.implStartCol}")
+                    } else if (methodInfo.isInherentMethod && methodInfo.implSourceFile.isNotEmpty()) {
+                        // Inherent method: file+location hash matching buildAbilityImpl
+                        val implHash = computeHash("impl_${methodInfo.implSourceFile}_${methodInfo.implStartLine}_${methodInfo.implStartCol}")
                         val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
                         builder.append(implHash.hex)
                         builder.append(methodInfo.methodName)
@@ -678,7 +677,6 @@ class TypedAstBuilder(
                             loc = memberAccess.loc
                         )
                     } else {
-                        // No hash — fall back to field access
                         buildExpr(expr.function, file)
                     }
 
@@ -1308,7 +1306,9 @@ class TypedAstBuilder(
         // Unqualified: check content hashes
         val unqualKey = BindingKey.unqualified(name)
         val localHash = hashes[unqualKey]
-        if (localHash != null) return BindingRef.ByHash(Hash.fromV1(localHash))
+        if (localHash != null) {
+            return BindingRef.ByHash(Hash.fromV1(localHash))
+        }
 
         // Check importContext
         importContext?.importedBindings?.get(name)?.let { binding ->
