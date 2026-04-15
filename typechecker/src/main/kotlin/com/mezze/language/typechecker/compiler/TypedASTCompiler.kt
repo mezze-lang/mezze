@@ -768,11 +768,17 @@ class TypedASTCompiler(
                 PatternIR.Variant(tag, pattern.tag, fieldNames, fieldSlots)
             }
             is TypedRecordPattern -> {
-                PatternIR.Record(
-                    pattern.fields.map { it.name },
-                    pattern.fields.map { localsByName[it.name] ?: -1 },
-                    pattern.isOpen
-                )
+                // Field names are for runtime extraction from the record.
+                // Slots must map to the BINDING name (renamed variable), not the field name.
+                // { value = v } → fieldName="value", bindingName="v"
+                val fieldNames = pattern.fields.map { it.name }
+                val fieldSlots = pattern.fields.map { fp ->
+                    val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+                    scopeStack.lastOrNull()?.get(bindingName)
+                        ?: localsByName[bindingName]
+                        ?: forceAllocLocal(bindingName)
+                }
+                PatternIR.Record(fieldNames, fieldSlots, pattern.isOpen)
             }
             is TypedSeqPattern -> {
                 PatternIR.Seq(
@@ -790,7 +796,7 @@ class TypedASTCompiler(
     private val inlineableOps = setOf(
         "add", "sub", "mul", "div", "mod",
         "eq", "neq", "lt", "le", "gt", "ge",
-        "and", "or"
+        "and", "or", "neg", "not"
     )
 
     private val primitiveTypes = setOf(
@@ -815,6 +821,8 @@ class TypedASTCompiler(
             "ge" -> InlineOp.GE
             "and" -> InlineOp.AND
             "or" -> InlineOp.OR
+            "neg" -> InlineOp.NEG
+            "not" -> InlineOp.NOT
             else -> null
         }
     }

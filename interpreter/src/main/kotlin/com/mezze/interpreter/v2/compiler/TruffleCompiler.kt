@@ -577,6 +577,8 @@ class TruffleCompiler(
             InlineOp.GE -> com.mezze.interpreter.v2.nodes.inline.DirectGreaterThanOrEqualNode.create(left, right)
             InlineOp.AND -> com.mezze.interpreter.v2.nodes.inline.DirectAndNode.create(left, right)
             InlineOp.OR -> com.mezze.interpreter.v2.nodes.inline.DirectOrNode.create(left, right)
+            InlineOp.NEG -> com.mezze.interpreter.v2.nodes.inline.DirectSubtractNode.create(IntLiteralNode(0), left)
+            InlineOp.NOT -> com.mezze.interpreter.v2.nodes.inline.DirectEqualNode.create(left, BoolLiteralNode(false))
         }
     }
 

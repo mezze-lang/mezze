@@ -107,7 +107,8 @@ sealed interface StringPartIR {
 enum class InlineOp {
     ADD, SUB, MUL, DIV, MOD,
     EQ, NEQ, LT, LE, GT, GE,
-    AND, OR
+    AND, OR,
+    NEG, NOT  // Unary ops — rightIR is unused
 }
 
 // Records
