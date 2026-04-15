@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.BindingKey
+import com.mezze.language.ast.MezzeType
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypeScheme

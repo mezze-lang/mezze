@@ -1,9 +1,9 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.AbilityDeclaration
-import com.mezze.language.ast.EffectDeclaration
-import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parsedast.ParsedAbilityDecl
+import com.mezze.language.parsedast.ParsedEffectDecl
+import com.mezze.language.typechecker.hashing.ParsedDeclHasher
 
 /**
  * Singleton that computes and caches the content hashes of compiler-known
@@ -229,12 +229,12 @@ object WellKnownHashes {
                 ?: return emptySet()
 
             val parser = MezzeParser()
-            val program = parser.parse(source)
-            program.items.filterIsInstance<AbilityDeclaration>()
+            val module = parser.parseParsedModule(source, "stdlib")
+            module.decls.filterIsInstance<ParsedAbilityDecl>()
                 .filter { it.name in CODEC_ABILITY_NAMES }
                 .mapNotNull { decl ->
                     try {
-                        ASTHasher.hashAbilityDeclaration(decl).toFullHexString()
+                        ParsedDeclHasher.hashAbilityDecl(decl)
                     } catch (_: Exception) {
                         null
                     }
@@ -264,12 +264,12 @@ object WellKnownHashes {
                 ?: return null
 
             val parser = MezzeParser()
-            val program = parser.parse(source)
-            val decl = program.items.filterIsInstance<AbilityDeclaration>()
+            val module = parser.parseParsedModule(source, "stdlib")
+            val decl = module.decls.filterIsInstance<ParsedAbilityDecl>()
                 .firstOrNull { it.name == abilityName }
                 ?: return null
 
-            ASTHasher.hashAbilityDeclaration(decl).toFullHexString()
+            ParsedDeclHasher.hashAbilityDecl(decl)
         } catch (_: Exception) {
             null
         }
@@ -285,12 +285,12 @@ object WellKnownHashes {
                 ?: return null
 
             val parser = MezzeParser()
-            val program = parser.parse(source)
-            val decl = program.items.filterIsInstance<EffectDeclaration>()
+            val module = parser.parseParsedModule(source, "stdlib")
+            val decl = module.decls.filterIsInstance<ParsedEffectDecl>()
                 .firstOrNull { it.name == "Mut" }
                 ?: return null
 
-            ASTHasher.hashEffectDeclaration(decl).toFullHexString()
+            ParsedDeclHasher.hashEffectDecl(decl)
         } catch (_: Exception) {
             null
         }

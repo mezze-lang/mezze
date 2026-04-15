@@ -3,11 +3,9 @@ package com.mezze.language.typechecker
 import com.mezze.language.ast.*
 import com.mezze.language.ast.debug.ContentHashRegistry
 import com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind
-import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
@@ -950,9 +948,8 @@ class ModuleResolver(
      * Extract exported items directly from a ParsedModule without needing a v1 Program.
      *
      * Walks [module.decls] and converts each public declaration to an [ExportedItem].
-     * Content hashes are computed by converting each ParsedDecl to its v1 counterpart
-     * (using ParserBridge) and then running the appropriate ASTHasher method — the
-     * same pattern used by ContextBuilder and ContentHashComputer.
+     * Content hashes are computed using ParsedDeclHasher which hashes directly from
+     * parsed AST nodes without converting to v1.
      *
      * @param module The parsed module to extract exports from.
      * @param modulePath Optional qualified module path (e.g. "std::int") used only for
@@ -1015,40 +1012,7 @@ class ModuleResolver(
                 is ParsedTypeDecl -> {
                     if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
 
-                    // Convert definition to v1
-                    val v1Definition: TypeDefinition = when (val def = decl.definition) {
-                        is ParsedRecordDef -> RecordDefinition(
-                            fields = def.fields.map { f ->
-                                RecordFieldDef(
-                                    name = f.name,
-                                    type = ParserBridge.toV1TypeAnnotation(f.type, file)
-                                )
-                            },
-                            isOpen = def.isOpen
-                        )
-                        is ParsedVariantDef -> VariantDefinition(
-                            constructors = def.constructors.map { c ->
-                                VariantConstructorDef(
-                                    name = c.name,
-                                    dataType = c.dataType?.let {
-                                        ParserBridge.toV1TypeAnnotation(it, file)
-                                    }
-                                )
-                            },
-                            isOpen = def.isOpen
-                        )
-                        is ParsedNewtypeDef -> NewtypeDefinition(
-                            constructor = def.constructor,
-                            wrappedType = ParserBridge.toV1TypeAnnotation(def.wrappedType, file)
-                        )
-                    }
-                    val v1TypeDecl = TypeDeclaration(
-                        name = decl.name,
-                        visibility = com.mezze.language.ast.Visibility.PUBLIC,
-                        typeParams = decl.typeParams,
-                        definition = v1Definition
-                    )
-                    val contentHash = ASTHasher.hashTypeDeclaration(v1TypeDecl).toFullHexString()
+                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashTypeDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1087,19 +1051,7 @@ class ModuleResolver(
                 // Effect declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedEffectDecl -> {
-                    val v1Effect = EffectDeclaration(
-                        name = decl.name,
-                        operations = decl.operations.map { op ->
-                            EffectOperation(
-                                name = op.name,
-                                paramType = ParserBridge.toV1TypeAnnotation(op.paramType, file),
-                                returnType = ParserBridge.toV1TypeAnnotation(op.returnType, file),
-                                effects = op.effects
-                            )
-                        },
-                        associatedTypes = decl.associatedTypes
-                    )
-                    val contentHash = ASTHasher.hashEffectDeclaration(v1Effect).toFullHexString()
+                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashEffectDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1140,56 +1092,7 @@ class ModuleResolver(
                 // Ability declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedAbilityDecl -> {
-                    val v1Ability = AbilityDeclaration(
-                        name = decl.name,
-                        typeParams = decl.typeParams,
-                        receiverTypeParam = decl.receiverTypeParam,
-                        associatedTypes = decl.associatedTypes,
-                        constraints = decl.constraints.map { c ->
-                            AbilityConstraint(
-                                abilityName = c.abilityName,
-                                typeParam = c.typeParam
-                            )
-                        },
-                        dependencies = decl.dependencies.map { d ->
-                            AbilityDependency(
-                                abilityName = d.abilityName,
-                                typeArgs = d.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) }
-                            )
-                        },
-                        operations = decl.operations.map { op ->
-                            AbilityOperation(
-                                name = op.name,
-                                paramType = ParserBridge.toV1TypeAnnotation(op.paramType, file),
-                                returnType = ParserBridge.toV1TypeAnnotation(op.returnType, file),
-                                effects = op.effects?.let { row ->
-                                    EffectRowAnnotation(
-                                        effects = row.effects,
-                                        effectAnnotations = row.effectAnnotations.map { ea ->
-                                            EffectAnnotation(
-                                                name = ea.name,
-                                                associatedTypes = ea.associatedTypes.mapValues { (_, ann) ->
-                                                    ParserBridge.toV1TypeAnnotation(ann, file)
-                                                }
-                                            )
-                                        },
-                                        isPolymorphic = row.isPolymorphic,
-                                        isPerformed = row.isPerformed
-                                    )
-                                },
-                                abilityConstraints = op.abilityConstraints.map { c ->
-                                    FunctionAbilityConstraint(
-                                        abilityName = c.abilityName,
-                                        typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                                        associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, ann) ->
-                                            ParserBridge.toV1TypeAnnotation(ann, file)
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                    )
-                    val contentHash = ASTHasher.hashAbilityDeclaration(v1Ability).toFullHexString()
+                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashAbilityDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1215,47 +1118,7 @@ class ModuleResolver(
                 // Performer (effect implementation) declarations
                 // ----------------------------------------------------------------
                 is ParsedPerformerDecl -> {
-                    val effectRef = QualifiedRef(
-                        localName = decl.effect.localName,
-                        qualifier = decl.effect.qualifier?.let { ModulePath(it.segments) }
-                    )
-                    val v1Impl = ImplDeclaration(
-                        effect = effectRef,
-                        performerName = decl.performerName,
-                        performerParams = decl.params.map { p ->
-                            PerformerParameter(
-                                name = p.name,
-                                type = ParserBridge.toV1TypeAnnotation(p.type, file)
-                            )
-                        },
-                        associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
-                            ParserBridge.toV1TypeAnnotation(ann, file)
-                        },
-                        operations = decl.operations.map { op ->
-                            PerformerOperation(
-                                name = op.name,
-                                paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                                returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                                implementation = ParserBridge.toV1Expr(op.implementation, file),
-                                effects = op.effects?.let { row ->
-                                    EffectRowAnnotation(
-                                        effects = row.effects,
-                                        effectAnnotations = row.effectAnnotations.map { ea ->
-                                            EffectAnnotation(
-                                                name = ea.name,
-                                                associatedTypes = ea.associatedTypes.mapValues { (_, ann) ->
-                                                    ParserBridge.toV1TypeAnnotation(ann, file)
-                                                }
-                                            )
-                                        },
-                                        isPolymorphic = row.isPolymorphic,
-                                        isPerformed = row.isPerformed
-                                    )
-                                }
-                            )
-                        }
-                    )
-                    val contentHash = ASTHasher.hashImplDeclaration(v1Impl).toFullHexString()
+                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(decl)
 
                     // Don't overwrite an existing TYPE export with a HANDLER export
                     val existingExport = exports[decl.performerName]

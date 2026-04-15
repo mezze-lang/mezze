@@ -167,7 +167,6 @@ class MezzeTextDocumentService(
      */
     private fun analyzeDocument(uri: String, content: String, version: Int): DocumentState {
         val diagnostics = mutableListOf<Diagnostic>()
-        var ast: Program? = null
         var typeCheckResult: TypeCheckResult? = null
         var typeAliases: Map<String, TypeAliasInfo> = emptyMap()
 
@@ -176,7 +175,7 @@ class MezzeTextDocumentService(
 
         // Step 1: Parse with error recovery to get ALL parse errors
         val parseResult = parser.parseWithRecovery(content, file = fileName)
-        ast = parseResult.program
+        val parsedModule = parseResult.module
 
         // Collect all parse errors as diagnostics
         parseResult.errors.forEach { e ->
@@ -211,10 +210,6 @@ class MezzeTextDocumentService(
                 filePath?.parent ?: Paths.get(".")
             }
 
-            // Convert parsed Program to ParsedModule and use v2 checkParsedModule
-            val parsedModule = com.mezze.language.parser.MezzeParser().programToParsedModule(
-                ast ?: Program(emptyList()), fileName ?: "<lsp>"
-            )
             val result = typeChecker.checkParsedModule(parsedModule, projectRoot, null)
 
             typeAliases = typeChecker.getTypeAliases()
@@ -267,7 +262,7 @@ class MezzeTextDocumentService(
             ))
         }
 
-        return DocumentState(uri, content, version, ast, typeCheckResult, typeAliases, diagnostics)
+        return DocumentState(uri, content, version, null, typeCheckResult, typeAliases, diagnostics)
     }
 
     /**

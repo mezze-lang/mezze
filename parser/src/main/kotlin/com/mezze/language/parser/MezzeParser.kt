@@ -1,8 +1,9 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.Comment
+import com.mezze.language.ast.SourceLocation
+import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parsedast.*
-import com.mezze.language.ast.Visibility as AstVisibility
 import com.mezze.language.parser.internal.*
 import com.mezze.language.parser.internal.lib.*
 
@@ -26,22 +27,22 @@ import com.mezze.language.parser.internal.lib.*
  * ```kotlin
  * // Parse multiple files in parallel - SAFE!
  * files.parallelStream().map { file ->
- *     MezzeParser().parse(File(file).readText(), file = file)
+ *     MezzeParser().parseParsedModule(File(file).readText(), file = file)
  * }.toList()
  * ```
  *
  * ✅ **SAFE - Sequential parsing with same instance**:
  * ```kotlin
  * val parser = MezzeParser()
- * val prog1 = parser.parse(source1)  // OK
- * val prog2 = parser.parse(source2)  // OK - sequential
+ * val mod1 = parser.parseParsedModule(source1)  // OK
+ * val mod2 = parser.parseParsedModule(source2)  // OK - sequential
  * ```
  *
  * ❌ **UNSAFE - Concurrent parsing with same instance**:
  * ```kotlin
  * val parser = MezzeParser()
- * thread1 { parser.parse(source1) }  // Race on currentSource/currentFile!
- * thread2 { parser.parse(source2) }  // Race on warnings!
+ * thread1 { parser.parseParsedModule(source1) }  // Race on currentSource/currentFile!
+ * thread2 { parser.parseParsedModule(source2) }  // Race on warnings!
  * ```
  *
  * **Recommendation**: Use fresh `MezzeParser()` instance per thread for parallel parsing.
@@ -87,79 +88,16 @@ class MezzeParser(
         ))
     }
 
-    /**
-     * Result of parsing with error recovery.
-     */
-    data class ParseResultWithRecovery(
-        val program: Program,
-        val errors: List<ParseException>,
-        val warnings: List<ParseWarning>
-    ) {
-        val hasErrors: Boolean get() = errors.isNotEmpty()
-        val isSuccess: Boolean get() = errors.isEmpty()
-    }
-
-    /**
-     * Convert a v1 Program to ParsedModule.
-     * Used by the typechecker to bridge from v1 input to ParsedAST-based processing.
-     */
-    fun programToParsedModule(program: Program, file: String = "<unknown>"): ParsedModule {
-        return v1ProgramToParsedModule(program, file)
-    }
-
-    /**
-     * Convert ParsedModule to v1 Program (bridge for backward compatibility).
-     * Includes impl resolution and desugaring.
-     */
-    fun parsedModuleToProgram(module: ParsedModule): Program {
-        val program = parsedModuleToV1Program(module, emptyList())
-        val resolvedProgram = resolveImplDeclarations(program)
-        return desugarProgram(resolvedProgram)
-    }
-
     companion object {
-        /** Convert v1 Expression → ParsedExpr */
-        @JvmStatic
-        fun toParsedExpr(expr: Expression, file: String = "<unknown>"): ParsedExpr = v1ExprToParsedExpr(expr, file)
-
-        /** Convert v1 Pattern → ParsedPattern */
-        @JvmStatic
-        fun toParsedPattern(pattern: Pattern, file: String = "<unknown>"): ParsedPattern = v1PatternToParsed(pattern, file)
-
-        /** Convert v1 TypeAnnotation → ParsedTypeAnnotation */
-        @JvmStatic
-        fun toParsedTypeAnnotation(ann: TypeAnnotation, file: String = "<unknown>"): ParsedTypeAnnotation = v1TypeAnnotationToParsed(ann, file)
-
-        /** Convert ParsedExpr → v1 Expression */
-        @JvmStatic
-        fun toV1Expr(expr: ParsedExpr, file: String = "<unknown>"): Expression = parsedExprToV1Expr(expr, file)
-
-        /** Convert ParsedPattern → v1 Pattern */
-        @JvmStatic
-        fun toV1Pattern(pattern: ParsedPattern, file: String = "<unknown>"): Pattern = parsedPatternToV1(pattern, file)
-
-        /** Convert ParsedTypeAnnotation → v1 TypeAnnotation */
-        @JvmStatic
-        fun toV1TypeAnnotation(ann: ParsedTypeAnnotation, file: String = "<unknown>"): TypeAnnotation = parsedTypeAnnotationToV1(ann, file)
-
         /** Convert Loc → SourceLocation */
         @JvmStatic
         fun toSourceLocation(loc: Loc): SourceLocation = SourceLocation(loc.startLine, loc.startCol, loc.file)
     }
 
-    fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
-        // Delegate to parseParsedModule and convert to v1 Program for backward compatibility
-        val parsedModule = parseParsedModule(source, file ?: "<unknown>")
-        val program = parsedModuleToV1Program(parsedModule, comments.toList())
-        val resolvedProgram = resolveImplDeclarations(program)
-        val programWithComments = resolvedProgram.copy(comments = comments.toList())
-        return if (desugar) desugarProgram(programWithComments) else programWithComments
-    }
-
     /**
      * Parse source into ParsedModule (v2 AST — clean, no nullable typechecker fields).
      *
-     * This is now the primary parse path. The v1 parse() method delegates here.
+     * This is the primary (and only) parse entry point.
      */
     fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
         // Store for error reporting in nested parser methods
@@ -196,12 +134,24 @@ class MezzeParser(
     }
 
     /**
+     * Result of parsing with error recovery.
+     */
+    data class ParseResultWithRecovery(
+        val module: ParsedModule,
+        val errors: List<ParseException>,
+        val warnings: List<ParseWarning>
+    ) {
+        val hasErrors: Boolean get() = errors.isNotEmpty()
+        val isSuccess: Boolean get() = errors.isEmpty()
+    }
+
+    /**
      * Parse with error recovery - continues parsing after errors and collects all errors.
      *
      * This is useful for IDEs/LSP to show all errors at once instead of stopping at the first one.
      * Returns a partial AST with successfully parsed items plus a list of all parse errors.
      */
-    fun parseWithRecovery(source: String, desugar: Boolean = true, file: String? = null): ParseResultWithRecovery {
+    fun parseWithRecovery(source: String, file: String? = null): ParseResultWithRecovery {
         currentSource = source
         currentFile = file
         warnings.clear()
@@ -244,10 +194,8 @@ class MezzeParser(
             }
 
             val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls))
-            val program = resolveImplDeclarations(parsedModuleToV1Program(parsedModule, comments.toList()))
-            val finalProgram = if (desugar && errors.isEmpty()) desugarProgram(program) else program
 
-            return ParseResultWithRecovery(finalProgram, errors, warnings.toList())
+            return ParseResultWithRecovery(parsedModule, errors, warnings.toList())
         } finally {
             currentSource = null
             currentFile = null
@@ -653,134 +601,6 @@ class MezzeParser(
             }
         }
         return result.toString()
-    }
-
-    /**
-     * Parse an interpolated string, extracting string parts and expression parts.
-     * The input is the raw string content (escape sequences not yet processed).
-     */
-    internal fun parseInterpolatedString(content: String, stream: TokenStream, location: SourceLocation? = null): ParseResult<Expression> {
-        val parts = mutableListOf<StringInterpolationPart>()
-        var i = 0
-        val currentStringPart = StringBuilder()
-
-        while (i < content.length) {
-            if (content[i] == '\\' && i + 1 < content.length) {
-                // Handle escape sequence
-                when (content[i + 1]) {
-                    'n' -> { currentStringPart.append('\n'); i += 2 }
-                    't' -> { currentStringPart.append('\t'); i += 2 }
-                    'r' -> { currentStringPart.append('\r'); i += 2 }
-                    '\\' -> { currentStringPart.append('\\'); i += 2 }
-                    '"' -> { currentStringPart.append('"'); i += 2 }
-                    '$' -> { currentStringPart.append('$'); i += 2 }  // Escaped $, not interpolation
-                    else -> { currentStringPart.append(content[i]); i++ }
-                }
-            } else if (content[i] == '$' && i + 1 < content.length && content[i + 1] == '(') {
-                // Found unescaped interpolation start
-                // First, add any accumulated string part
-                if (currentStringPart.isNotEmpty()) {
-                    parts.add(StringPart(currentStringPart.toString()))
-                    currentStringPart.clear()
-                }
-
-                // Find the matching closing paren
-                i += 2  // Skip "$("
-                val exprStart = i
-                var parenDepth = 1
-
-                while (i < content.length && parenDepth > 0) {
-                    when {
-                        content[i] == '\\' && i + 1 < content.length -> {
-                            // Skip escaped character
-                            i += 2
-                        }
-                        content[i] == '(' -> {
-                            parenDepth++
-                            i++
-                        }
-                        content[i] == ')' -> {
-                            parenDepth--
-                            if (parenDepth > 0) i++
-                        }
-                        content[i] == '"' -> {
-                            // Skip over nested string
-                            i++
-                            while (i < content.length && content[i] != '"') {
-                                if (content[i] == '\\' && i + 1 < content.length) {
-                                    i += 2
-                                } else {
-                                    i++
-                                }
-                            }
-                            if (i < content.length) i++  // Skip closing quote
-                        }
-                        else -> i++
-                    }
-                }
-
-                val exprContent = content.substring(exprStart, i)
-                if (i < content.length) i++  // Skip the closing )
-
-                // Calculate line and column offset for error reporting
-                var lineOffset = location?.line ?: 1
-                var columnOffset = (location?.column ?: 1) + 1  // +1 for opening quote
-
-                // Count newlines and track column before the interpolation
-                for (j in 0 until exprStart) {
-                    if (content[j] == '\n') {
-                        lineOffset++
-                        columnOffset = 1
-                    } else {
-                        columnOffset++
-                    }
-                }
-                columnOffset += 2  // Add 2 for "$("
-
-                // Parse the expression content
-                val exprParser = MezzeParser()
-                try {
-                    // We need to parse just the expression, so wrap it to make it a valid program
-                    val exprProgram = exprParser.parse(exprContent, desugar = true, file = location?.file)
-                    val expr = when (val firstItem = exprProgram.items.firstOrNull()) {
-                        is TopLevelExpression -> firstItem.expression
-                        is LetBinding -> firstItem.expression
-                        else -> return stream.failure(
-                            "Invalid expression in string interpolation: $exprContent"
-                        )
-                    }
-
-                    // Fix source locations for better error reporting
-                    val fixedExpr = fixInterpolationSourceLocation(expr, lineOffset, columnOffset, location?.file)
-                    parts.add(ExpressionPart(fixedExpr))
-                } catch (e: ParseException) {
-                    return stream.failure(
-                        "Failed to parse interpolated expression '$exprContent': ${e.message}"
-                    )
-                }
-            } else {
-                currentStringPart.append(content[i])
-                i++
-            }
-        }
-
-        // Add any remaining string part
-        if (currentStringPart.isNotEmpty()) {
-            parts.add(StringPart(currentStringPart.toString()))
-        }
-
-        // If we only have one StringPart, it's actually not interpolated (edge case after escape processing)
-        if (parts.size == 1 && parts[0] is StringPart) {
-            return ParseResult.Success(
-                StringLiteral((parts[0] as StringPart).value, sourceLocation = location),
-                stream
-            )
-        }
-
-        return ParseResult.Success(
-            StringLiteral(value = "", parts = parts, sourceLocation = location),
-            stream
-        )
     }
 
     /**

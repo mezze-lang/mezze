@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.abilities
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.parsedast.*
 
 /**
  * Built-in ability registry for TypeChecker.
@@ -9,9 +11,9 @@ import com.mezze.language.ast.*
  * Only Inspect is compiler-provided (universally available for all types).
  *
  * Operators are desugared to method-call syntax (receiver is implicit `it`):
- * - x + y  →  x.add {r = y}   (NumAdd ability)
- * - x == y →  x.eq {r = y}    (Eq ability)
- * - x < y  →  x.lt {r = y}    (Ord ability)
+ * - x + y  ->  x.add {r = y}   (NumAdd ability)
+ * - x == y ->  x.eq {r = y}    (Eq ability)
+ * - x < y  ->  x.lt {r = y}    (Ord ability)
  */
 object BuiltInAbilities {
     private val boolType = MezzeType.BoolType
@@ -59,8 +61,8 @@ object BuiltInAbilities {
                 val source = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(embeddedPath)
                     ?: com.mezze.language.typechecker.ModuleResolver.readStdlibFile(diskPath)
                     ?: continue
-                val program = parser.parse(source)
-                for (decl in program.items.filterIsInstance<AbilityDeclaration>()) {
+                val module = parser.parseParsedModule(source, embeddedPath)
+                for (decl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
                     val methods = mutableMapOf<String, (MezzeType.VarType) -> MezzeType>()
                     for (op in decl.operations) {
                         methods[op.name] = { typeVar: MezzeType.VarType ->
@@ -95,11 +97,11 @@ object BuiltInAbilities {
     }
 
     /**
-     * Convert a TypeAnnotation to a MezzeType, replacing type variables with the shared typeVar.
+     * Convert a ParsedTypeAnnotation to a MezzeType, replacing type variables with the shared typeVar.
      */
-    private fun convertAnnotationToType(annotation: TypeAnnotation, typeVar: MezzeType.VarType): MezzeType {
+    private fun convertAnnotationToType(annotation: ParsedTypeAnnotation, typeVar: MezzeType.VarType): MezzeType {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
+            is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)
                     ?: if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
                         typeVar
@@ -107,7 +109,7 @@ object BuiltInAbilities {
                         MezzeType.TypeApplication(annotation.name, emptyList())
                     }
             }
-            is RecordTypeAnnotation -> {
+            is ParsedRecordType -> {
                 MezzeType.RecordType(
                     fields = annotation.entries.associate { entry ->
                         entry.name to convertAnnotationToType(entry.type, typeVar)
@@ -115,7 +117,7 @@ object BuiltInAbilities {
                     rowVar = null
                 )
             }
-            is FunctionTypeAnnotation -> {
+            is ParsedFunctionType -> {
                 MezzeType.FunctionType(
                     paramType = convertAnnotationToType(annotation.paramType, typeVar),
                     returnType = convertAnnotationToType(annotation.returnType, typeVar)

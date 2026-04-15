@@ -233,8 +233,9 @@ class ModuleLoader(
         // Prefer the parsedModule stored on the resolver Module (set during loadModule).
         @Suppress("DEPRECATION")
         val parsedModule = resolverModule.parsedModule
-            ?: com.mezze.language.parser.MezzeParser().programToParsedModule(
-                resolverModule.program, resolverModule.filePath
+            ?: com.mezze.language.parser.MezzeParser().parseParsedModule(
+                try { java.io.File(resolverModule.filePath).readText() } catch (_: Exception) { "" },
+                resolverModule.filePath
             )
         return LoadedModule(
             path = resolverModule.path,

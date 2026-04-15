@@ -1,6 +1,9 @@
 package com.mezze.language.typechecker.context
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.AbilityConstraint
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
+import com.mezze.language.ast.TypeVar
 
 /**
  * Type scheme for polymorphic types.

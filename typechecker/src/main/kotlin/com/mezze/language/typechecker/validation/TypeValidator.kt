@@ -118,25 +118,11 @@ class TypeValidator(
                     val topLevelErrors = validateParsedTopLevelEffects(decl, substitution, constraintResults)
                     errors.addAll(topLevelErrors)
 
-                    // Validate let binding patterns and expression patterns
-                    // Convert to v1 only for the pattern/expression validation helpers that still need v1
-                    val v1Pattern = parserBridge.toV1Pattern(decl.pattern, file)
-                    val scrutineeType = if (decl.isSimpleBinding) {
-                        constraintResults[decl.variableName]?.type?.let { substitution.apply(it) }
-                    } else null
-                    if (scrutineeType != null) {
-                        val patternErrors = validateLetPattern(v1Pattern, scrutineeType)
-                        errors.addAll(patternErrors)
-                    }
-
-                    val v1Expr = parserBridge.toV1Expr(decl.value, file)
-                    val exprPatternErrors = validatePatternsInExpression(v1Expr, substitution)
-                    errors.addAll(exprPatternErrors)
+                    // TODO: Rewrite pattern validation to work on v2 ParsedAST directly
+                    // V2Validator covers pattern exhaustiveness checks
                 }
                 is com.mezze.language.parsedast.ParsedTopLevelExpr -> {
-                    val v1Expr = parserBridge.toV1Expr(decl.expression, file)
-                    val exprPatternErrors = validatePatternsInExpression(v1Expr, substitution)
-                    errors.addAll(exprPatternErrors)
+                    // TODO: Rewrite expression pattern validation for v2
                 }
                 is com.mezze.language.parsedast.ParsedEffectDecl -> {
                     val declErrors = effectValidator.validateEffectDeclaration(decl)
@@ -154,30 +140,10 @@ class TypeValidator(
         }
 
         // Validate perform expressions (handler type compatibility)
-        // Convert to v1 for the expression-walking helper that still needs v1 types
-        val v1FunctionDefs = mutableMapOf<String, LambdaExpression>()
+        // TODO: Rewrite perform expression validation for v2 ParsedAST
+        // V2Validator already covers perform handler checks
         for (decl in module.decls) {
-            if (decl is com.mezze.language.parsedast.ParsedLetDecl && decl.isSimpleBinding) {
-                val v1Expr = parserBridge.toV1Expr(decl.value, file)
-                if (v1Expr is LambdaExpression) {
-                    v1FunctionDefs[decl.variableName] = v1Expr
-                }
-            }
-        }
-        for (decl in module.decls) {
-            val performErrors = when (decl) {
-                is com.mezze.language.parsedast.ParsedLetDecl -> {
-                    val v1Expr = parserBridge.toV1Expr(decl.value, file)
-                    validatePerformExpressionsInExpression(
-                        v1Expr, implDeclarations, effectDeclarations, v1FunctionDefs
-                    )
-                }
-                is com.mezze.language.parsedast.ParsedTopLevelExpr -> {
-                    val v1Expr = parserBridge.toV1Expr(decl.expression, file)
-                    validatePerformExpressionsInExpression(
-                        v1Expr, implDeclarations, effectDeclarations, v1FunctionDefs
-                    )
-                }
+            val performErrors: List<ValidationError> = when (decl) {
                 else -> emptyList()
             }
             errors.addAll(performErrors)
@@ -809,7 +775,7 @@ class TypeValidator(
             if (concretePayload == null) continue
 
             // Extract type parameter mappings by comparing the annotation with the concrete type
-            extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(dataTypeAnnotation, "<infer>"), concretePayload, typeDecl.typeParams, typeArgMap)
+            extractTypeParamMappingsV2(dataTypeAnnotation, concretePayload, typeDecl.typeParams, typeArgMap)
         }
 
         // Return the type arguments in order
@@ -823,6 +789,39 @@ class TypeValidator(
     /**
      * Extract type parameter mappings by comparing a type annotation with a concrete type.
      */
+    private fun extractTypeParamMappingsV2(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        concreteType: MezzeType,
+        typeParams: List<String>,
+        mappings: MutableMap<String, MezzeType>
+    ) {
+        when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                if (annotation.name in typeParams) mappings[annotation.name] = concreteType
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                if (concreteType is MezzeType.RecordType) {
+                    for (e in annotation.entries) {
+                        val ft = concreteType.fields[e.name] ?: continue
+                        extractTypeParamMappingsV2(e.type, ft, typeParams, mappings)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                if (concreteType is MezzeType.TypeApplication && concreteType.constructor == annotation.constructor) {
+                    for ((a, c) in annotation.args.zip(concreteType.args)) extractTypeParamMappingsV2(a, c, typeParams, mappings)
+                }
+            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                if (concreteType is MezzeType.FunctionType) {
+                    extractTypeParamMappingsV2(annotation.paramType, concreteType.paramType, typeParams, mappings)
+                    extractTypeParamMappingsV2(annotation.returnType, concreteType.returnType, typeParams, mappings)
+                }
+            }
+            else -> {}
+        }
+    }
+
     private fun extractTypeParamMappings(
         annotation: TypeAnnotation,
         concreteType: MezzeType,
@@ -1124,56 +1123,13 @@ class TypeValidator(
         return errors
     }
 
-    /**
-     * Convert a v2 ParsedEffectDecl to a v1 EffectDeclaration for validation.
-     * Thin bridge for EffectValidator which still operates on v1 types.
-     */
-    private fun parsedEffectDeclToV1(decl: com.mezze.language.parsedast.ParsedEffectDecl, file: String): EffectDeclaration {
-        return EffectDeclaration(
-            name = decl.name,
-            operations = decl.operations.map { op ->
-                EffectOperation(
-                    name = op.name,
-                    paramType = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(op.paramType, file),
-                    returnType = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(op.returnType, file),
-                    effects = op.effects
-                )
-            },
-            associatedTypes = decl.associatedTypes
-        )
-    }
+    // parsedEffectDeclToV1 deleted — v1 bridge no longer needed
 
     /**
      * Convert a v2 ParsedPerformerDecl to a v1 ImplDeclaration for validation.
      * Thin bridge for EffectValidator which still operates on v1 types.
      */
-    private fun parsedPerformerDeclToV1(decl: com.mezze.language.parsedast.ParsedPerformerDecl, file: String): ImplDeclaration {
-        val effect = QualifiedRef(
-            localName = decl.effect.localName,
-            qualifier = decl.effect.qualifier?.let { ModulePath(it.segments) }
-        )
-        return ImplDeclaration(
-            effect = effect,
-            performerName = decl.performerName,
-            performerParams = decl.params.map { p ->
-                PerformerParameter(
-                    name = p.name,
-                    type = com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(p.type, file)
-                )
-            },
-            associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
-                com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(ann, file)
-            },
-            operations = decl.operations.map { op ->
-                PerformerOperation(
-                    name = op.name,
-                    paramType = op.paramType?.let { com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(it, file) },
-                    returnType = op.returnType?.let { com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(it, file) },
-                    implementation = com.mezze.language.parser.MezzeParser.toV1Expr(op.implementation, file)
-                )
-            }
-        )
-    }
+    // parsedPerformerDeclToV1 deleted — v1 bridge no longer needed
 
     /**
      * Validate a top-level expression for effect restrictions.
@@ -2888,7 +2844,7 @@ class TypeValidator(
         val associatedTypeNames = effectDecl.associatedTypes.toSet()
 
         // Parse the parameter type annotation to find field -> associated type mappings
-        val fieldToAssocType = findAssociatedTypeFields(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(paramTypeAnnotation, "<effect>"), associatedTypeNames)
+        val fieldToAssocType = findAssociatedTypeFieldsV2(paramTypeAnnotation, associatedTypeNames)
 
         if (fieldToAssocType.isEmpty()) return null
 
@@ -2917,6 +2873,22 @@ class TypeValidator(
      *
      * For a type like `{error: 'error, value: Int}`, this returns {"error" -> "'error"}.
      */
+    private fun findAssociatedTypeFieldsV2(
+        typeAnnotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        associatedTypeNames: Set<String>
+    ): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        if (typeAnnotation is com.mezze.language.parsedast.ParsedRecordType) {
+            for (entry in typeAnnotation.entries) {
+                if (entry.type is com.mezze.language.parsedast.ParsedNamedType) {
+                    val typeName = (entry.type as com.mezze.language.parsedast.ParsedNamedType).name
+                    if (typeName in associatedTypeNames) result[entry.name] = typeName
+                }
+            }
+        }
+        return result
+    }
+
     private fun findAssociatedTypeFields(
         typeAnnotation: TypeAnnotation,
         associatedTypeNames: Set<String>

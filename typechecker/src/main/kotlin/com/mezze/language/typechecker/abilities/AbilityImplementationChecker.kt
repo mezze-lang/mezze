@@ -3,7 +3,6 @@ package com.mezze.language.typechecker.abilities
 import com.mezze.language.ast.BuiltinAbilities as AstAbilities
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.TypeDeclaration
 
 /**
  * Shared utility for checking built-in ability implementations.

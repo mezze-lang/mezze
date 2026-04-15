@@ -569,7 +569,33 @@ class AbilityResolver(
         typeParams: List<String>,
         mappings: MutableMap<String, MezzeType>
     ) {
-        extractTypeParamMappings(com.mezze.language.parser.MezzeParser.toV1TypeAnnotation(annotation, "<infer>"), concreteType, typeParams, mappings)
+        when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                if (annotation.name in typeParams) mappings[annotation.name] = concreteType
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                if (concreteType is MezzeType.RecordType) {
+                    for (entry in annotation.entries) {
+                        val fieldType = concreteType.fields[entry.name] ?: continue
+                        extractTypeParamMappings(entry.type, fieldType, typeParams, mappings)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                if (concreteType is MezzeType.TypeApplication && concreteType.constructor == annotation.constructor) {
+                    for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
+                        extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
+                    }
+                }
+            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                if (concreteType is MezzeType.FunctionType) {
+                    extractTypeParamMappings(annotation.paramType, concreteType.paramType, typeParams, mappings)
+                    extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
+                }
+            }
+            else -> {}
+        }
     }
 
     private fun extractTypeParamMappings(

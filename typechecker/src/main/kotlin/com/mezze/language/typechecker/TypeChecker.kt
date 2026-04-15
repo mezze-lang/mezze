@@ -1015,33 +1015,13 @@ class TypeChecker(
     // ========================================================================
 
     /**
-     * Type check a program (compatibility API).
-     *
-     * This method mimics the old TypeChecker API for backward compatibility.
-     * It throws TypeCheckError on failure instead of returning a sealed result.
-     *
-     * @throws TypeCheckError if type checking fails
-     */
-    @Deprecated("Use typeCheck(ParsedModule, ...) instead — v1 Program overload kept for backward compat")
-    fun typeCheck(program: Program): com.mezze.language.ast.TypeCheckResult {
-        return typeCheck(program, Paths.get("."))
-    }
-
-    /**
-     * Type check a program with module resolution (compatibility API).
-     *
-     * This method mimics the old TypeChecker API for backward compatibility.
-     * It throws TypeCheckError on failure instead of returning a sealed result.
+     * Type check a ParsedModule (v2 entry point).
      *
      * @param enablePrelude If true, auto-imports inherent impls from all stdlib modules.
      *                      Used by CLI/project execution, not by unit tests.
      * @throws TypeCheckError if type checking fails
      */
     @JvmOverloads
-    /**
-     * Type check a ParsedModule (v2 entry point).
-     * Converts to v1 Program and delegates to typeCheck(Program).
-     */
     fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
@@ -1065,45 +1045,6 @@ class TypeChecker(
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
                     loadedModules = result.loadedModules.mapValues { (_, m) -> m.v2TypedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! }
-                )
-            }
-            is TypeCheckResult.Failure -> {
-                val error = result.errors.firstOrNull()
-                    ?: throw TypeCheckError("Type checking failed with unknown error")
-                throw TypeCheckError(error.message, error.sourceLocation)
-            }
-        }
-    }
-
-    @Deprecated("Use typeCheck(ParsedModule, ...) instead — v1 Program overload kept for backward compat")
-    fun typeCheck(program: Program, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
-        // Reset type variable counter for consistent naming (old behavior)
-        com.mezze.language.ast.TypeVar.resetCounter()
-
-        // Convert v1 Program to v2 ParsedModule and delegate to the real implementation
-        val parsedModule = MezzeParser().programToParsedModule(program, modulePath ?: "<unknown>")
-        val result = checkParsedModule(parsedModule, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
-
-        return when (result) {
-            is TypeCheckResult.Success -> {
-                // Convert import context to resolved imports for IDE support
-                val resolvedImports = buildResolvedImports(result.importContext)
-
-                // Convert internal TypeCheckWarning to AST TypeCheckWarning
-                // Source locations are already properly set for each warning
-                val structuredWarnings = result.warnings.map { warning ->
-                    com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
-                }
-
-                com.mezze.language.ast.TypeCheckResult(
-                    program = program,
-                    resolvedImports = resolvedImports,
-                    warnings = structuredWarnings,
-                    importedAbilities = emptyMap(),
-                    importedEffects = emptyMap(),
-                    loweredFunctions = result.loweredFunctions ?: emptyList(),
-                    typedModule = result.typedModule,
-                    performerRecords = result.loweredPerformers
                 )
             }
             is TypeCheckResult.Failure -> {
@@ -1377,8 +1318,14 @@ class TypeChecker(
             val resolver = ModuleResolver.create()
 
             for ((modulePath, program) in modules) {
-                // Convert v1 Program to v2 ParsedModule and use v2 export path
-                val parsedModule = MezzeParser().programToParsedModule(program, modulePath)
+                // Re-parse each module's source to get a v2 ParsedModule.
+                // The v1 Program doesn't carry source, so we build a minimal
+                // ParsedModule with empty decls — the actual exports are populated
+                // by preloadIntoGlobalCache below.
+                val parsedModule = com.mezze.language.parsedast.ParsedModule(
+                    path = modulePath,
+                    decls = emptyList()
+                )
                 resolver.updateModuleExportsV2(modulePath, parsedModule)
 
                 // Also cache in ModuleTypeChecker's global cache to prevent re-type-checking.

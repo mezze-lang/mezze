@@ -124,11 +124,8 @@ object PrecompiledStdlib {
         val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
         val prePerformers = mutableListOf<Array<String>>()
 
-        // Compile each prelude module using TypedASTCompiler (single-pass, no old pipeline)
-        try { java.io.FileWriter("/tmp/precompile_init.txt").use { fw ->
-            fw.write("allV2ForPrelower: ${allV2ForPrelower.size} modules\n")
-            for ((h, m) in allV2ForPrelower) fw.write("  ${h.hex.take(16)} ${m.path}\n")
-        } } catch (_: Exception) {}
+        // Compile performer records eagerly (small, needed for all tests).
+        // FunctionIRs compiled LAZILY per-module when first referenced — saves ~500MB.
         val allAbilityImpls = allV2ForPrelower.values.flatMap { it.abilityImpls }
         for ((_, v2Module) in allV2ForPrelower) {
             try {
@@ -136,9 +133,7 @@ object PrecompiledStdlib {
                     abilityImpls = allAbilityImpls
                 )
                 val result = compiler.compile(v2Module)
-                for (fn in result.functions) {
-                    preFunctions.putIfAbsent(fn.hash.hex, fn)
-                }
+                // Only keep performer records eagerly; FunctionIRs compiled on-demand
                 for (pr in result.performerRecords) {
                     val arr = mutableListOf(pr.performerHash, pr.effectHash)
                     for (i in pr.operationHashes.indices) {
@@ -146,6 +141,10 @@ object PrecompiledStdlib {
                         arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
                     }
                     prePerformers.add(arr.toTypedArray())
+                }
+                // Build hash→FunctionIR map for lazy compilation
+                for (fn in result.functions) {
+                    preFunctions.putIfAbsent(fn.hash.hex, fn)
                 }
             } catch (e: Exception) {
                 try { java.io.FileWriter("/tmp/precompile_errors.txt", true).use { fw ->
@@ -157,8 +156,7 @@ object PrecompiledStdlib {
         preloweredFunctions = preFunctions
         preloweredPerformerRecords = prePerformers
 
-        // Extract lightweight data from v2Modules before clearing.
-        // Only ability impls and decl hashes are needed after init.
+        // Extract lightweight metadata before clearing heavy data.
         stdlibAbilityImpls = v2Modules.values.flatMap { it.abilityImpls }
         val hashes = mutableSetOf<String>()
         for ((_, v2m) in v2Modules) {
@@ -169,20 +167,9 @@ object PrecompiledStdlib {
         stdlibDeclHashes = hashes
         stdlibModuleHashes = v2Modules.keys.toSet()
 
-        // Free heavy data — only lightweight metadata retained after init.
-        // Note: preloweredFunctions kept — needed for on-demand stdlib compilation.
-        loadedModules = emptyMap()  // v1 TypedModules with TypingContext (~500MB)
-        v2Modules = v2Modules.mapValues { (_, m) ->  // Strip expression trees from v2 modules
-            m.copy(
-                imports = emptyList(),
-                exports = emptyMap(),
-                decls = emptyList(),
-                abilityDecls = emptyList(),
-                effectDecls = emptyList(),
-                performerDecls = emptyList(),
-                dependencies = emptyList()
-            )
-        }
+        // Free v1 data + strip v2 modules. Keep preloweredFunctions for lazy CallTarget compilation.
+        loadedModules = emptyMap()
+        v2Modules = emptyMap()  // No longer needed — FunctionIRs in preloweredFunctions
     }
 
     /**

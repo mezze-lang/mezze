@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.context
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.BindingKey
+import com.mezze.language.ast.MezzeType
 
 /**
  * Immutable typing context for type checking.

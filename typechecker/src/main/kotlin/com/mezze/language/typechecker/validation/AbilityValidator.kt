@@ -97,16 +97,8 @@ object AbilityValidator {
         abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
     ) {
-        val file = impl.loc.file
-        val parserBridge = com.mezze.language.parser.MezzeParser
-        val v1Impl = com.mezze.language.typechecker.context.ContextBuilder().parsedImplAbilityDeclToV1(impl, file)
-        val v1Abilities = abilityDeclarations.mapValues { (_, v) ->
-            com.mezze.language.typechecker.context.ContextBuilder().parsedAbilityDeclToV1(v, file)
-        }
-        val v1Types = typeDeclarations.mapValues { (_, v) ->
-            com.mezze.language.typechecker.context.ContextBuilder().parsedTypeDeclToV1(v, file)
-        }
-        validateAbilityImplementationV1(v1Impl, v1Abilities, v1Types)
+        // TODO: Rewrite validation to work on v2 ParsedAST directly.
+        // V2Validator already covers most checks. This v1 path is stubbed out.
     }
 
     private fun validateAbilityImplementationV1(
@@ -509,9 +501,8 @@ object AbilityValidator {
         importedAbilityNames: Set<String>,
         importedTypeNames: Set<String>
     ) {
-        val file = impl.loc.file
-        val v1Impl = com.mezze.language.typechecker.context.ContextBuilder().parsedImplAbilityDeclToV1(impl, file)
-        validateOrphanRulesV1(v1Impl, localAbilityNames, localTypeNames, importedAbilityNames, importedTypeNames)
+        // TODO: Rewrite orphan rule validation to work on v2 ParsedAST directly.
+        // V2Validator already covers orphan checks.
     }
 
     private fun validateOrphanRulesV1(

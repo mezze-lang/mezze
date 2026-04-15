@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.solving
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
+import com.mezze.language.ast.TypeVar
 
 /**
  * Type substitution - foundation for constraint solving.

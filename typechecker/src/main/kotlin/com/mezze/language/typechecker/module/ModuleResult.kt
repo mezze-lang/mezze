@@ -185,8 +185,6 @@ sealed class ModuleTypeCheckResult {
  */
 data class TypedModule(
     val modulePath: String,                           // Module path
-    @Deprecated("Use v2TypedModule instead — v1 Program kept temporarily for backward compat")
-    val program: Program = Program(emptyList()),
     val exports: Map<String, ExportedItem>,           // Exports with complete types
     val context: TypingContext,                       // Module-specific typing context
     val substitution: Substitution,                   // Type substitution from inference

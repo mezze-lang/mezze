@@ -3,7 +3,6 @@ package com.mezze.language.typechecker.context
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
-import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.validation.AbilityValidator
@@ -164,10 +163,9 @@ class ContextBuilder {
                 resolvedAbilityImplDecls.add(withHash)
                 convertedPerformerDecls[perfDecl] = withHash
             } else {
-                // Real effect performer — compute content hash via v1 bridge
-                val v1Impl = parsedPerformerDeclToV1(perfDecl, file)
+                // Real effect performer — compute content hash via ParsedDeclHasher
                 val perfWithHash = if (perfDecl.contentHash != null) perfDecl
-                    else perfDecl.copy(contentHash = v1Impl.contentHash)
+                    else perfDecl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(perfDecl))
                 resolvedParsedPerformerDecls.add(perfWithHash)
             }
         }
@@ -513,71 +511,53 @@ class ContextBuilder {
         implDecl: ParsedPerformerDecl,
         associatedTypes: Map<String, MezzeType>
     ): MezzeType? {
-        val file = implDecl.loc.file
-        // Bridge: convert operations to v1 for the expression walker
-        for (op in implDecl.operations) {
-            val v1Impl = com.mezze.language.parser.MezzeParser.toV1Expr(op.implementation, file)
-            if (v1Impl !is LambdaExpression) continue
-            val suspendWithValue = findSuspendWithValue(v1Impl.body)
-            if (suspendWithValue != null) {
-                return inferSuspensionTypeFromExpression(suspendWithValue, associatedTypes)
-            }
-        }
-        return null
-    }
-
-    private fun extractSuspensionType(
-        implDecl: ImplDeclaration,
-        associatedTypes: Map<String, MezzeType>
-    ): MezzeType? {
-        // Look through all operations for suspend_with calls
+        // Walk parsed AST directly (no v1 conversion needed)
         for (op in implDecl.operations) {
             val impl = op.implementation
-            if (impl !is LambdaExpression) continue
-
-            val suspendWithValue = findSuspendWithValue(impl.body)
+            if (impl !is ParsedLambda) continue
+            val suspendWithValue = findSuspendWithValueParsed(impl.body)
             if (suspendWithValue != null) {
-                return inferSuspensionTypeFromExpression(suspendWithValue, associatedTypes)
+                return inferSuspensionTypeFromParsedExpr(suspendWithValue, associatedTypes)
             }
         }
         return null
     }
 
     /**
-     * Recursively find the value expression passed to suspend_with.
+     * Recursively find the value expression passed to suspend_with in parsed AST.
      * Looks for patterns like: cont.suspend_with {value = expr}
      */
-    private fun findSuspendWithValue(expr: Expression): Expression? {
+    private fun findSuspendWithValueParsed(expr: ParsedExpr): ParsedExpr? {
         return when (expr) {
-            is FunctionCall -> {
+            is ParsedFunctionCall -> {
                 // Check if this is a call to suspend_with
                 val callee = expr.function
-                if (callee is MemberAccess && callee.member == "suspend_with") {
+                if (callee is ParsedMemberAccess && callee.member == "suspend_with") {
                     // Found suspend_with call, extract the value from arguments
                     val args = expr.arguments
-                    if (args is RecordLiteral) {
+                    if (args is ParsedRecordLit) {
                         for (entry in args.entries) {
-                            if (entry is RecordFieldEntry && entry.name == "value") {
+                            if (entry is ParsedRecordEntry.Field && entry.name == "value") {
                                 return entry.value
                             }
                         }
                     }
                 }
                 // Not a suspend_with call, recurse into arguments
-                findSuspendWithValue(expr.arguments)
+                findSuspendWithValueParsed(expr.arguments)
             }
-            is DoExpression -> {
+            is ParsedDo -> {
                 // Check the result expression
-                findSuspendWithValue(expr.result) ?: run {
+                findSuspendWithValueParsed(expr.result) ?: run {
                     // Check statements
                     for (stmt in expr.statements.reversed()) {
                         when (stmt) {
-                            is ExpressionStatement -> {
-                                val found = findSuspendWithValue(stmt.expression)
+                            is ParsedStatement.Expr -> {
+                                val found = findSuspendWithValueParsed(stmt.expr)
                                 if (found != null) return found
                             }
-                            is LetStatement -> {
-                                val found = findSuspendWithValue(stmt.expression)
+                            is ParsedStatement.Let -> {
+                                val found = findSuspendWithValueParsed(stmt.value)
                                 if (found != null) return found
                             }
                         }
@@ -585,40 +565,40 @@ class ContextBuilder {
                     null
                 }
             }
-            is IfExpression -> {
+            is ParsedIf -> {
                 // Check both branches
-                findSuspendWithValue(expr.thenBranch) ?: findSuspendWithValue(expr.elseBranch)
+                findSuspendWithValueParsed(expr.thenBranch) ?: findSuspendWithValueParsed(expr.elseBranch)
             }
-            is MatchExpression -> {
+            is ParsedMatch -> {
                 // Check all cases
                 for (case in expr.cases) {
-                    val found = findSuspendWithValue(case.expression)
+                    val found = findSuspendWithValueParsed(case.body)
                     if (found != null) return found
                 }
                 null
             }
-            is LambdaExpression -> findSuspendWithValue(expr.body)
+            is ParsedLambda -> findSuspendWithValueParsed(expr.body)
             else -> null
         }
     }
 
     /**
-     * Infer the suspension type from the expression passed to suspend_with.
+     * Infer the suspension type from a parsed expression passed to suspend_with.
      *
      * For variant constructors like `Err {error}`, we create a variant type.
      * For other expressions, we try to infer a reasonable type.
      */
-    private fun inferSuspensionTypeFromExpression(
-        expr: Expression,
+    private fun inferSuspensionTypeFromParsedExpr(
+        expr: ParsedExpr,
         associatedTypes: Map<String, MezzeType>
     ): MezzeType? {
         return when (expr) {
-            is VariantConstruction -> {
+            is ParsedVariantConstruct -> {
                 // Variant like Err {error} or Ok {val}
                 val constructorName = expr.constructor
                 val exprValue = expr.value
                 val payloadType = if (exprValue != null) {
-                    inferPayloadType(exprValue, associatedTypes)
+                    inferParsedPayloadType(exprValue, associatedTypes)
                 } else null
 
                 // Create a variant type with this constructor
@@ -657,14 +637,14 @@ class ContextBuilder {
                     )
                 }
             }
-            is RecordLiteral -> {
+            is ParsedRecordLit -> {
                 // Record literal - infer field types
                 val fields = mutableMapOf<String, MezzeType>()
                 for (entry in expr.entries) {
-                    if (entry is RecordFieldEntry) {
+                    if (entry is ParsedRecordEntry.Field) {
                         val entryValue = entry.value
                         val fieldType = if (entryValue != null) {
-                            inferPayloadType(entryValue, associatedTypes)
+                            inferParsedPayloadType(entryValue, associatedTypes)
                         } else {
                             // Shorthand {foo} - look up in associated types
                             associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
@@ -674,7 +654,7 @@ class ContextBuilder {
                 }
                 MezzeType.RecordType(fields)
             }
-            is Identifier -> {
+            is ParsedIdentifier -> {
                 // Reference to a variable - check if it's an associated type
                 val name = expr.localName
                 associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
@@ -687,17 +667,17 @@ class ContextBuilder {
     }
 
     /**
-     * Infer the type of a payload expression.
+     * Infer the type of a payload expression from parsed AST.
      */
-    private fun inferPayloadType(expr: Expression, associatedTypes: Map<String, MezzeType>): MezzeType {
+    private fun inferParsedPayloadType(expr: ParsedExpr, associatedTypes: Map<String, MezzeType>): MezzeType {
         return when (expr) {
-            is RecordLiteral -> {
+            is ParsedRecordLit -> {
                 val fields = mutableMapOf<String, MezzeType>()
                 for (entry in expr.entries) {
-                    if (entry is RecordFieldEntry) {
+                    if (entry is ParsedRecordEntry.Field) {
                         val entryValue = entry.value
                         val fieldType = if (entryValue != null) {
-                            inferPayloadType(entryValue, associatedTypes)
+                            inferParsedPayloadType(entryValue, associatedTypes)
                         } else {
                             // Shorthand {foo} - look up in associated types
                             associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
@@ -707,7 +687,7 @@ class ContextBuilder {
                 }
                 MezzeType.RecordType(fields)
             }
-            is Identifier -> {
+            is ParsedIdentifier -> {
                 val name = expr.localName
                 associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
             }
@@ -732,8 +712,7 @@ class ContextBuilder {
     ): TypingContext {
         // Ensure content hash is available (compute if missing)
         val implWithHash = if (implDecl.contentHash != null) implDecl else {
-            val v1 = parsedPerformerDeclToV1(implDecl, implDecl.loc.file)
-            implDecl.copy(contentHash = v1.contentHash)
+            implDecl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(implDecl))
         }
         @Suppress("NAME_SHADOWING")
         val implDecl = implWithHash
@@ -1326,217 +1305,10 @@ class ContextBuilder {
         }
     }
 
-    // ============================================================================
-    // ParsedDecl → v1 AST conversion helpers
-    // ============================================================================
-
-    /** Convert parsedast.Visibility to ast.Visibility (both share the same enum values). */
-    private fun convertVisibility(v: com.mezze.language.parsedast.Visibility): com.mezze.language.ast.Visibility =
-        when (v) {
-            com.mezze.language.parsedast.Visibility.PUBLIC -> com.mezze.language.ast.Visibility.PUBLIC
-            com.mezze.language.parsedast.Visibility.PRIVATE -> com.mezze.language.ast.Visibility.PRIVATE
-        }
-
-    // ============================================================================
-    // v1 AST → ParsedDecl (v2) conversion helpers (for deprecated build(Program) overload)
-    // ============================================================================
-
-    private val syntheticLoc = Loc(file = "<v1-bridge>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
-
-    /**
-     * Convert a ParsedTypeDecl to a v1 TypeDeclaration.
-     */
-    internal fun parsedTypeDeclToV1(decl: ParsedTypeDecl, file: String = "<converted>"): TypeDeclaration {
-        val definition: TypeDefinition = when (val def = decl.definition) {
-            is ParsedRecordDef -> RecordDefinition(
-                fields = def.fields.map { f ->
-                    RecordFieldDef(
-                        name = f.name,
-                        type = ParserBridge.toV1TypeAnnotation(f.type, file)
-                    )
-                },
-                isOpen = def.isOpen
-            )
-            is ParsedVariantDef -> VariantDefinition(
-                constructors = def.constructors.map { c ->
-                    VariantConstructorDef(
-                        name = c.name,
-                        dataType = c.dataType?.let { ParserBridge.toV1TypeAnnotation(it, file) }
-                    )
-                },
-                isOpen = def.isOpen
-            )
-            is ParsedNewtypeDef -> NewtypeDefinition(
-                constructor = def.constructor,
-                wrappedType = ParserBridge.toV1TypeAnnotation(def.wrappedType, file)
-            )
-        }
-        val result = TypeDeclaration(
-            name = decl.name,
-            visibility = convertVisibility(decl.visibility),
-            typeParams = decl.typeParams,
-            definition = definition
-        )
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashTypeDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
-    }
-
-    /**
-     * Convert a ParsedAbilityDecl to a v1 AbilityDeclaration.
-     */
-    internal fun parsedAbilityDeclToV1(decl: ParsedAbilityDecl, file: String): AbilityDeclaration {
-        val result = AbilityDeclaration(
-            name = decl.name,
-            typeParams = decl.typeParams,
-            receiverTypeParam = decl.receiverTypeParam,
-            associatedTypes = decl.associatedTypes,
-            constraints = decl.constraints.map { c ->
-                AbilityConstraint(
-                    abilityName = c.abilityName,
-                    typeParam = c.typeParam
-                )
-            },
-            dependencies = decl.dependencies.map { d ->
-                AbilityDependency(
-                    abilityName = d.abilityName,
-                    typeArgs = d.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) }
-                )
-            },
-            operations = decl.operations.map { op ->
-                AbilityOperation(
-                    name = op.name,
-                    paramType = ParserBridge.toV1TypeAnnotation(op.paramType, file),
-                    returnType = ParserBridge.toV1TypeAnnotation(op.returnType, file),
-                    effects = op.effects?.let { row ->
-                        EffectRowAnnotation(
-                            effects = row.effects,
-                            effectAnnotations = row.effectAnnotations.map { ea ->
-                                EffectAnnotation(
-                                    name = ea.name,
-                                    associatedTypes = ea.associatedTypes.mapValues { (_, ann) ->
-                                        ParserBridge.toV1TypeAnnotation(ann, file)
-                                    }
-                                )
-                            },
-                            isPolymorphic = row.isPolymorphic,
-                            isPerformed = row.isPerformed
-                        )
-                    },
-                    abilityConstraints = op.abilityConstraints.map { c ->
-                        FunctionAbilityConstraint(
-                            abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                            associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, ann) ->
-                                ParserBridge.toV1TypeAnnotation(ann, file)
-                            }
-                        )
-                    }
-                )
-            }
-        )
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
-    }
-
-    /**
-     * Convert a ParsedPerformerDecl to a v1 ImplDeclaration.
-     */
-    private fun parsedPerformerDeclToV1(decl: ParsedPerformerDecl, file: String): ImplDeclaration {
-        val effect = QualifiedRef(
-            localName = decl.effect.localName,
-            qualifier = decl.effect.qualifier?.let { ModulePath(it.segments) }
-        )
-        val result = ImplDeclaration(
-            effect = effect,
-            performerName = decl.performerName,
-            performerParams = decl.params.map { p ->
-                PerformerParameter(
-                    name = p.name,
-                    type = ParserBridge.toV1TypeAnnotation(p.type, file)
-                )
-            },
-            associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
-                ParserBridge.toV1TypeAnnotation(ann, file)
-            },
-            operations = decl.operations.map { op ->
-                PerformerOperation(
-                    name = op.name,
-                    paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                    returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                    implementation = ParserBridge.toV1Expr(op.implementation, file),
-                    effects = op.effects?.let { row ->
-                        EffectRowAnnotation(
-                            effects = row.effects,
-                            effectAnnotations = row.effectAnnotations.map { ea ->
-                                EffectAnnotation(
-                                    name = ea.name,
-                                    associatedTypes = ea.associatedTypes.mapValues { (_, ann) ->
-                                        ParserBridge.toV1TypeAnnotation(ann, file)
-                                    }
-                                )
-                            },
-                            isPolymorphic = row.isPolymorphic,
-                            isPerformed = row.isPerformed
-                        )
-                    }
-                )
-            }
-        )
-        // Compute content hash
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
-    }
-
-    /** Ensure a ParsedImplAbilityDecl has a content hash (compute via v1 bridge if missing). */
-    private fun ensureContentHash(decl: ParsedImplAbilityDecl, file: String): ParsedImplAbilityDecl {
+    /** Ensure a ParsedImplAbilityDecl has a content hash (compute via ParsedDeclHasher if missing). */
+    private fun ensureContentHash(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): ParsedImplAbilityDecl {
         if (decl.contentHash != null) return decl
-        val v1 = parsedImplAbilityDeclToV1(decl, file)
-        return decl.copy(contentHash = v1.contentHash)
-    }
-
-    /**
-     * Convert a ParsedImplAbilityDecl to a v1 ImplAbilityDeclaration.
-     */
-    internal fun parsedImplAbilityDeclToV1(decl: ParsedImplAbilityDecl, file: String = "<import>"): ImplAbilityDeclaration {
-        val target: ImplTarget = when (val t = decl.target) {
-            is ParsedImplTarget.Named -> ImplTarget.Named(
-                ability = QualifiedRef(
-                    localName = t.ability.localName,
-                    qualifier = t.ability.qualifier?.let { ModulePath(it.segments) }
-                )
-            )
-            is ParsedImplTarget.Inherent -> ImplTarget.Inherent
-        }
-        val result = ImplAbilityDeclaration(
-            target = target,
-            targetTypes = decl.targetTypes.map { ParserBridge.toV1TypeAnnotation(it, file) },
-            abilityTypeArgs = decl.abilityTypeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-            forallVars = decl.forallVars,
-            associatedTypeBindings = decl.associatedTypeBindings.mapValues { (_, ann) ->
-                ParserBridge.toV1TypeAnnotation(ann, file)
-            },
-            operations = decl.operations.map { op ->
-                ImplAbilityOperation(
-                    name = op.name,
-                    paramType = op.paramType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                    returnType = op.returnType?.let { ParserBridge.toV1TypeAnnotation(it, file) },
-                    implementation = ParserBridge.toV1Expr(op.implementation, file),
-                    abilityConstraints = op.abilityConstraints.map { c ->
-                        FunctionAbilityConstraint(
-                            abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { ParserBridge.toV1TypeAnnotation(it, file) },
-                            associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, ann) ->
-                                ParserBridge.toV1TypeAnnotation(ann, file)
-                            }
-                        )
-                    }
-                )
-            },
-            contentHash = null
-        )
-        // Compute content hash (same as Phase 0.6)
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(result)
-        return result.copy(contentHash = hash.toFullHexString())
+        return decl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashImplAbilityDecl(decl))
     }
 
     companion object {

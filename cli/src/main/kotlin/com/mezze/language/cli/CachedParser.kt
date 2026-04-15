@@ -120,12 +120,11 @@ class CachedParser(
      */
     fun parseWithRecovery(
         source: String,
-        desugar: Boolean = true,
         filePath: String? = null
     ): MezzeParser.ParseResultWithRecovery {
         // For recovery mode, don't use cache since we want fresh error info
         // and the partial AST may not be suitable for caching
-        return parser.parseWithRecovery(source, desugar, filePath)
+        return parser.parseWithRecovery(source, filePath)
     }
 
     /**

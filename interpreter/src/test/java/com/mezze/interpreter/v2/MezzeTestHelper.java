@@ -80,64 +80,6 @@ public final class MezzeTestHelper {
     }
 
     /**
-     * Execute a pre-typed program directly.
-     * Typechecks the program to obtain TruffleIR (loweredFunctions) for execution.
-     */
-    public static Object execute(Program program) {
-        return execute(program, null);
-    }
-
-    /**
-     * Execute a pre-typed program with custom project root.
-     * Typechecks the program to obtain TruffleIR (loweredFunctions) for execution.
-     */
-    public static Object execute(Program program, Path projectRoot) {
-        Path root = projectRoot != null
-            ? projectRoot
-            : Paths.get(System.getProperty("mezze.project.root", "."));
-
-        // Clear module cache for clean state between tests.
-        com.mezze.language.typechecker.ModuleResolver.clearCache();
-        com.mezze.language.typechecker.TypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache();
-        com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
-        MezzeLanguage.clearLastResult();
-
-        // Type-check the program to get TruffleIR (loweredFunctions)
-        var parsedModule = new com.mezze.language.parser.MezzeParser().programToParsedModule(program, "<test>");
-        var tc = new TypeChecker();
-        var result = tc.typeCheck(parsedModule, root);
-        var functions = result.getLoweredFunctions();
-        if (functions == null) {
-            functions = java.util.Collections.emptyList();
-        }
-
-        Context context = Context.newBuilder(MezzeLanguage.ID)
-                .engine(sharedEngine)
-                .allowAllAccess(true)
-                .allowCreateThread(true)
-                .build();
-
-        try {
-            // Set TruffleIR functions for direct execution
-            MezzeLanguage.setFunctionsForDirectExecution(functions, root);
-
-            // Trigger execution with minimal source
-            Source source = Source.newBuilder(MezzeLanguage.ID, "# direct", "__direct__.mz")
-                .buildLiteral();
-
-            context.eval(source);
-
-            return MezzeLanguage.getLastExecutionResult();
-        } finally {
-            // Use cancelIfExecuting=true for Go/Rust-style semantics:
-            // When the program exits, any fire-and-forget tasks are cancelled.
-            // This prevents "polyglot threads did not complete" errors.
-            context.close(true);
-        }
-    }
-
-    /**
      * Parse source code to AST (without type-checking).
      */
     public static Program parse(String sourceCode) {
