@@ -1015,6 +1015,24 @@ class TypeChecker(
     // ========================================================================
 
     /**
+     * Type check a v1 Program (backward compatibility for tests).
+     * Ignores the empty Program and re-parses via the stored ParsedModule from MezzeParser.
+     * @deprecated Use typeCheck(ParsedModule, ...) instead
+     */
+    @Deprecated("Use typeCheck(ParsedModule, ...) instead")
+    fun typeCheck(program: com.mezze.language.ast.Program): com.mezze.language.ast.TypeCheckResult {
+        return typeCheck(program, java.nio.file.Paths.get("."))
+    }
+
+    @Deprecated("Use typeCheck(ParsedModule, ...) instead")
+    fun typeCheck(program: com.mezze.language.ast.Program, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
+        // The Program is empty (from the compat parse() method). Use the last parsed module.
+        val lastModule = com.mezze.language.parser.MezzeParser.getLastParsedModule()
+            ?: throw IllegalStateException("No ParsedModule available — call parse() or parseParsedModule first")
+        return typeCheck(lastModule, currentPath, enablePrelude, modulePath)
+    }
+
+    /**
      * Type check a ParsedModule (v2 entry point).
      *
      * @param enablePrelude If true, auto-imports inherent impls from all stdlib modules.
