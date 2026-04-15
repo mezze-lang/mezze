@@ -35,6 +35,14 @@ public final class ReadContextNode extends MezzeNode {
         if (value == null) {
             value = context.lookupGlobal(name);
         }
+        // Fall back to Language-level lazy compilation (for functions referenced by hash)
+        if (value == null) {
+            var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+            var ct = lang.getCachedStdlibCallTarget(name);
+            if (ct != null) {
+                value = com.mezze.interpreter.v2.values.MezzeFunction.create(ct, name);
+            }
+        }
         if (value == null) {
             throw new RuntimeException("Context variable '" + name + "' not found");
         }
