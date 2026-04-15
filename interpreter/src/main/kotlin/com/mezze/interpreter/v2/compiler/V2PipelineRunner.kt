@@ -52,8 +52,7 @@ object V2PipelineRunner {
         functions: List<com.mezze.language.truffleir.FunctionIR>,
         importedModulePaths: List<String> = emptyList(),
         projectRoot: Path = Path.of("."),
-        performerRecords: List<Array<String>> = emptyList(),
-        loadedModules: Map<String, com.mezze.language.typedast.TypedModule> = emptyMap()
+        performerRecords: List<Array<String>> = emptyList()
     ): CallTarget {
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()

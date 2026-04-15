@@ -69,11 +69,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private static final MezzeParser sharedParser = new MezzeParser();
     private static final TypeChecker sharedTypeChecker = new TypeChecker();
 
-    // Stdlib CallTargets — compiled once per Language instance.
-    // Truffle creates a new Language instance per Context, so each Context recompiles stdlib.
-    // This is unavoidable — CallTargets are tied to their creating Language instance.
+    // CallTarget cache — shared across all tests for the same Language instance.
+    // Content-hash keys ensure identical functions reuse the same CallTarget,
+    // preventing accumulation on the Engine across 5000+ test runs.
     private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Expose cache for FunctionDefinitionNode to store lambda CallTargets by content hash. */
+    public java.util.concurrent.ConcurrentHashMap<String, CallTarget> getCachedStdlibCallTargetCache() {
+        return stdlibCallTargetCache;
+    }
     private volatile java.util.Map<String, String> stdlibHashToName = null;
     private volatile java.util.List<String[]> stdlibPerformerRecords = null;
     private volatile boolean stdlibCompiled = false;
@@ -110,11 +115,21 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         var ir = userFunctionIRRegistry.get(hash);
         if (ir != null) {
             var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
-            // Register ALL user functions so MakeLambdaIR can find lambda bodies
             compiler.registerFunctions(new java.util.ArrayList<>(userFunctionIRRegistry.values()));
             var rootNode = compiler.compile(ir);
             ct = rootNode.getCallTarget();
             userCallTargetCache.put(hash, ct);
+            return ct;
+        }
+        // Try stdlib FunctionIR — may be available if preloweredFunctions not yet cleared
+        var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
+        var stdlibIR = precompiled.getPreloweredFunctions().get(hash);
+        if (stdlibIR != null) {
+            var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
+            compiler.registerFunctions(new java.util.ArrayList<>(precompiled.getPreloweredFunctions().values()));
+            var rootNode = compiler.compile(stdlibIR);
+            ct = rootNode.getCallTarget();
+            stdlibCallTargetCache.put(hash, ct);
             return ct;
         }
         return null;
@@ -213,7 +228,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         String sourceCode = source.getCharacters().toString();
 
         // Clear previous test's user function state — each test gets fresh functions.
-        // This prevents CallTarget accumulation that causes OOM over thousands of tests.
         userFunctionIRRegistry.clear();
         userCallTargetCache.clear();
 
@@ -232,8 +246,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             // All modules are already included in the FunctionIR list — no import extraction needed
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
                 this, directFunctions, Collections.emptyList(), projectRoot,
-                performers != null ? performers : Collections.emptyList(),
-                Collections.emptyMap()
+                performers != null ? performers : Collections.emptyList()
             );
         }
 
@@ -256,11 +269,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
             var performers = typeCheckResult.getPerformerRecords();
-            var loadedModules = typeCheckResult.getLoadedModules();
             return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
                 this, loweredFunctions, Collections.emptyList(), projectRoot,
-                performers != null ? performers : Collections.emptyList(),
-                loadedModules != null ? loadedModules : Collections.emptyMap()
+                performers != null ? performers : Collections.emptyList()
             );
         }
 

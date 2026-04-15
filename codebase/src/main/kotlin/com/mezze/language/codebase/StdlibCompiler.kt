@@ -12,7 +12,6 @@ object StdlibCompiler {
 
     fun compile(codebase: SQLiteCodebase): CompileResult {
         val v2Modules = PrecompiledStdlib.v2Modules
-        val loadedModules = PrecompiledStdlib.loadedModules
 
         var typedModuleCount = 0
         var functionIRCount = 0
@@ -25,22 +24,20 @@ object StdlibCompiler {
 
         val allAbilityImpls = v2Modules.values.flatMap { it.abilityImpls }
 
-        for ((path, v1Module) in loadedModules) {
+        for ((_, v2Module) in v2Modules) {
             try {
-                val v2Module = v1Module.v2TypedModule ?: continue
-
                 val compiler = TypedASTCompiler(abilityImpls = allAbilityImpls)
                 val result = compiler.compile(v2Module)
 
                 for (fn in result.functions) {
                     if (!codebase.hasStdlibCompiled(fn.hash.hex)) {
                         val blob = CodebaseSerialization.serializeFunctionIR(fn)
-                        codebase.putStdlibCompiled(fn.hash.hex, path, "function_ir", blob)
+                        codebase.putStdlibCompiled(fn.hash.hex, v2Module.path, "function_ir", blob)
                         functionIRCount++
                     }
                 }
             } catch (e: Exception) {
-                System.err.println("[StdlibCompiler] Failed to compile $path: ${e.message}")
+                System.err.println("[StdlibCompiler] Failed to compile ${v2Module.path}: ${e.message}")
             }
         }
 

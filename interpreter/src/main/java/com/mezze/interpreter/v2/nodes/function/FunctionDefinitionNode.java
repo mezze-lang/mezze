@@ -298,14 +298,18 @@ public final class FunctionDefinitionNode extends MezzeNode {
 
     @TruffleBoundary
     private CallTarget getCachedCallTarget() {
+        // Check Language-level cache first (shared across all tests/contexts)
+        var langCt = MezzeLanguage.get(this).getCachedStdlibCallTarget(contentHash);
+        if (langCt != null) return langCt;
+        // Fall back to per-context cache
         MezzeContext context = MezzeContext.get(this);
         return context.getCachedCallTarget(contentHash);
     }
 
     @TruffleBoundary
     private void cacheCallTarget(CallTarget target) {
-        MezzeContext context = MezzeContext.get(this);
-        context.cacheCallTarget(contentHash, target);
+        // Cache on Language (shared across tests) — prevents CallTarget accumulation on Engine
+        MezzeLanguage.get(this).getCachedStdlibCallTargetCache().put(contentHash, target);
     }
 
     public String getName() {

@@ -30,11 +30,29 @@ object PrecompiledStdlib {
     /** Raw prelude import context (for merging with user imports) */
     val preludeImportContext: ModuleImportContext
 
-    /** Loaded v1 TypedModules for all prelude modules */
-    val loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
+    /** @deprecated v1 TypedModules — cleared after init to free ~500MB. Use v2Modules instead. */
+    @Deprecated("Use v2Modules instead — v1 modules cleared after init")
+    var loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
+        private set
 
-    /** Pre-converted v2 TypedModules for monomorphizer */
-    val v2Modules: Map<Hash, com.mezze.language.typedast.TypedModule>
+    /** Pre-converted v2 TypedModules — full modules during init, stripped after.
+     *  After init, only abilityImpls and decl hashes are retained (via stdlibAbilityImpls + stdlibDeclHashes). */
+    var v2Modules: Map<Hash, com.mezze.language.typedast.TypedModule>
+        private set
+
+    /** Ability impls from ALL stdlib v2 modules — extracted during init, kept permanently.
+     *  Used by TypeChecker to build allAbilityImpls per test. */
+    var stdlibAbilityImpls: List<com.mezze.language.typedast.TypedAbilityImpl> = emptyList()
+        private set
+
+    /** Decl hashes from ALL stdlib v2 modules — extracted during init, kept permanently.
+     *  Used by TypeChecker to build preludeHashes set. */
+    var stdlibDeclHashes: Set<String> = emptySet()
+        private set
+
+    /** Module hashes for prelude skip detection — extracted from v2Modules.keys */
+    var stdlibModuleHashes: Set<Hash> = emptySet()
+        private set
 
     /** Pre-lowered stdlib functions: hash → FunctionIR.
      *  Cleared after CallTargets are compiled to free ~100MB of IR data. */
@@ -139,6 +157,32 @@ object PrecompiledStdlib {
         preloweredFunctions = preFunctions
         preloweredPerformerRecords = prePerformers
 
+        // Extract lightweight data from v2Modules before clearing.
+        // Only ability impls and decl hashes are needed after init.
+        stdlibAbilityImpls = v2Modules.values.flatMap { it.abilityImpls }
+        val hashes = mutableSetOf<String>()
+        for ((_, v2m) in v2Modules) {
+            for (d in v2m.decls) {
+                if (d is com.mezze.language.typedast.TypedLetDecl) hashes.add(d.hash.hex)
+            }
+        }
+        stdlibDeclHashes = hashes
+        stdlibModuleHashes = v2Modules.keys.toSet()
+
+        // Free heavy data — only lightweight metadata retained after init.
+        // Note: preloweredFunctions kept — needed for on-demand stdlib compilation.
+        loadedModules = emptyMap()  // v1 TypedModules with TypingContext (~500MB)
+        v2Modules = v2Modules.mapValues { (_, m) ->  // Strip expression trees from v2 modules
+            m.copy(
+                imports = emptyList(),
+                exports = emptyMap(),
+                decls = emptyList(),
+                abilityDecls = emptyList(),
+                effectDecls = emptyList(),
+                performerDecls = emptyList(),
+                dependencies = emptyList()
+            )
+        }
     }
 
     /**

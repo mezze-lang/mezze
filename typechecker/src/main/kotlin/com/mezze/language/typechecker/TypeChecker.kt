@@ -537,9 +537,7 @@ class TypeChecker(
                     // Collect all ability impls from all visible modules
                     val allAbilityImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
                     allAbilityImpls.addAll(wrapped.abilityImpls)
-                    for ((_, v2) in PrecompiledStdlib.v2Modules) {
-                        allAbilityImpls.addAll(v2.abilityImpls)
-                    }
+                    allAbilityImpls.addAll(PrecompiledStdlib.stdlibAbilityImpls)
                     for ((_, v1Module) in loadedModules) {
                         val v2m = v1Module.v2TypedModule ?: continue
                         allAbilityImpls.addAll(v2m.abilityImpls)
@@ -557,14 +555,9 @@ class TypeChecker(
 
                     // Collect ALL prelude decl hashes to skip during compilation
                     val preludeHashes = mutableSetOf<String>()
-                    // Use hash set (survives FunctionIR cleanup) OR keys if not yet cleared
                     val fnHashes = PrecompiledStdlib.preloweredFunctionHashes.ifEmpty { PrecompiledStdlib.preloweredFunctions.keys }
                     preludeHashes.addAll(fnHashes)
-                    for ((_, v2m) in PrecompiledStdlib.v2Modules) {
-                        for (d in v2m.decls) {
-                            if (d is com.mezze.language.typedast.TypedLetDecl) preludeHashes.add(d.hash.hex)
-                        }
-                    }
+                    preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
 
                     // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
                     val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
@@ -574,7 +567,7 @@ class TypeChecker(
                     compiler.setDeclIndex(declIndex)
 
                     // Collect imported modules and performers (non-prelude only)
-                    val preludeModuleHashes = PrecompiledStdlib.v2Modules.keys
+                    val preludeModuleHashes = PrecompiledStdlib.stdlibModuleHashes
                     val importedModules = mutableListOf<com.mezze.language.typedast.TypedModule>()
                     val importedPerformers = mutableListOf<com.mezze.language.typedast.TypedPerformerDecl>()
                     val seenHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
