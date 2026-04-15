@@ -129,7 +129,7 @@ class TypedAstBuilder(
         }
 
         // Add hashes for all let declarations in this module
-        val moduleHashes = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashAllLetDecls(module)
+        val moduleHashes = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashAllLetDecls(module)
         for ((name, hash) in moduleHashes) {
             val key = BindingKey.unqualified(name)
             if (key !in mutableHashes) {
@@ -254,7 +254,7 @@ class TypedAstBuilder(
         identifierContext[name] = type
 
         // Compute content hash for this declaration
-        val hash = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashLetDecl(decl, file)
+        val hash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashLetDecl(decl, file)
             ?.let { Hash.fromV1(it) }
             ?: computeHash("let_$name:${typeToString(type)}")
 

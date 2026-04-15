@@ -109,7 +109,7 @@ class ContextBuilder {
             .mapValues { (_, decl) ->
                 if (decl.contentHash != null) decl
                 else {
-                    val hash = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashEffectDecl(decl, file)
+                    val hash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashEffectDecl(decl)
                     if (hash != null) decl.copy(contentHash = hash) else decl
                 }
             }

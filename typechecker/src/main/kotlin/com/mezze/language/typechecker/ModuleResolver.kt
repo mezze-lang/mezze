@@ -77,8 +77,8 @@ data class ProgramIndex(
             val abilityImplDecls = decls.filterIsInstance<ParsedImplAbilityDecl>()
             val letDecls = decls.filterIsInstance<ParsedLetDecl>()
 
-            // Compute content hashes using ParsedASTHasher (v2 — no v1 Program round-trip)
-            val hasher = com.mezze.language.typechecker.hashing.ParsedASTHasher
+            // Compute content hashes using ParsedDeclHasher (v2-native, Unison-style)
+            val hasher = com.mezze.language.typechecker.hashing.ParsedDeclHasher
             val file = module.path
 
             val hashedEffects = effectDecls.mapValues { (_, decl) ->
@@ -988,8 +988,8 @@ class ModuleResolver(
                     val mezzeType: MezzeType = fromContext ?: fromAnnotation
                         ?: MezzeType.VarType(TypeVar.fresh())
 
-                    // Compute content hash via ParsedASTHasher (thin bridge to v1 hashing)
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedASTHasher.hashLetDecl(decl, file)
+                    // Compute content hash via ParsedDeclHasher (v2-native, Unison-style)
+                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashLetDecl(decl)
                         ?: "unknown_${name}_hash"
 
                     exports[name] = ExportedItem(
