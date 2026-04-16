@@ -42,14 +42,23 @@ class ConstraintSolver(
      */
     private val codecGenerator = CodecGenerator()
 
+    /** Lightweight representation of a generated codec implementation.
+     *  Replaces v1 ImplAbilityDeclaration — only stores metadata needed
+     *  for dedup (contentHash) and bidirectional inference (abilityName, targetTypes). */
+    private data class GeneratedCodecImpl(
+        val abilityName: String,
+        val targetTypes: List<MezzeType>,  // [formatType, dataType]
+        val contentHash: String
+    )
+
     /**
      * Track generated codec implementations.
      *
      * When we see an Encode or Decode ability constraint for a serializable type
      * that doesn't have an explicit impl, we generate one and store it here.
-     * Key: Content hash of the generated ImplAbilityDeclaration
+     * Key: Content hash of the GeneratedCodecImpl
      */
-    private val generatedCodecImpls = mutableMapOf<String, ImplAbilityDeclaration>()
+    private val generatedCodecImpls = mutableMapOf<String, GeneratedCodecImpl>()
     /**
      * Tracked ability constraint entry — carries abilityName, optional content hash, typeArgs, and source location.
      *
@@ -1856,14 +1865,8 @@ class ConstraintSolver(
             return false
         }
 
-        // Generate the implementation based on ability type
-        val generatedImpl = when (abilityName) {
-            "Encode", "EncodeRepr" -> codecGenerator.generateEncodeImpl(formatType, dataType)
-            "Decode", "DecodeRepr" -> codecGenerator.generateDecodeImpl(formatType, dataType)
-            "StreamEncode" -> codecGenerator.generateStreamEncodeImpl(formatType, dataType)
-            "StreamDecode" -> codecGenerator.generateStreamDecodeImpl(formatType, dataType)
-            else -> return false
-        }
+        // isSerializable already verified — codec generation will succeed.
+        // No need to actually build v1 Expression trees.
 
         // Compute content hash and use it as the key — simple structural hash
         val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
@@ -1872,7 +1875,6 @@ class ConstraintSolver(
         hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(formatType))
         hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
         val hash = hashBuilder.build()
-        val implWithHash = generatedImpl.copy(contentHash = hash.toFullHexString())
         val implKey = hash.toFullHexString()
 
         // Check if we've already generated this impl (same content = same hash)
@@ -1880,8 +1882,12 @@ class ConstraintSolver(
             return true
         }
 
-        // Store the generated impl keyed by content hash
-        generatedCodecImpls[implKey] = implWithHash
+        // Store lightweight metadata only — no v1 expression trees
+        generatedCodecImpls[implKey] = GeneratedCodecImpl(
+            abilityName = abilityName,
+            targetTypes = listOf(formatType, dataType),
+            contentHash = implKey
+        )
         return true
     }
 
@@ -2049,16 +2055,6 @@ class ConstraintSolver(
             is MezzeType.ByteBufferType -> false
             is MezzeType.NewtypeType -> false  // Newtypes don't auto-derive codec
         }
-    }
-
-    /**
-     * Get all generated codec implementations.
-     *
-     * Called after constraint solving to retrieve auto-derived implementations
-     * that need to be added to the program.
-     */
-    fun getGeneratedCodecImpls(): Map<String, ImplAbilityDeclaration> {
-        return generatedCodecImpls.toMap()
     }
 
     /**
@@ -2331,12 +2327,9 @@ class ConstraintSolver(
                 if (matchingImpls.size == 1) {
                     // Exactly one impl - we can infer the data type!
                     val impl = matchingImpls.first()
-                    // Extract the data type from the impl's target types using structural conversion
-                    val inferredType = convertV1AnnotationToType(impl.targetTypes[0])
-
-                    if (inferredType != null) {
-                        return Substitution.single(dataType.variable, inferredType)
-                    }
+                    // targetTypes stores MezzeType directly — no v1 conversion needed
+                    val inferredType = impl.targetTypes[0]
+                    return Substitution.single(dataType.variable, inferredType)
                 }
                 // Multiple impls or none found - cannot infer unambiguously
                 // This will result in an error asking for type annotation
@@ -2350,19 +2343,17 @@ class ConstraintSolver(
             // If format is concrete and data is a type variable, try to infer from generated impls
             if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
                 // Look for generated Decode impls for this format using STRUCTURAL matching
+                // targetTypes stores MezzeType directly — no v1 conversion needed
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
                     impl.abilityName == "Decode" &&
                     impl.targetTypes.size >= 2 &&
-                    convertV1AnnotationToType(impl.targetTypes[0])?.let { typeMatchesMezzeType(formatType, it) } == true
+                    typeMatchesMezzeType(formatType, impl.targetTypes[0])
                 }
 
                 if (matchingImpls.size == 1) {
                     val impl = matchingImpls.first()
-                    val inferredType = convertV1AnnotationToType(impl.targetTypes[1])
-
-                    if (inferredType != null) {
-                        return Substitution.single(dataType.variable, inferredType)
-                    }
+                    val inferredType = impl.targetTypes[1]
+                    return Substitution.single(dataType.variable, inferredType)
                 }
                 // Multiple impls or none found - cannot infer unambiguously
                 // This will result in an error asking for type annotation
@@ -2464,28 +2455,6 @@ class ConstraintSolver(
             return expected.constructor == actual.constructor
         }
         return false
-    }
-
-    /** Convert v1 TypeAnnotation to MezzeType directly (avoids v2→v1 bridge). */
-    private fun convertV1AnnotationToType(ann: TypeAnnotation): MezzeType? {
-        return when (ann) {
-            is IdentifierTypeAnnotation -> PrimitiveTypes.fromName(ann.name) ?: MezzeType.TypeApplication(ann.name, emptyList())
-            is TypeApplicationAnnotation -> {
-                val args = ann.args.mapNotNull { convertV1AnnotationToType(it) }
-                if (args.size != ann.args.size) null else MezzeType.TypeApplication(ann.constructor, args)
-            }
-            is RecordTypeAnnotation -> {
-                val fields = mutableMapOf<String, MezzeType>()
-                for (e in ann.entries) { val ft = convertV1AnnotationToType(e.type) ?: return null; fields[e.name] = ft }
-                MezzeType.RecordType(fields)
-            }
-            is FunctionTypeAnnotation -> {
-                val p = convertV1AnnotationToType(ann.paramType) ?: return null
-                val r = convertV1AnnotationToType(ann.returnType) ?: return null
-                MezzeType.FunctionType(p, r)
-            }
-            else -> null
-        }
     }
 
     /**
