@@ -39,6 +39,40 @@ private fun printVariantType(
         return declMatch.declName + typeArgsStr
     }
 
+    // Check type aliases by constructor name matching (handles recursive types where
+    // structural unification fails because type vars are the same on both sides)
+    for ((aliasName, aliasInfo) in typeAliases) {
+        val aliasDef = aliasInfo.definition
+        if (aliasDef is MezzeType.VariantType) {
+            val aliasCtors = aliasDef.constructors.keys.sorted()
+            val typeCtors = type.constructors.keys.sorted()
+            if (aliasCtors == typeCtors) {
+                // Constructors match by name — infer type args
+                val typeArgs = inferTypeArguments(type, aliasDef, aliasInfo.typeParams)
+                if (typeArgs != null) {
+                    val argsStr = if (typeArgs.isEmpty()) "" else " " + typeArgs.joinToString(" ") {
+                        prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+                    }
+                    return aliasName + argsStr
+                }
+            }
+        }
+    }
+
+    // Check type aliases via structural unification
+    val aliasMatch = findTypeAliasForType(type, typeAliases)
+    if (aliasMatch != null) {
+        val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
+            aliasMatch.aliasName
+        } else {
+            val argsStr = aliasMatch.typeArgs.joinToString(" ") {
+                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+            }
+            "${aliasMatch.aliasName} $argsStr"
+        }
+        return aliasName
+    }
+
     // Special case: Result variant
     val resultTypes = BuiltinTypes.getResultTypes(type)
     if (resultTypes != null) {
@@ -467,7 +501,58 @@ private fun prettyPrintWithAliasCheck(
     typeVarMapping: Map<TypeVar, String>,
     typeDeclarations: List<TypeDeclaration> = emptyList()
 ): String {
-    // First, check if this type matches any alias
+    // For variant types: match by constructor names (handles recursive types and row-var differences)
+    if (type is MezzeType.VariantType) {
+        // First check typeName (set by type declarations in the solver)
+        if (type.typeName != null) {
+            val alias = typeAliases[type.typeName]
+            if (alias != null) {
+                // Collect type args by finding all type vars in the concrete type
+                val typeVars = mutableSetOf<MezzeType>()
+                for ((_, payload) in type.constructors) {
+                    if (payload != null) collectFreeTypeVars(payload, typeVars)
+                }
+                val argsStr = if (typeVars.isEmpty()) "" else " " + typeVars.joinToString(" ") {
+                    prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+                }
+                return type.typeName + argsStr
+            }
+        }
+        // Then check by constructor name matching
+        val typeCtors = type.constructors.keys.sorted()
+        for ((aliasName, aliasInfo) in typeAliases) {
+            val aliasDef = aliasInfo.definition
+            if (aliasDef is MezzeType.VariantType && aliasDef.constructors.keys.sorted() == typeCtors) {
+                if (aliasInfo.typeParams.isEmpty()) return aliasName
+                // Infer type args by collecting unique type vars from concrete payloads
+                val typeVars = mutableListOf<MezzeType>()
+                for ((_, payload) in type.constructors) {
+                    if (payload != null) collectFreeTypeVars(payload, typeVars.toMutableSet())
+                }
+                // Use distinct type vars as type args (in order they appear)
+                val seen = mutableSetOf<String>()
+                val orderedArgs = mutableListOf<MezzeType>()
+                for (v in typeVars) {
+                    if (v is MezzeType.VarType && v.variable.name !in seen) {
+                        seen.add(v.variable.name)
+                        orderedArgs.add(v)
+                    }
+                }
+                if (orderedArgs.size == aliasInfo.typeParams.size) {
+                    val argsStr = orderedArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
+                    return "$aliasName $argsStr"
+                }
+                // Fallback: just print the alias name with generic vars
+                if (aliasInfo.typeParams.isNotEmpty()) {
+                    val genericArgs = aliasInfo.typeParams.joinToString(" ") { "'${it.removePrefix("'")}" }
+                    return "$aliasName $genericArgs"
+                }
+                return aliasName
+            }
+        }
+    }
+
+    // Check if this type matches any alias via structural unification
     val aliasMatch = findTypeAliasForType(type, typeAliases)
 
     return if (aliasMatch != null) {
@@ -830,3 +915,17 @@ fun printTypeScheme(scheme: TypeScheme): String {
 // - prettyPrintTypeWithBuiltinInfo
 // - areTypesAlphaEquivalent (with alphaEquivHelper)
 // Use BuiltinTypes.isBuiltinTypeName() for type name checks instead.
+
+/** Collect free type variables from a MezzeType. */
+private fun collectFreeTypeVars(type: MezzeType, result: MutableSet<MezzeType>) {
+    when (type) {
+        is MezzeType.VarType -> result.add(type)
+        is MezzeType.RecordType -> type.fields.values.forEach { collectFreeTypeVars(it, result) }
+        is MezzeType.VariantType -> type.constructors.values.filterNotNull().forEach { collectFreeTypeVars(it, result) }
+        is MezzeType.FunctionType -> { collectFreeTypeVars(type.paramType, result); collectFreeTypeVars(type.returnType, result) }
+        is MezzeType.TypeApplication -> type.args.forEach { collectFreeTypeVars(it, result) }
+        is MezzeType.SeqType -> collectFreeTypeVars(type.elementType, result)
+        is MezzeType.ListType -> collectFreeTypeVars(type.elementType, result)
+        else -> {}
+    }
+}
