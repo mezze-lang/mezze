@@ -229,7 +229,7 @@ class MezzeTextDocumentService(
                     }
 
                     typeCheckResult = TypeCheckResult(
-                        program = result.program,
+                        program = Program(emptyList()),
                         resolvedImports = buildResolvedImports(result.importContext),
                         importedAbilities = emptyMap(),
                         importedEffects = emptyMap()

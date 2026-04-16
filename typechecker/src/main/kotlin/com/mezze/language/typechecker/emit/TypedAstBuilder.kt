@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker.emit
 
 import com.mezze.language.ast.*
-import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser as ParserBridge
 import com.mezze.language.parsedast.*
@@ -415,7 +414,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        // Use the ASTHasher content hash so it matches what importers look up.
+        // Use the content hash so it matches what importers look up.
         // Try: decl.contentHash, then implDeclarations, then identifierContentHashes, then fallback
         val contentHash = decl.contentHash
             ?: implDeclarations[decl.performerName]?.contentHash

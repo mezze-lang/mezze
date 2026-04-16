@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker.hashing
 
 import com.mezze.language.ast.*
-import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.ast.hashing.MezzeHash
 
 /**

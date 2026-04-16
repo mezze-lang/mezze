@@ -1865,8 +1865,13 @@ class ConstraintSolver(
             else -> return false
         }
 
-        // Compute content hash and use it as the key
-        val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(generatedImpl)
+        // Compute content hash and use it as the key — simple structural hash
+        val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        hashBuilder.append("codec_impl")
+        hashBuilder.append(abilityName)
+        hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(formatType))
+        hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
+        val hash = hashBuilder.build()
         val implWithHash = generatedImpl.copy(contentHash = hash.toFullHexString())
         val implKey = hash.toFullHexString()
 
