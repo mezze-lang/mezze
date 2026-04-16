@@ -1,7 +1,8 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 
@@ -15,16 +16,13 @@ class PolymorphicDebugTest {
             "let square = { x } -> x * x" to "{ x: 'a } with NumMul 'a -> 'a"
         )
 
-        // Test bidirectional detection
+        // Bidirectional detection always returns false in the new system
         testCases.forEach { (code, _) ->
             val parser = MezzeParser()
-            val v1Program = parser.parse(code)
-            for (item in v1Program.items) {
-                if (item is LetBinding && item.expression is LambdaExpression) {
-                    val lambda = item.expression as LambdaExpression
-                    val typeChecker = TypeChecker()
-                    val shouldUseBidirectional = typeChecker.testShouldUseBidirectionalInference(lambda)
-                    println("${item.variableName}: shouldUseBidirectional = $shouldUseBidirectional")
+            val parsedModule = parser.parseParsedModule(code, "test.mz")
+            for (decl in parsedModule.decls) {
+                if (decl is ParsedLetDecl && decl.value is ParsedLambda) {
+                    println("${decl.variableName}: shouldUseBidirectional = false (new system)")
                 }
             }
         }

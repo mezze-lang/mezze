@@ -89,30 +89,22 @@ object AbilityValidator {
      * @throws TypeCheckError if validation fails
      */
     /**
-     * Validate ability implementation (v2 entry point).
-     * Converts v2 types to v1 internally for the validation logic.
+     * Validate ability implementation (v2 native — works directly on ParsedImplAbilityDecl).
+     * No v1 bridge conversion needed.
      */
     fun validateAbilityImplementation(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
     ) {
-        // TODO: Rewrite validation to work on v2 ParsedAST directly.
-        // V2Validator already covers most checks. This v1 path is stubbed out.
-    }
+        val sourceLocation = SourceLocation(impl.loc.startLine, impl.loc.startCol, impl.loc.file)
 
-    private fun validateAbilityImplementationV1(
-        impl: ImplAbilityDeclaration,
-        abilityDeclarations: Map<String, AbilityDeclaration>,
-        typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
-    ) {
         // Rule 0: Check impl method names don't conflict with target type's record fields.
-        // e.g., if Button has field `onClick`, you can't impl an ability with method `onClick` for Button.
-        validateNoFieldMethodConflict(impl, typeDeclarations)
+        validateNoFieldMethodConflict(impl, typeDeclarations, sourceLocation)
 
         // Inherent impls don't implement an ability — validate target type exists, then return
         if (impl.isInherent) {
-            validateInherentImplTargetType(impl, typeDeclarations)
+            validateInherentImplTargetType(impl, typeDeclarations, sourceLocation)
             return
         }
 
@@ -120,30 +112,25 @@ object AbilityValidator {
         val abilityQualifier = impl.abilityRef?.qualifier
 
         // Find the ability declaration
-        // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
-        val qualifiedAbilityName = abilityQualifier?.let { "${it.fullPath}::$abilityName" } ?: abilityName
+        val qualifiedAbilityName = abilityQualifier?.let { "$it::$abilityName" } ?: abilityName
         val abilityDeclaration = abilityDeclarations[abilityName]
             ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw TypeCheckError(
                 "Ability '$qualifiedAbilityName' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
-                impl.sourceLocation
+                sourceLocation
             )
 
         // Rule 1: Check type parameter count matches
-        // Concrete abilityTypeArgs (before 'for') + targetTypes (after 'for') must match ability's type params.
-        // For `impl Into Str for Int`: abilityTypeArgs=[Str](concrete), targetTypes=[Int] → total=2
-        // For `impl Into for Str Int`: abilityTypeArgs=[], targetTypes=[Str, Int] → total=2
-        // For `impl Eq 'a for ['a]`: abilityTypeArgs=['a](variable, not counted), targetTypes=[['a]] → total=1
         val concreteAbilityTypeArgCount = impl.abilityTypeArgs
-            .count { it !is IdentifierTypeAnnotation || !it.name.startsWith("'") }
+            .count { it !is com.mezze.language.parsedast.ParsedNamedType || !it.name.startsWith("'") }
         val totalTypeParams = concreteAbilityTypeArgCount + impl.targetTypes.size
         if (totalTypeParams != abilityDeclaration.typeParams.size) {
             throw TypeCheckError(
                 "Type parameter count mismatch in ability implementation for '${abilityName}': " +
                 "ability expects ${abilityDeclaration.typeParams.size} type parameters, " +
                 "but implementation provides ${totalTypeParams}",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
@@ -151,52 +138,48 @@ object AbilityValidator {
         val abilityAssociatedTypes = abilityDeclaration.associatedTypes
         val implAssociatedTypeBindings = impl.associatedTypeBindings
 
-        // Rule 2: If ability declares associated types, impl must provide bindings
         if (abilityAssociatedTypes.isNotEmpty() && implAssociatedTypeBindings.isEmpty()) {
             val typesList = abilityAssociatedTypes.joinToString(", ")
             throw TypeCheckError(
                 "Ability '${abilityName}' declares associated types [$typesList] " +
                 "but implementation does not provide bindings. " +
-                "Use: impl ${abilityName} ${impl.targetTypes.joinToString(" ")} " +
+                "Use: impl ${abilityName} ${impl.targetTypes.joinToString(" ") { parsedTypeAnnotationToString(it) }} " +
                 "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
-        // Rule 3: If ability doesn't declare associated types, impl cannot provide bindings
         if (abilityAssociatedTypes.isEmpty() && implAssociatedTypeBindings.isNotEmpty()) {
             val bindingsList = implAssociatedTypeBindings.keys.joinToString(", ")
             throw TypeCheckError(
                 "Implementation provides associated type bindings [$bindingsList] " +
                 "but ability '${abilityName}' does not declare associated types. " +
                 "Remove the 'having' clause or add it to the ability declaration.",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
-        // Rule 4: Check that all declared associated types have bindings
         val missingBindings = abilityAssociatedTypes.filter { it !in implAssociatedTypeBindings.keys }
         if (missingBindings.isNotEmpty()) {
             throw TypeCheckError(
                 "Ability '${abilityName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
                 "but implementation is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                 "All associated types must be bound in the implementation.",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
-        // Rule 5: Check that impl doesn't provide extra bindings not declared in ability
         val extraBindings = implAssociatedTypeBindings.keys.filter { it !in abilityAssociatedTypes }
         if (extraBindings.isNotEmpty()) {
             throw TypeCheckError(
                 "Implementation provides bindings for ${extraBindings.joinToString(", ")} " +
                 "but ability '${abilityName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
                 "Remove the extra bindings or add them to the ability declaration.",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
-        // Rule 6: Check all operations are implemented (OldTypeChecker.kt:13129-13138)
+        // Rule 6: Check all operations are implemented
         val declaredOps = abilityDeclaration.operations.map { it.name }.toSet()
         val implementedOps = impl.operations.map { it.name }.toSet()
         val missingOps = declaredOps - implementedOps
@@ -207,16 +190,16 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Implementation of '${abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
                 "Add: $example = {args} -> ...",
-                impl.sourceLocation
+                sourceLocation
             )
         }
 
-        // Rule 7: Check no extra operations (OldTypeChecker.kt:13140-13146)
+        // Rule 7: Check no extra operations
         val extraOps = implementedOps - declaredOps
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
-            // Get source location from first extra operation
-            val extraOpLocation = impl.operations.find { it.name in extraOps }?.implementation?.sourceLocation
+            val extraOpLoc = impl.operations.find { it.name in extraOps }?.loc
+            val extraOpLocation = extraOpLoc?.let { SourceLocation(it.startLine, it.startCol, it.file) }
             throw TypeCheckError(
                 "Implementation of '${abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
                 "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
@@ -225,19 +208,17 @@ object AbilityValidator {
         }
 
         // Rule 8: Validate operation signatures match after type parameter substitution
-        // (OldTypeChecker.kt:13148-13198)
-        validateOperationSignatures(impl, abilityDeclaration)
+        validateOperationSignatures(impl, abilityDeclaration, sourceLocation)
     }
 
     /**
      * Validate that all operation signatures in the implementation match the declaration
-     * after substituting type parameters.
-     *
-     * Based on OldTypeChecker.kt:13148-13198
+     * after substituting type parameters (v2 native — works on ParsedTypeAnnotation).
      */
     private fun validateOperationSignatures(
-        impl: ImplAbilityDeclaration,
-        abilityDeclaration: AbilityDeclaration
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        abilityDeclaration: com.mezze.language.parsedast.ParsedAbilityDecl,
+        implSourceLocation: SourceLocation
     ) {
         // Build type parameter substitution map
         // e.g., for impl Show for Int: 'a -> Int
@@ -255,14 +236,11 @@ object AbilityValidator {
             val actualParamType = implOp.paramType ?: expectedParamType
             val actualReturnType = implOp.returnType ?: expectedReturnType
 
-            // Get source location from implementation expression for better error messages
-            val sourceLocation = implOp.implementation.sourceLocation
+            val sourceLocation = SourceLocation(implOp.loc.startLine, implOp.loc.startCol, implOp.loc.file)
 
             // Check for type variables in concrete implementations
-            // For generic impls (e.g., impl Eq 'a for ['a]), type variables from
-            // the impl header are allowed in operation signatures.
             val allowedTypeVars = impl.abilityTypeArgs
-                .filterIsInstance<IdentifierTypeAnnotation>()
+                .filterIsInstance<com.mezze.language.parsedast.ParsedNamedType>()
                 .filter { it.name.startsWith("'") }
                 .map { it.name }
                 .toSet()
@@ -288,8 +266,8 @@ object AbilityValidator {
             if (!typeAnnotationsMatch(actualParamType, expectedParamType)) {
                 throw TypeCheckError(
                     "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
-                    "expected ${typeAnnotationToString(expectedParamType)}, " +
-                    "but got ${typeAnnotationToString(actualParamType)}.",
+                    "expected ${parsedTypeAnnotationToString(expectedParamType)}, " +
+                    "but got ${parsedTypeAnnotationToString(actualParamType)}.",
                     sourceLocation
                 )
             }
@@ -298,8 +276,8 @@ object AbilityValidator {
             if (!typeAnnotationsMatch(actualReturnType, expectedReturnType)) {
                 throw TypeCheckError(
                     "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
-                    "expected ${typeAnnotationToString(expectedReturnType)}, " +
-                    "but got ${typeAnnotationToString(actualReturnType)}.",
+                    "expected ${parsedTypeAnnotationToString(expectedReturnType)}, " +
+                    "but got ${parsedTypeAnnotationToString(actualReturnType)}.",
                     sourceLocation
                 )
             }
@@ -307,123 +285,130 @@ object AbilityValidator {
     }
 
     /**
-     * Substitute type parameters in a type annotation.
+     * Substitute type parameters in a v2 ParsedTypeAnnotation.
      * e.g., {val: 'a} with {'a -> Int} becomes {val: Int}
      */
     private fun substituteTypeParameters(
-        annotation: TypeAnnotation,
-        substitution: Map<String, TypeAnnotation>
-    ): TypeAnnotation {
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        substitution: Map<String, com.mezze.language.parsedast.ParsedTypeAnnotation>
+    ): com.mezze.language.parsedast.ParsedTypeAnnotation {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check if this is a type parameter that needs substitution
+            is com.mezze.language.parsedast.ParsedNamedType -> {
                 val paramName = annotation.name.removePrefix("'")
                 substitution[paramName] ?: substitution["'$paramName"] ?: annotation
             }
-            is FunctionTypeAnnotation -> {
-                FunctionTypeAnnotation(
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                com.mezze.language.parsedast.ParsedFunctionType(
                     paramType = substituteTypeParameters(annotation.paramType, substitution),
                     returnType = substituteTypeParameters(annotation.returnType, substitution),
                     effects = annotation.effects,
-                    abilityConstraints = annotation.abilityConstraints
+                    abilityConstraints = annotation.abilityConstraints,
+                    loc = annotation.loc
                 )
             }
-            is RecordTypeAnnotation -> {
-                RecordTypeAnnotation(
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                com.mezze.language.parsedast.ParsedRecordType(
                     entries = annotation.entries.map { entry ->
-                        RecordTypeEntry(
+                        com.mezze.language.parsedast.ParsedRecordTypeEntry(
                             name = entry.name,
-                            type = substituteTypeParameters(entry.type, substitution)
+                            type = substituteTypeParameters(entry.type, substitution),
+                            loc = entry.loc
                         )
-                    }
+                    },
+                    isOpen = annotation.isOpen,
+                    loc = annotation.loc
                 )
             }
-            is VariantTypeAnnotation -> {
-                VariantTypeAnnotation(
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                com.mezze.language.parsedast.ParsedVariantType(
                     constructors = annotation.constructors.map { ctor ->
-                        VariantTypeConstructor(
+                        com.mezze.language.parsedast.ParsedVariantTypeCtor(
                             name = ctor.name,
-                            dataType = ctor.dataType?.let { substituteTypeParameters(it, substitution) }
+                            dataType = ctor.dataType?.let { substituteTypeParameters(it, substitution) },
+                            loc = ctor.loc
                         )
-                    }
+                    },
+                    isOpen = annotation.isOpen,
+                    loc = annotation.loc
                 )
             }
-            is TypeApplicationAnnotation -> {
-                TypeApplicationAnnotation(
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                com.mezze.language.parsedast.ParsedTypeApp(
                     constructor = annotation.constructor,
-                    args = annotation.args.map { substituteTypeParameters(it, substitution) }
+                    args = annotation.args.map { substituteTypeParameters(it, substitution) },
+                    loc = annotation.loc
                 )
             }
-            is SeqTypeAnnotation -> {
-                SeqTypeAnnotation(
-                    elementType = substituteTypeParameters(annotation.elementType, substitution)
+            is com.mezze.language.parsedast.ParsedSeqType -> {
+                com.mezze.language.parsedast.ParsedSeqType(
+                    elementType = substituteTypeParameters(annotation.elementType, substitution),
+                    loc = annotation.loc
                 )
             }
-            is EffectRowAnnotation -> annotation // No substitution needed
-            is QualifiedTypeAnnotation -> {
-                QualifiedTypeAnnotation(
+            is com.mezze.language.parsedast.ParsedQualifiedType -> {
+                com.mezze.language.parsedast.ParsedQualifiedType(
                     modulePath = annotation.modulePath,
                     typeName = annotation.typeName,
-                    args = annotation.args.map { substituteTypeParameters(it, substitution) }
+                    args = annotation.args.map { substituteTypeParameters(it, substitution) },
+                    loc = annotation.loc
                 )
             }
         }
     }
 
     /**
-     * Check if a type annotation contains type variables
+     * Check if a v2 ParsedTypeAnnotation contains type variables.
      */
-    private fun hasTypeVariables(annotation: TypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean {
+    private fun hasTypeVariables(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
                 val isTypeVar = annotation.name.startsWith("'") || annotation.name.first().isLowerCase()
                 isTypeVar && annotation.name !in allowedVars
             }
-            is FunctionTypeAnnotation -> {
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
                 hasTypeVariables(annotation.paramType, allowedVars) || hasTypeVariables(annotation.returnType, allowedVars)
             }
-            is RecordTypeAnnotation -> {
+            is com.mezze.language.parsedast.ParsedRecordType -> {
                 annotation.entries.any { hasTypeVariables(it.type, allowedVars) }
             }
-            is VariantTypeAnnotation -> {
-                annotation.constructors.any { it.dataType?.let { hasTypeVariables(it, allowedVars) } == true }
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                annotation.constructors.any { it.dataType?.let { dt -> hasTypeVariables(dt, allowedVars) } == true }
             }
-            is TypeApplicationAnnotation -> {
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
                 annotation.args.any { hasTypeVariables(it, allowedVars) }
             }
-            is SeqTypeAnnotation -> hasTypeVariables(annotation.elementType, allowedVars)
-            is EffectRowAnnotation -> false
-            is QualifiedTypeAnnotation -> annotation.args.any { hasTypeVariables(it, allowedVars) }
+            is com.mezze.language.parsedast.ParsedSeqType -> hasTypeVariables(annotation.elementType, allowedVars)
+            is com.mezze.language.parsedast.ParsedQualifiedType -> annotation.args.any { hasTypeVariables(it, allowedVars) }
         }
     }
 
     /**
-     * Check if two type annotations match structurally
+     * Check if two v2 ParsedTypeAnnotations match structurally.
      */
-    private fun typeAnnotationsMatch(a: TypeAnnotation, b: TypeAnnotation): Boolean {
+    private fun typeAnnotationsMatch(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
         return when {
-            a is IdentifierTypeAnnotation && b is IdentifierTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedNamedType && b is com.mezze.language.parsedast.ParsedNamedType -> {
                 a.name == b.name
             }
-            a is FunctionTypeAnnotation && b is FunctionTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedFunctionType && b is com.mezze.language.parsedast.ParsedFunctionType -> {
                 typeAnnotationsMatch(a.paramType, b.paramType) &&
                 typeAnnotationsMatch(a.returnType, b.returnType)
             }
-            a is RecordTypeAnnotation && b is RecordTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedRecordType && b is com.mezze.language.parsedast.ParsedRecordType -> {
                 a.entries.size == b.entries.size &&
                 a.entries.zip(b.entries).all { (aEntry, bEntry) ->
                     aEntry.name == bEntry.name && typeAnnotationsMatch(aEntry.type, bEntry.type)
                 }
             }
-            a is TypeApplicationAnnotation && b is TypeApplicationAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedTypeApp && b is com.mezze.language.parsedast.ParsedTypeApp -> {
                 a.constructor == b.constructor &&
                 a.args.size == b.args.size &&
                 a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
             }
-            a is SeqTypeAnnotation && b is SeqTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedSeqType && b is com.mezze.language.parsedast.ParsedSeqType -> {
                 typeAnnotationsMatch(a.elementType, b.elementType)
             }
-            a is VariantTypeAnnotation && b is VariantTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedVariantType && b is com.mezze.language.parsedast.ParsedVariantType -> {
                 a.constructors.size == b.constructors.size &&
                 a.constructors.zip(b.constructors).all { (aCtor, bCtor) ->
                     aCtor.name == bCtor.name &&
@@ -432,47 +417,13 @@ object AbilityValidator {
                       typeAnnotationsMatch(aCtor.dataType!!, bCtor.dataType!!)))
                 }
             }
-            a is QualifiedTypeAnnotation && b is QualifiedTypeAnnotation -> {
+            a is com.mezze.language.parsedast.ParsedQualifiedType && b is com.mezze.language.parsedast.ParsedQualifiedType -> {
                 a.modulePath == b.modulePath &&
                 a.typeName == b.typeName &&
                 a.args.size == b.args.size &&
                 a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
             }
             else -> false
-        }
-    }
-
-    /**
-     * Convert type annotation to string for error messages
-     */
-    private fun typeAnnotationToString(annotation: TypeAnnotation): String {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name
-            is FunctionTypeAnnotation -> {
-                "${typeAnnotationToString(annotation.paramType)} -> ${typeAnnotationToString(annotation.returnType)}"
-            }
-            is RecordTypeAnnotation -> {
-                val fields = annotation.entries.joinToString(", ") { "${it.name}: ${typeAnnotationToString(it.type)}" }
-                "{$fields}"
-            }
-            is VariantTypeAnnotation -> {
-                val ctors = annotation.constructors.joinToString(", ") {
-                    val dataType = it.dataType
-                    if (dataType != null) "${it.name} ${typeAnnotationToString(dataType)}"
-                    else it.name
-                }
-                "| $ctors |"
-            }
-            is TypeApplicationAnnotation -> {
-                if (annotation.args.isEmpty()) annotation.constructor
-                else "${annotation.constructor} ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
-            }
-            is SeqTypeAnnotation -> "[${typeAnnotationToString(annotation.elementType)}]"
-            is EffectRowAnnotation -> "<${annotation.effects.joinToString(", ")}>"
-            is QualifiedTypeAnnotation -> {
-                if (annotation.args.isEmpty()) annotation.qualifiedName
-                else "${annotation.qualifiedName} ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
-            }
         }
     }
 
@@ -494,6 +445,9 @@ object AbilityValidator {
      * @param importedTypeNames Set of type names imported from other modules
      * @throws TypeCheckError if the impl is an orphan
      */
+    /**
+     * Validate orphan rules for ability implementation (v2 native).
+     */
     fun validateOrphanRules(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         localAbilityNames: Set<String>,
@@ -501,48 +455,32 @@ object AbilityValidator {
         importedAbilityNames: Set<String>,
         importedTypeNames: Set<String>
     ) {
-        // TODO: Rewrite orphan rule validation to work on v2 ParsedAST directly.
-        // V2Validator already covers orphan checks.
-    }
+        val sourceLocation = SourceLocation(impl.loc.startLine, impl.loc.startCol, impl.loc.file)
 
-    private fun validateOrphanRulesV1(
-        impl: ImplAbilityDeclaration,
-        localAbilityNames: Set<String>,
-        localTypeNames: Set<String>,
-        importedAbilityNames: Set<String>,
-        importedTypeNames: Set<String>
-    ) {
         // Inherent impls: target type must be defined locally
         if (impl.isInherent) {
-            validateInherentImplLocality(impl, localTypeNames)
+            validateInherentImplLocality(impl, localTypeNames, sourceLocation)
             return
         }
 
         val abilityName = impl.abilityName!!  // safe: not inherent
 
-        // Check if ability is defined locally
         val isAbilityLocal = localAbilityNames.contains(abilityName)
-
-        // Check if ability is imported (from another module)
         val isAbilityImported = importedAbilityNames.contains(abilityName)
 
-        // If ability is not found anywhere, skip orphan check (will fail ability lookup later)
         if (!isAbilityLocal && !isAbilityImported) {
             return  // Let validateAbilityImplementation handle "ability not found"
         }
 
-        // If ability is local, this impl is valid (in same module as ability)
         if (isAbilityLocal) {
             return  // Valid: impl is in same module as ability declaration
         }
 
         // Ability is imported - check if any target type is local
-        // Include both concrete abilityTypeArgs (before 'for') and targetTypes (after 'for')
         val concreteAbilityTypeArgs = impl.abilityTypeArgs
-            .filter { it !is IdentifierTypeAnnotation || !it.name.startsWith("'") }
-        val targetTypeNames = (concreteAbilityTypeArgs + impl.targetTypes).map { getTypeNameFromAnnotation(it) }
+            .filter { it !is com.mezze.language.parsedast.ParsedNamedType || !it.name.startsWith("'") }
+        val targetTypeNames = (concreteAbilityTypeArgs + impl.targetTypes).map { getTypeNameFromParsedAnnotation(it) }
 
-        // Check if any target type is defined locally
         val hasLocalTargetType = targetTypeNames.any { typeName ->
             localTypeNames.contains(typeName)
         }
@@ -551,30 +489,28 @@ object AbilityValidator {
             return  // Valid: impl is in same module as at least one target type
         }
 
-        // At this point, both ability and all types are imported - this is an orphan impl
         val typesList = targetTypeNames.joinToString(", ")
         throw TypeCheckError(
             "Orphan impl: cannot implement imported ability '$abilityName' for types [$typesList] " +
             "in this module. An impl must be in the same module as either the ability declaration " +
             "or at least one of the target types. Move this impl to the module where '$abilityName' " +
             "or one of [$typesList] is defined.",
-            impl.sourceLocation
+            sourceLocation
         )
     }
 
     /**
-     * Extract type name from a type annotation for orphan rule checking.
+     * Extract type name from a v2 ParsedTypeAnnotation for orphan rule checking.
      */
-    private fun getTypeNameFromAnnotation(annotation: TypeAnnotation): String {
+    private fun getTypeNameFromParsedAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): String {
         return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name.removePrefix("'")
-            is TypeApplicationAnnotation -> annotation.constructor
-            is QualifiedTypeAnnotation -> annotation.typeName
-            is RecordTypeAnnotation -> "Record"
-            is VariantTypeAnnotation -> "Variant"
-            is FunctionTypeAnnotation -> "Function"
-            is SeqTypeAnnotation -> "Seq"
-            is EffectRowAnnotation -> "EffectRow"
+            is com.mezze.language.parsedast.ParsedNamedType -> annotation.name.removePrefix("'")
+            is com.mezze.language.parsedast.ParsedTypeApp -> annotation.constructor
+            is com.mezze.language.parsedast.ParsedQualifiedType -> annotation.typeName
+            is com.mezze.language.parsedast.ParsedRecordType -> "Record"
+            is com.mezze.language.parsedast.ParsedVariantType -> "Variant"
+            is com.mezze.language.parsedast.ParsedFunctionType -> "Function"
+            is com.mezze.language.parsedast.ParsedSeqType -> "Seq"
         }
     }
 
@@ -733,17 +669,15 @@ object AbilityValidator {
     }
 
     /**
-     * Validate that an inherent impl's target type exists.
-     *
-     * For primitive types (Int, Float, Str, Bool, etc.), the type always exists.
-     * For user-defined types, the type must be declared.
+     * Validate that an inherent impl's target type exists (v2 native).
      */
     private fun validateInherentImplTargetType(
-        impl: ImplAbilityDeclaration,
-        typeDeclarations: Map<String, TypeDeclaration>
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        sourceLocation: SourceLocation
     ) {
         for (targetType in impl.targetTypes) {
-            val typeName = getTypeNameFromAnnotation(targetType)
+            val typeName = getTypeNameFromParsedAnnotation(targetType)
 
             // Primitive types always exist
             if (PrimitiveTypes.isPrimitiveName(typeName)) continue
@@ -756,66 +690,54 @@ object AbilityValidator {
                 throw TypeCheckError(
                     "Cannot define inherent impl for unknown type '$typeName'. " +
                     "The type must be declared before implementing methods on it.",
-                    impl.sourceLocation
+                    sourceLocation
                 )
             }
         }
     }
 
     /**
-     * Validate that an inherent impl is defined in the same module as the target type.
-     *
-     * Inherent impls can only be defined where the type is defined:
-     * - The target type must be locally defined in this module
-     * - Primitive/built-in types are NOT exempted — only stdlib can impl for them
-     *   (stdlib modules will have those types in their localTypeNames)
+     * Validate that an inherent impl is defined in the same module as the target type (v2 native).
      */
     private fun validateInherentImplLocality(
-        impl: ImplAbilityDeclaration,
-        localTypeNames: Set<String>
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        localTypeNames: Set<String>,
+        sourceLocation: SourceLocation
     ) {
         for (targetType in impl.targetTypes) {
-            val typeName = getTypeNameFromAnnotation(targetType)
+            val typeName = getTypeNameFromParsedAnnotation(targetType)
 
-            // Target type must be locally defined — no exceptions
             if (!localTypeNames.contains(typeName)) {
                 throw TypeCheckError(
                     "Cannot define inherent impl for type '$typeName' in this module. " +
                     "Inherent impls can only be defined where the type is defined. " +
                     "Move this impl to the module where '$typeName' is declared.",
-                    impl.sourceLocation
+                    sourceLocation
                 )
             }
         }
     }
 
     /**
-     * Validate that impl method names don't conflict with fields on the target type.
-     *
-     * For example, if `type Button = { onClick: {} -> {} }`, then:
-     *   impl Button where { onClick = ... }           — ERROR
-     *   impl Handler for Button where { onClick = ... } — ERROR
-     *
-     * The target type's record fields and the impl's method names must be disjoint.
+     * Validate that impl method names don't conflict with fields on the target type (v2 native).
      */
     private fun validateNoFieldMethodConflict(
-        impl: ImplAbilityDeclaration,
-        typeDeclarations: Map<String, TypeDeclaration>
+        impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        sourceLocation: SourceLocation
     ) {
         if (typeDeclarations.isEmpty()) return
 
-        // Get the impl's method names
         val implMethodNames = impl.operations.map { it.name }.toSet()
         if (implMethodNames.isEmpty()) return
 
-        // Check each target type for field conflicts
         for (targetType in impl.targetTypes) {
-            val typeName = getTypeNameFromAnnotation(targetType)
+            val typeName = getTypeNameFromParsedAnnotation(targetType)
             val typeDecl = typeDeclarations[typeName] ?: continue
             val definition = typeDecl.definition
 
             // Only record types have fields to conflict with
-            if (definition is RecordDefinition) {
+            if (definition is com.mezze.language.parsedast.ParsedRecordDef) {
                 val fieldNames = definition.fields.map { it.name }.toSet()
                 val conflicts = implMethodNames.intersect(fieldNames)
                 if (conflicts.isNotEmpty()) {
@@ -824,9 +746,43 @@ object AbilityValidator {
                         "Cannot implement ${if (impl.isInherent) "methods" else "ability '${impl.abilityName}'"} " +
                             "for type '$typeName': method names $conflictList conflict with fields " +
                             "already defined on '$typeName'. Rename the fields or the ability methods to avoid ambiguity.",
-                        impl.sourceLocation
+                        sourceLocation
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Convert a v2 ParsedTypeAnnotation to string for error messages.
+     */
+    private fun parsedTypeAnnotationToString(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): String {
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> annotation.name
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                "${parsedTypeAnnotationToString(annotation.paramType)} -> ${parsedTypeAnnotationToString(annotation.returnType)}"
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                val fields = annotation.entries.joinToString(", ") { "${it.name}: ${parsedTypeAnnotationToString(it.type)}" }
+                "{$fields}"
+            }
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                val ctors = annotation.constructors.joinToString(", ") {
+                    val dataType = it.dataType
+                    if (dataType != null) "${it.name} ${parsedTypeAnnotationToString(dataType)}"
+                    else it.name
+                }
+                "| $ctors |"
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                if (annotation.args.isEmpty()) annotation.constructor
+                else "${annotation.constructor} ${annotation.args.joinToString(" ") { parsedTypeAnnotationToString(it) }}"
+            }
+            is com.mezze.language.parsedast.ParsedSeqType -> "[${parsedTypeAnnotationToString(annotation.elementType)}]"
+            is com.mezze.language.parsedast.ParsedQualifiedType -> {
+                val qualifiedName = annotation.modulePath.joinToString("::") + "::" + annotation.typeName
+                if (annotation.args.isEmpty()) qualifiedName
+                else "$qualifiedName ${annotation.args.joinToString(" ") { parsedTypeAnnotationToString(it) }}"
             }
         }
     }

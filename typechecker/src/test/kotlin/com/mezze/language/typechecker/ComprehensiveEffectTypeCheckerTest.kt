@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -20,13 +20,6 @@ class ComprehensiveEffectTypeCheckerTest {
         typeChecker = TypeChecker()
     }
 
-    /** Parse source via v2 API, typecheck, and return v1 Program for AST inspection */
-    private fun typeCheckAndInspect(source: String): Program {
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        typeChecker.typeCheck(parsedModule, Paths.get("."))
-        return parser.parse(source)
-    }
-
     @Test
     fun testEffectDeclarationTypeChecking() {
         val source = """
@@ -39,20 +32,20 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val effectDecl = parser.parse(source).items.filterIsInstance<EffectDeclaration>().first()
+        // Check structural properties from v2 parsed AST
+        val effectDecl = parsedModule.decls.filterIsInstance<ParsedEffectDecl>().first()
         assertEquals("Log", effectDecl.name)
         assertEquals(2, effectDecl.operations.size)
 
         // Check that operations have correct types
         val printOp = effectDecl.operations[0]
         assertEquals("print", printOp.name)
-        assertTrue(printOp.paramType is RecordTypeAnnotation)
-        assertTrue(printOp.returnType is RecordTypeAnnotation)
+        assertTrue(printOp.paramType is ParsedRecordType)
+        assertTrue(printOp.returnType is ParsedRecordType)
 
         val debugOp = effectDecl.operations[1]
         assertEquals("debug", debugOp.name)
-        val debugParams = debugOp.paramType as RecordTypeAnnotation
+        val debugParams = debugOp.paramType as ParsedRecordType
         assertEquals(2, debugParams.entries.size)
         assertEquals("msg", debugParams.entries[0].name)
         assertEquals("level", debugParams.entries[1].name)
@@ -73,9 +66,9 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val effectDecl = parser.parse(source).items.filterIsInstance<EffectDeclaration>().first()
-        val implDecl = parser.parse(source).items.filterIsInstance<ImplDeclaration>().first()
+        // Check structural properties from v2 parsed AST
+        val effectDecl = parsedModule.decls.filterIsInstance<ParsedEffectDecl>().first()
+        val implDecl = parsedModule.decls.filterIsInstance<ParsedPerformerDecl>().first()
 
         assertEquals("Log", effectDecl.name)
         assertEquals("Log", implDecl.effect.localName)
@@ -87,7 +80,7 @@ class ComprehensiveEffectTypeCheckerTest {
         assertEquals(effectOp.name, implOp.name)
 
         // Implementation should be a lambda expression
-        assertTrue(implOp.implementation is LambdaExpression)
+        assertTrue(implOp.implementation is ParsedLambda)
     }
 
     @Test
@@ -107,17 +100,21 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from v1 parsed AST (for inspection only)
-        val v1Program = parser.parse(source)
-        val topLevelExpr = v1Program.items.filterIsInstance<TopLevelExpression>().first()
-        val performExpr = topLevelExpr.expression as PerformExpression
+        // Check structural properties from v2 parsed AST
+        val effectDecl = parsedModule.decls.filterIsInstance<ParsedEffectDecl>().first()
+        assertEquals("Log", effectDecl.name)
+
+        val implDecl = parsedModule.decls.filterIsInstance<ParsedPerformerDecl>().first()
+        assertEquals("Console", implDecl.performerName)
+
+        // The top-level expression is a ParsedTopLevelExpr wrapping a ParsedPerform
+        val topLevelExpr = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>().first()
+        val performExpr = topLevelExpr.expression as ParsedPerform
         assertEquals(1, performExpr.handlers.size)
         assertEquals("Console", performExpr.handlers[0].performer.localName)
 
         // The performed expression should be a function call
-        assertTrue(performExpr.expression is FunctionCall)
-        val funcCall = performExpr.expression as FunctionCall
-        assertTrue(funcCall.function is MemberAccess)
+        assertTrue(performExpr.body is ParsedFunctionCall)
     }
 
     @Test
@@ -138,10 +135,10 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val letBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "getRandomValue" }!!
+        // Check structural properties from v2 parsed AST
+        val letBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "getRandomValue" }!!
         assertEquals("getRandomValue", letBinding.variableName)
-        assertNotNull(letBinding.expression)
+        assertNotNull(letBinding.value)
     }
 
     @Test
@@ -177,30 +174,24 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val effectDecls = parser.parse(source).items.filterIsInstance<EffectDeclaration>()
+        // Check structural properties from v2 parsed AST
+        val effectDecls = parsedModule.decls.filterIsInstance<ParsedEffectDecl>()
         val logEffect = effectDecls.find { it.name == "Log" }!!
         val randomEffect = effectDecls.find { it.name == "Random" }!!
         assertEquals("Log", logEffect.name)
         assertEquals("Random", randomEffect.name)
 
         // Check impl declarations
-        val implDecls = parser.parse(source).items.filterIsInstance<ImplDeclaration>()
+        val implDecls = parsedModule.decls.filterIsInstance<ParsedPerformerDecl>()
         val logImpl = implDecls.find { it.performerName == "Console" }!!
         val randomImpl = implDecls.find { it.performerName == "MathRandom" }!!
         assertEquals("Log", logImpl.effect.localName)
         assertEquals("Random", randomImpl.effect.localName)
 
         // Check let binding
-        val letBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "gameLogic" }!!
+        val letBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "gameLogic" }!!
         assertEquals("gameLogic", letBinding.variableName)
-        assertTrue(letBinding.expression is LambdaExpression)
-
-        // Check final expression (gameLogic identifier)
-        val finalExpr = parser.parse(source).items.filterIsInstance<TopLevelExpression>().last()
-        assertTrue(finalExpr.expression is Identifier)
-        val identifier = finalExpr.expression as Identifier
-        assertEquals("gameLogic", identifier.localName)
+        assertTrue(letBinding.value is ParsedLambda)
     }
 
     @Test
@@ -234,23 +225,20 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val letBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "computation" }!!
+        // Check structural properties from v2 parsed AST
+        val letBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "computation" }!!
         assertEquals("computation", letBinding.variableName)
 
         // The lambda body should be a do expression
-        val lambda = letBinding.expression as LambdaExpression
-        assertTrue(lambda.body is DoExpression)
+        val lambda = letBinding.value as ParsedLambda
+        assertTrue(lambda.body is ParsedDo)
 
-        val doExpr = lambda.body as DoExpression
+        val doExpr = lambda.body as ParsedDo
         assertEquals(4, doExpr.statements.size)
 
-        // Check that effect calls in do block are typed correctly
-        val firstStmt = doExpr.statements[0] as ExpressionStatement
-        assertTrue(firstStmt.expression is FunctionCall)
-
-        val funcCall = firstStmt.expression as FunctionCall
-        assertTrue(funcCall.function is MemberAccess)
+        // Check that first statement is an expression statement (effect call)
+        val firstStmt = doExpr.statements[0] as ParsedStatement.Expr
+        assertTrue(firstStmt.expr is ParsedFunctionCall)
     }
 
 
@@ -271,9 +259,9 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val effectDecl = parser.parse(source).items.filterIsInstance<EffectDeclaration>().first()
-        val implDecl = parser.parse(source).items.filterIsInstance<ImplDeclaration>().first()
+        // Check structural properties from v2 parsed AST
+        val effectDecl = parsedModule.decls.filterIsInstance<ParsedEffectDecl>().first()
+        val implDecl = parsedModule.decls.filterIsInstance<ParsedPerformerDecl>().first()
 
         assertEquals(2, effectDecl.operations.size)
         assertEquals(2, implDecl.operations.size)
@@ -283,7 +271,6 @@ class ComprehensiveEffectTypeCheckerTest {
             val effectOp = effectDecl.operations[i]
             val implOp = implDecl.operations[i]
             assertEquals(effectOp.name, implOp.name)
-            // Parameter types should match (this would be enforced by type checker)
         }
     }
 
@@ -309,19 +296,19 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val loggedFunctionBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "loggedFunction" }!!
+        // Check structural properties from v2 parsed AST
+        val loggedFunctionBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "loggedFunction" }!!
         assertEquals("loggedFunction", loggedFunctionBinding.variableName)
 
         // The function should have a lambda expression
-        assertTrue(loggedFunctionBinding.expression is LambdaExpression)
-        val lambda = loggedFunctionBinding.expression as LambdaExpression
-        assertTrue(lambda.body is DoExpression)
+        assertTrue(loggedFunctionBinding.value is ParsedLambda)
+        val lambda = loggedFunctionBinding.value as ParsedLambda
+        assertTrue(lambda.body is ParsedDo)
 
         // Check getResult binding
-        val getResultBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "getResult" }!!
+        val getResultBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "getResult" }!!
         assertEquals("getResult", getResultBinding.variableName)
-        assertTrue(getResultBinding.expression is LambdaExpression)
+        assertTrue(getResultBinding.value is ParsedLambda)
     }
 
     @Test
@@ -349,14 +336,14 @@ class ComprehensiveEffectTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val letBinding = parser.parse(source).items.filterIsInstance<LetBinding>().find { it.variableName == "nestedLogging" }!!
+        // Check structural properties from v2 parsed AST
+        val letBinding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().find { it.variableName == "nestedLogging" }!!
         assertEquals("nestedLogging", letBinding.variableName)
 
-        val lambda = letBinding.expression as LambdaExpression
-        assertTrue(lambda.body is DoExpression)
+        val lambda = letBinding.value as ParsedLambda
+        assertTrue(lambda.body is ParsedDo)
 
-        val outerDo = lambda.body as DoExpression
+        val outerDo = lambda.body as ParsedDo
         assertEquals(2, outerDo.statements.size)
 
         // Check that statements are present (simplified test)

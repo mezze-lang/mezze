@@ -1,7 +1,8 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -29,95 +30,6 @@ class ConstructorResolutionTest {
         TypeChecker.clearCache()
         parser = MezzeParser()
         typeChecker = TypeChecker()
-    }
-
-    // ============================================================================
-    // HELPER FUNCTIONS
-    // ============================================================================
-
-    private fun findVariantConstructions(expr: Expression): List<VariantConstruction> {
-        val results = mutableListOf<VariantConstruction>()
-        collectVariantConstructions(expr, results)
-        return results
-    }
-
-    private fun collectVariantConstructions(expr: Expression, results: MutableList<VariantConstruction>) {
-        when (expr) {
-            is VariantConstruction -> {
-                results.add(expr)
-                expr.value?.let { collectVariantConstructions(it, results) }
-            }
-            is MemberAccess -> {
-                collectVariantConstructions(expr.receiver, results)
-            }
-            is FunctionCall -> {
-                collectVariantConstructions(expr.function, results)
-                collectVariantConstructions(expr.arguments, results)
-            }
-            is RecordLiteral -> {
-                expr.entries.forEach { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> entry.value?.let { collectVariantConstructions(it, results) }
-                        is RecordSpreadEntry -> collectVariantConstructions(entry.expression, results)
-                    }
-                }
-            }
-            is LambdaExpression -> {
-                collectVariantConstructions(expr.body, results)
-            }
-            is DoExpression -> {
-                expr.statements.forEach { stmt ->
-                    when (stmt) {
-                        is LetStatement -> collectVariantConstructions(stmt.expression, results)
-                        is ExpressionStatement -> collectVariantConstructions(stmt.expression, results)
-                    }
-                }
-                collectVariantConstructions(expr.result, results)
-            }
-            is IfExpression -> {
-                collectVariantConstructions(expr.condition, results)
-                collectVariantConstructions(expr.thenBranch, results)
-                collectVariantConstructions(expr.elseBranch, results)
-            }
-            is MatchExpression -> {
-                collectVariantConstructions(expr.expression, results)
-                expr.cases.forEach { case ->
-                    collectVariantConstructions(case.expression, results)
-                }
-            }
-            is SeqLiteral -> {
-                expr.elements.forEach { elem ->
-                    when (elem) {
-                        is SeqRegularElement -> collectVariantConstructions(elem.expression, results)
-                        is SeqSpreadElement -> collectVariantConstructions(elem.expression, results)
-                    }
-                }
-            }
-            is PerformExpression -> {
-                collectVariantConstructions(expr.expression, results)
-            }
-            is StringLiteral -> {
-                expr.parts?.forEach { part ->
-                    if (part is ExpressionPart) {
-                        collectVariantConstructions(part.expression, results)
-                    }
-                }
-            }
-            else -> { /* Literals, Identifiers, etc. - no nested VariantConstructions */ }
-        }
-    }
-
-    // findResolution walks the PARSED program's LetBindings to find VariantConstruction.resolution
-    // (resolution is set by the typechecker on the parsed AST nodes as a side effect)
-    private fun findResolution(parsedProgram: Program, constructorName: String): ConstructorResolution? {
-        for (item in parsedProgram.items) {
-            if (item is LetBinding) {
-                val constructions = findVariantConstructions(item.expression)
-                val match = constructions.find { it.constructor == constructorName }
-                if (match != null) return match.resolution
-            }
-        }
-        return null
     }
 
     private fun typeCheckAndGetParsed(source: String): com.mezze.language.parsedast.ParsedModule {

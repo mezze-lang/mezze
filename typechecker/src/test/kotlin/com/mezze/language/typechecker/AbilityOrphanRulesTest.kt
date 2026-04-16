@@ -3,7 +3,7 @@ package com.mezze.language.typechecker
 import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
-import com.mezze.language.ast.LetBinding
+
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*

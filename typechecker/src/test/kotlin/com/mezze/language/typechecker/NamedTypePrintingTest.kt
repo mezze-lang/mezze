@@ -3,7 +3,6 @@ package com.mezze.language.typechecker
 import java.nio.file.Paths
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.ast.prettyPrintTypeWithAliases
-import com.mezze.language.ast.TypeDeclaration
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -36,16 +35,16 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Get type declarations from the parsed (v1) program for prettyPrintTypeWithAliases
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
+        // Get type aliases from the typechecker (replaces v1 typeDeclarations)
+        val typeAliases = typeChecker.getTypeAliases()
 
         val foldType = result.getVariableType("fold")
         assertNotNull(foldType, "fold type should not be null")
 
-        // Print the type with type declarations
+        // Print the type with type aliases
         val typeStr = prettyPrintTypeWithAliases(
             foldType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // Should contain "Tree 'b" or similar, not the expanded variant
@@ -67,14 +66,14 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
+        val typeAliases = typeChecker.getTypeAliases()
 
         val mapType = result.getVariableType("map_maybe")
         assertNotNull(mapType, "map_maybe type should not be null")
 
         val typeStr = prettyPrintTypeWithAliases(
             mapType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // Should contain "Maybe"
@@ -94,14 +93,14 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
+        val typeAliases = typeChecker.getTypeAliases()
 
         val mapType = result.getVariableType("map_left")
         assertNotNull(mapType, "map_left type should not be null")
 
         val typeStr = prettyPrintTypeWithAliases(
             mapType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // Should contain "Either" with type parameters
@@ -122,14 +121,14 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
+        val typeAliases = typeChecker.getTypeAliases()
 
         val nodeType = result.getVariableType("make_node")
         assertNotNull(nodeType, "make_node type should not be null")
 
         val typeStr = prettyPrintTypeWithAliases(
             nodeType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // Should contain "Tree" for return type and parameters
@@ -147,14 +146,14 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
+        val typeAliases = typeChecker.getTypeAliases()
 
         val listType = result.getVariableType("list_test")
         assertNotNull(listType, "list_test type should not be null")
 
         val typeStr = prettyPrintTypeWithAliases(
             listType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // List should still be printed as List
@@ -176,15 +175,15 @@ class NamedTypePrintingTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        val typeDecls = parser.parse(source).items.filterIsInstance<TypeDeclaration>()
-        assertEquals(2, typeDecls.size)
+        val typeAliases = typeChecker.getTypeAliases()
+        assertEquals(2, typeAliases.size)
 
         val testType = result.getVariableType("test")
         assertNotNull(testType, "test type should not be null")
 
         val typeStr = prettyPrintTypeWithAliases(
             testType!!,
-            typeDeclarations = typeDecls
+            typeAliases = typeAliases
         )
 
         // Should contain both type names

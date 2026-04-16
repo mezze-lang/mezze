@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -30,7 +31,7 @@ class MultiParameterTypeTest {
 
         // Check parsed AST directly
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Either", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'a", typeDecl.typeParams[0])
@@ -48,7 +49,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Result", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
         assertEquals("'ok", typeDecl.typeParams[0])
@@ -65,7 +66,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Triple", typeDecl.name)
         assertEquals(3, typeDecl.typeParams.size)
 
@@ -102,7 +103,7 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Pair", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
@@ -118,11 +119,11 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Maybe2", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
-        val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
+        val definition = typeDecl.definition as ParsedVariantDef
         assertEquals(4, definition.constructors.size)
     }
 
@@ -133,21 +134,21 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
-        val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
+        val definition = typeDecl.definition as ParsedVariantDef
 
         // Check Left constructor
         val leftConstructor = definition.constructors.find { it.name == "Left" }!!
-        val leftType = leftConstructor.dataType as com.mezze.language.ast.RecordTypeAnnotation
+        val leftType = leftConstructor.dataType as ParsedRecordType
         val leftField = leftType.entries.find { it.name == "val" }!!
-        val leftFieldType = leftField.type as com.mezze.language.ast.IdentifierTypeAnnotation
+        val leftFieldType = leftField.type as ParsedNamedType
         assertEquals("'a", leftFieldType.name)
 
         // Check Right constructor
         val rightConstructor = definition.constructors.find { it.name == "Right" }!!
-        val rightType = rightConstructor.dataType as com.mezze.language.ast.RecordTypeAnnotation
+        val rightType = rightConstructor.dataType as ParsedRecordType
         val rightField = rightType.entries.find { it.name == "val" }!!
-        val rightFieldType = rightField.type as com.mezze.language.ast.IdentifierTypeAnnotation
+        val rightFieldType = rightField.type as ParsedNamedType
         assertEquals("'b", rightFieldType.name)
     }
 
@@ -158,11 +159,11 @@ class MultiParameterTypeTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val typeDecl = parser.parse(source).items.filterIsInstance<com.mezze.language.ast.TypeDeclaration>().first()
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().first()
         assertEquals("Status", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
 
-        val definition = typeDecl.definition as com.mezze.language.ast.VariantDefinition
+        val definition = typeDecl.definition as ParsedVariantDef
         assertEquals(3, definition.constructors.size)
 
         // All constructors should have null dataType (unit constructors)

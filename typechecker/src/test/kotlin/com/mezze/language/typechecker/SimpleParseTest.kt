@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import kotlin.test.assertNotNull
@@ -147,32 +148,29 @@ let foo = {n, xs} -> bar {x = 1, y = 2}
         println("===== ATTEMPTING PARSE =====")
         try {
             val parsedModule = parser.parseParsedModule(code, "test.mz")
-            val v1Ast = parser.parse(code)
             println("SUCCESS! Parsed to AST")
-            assertNotNull(v1Ast, "AST should not be null")
-            println("\n===== AST ITEMS =====")
-            v1Ast.items.forEachIndexed { i, item ->
-                println("Item $i: ${item::class.simpleName}")
-                if (item is com.mezze.language.ast.LetBinding) {
-                    println("  Pattern: ${item.pattern}")
-                    println("  Expression: ${item.expression}")
-                    println("  Expression class: ${item.expression::class.simpleName}")
-                    if (item.expression is com.mezze.language.ast.FunctionCall) {
-                        val call = item.expression as com.mezze.language.ast.FunctionCall
+            assertNotNull(parsedModule, "ParsedModule should not be null")
+            println("\n===== PARSED DECLS =====")
+            parsedModule.decls.forEachIndexed { i, decl ->
+                println("Decl $i: ${decl::class.simpleName}")
+                if (decl is ParsedLetDecl) {
+                    println("  Name: ${decl.variableName}")
+                    println("  Value: ${decl.value::class.simpleName}")
+                    if (decl.value is ParsedFunctionCall) {
+                        val call = decl.value as ParsedFunctionCall
                         println("  Function: ${call.function}")
-                        println("  Arguments: ${call.arguments}")
-                        println("  Arguments class: ${call.arguments::class.simpleName}")
-                        if (call.arguments is com.mezze.language.ast.RecordLiteral) {
-                            val rec = call.arguments as com.mezze.language.ast.RecordLiteral
+                        println("  Arguments: ${call.arguments::class.simpleName}")
+                        if (call.arguments is ParsedRecordLit) {
+                            val rec = call.arguments as ParsedRecordLit
                             println("  Record entries (${rec.entries.size} entries):")
                             rec.entries.forEach { entry ->
                                 when (entry) {
-                                    is com.mezze.language.ast.RecordFieldEntry -> {
+                                    is ParsedRecordEntry.Field -> {
                                         val className = entry.value?.let { it::class.simpleName } ?: "null"
                                         println("    Field: ${entry.name} = ${entry.value} ($className)")
                                     }
-                                    is com.mezze.language.ast.RecordSpreadEntry -> {
-                                        println("    Spread: ${entry.expression}")
+                                    is ParsedRecordEntry.Spread -> {
+                                        println("    Spread: ${entry.expr}")
                                     }
                                 }
                             }

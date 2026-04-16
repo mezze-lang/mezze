@@ -1,7 +1,8 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -42,8 +43,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -57,8 +58,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -72,8 +73,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -87,8 +88,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(!typeAnnotation.effects!!.isPolymorphic, "Closed effect row should NOT be polymorphic")
@@ -102,8 +103,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         // Empty effect row <> means no effects, so the annotation should be null
         assertEquals(null, typeAnnotation.effects, "Empty effect row <> should result in null annotation")
@@ -116,8 +117,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertEquals(null, typeAnnotation.effects, "Function with no effects should have null effect annotation")
     }
@@ -131,8 +132,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(typeAnnotation.effects!!.isPolymorphic)
@@ -150,8 +151,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[1] as LetBinding // Second item (after effect declaration)
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -170,8 +171,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[1] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(!typeAnnotation.effects!!.isPolymorphic, "Effect row should NOT be polymorphic")
@@ -187,13 +188,13 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         // Check that parameter types have polymorphic effects
-        val paramType = typeAnnotation.paramType as RecordTypeAnnotation
-        val fType = paramType.entries.find { it.name == "f" }!!.type as FunctionTypeAnnotation
-        val gType = paramType.entries.find { it.name == "g" }!!.type as FunctionTypeAnnotation
+        val paramType = typeAnnotation.paramType as ParsedRecordType
+        val fType = paramType.entries.find { it.name == "f" }!!.type as ParsedFunctionType
+        val gType = paramType.entries.find { it.name == "g" }!!.type as ParsedFunctionType
 
         assertNotNull(fType.effects, "f should have effect annotation")
         assertTrue(fType.effects!!.isPolymorphic, "f effect row should be polymorphic")
@@ -217,8 +218,8 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[2] as LetBinding // Third item (after two effect declarations)
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Function should have effect annotation")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -233,12 +234,12 @@ class EffectPolymorphismTest {
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        val binding = parser.parse(code).items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val binding = parsedModule.decls.filterIsInstance<ParsedLetDecl>().first()
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         // Check that the parameter type (a function) has polymorphic effects
-        val paramType = typeAnnotation.paramType as RecordTypeAnnotation
-        val fType = paramType.entries.find { it.name == "f" }!!.type as FunctionTypeAnnotation
+        val paramType = typeAnnotation.paramType as ParsedRecordType
+        val fType = paramType.entries.find { it.name == "f" }!!.type as ParsedFunctionType
 
         assertNotNull(fType.effects)
         assertTrue(fType.effects!!.isPolymorphic)

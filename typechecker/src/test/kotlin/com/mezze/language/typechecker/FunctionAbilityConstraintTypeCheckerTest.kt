@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker
 
 import java.nio.file.Paths
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -33,9 +33,9 @@ class FunctionAbilityConstraintTypeCheckerTest {
 
         // Check structural properties from parsed AST
         val item = parsedModule.decls[0]
-        assertTrue(item is com.mezze.language.parsedast.ParsedAbilityDecl)
+        assertTrue(item is ParsedAbilityDecl)
 
-        val ability = item as com.mezze.language.parsedast.ParsedAbilityDecl
+        val ability = item as ParsedAbilityDecl
         assertEquals("Show", ability.name)
     }
 
@@ -55,8 +55,8 @@ class FunctionAbilityConstraintTypeCheckerTest {
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
         // Check structural properties from parsed AST
-        val abilityDecl = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
-        val implDecl = parsedModule.decls[1] as com.mezze.language.parsedast.ParsedImplAbilityDecl
+        val abilityDecl = parsedModule.decls[0] as ParsedAbilityDecl
+        val implDecl = parsedModule.decls[1] as ParsedImplAbilityDecl
 
         assertEquals("Show", abilityDecl.name)
         assertFalse(implDecl.isInherent)
@@ -75,11 +75,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val topLevel = parser.parse(source).items[1] as TopLevelExpression
-        assertTrue(topLevel.expression is LambdaExpression)
+        // Check structural properties from v2 parsed AST
+        val topLevel = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>().first()
+        assertTrue(topLevel.expression is ParsedLambda)
 
-        val lambda = topLevel.expression as LambdaExpression
+        val lambda = topLevel.expression as ParsedLambda
 
         // Ability constraints are set by the parser and preserved on the lambda node
         assertEquals(1, lambda.abilityConstraints.size)
@@ -104,11 +104,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val topLevel = parser.parse(source).items[2] as TopLevelExpression
-        assertTrue(topLevel.expression is LambdaExpression)
+        // Check structural properties from v2 parsed AST
+        val topLevel = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>().first()
+        assertTrue(topLevel.expression is ParsedLambda)
 
-        val lambda = topLevel.expression as LambdaExpression
+        val lambda = topLevel.expression as ParsedLambda
 
         // Ability constraints are set by the parser and preserved on the lambda node
         assertEquals(2, lambda.abilityConstraints.size)
@@ -154,11 +154,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val topLevel = parser.parse(source).items[1] as TopLevelExpression
-        assertTrue(topLevel.expression is LambdaExpression)
+        // Check structural properties from v2 parsed AST
+        val topLevel = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>().first()
+        assertTrue(topLevel.expression is ParsedLambda)
 
-        val lambda = topLevel.expression as LambdaExpression
+        val lambda = topLevel.expression as ParsedLambda
 
         // Ability constraints are set by the parser and preserved on the lambda node
         assertEquals(1, lambda.abilityConstraints.size)
@@ -180,11 +180,11 @@ class FunctionAbilityConstraintTypeCheckerTest {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         typeChecker.typeCheck(parsedModule, Paths.get("."))
 
-        // Check structural properties from parsed AST
-        val topLevel = parser.parse(source).items[1] as TopLevelExpression
-        assertTrue(topLevel.expression is LambdaExpression)
+        // Check structural properties from v2 parsed AST
+        val topLevel = parsedModule.decls.filterIsInstance<ParsedTopLevelExpr>().first()
+        assertTrue(topLevel.expression is ParsedLambda)
 
-        val lambda = topLevel.expression as LambdaExpression
+        val lambda = topLevel.expression as ParsedLambda
 
         // Ability constraints are set by the parser and preserved on the lambda node
         assertEquals(1, lambda.abilityConstraints.size)
