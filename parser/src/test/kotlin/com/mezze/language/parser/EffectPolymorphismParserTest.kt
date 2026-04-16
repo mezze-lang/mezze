@@ -16,7 +16,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -31,7 +31,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -46,7 +46,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, Console, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -61,7 +61,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, Console> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -76,7 +76,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -92,7 +92,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -105,7 +105,7 @@ class EffectPolymorphismParserTest {
             let config: { handler: { x: Int } -> Int <...> } = { handler = { x } -> x }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as RecordTypeAnnotation
 
@@ -121,7 +121,7 @@ class EffectPolymorphismParserTest {
                 { f, g } -> { x } -> f { x = g { x = x } }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -147,7 +147,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, DB, FileSystem, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -167,7 +167,7 @@ class EffectPolymorphismParserTest {
             } -> {} = { handlers } -> {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -193,7 +193,7 @@ class EffectPolymorphismParserTest {
             } -> {} = { pure_fn, effectful_fn, poly_fn } -> {}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
         val paramType = typeAnnotation.paramType as RecordTypeAnnotation
@@ -221,7 +221,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 
@@ -237,7 +237,7 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <FileSystem, HTTP_Client, DatabasePool, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         val binding = program.items[0] as LetBinding
         val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
 

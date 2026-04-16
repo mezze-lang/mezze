@@ -82,7 +82,8 @@ enum class ImportKind {
 
 @Serializable
 data class TypeCheckResult(
-    val program: Program,  // DEPRECATED — empty. Use typedModule instead.
+    @Deprecated("v1 Program is always empty — use typedModule instead")
+    val program: Program = Program(emptyList()),
     val resolvedImports: List<ResolvedImport> = emptyList(),
     val warnings: List<TypeCheckWarning> = emptyList(),
     val importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
@@ -102,21 +103,8 @@ data class TypeCheckResult(
             ?.find { it.name == name }
             ?.scheme?.type
         if (v2Type != null && v2Type !is MezzeType.VarType) return v2Type
-        // Fallback: program bindings with inferredType (set from constraintResults + substitution)
-        val programType = program.items
-            .filterIsInstance<LetBinding>()
-            .find { it.isSimpleBinding && it.variableName == name }
-            ?.inferredType
-        if (programType != null && programType !is MezzeType.VarType) return programType
-        return v2Type
+        return null
     }
-
-    /**
-     * DEPRECATED bridge: returns the v1 program items (empty — use typedModule instead).
-     * Kept only to allow gradual migration of test files.
-     */
-    @Deprecated("v1 Program is empty — use getVariableType() or typedModule instead")
-    val items: List<ProgramItem> get() = program.items
 }
 
 /**

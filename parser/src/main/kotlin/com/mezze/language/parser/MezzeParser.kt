@@ -89,27 +89,9 @@ class MezzeParser(
     }
 
     companion object {
-        private val lastParsedModuleStore = ThreadLocal<ParsedModule?>()
-
-        /** Get the last parsed module (set by legacy parse() method). For test backward compat. */
-        @JvmStatic
-        fun getLastParsedModule(): ParsedModule? = lastParsedModuleStore.get()
-
         /** Convert Loc → SourceLocation */
         @JvmStatic
         fun toSourceLocation(loc: Loc): SourceLocation = SourceLocation(loc.startLine, loc.startCol, loc.file)
-    }
-
-    /**
-     * Legacy parse entry point — returns v1 Program for backward compatibility.
-     * @deprecated Use parseParsedModule instead.
-     */
-    @Suppress("DEPRECATION")
-    @Deprecated("Use parseParsedModule instead")
-    fun parse(source: String, @Suppress("UNUSED_PARAMETER") desugar: Boolean = true, @Suppress("UNUSED_PARAMETER") file: String? = null): com.mezze.language.ast.Program {
-        val module = parseParsedModule(source, file ?: "<test>")
-        lastParsedModuleStore.set(module)
-        return com.mezze.language.ast.Program(emptyList())
     }
 
     /**

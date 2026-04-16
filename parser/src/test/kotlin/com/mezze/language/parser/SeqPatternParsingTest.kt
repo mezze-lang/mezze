@@ -30,7 +30,7 @@ class SeqPatternParsingTest {
               _ -> "non-empty"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -52,7 +52,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -74,7 +74,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -98,7 +98,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -123,7 +123,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -144,7 +144,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -166,7 +166,7 @@ class SeqPatternParsingTest {
               _ -> []
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -188,7 +188,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -209,7 +209,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -233,7 +233,7 @@ class SeqPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -257,7 +257,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -281,7 +281,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -305,7 +305,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -325,7 +325,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -348,7 +348,7 @@ class SeqPatternParsingTest {
               _ -> "many"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -372,7 +372,7 @@ class SeqPatternParsingTest {
                     [_, ...tail] -> 1 + length {xs = tail}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -401,7 +401,7 @@ class SeqPatternParsingTest {
                     [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -433,7 +433,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -452,7 +452,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -471,7 +471,7 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -493,7 +493,7 @@ class SeqPatternParsingTest {
     fun `parse record with one empty seq field`() {
         val code = "let foo = {x = []}"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -505,7 +505,7 @@ class SeqPatternParsingTest {
     fun `parse record with two empty seq fields`() {
         val code = "let foo = {x = [], y = []}"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -517,7 +517,7 @@ class SeqPatternParsingTest {
     fun `parse just record expression with empty arrays`() {
         val code = "{yes = [], no = []}"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val topExpr = program.items.first() as TopLevelExpression
@@ -533,7 +533,7 @@ class SeqPatternParsingTest {
               _ -> {yes = [1], no = [2]}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -545,7 +545,7 @@ class SeqPatternParsingTest {
     fun `parse modulo operator`() {
         val code = "let is_even = {x: Int} -> x % 2 == 0"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -561,7 +561,7 @@ class SeqPatternParsingTest {
             my_partition
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -575,7 +575,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -588,7 +588,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -602,7 +602,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -617,7 +617,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -632,7 +632,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -645,7 +645,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -662,7 +662,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -679,7 +679,7 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -697,7 +697,7 @@ class SeqPatternParsingTest {
             my_partition
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -718,7 +718,7 @@ class SeqPatternParsingTest {
             my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 }

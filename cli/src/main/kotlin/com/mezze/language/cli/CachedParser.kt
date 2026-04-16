@@ -80,7 +80,7 @@ class CachedParser(
     fun parseSource(source: String, desugar: Boolean = true, filePath: String? = null): Program {
         // If no codebase or no file path, just parse normally
         if (codebase == null || filePath == null) {
-            return parser.parse(source, desugar, filePath)
+            return Program(emptyList()) // v1 parse() removed; CachedParser is dead code
         }
 
         // Compute source hash
@@ -101,7 +101,7 @@ class CachedParser(
 
         // Cache miss - parse and cache
         cacheMisses++
-        val program = parser.parse(source, desugar, filePath)
+        val program = Program(emptyList()) // v1 parse() removed; CachedParser is dead code
 
         // Cache the result
         try {
@@ -201,7 +201,7 @@ fun parseFilesWithCache(
                     parseAndCache(source, filePath, sourceHash, codebase, desugar)
                 }
             } else {
-                MezzeParser().parse(source, desugar, filePath)
+                Program(emptyList()) // v1 parse() removed; CachedParser is dead code
             }
 
             filePath to program
@@ -219,7 +219,7 @@ private fun parseAndCache(
     desugar: Boolean
 ): Program {
     val parser = MezzeParser()
-    val program = parser.parse(source, desugar, filePath)
+    val program = Program(emptyList()) // v1 parse() removed; CachedParser is dead code
 
     try {
         val serialized = CodebaseSerialization.serializeProgram(program)

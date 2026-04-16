@@ -15,7 +15,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test empty lambda`() {
         val source = "{ } -> 42"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         assertEquals(1, program.items.size)
         val item = program.items[0] as TopLevelExpression
@@ -30,7 +30,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test untyped lambda with single parameter`() {
         val source = "{x} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -42,7 +42,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test untyped lambda with multiple parameters`() {
         val source = "{x, y} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -54,7 +54,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test record literal with punning`() {
         val source = "{x}"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is RecordLiteral, "Should be record literal, not lambda")
@@ -63,7 +63,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test record literal with assignment`() {
         val source = "{x = 1}"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is RecordLiteral)
@@ -72,7 +72,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test typed lambda`() {
         val source = "{x: Int} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -84,7 +84,7 @@ class LambdaVsRecordTest {
     fun `test lambda with record literal in body`() {
         // This is the critical test case that ANTLR couldn't handle!
         val source = "{x} -> {x = x}"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression, "Should parse as lambda despite record in body")
@@ -95,7 +95,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test multi-parameter lambda with three parameters`() {
         val source = "{x, y, z} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -107,7 +107,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test multi-parameter lambda in let binding`() {
         val source = "let concat = {xs, ys} -> xs"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         assertEquals(1, program.items.size)
         val item = program.items[0] as LetBinding
@@ -121,7 +121,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test multi-parameter lambda with function call body`() {
         val source = "{xs, ys} -> concat { xs = xs, ys = ys }"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -134,7 +134,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test multi-parameter lambda with record literal body`() {
         val source = "{x, y} -> {a = x, b = y}"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -147,7 +147,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test multi-parameter typed lambda`() {
         val source = "{x: Int, y: Int} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)
@@ -162,7 +162,7 @@ class LambdaVsRecordTest {
     @Test
     fun `test nested multi-parameter lambda`() {
         val source = "{x, y} -> {z} -> x"
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         val expr = (program.items[0] as TopLevelExpression).expression
         assertTrue(expr is LambdaExpression)

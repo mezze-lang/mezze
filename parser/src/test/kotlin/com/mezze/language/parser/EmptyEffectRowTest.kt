@@ -17,7 +17,7 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val effectDecl = program.items[0] as EffectDeclaration
 
         assertEquals("Log", effectDecl.name)
@@ -37,7 +37,7 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val effectDecl = program.items[0] as EffectDeclaration
 
         assertEquals("Log", effectDecl.name)
@@ -57,7 +57,7 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val effectDecl = program.items[0] as EffectDeclaration
 
         assertEquals("Database", effectDecl.name)
@@ -79,7 +79,7 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val effectDecl = program.items[0] as EffectDeclaration
 
         assertEquals("Mixed", effectDecl.name)

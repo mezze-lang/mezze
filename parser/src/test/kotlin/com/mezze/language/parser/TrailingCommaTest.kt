@@ -29,7 +29,7 @@ class TrailingCommaTest {
     fun `parse array literal with trailing comma - single line`() {
         val code = "let nums = [1, 2, 3,]"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -47,7 +47,7 @@ class TrailingCommaTest {
             ]
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -59,7 +59,7 @@ class TrailingCommaTest {
     fun `parse array literal without trailing comma still works`() {
         val code = "let nums = [1, 2, 3]"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -71,7 +71,7 @@ class TrailingCommaTest {
     fun `parse nested array literals with trailing commas`() {
         val code = "let matrix = [[1, 2,], [3, 4,],]"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -83,7 +83,7 @@ class TrailingCommaTest {
     fun `parse single element array with trailing comma`() {
         val code = "let singleton = [42,]"
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -97,7 +97,7 @@ class TrailingCommaTest {
     fun `parse record literal with trailing comma - single line`() {
         val code = """let user = {name = "Alice", age = 30,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -114,7 +114,7 @@ class TrailingCommaTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -126,7 +126,7 @@ class TrailingCommaTest {
     fun `parse record literal without trailing comma still works`() {
         val code = """let user = {name = "Alice", age = 30}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -138,7 +138,7 @@ class TrailingCommaTest {
     fun `parse nested record literals with trailing commas`() {
         val code = """let config = {server = {host = "localhost", port = 8080,}, debug = true,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -150,7 +150,7 @@ class TrailingCommaTest {
     fun `parse single field record with trailing comma`() {
         val code = """let wrapper = {value = 42,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -168,7 +168,7 @@ class TrailingCommaTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -188,7 +188,7 @@ class TrailingCommaTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -204,7 +204,7 @@ class TrailingCommaTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -221,7 +221,7 @@ class TrailingCommaTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -239,7 +239,7 @@ class TrailingCommaTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -255,7 +255,7 @@ class TrailingCommaTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -271,7 +271,7 @@ class TrailingCommaTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -285,7 +285,7 @@ class TrailingCommaTest {
     fun `parse variant constructor with trailing comma in payload`() {
         val code = """let result = Some {value = 42,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -299,7 +299,7 @@ class TrailingCommaTest {
     fun `parse variant constructor with multiple fields and trailing comma`() {
         val code = """let person = User {name = "Alice", age = 30,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -315,7 +315,7 @@ class TrailingCommaTest {
     fun `parse lambda with trailing comma in untyped params`() {
         val code = """let add = {x, y, z,} -> x + y + z"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -329,7 +329,7 @@ class TrailingCommaTest {
     fun `parse lambda with trailing comma in typed params`() {
         val code = """let add: {x: Int, y: Int, z: Int,} -> Int = {x, y, z} -> x + y + z"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -343,7 +343,7 @@ class TrailingCommaTest {
     fun `parse single param lambda with trailing comma`() {
         val code = """let identity = {x,} -> x"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -359,7 +359,7 @@ class TrailingCommaTest {
     fun `parse function type with trailing comma in params`() {
         val code = """let process: {x: Int, y: Int,} -> Int = {x, y} -> x + y"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -372,7 +372,7 @@ class TrailingCommaTest {
     fun `parse nested function type with trailing commas`() {
         val code = """let apply: {f: {x: Int,} -> Int, value: Int,} -> Int = {f, value} -> f {x = value}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -392,7 +392,7 @@ class TrailingCommaTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val typeDecl = program.items.first() as TypeDeclaration
@@ -404,7 +404,7 @@ class TrailingCommaTest {
     fun `parse newtype with trailing comma`() {
         val code = """newtype UserId = UserId {value: Int,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val typeDecl = program.items.first() as TypeDeclaration
@@ -417,7 +417,7 @@ class TrailingCommaTest {
     fun `parse type with single field and trailing comma`() {
         val code = """type Wrapper = {value: Int,}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val typeDecl = program.items.first() as TypeDeclaration
@@ -437,7 +437,7 @@ class TrailingCommaTest {
                     {yes = [head,], no = tail,}
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
         // Just verify it parses without errors
     }
@@ -446,7 +446,7 @@ class TrailingCommaTest {
     fun `parse record with array fields and trailing commas`() {
         val code = """let data = {items = [1, 2, 3,], tags = ["a", "b",],}"""
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -463,7 +463,7 @@ class TrailingCommaTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -489,7 +489,7 @@ class TrailingCommaTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
         // Just verify it parses without errors
     }

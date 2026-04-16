@@ -13,7 +13,7 @@ class EffectParserTest {
             perform Console in Log.print {msg = "hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val topLevel = program.items[0] as TopLevelExpression
         val performExpr = topLevel.expression as PerformExpression
 
@@ -43,7 +43,7 @@ class EffectParserTest {
             perform Console, MathRandom, FileSystem in someFunction {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val topLevel = program.items[0] as TopLevelExpression
         val performExpr = topLevel.expression as PerformExpression
 
@@ -59,7 +59,7 @@ class EffectParserTest {
             perform FileLogger {path = "/tmp/log.txt"} in Log.print {msg = "hello"}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val topLevel = program.items[0] as TopLevelExpression
         val performExpr = topLevel.expression as PerformExpression
 
@@ -81,7 +81,7 @@ class EffectParserTest {
             perform Console, FileLogger {path = "/var/log/app.log"}, SystemRandom in someFunction {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val topLevelExpr = program.items[0] as TopLevelExpression
@@ -121,7 +121,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val effectDecl = program.items[0] as EffectDeclaration
@@ -140,7 +140,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val effectDecl = program.items[0] as EffectDeclaration
@@ -163,7 +163,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val effectDecl = program.items[0] as EffectDeclaration
@@ -182,7 +182,7 @@ class EffectParserTest {
         """.trimIndent()
 
         try {
-            parser.parse(source)
+            parser.parseParsedModule(source)
             fail("Should have thrown ParseException for non-type-variable in having")
         } catch (e: ParseException) {
             assertTrue(e.message?.contains("Type variable must start with '") == true)
@@ -201,7 +201,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
@@ -225,7 +225,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
@@ -256,7 +256,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val implDecl = program.items[1] as ImplDeclaration
@@ -282,7 +282,7 @@ class EffectParserTest {
         """.trimIndent()
 
         try {
-            parser.parse(source)
+            parser.parseParsedModule(source)
             fail("Should have thrown ParseException for non-type-variable in impl having")
         } catch (e: ParseException) {
             assertTrue(e.message?.contains("Type variable must start with '") == true)
@@ -299,7 +299,7 @@ class EffectParserTest {
             let f: {} -> Int <*> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -320,7 +320,7 @@ class EffectParserTest {
             let f: {} -> Int <Log, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -339,7 +339,7 @@ class EffectParserTest {
             let f: {} -> Int <Log, State, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -358,7 +358,7 @@ class EffectParserTest {
             let f: {} -> Int <> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -375,7 +375,7 @@ class EffectParserTest {
             let f: {} -> Int <Log> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -394,7 +394,7 @@ class EffectParserTest {
             let f: {} -> Int <...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -413,7 +413,7 @@ class EffectParserTest {
             let f: {} -> Int <Log, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -432,7 +432,7 @@ class EffectParserTest {
             let f: {} -> Int <console::Log, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -455,7 +455,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -481,7 +481,7 @@ class EffectParserTest {
             let f: {} -> Int <Generator having 'item = Int, 'result = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -504,7 +504,7 @@ class EffectParserTest {
             let f: {} -> Int <Log, Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -526,7 +526,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -553,7 +553,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -571,7 +571,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -589,7 +589,7 @@ class EffectParserTest {
             let f: {} -> Int <Log, Exception having 'error = String, State having 'state = Int, FileSystem, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -614,7 +614,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (List String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -634,7 +634,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = {x: Int, y: Int}> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -654,7 +654,7 @@ class EffectParserTest {
             let f: {} -> Int <std::exception::Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -679,7 +679,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, OtherEffect> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -700,7 +700,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, 'result = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -723,7 +723,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -744,7 +744,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -765,7 +765,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -789,7 +789,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (Option [Int])> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -811,7 +811,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (Result (Option String) Int)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -834,7 +834,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = ({x: Int} -> String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -855,7 +855,7 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = [{id: Int, name: String}]> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -876,7 +876,7 @@ class EffectParserTest {
             let f: {} -> Int <Generator having 'item = (Option String), 'result = (Result Int String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -908,7 +908,7 @@ class EffectParserTest {
             let f: {} -> Int <State> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -927,7 +927,7 @@ class EffectParserTest {
             let f: {} -> Int <State, Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -947,7 +947,7 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -970,7 +970,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
@@ -989,7 +989,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
@@ -1007,7 +1007,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
@@ -1028,7 +1028,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration
@@ -1048,7 +1048,7 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val implDecl = program.items[0] as ImplDeclaration

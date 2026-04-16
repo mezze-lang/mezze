@@ -103,7 +103,7 @@ class DevCommand {
         val parser = MezzeParser()
         val fileName = appFile.name
         val ast = try {
-            parser.parse(source, file = fileName)
+            parser.parseParsedModule(source, file = fileName)
         } catch (e: com.mezze.language.parser.ParseException) {
             println("❌ Parse Error")
             println("━".repeat(50))

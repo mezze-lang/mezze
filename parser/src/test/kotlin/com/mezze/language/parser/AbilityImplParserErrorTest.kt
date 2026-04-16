@@ -20,7 +20,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Expected 'for' keyword in ability declaration") == true,
@@ -37,7 +37,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Expected type variable after 'for' keyword") == true,
@@ -55,7 +55,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Missing ',' between ability methods") == true,
@@ -72,7 +72,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("must have a function type") == true,
@@ -97,7 +97,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Missing ','") == true,
@@ -117,7 +117,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Missing ',' between ability impl methods") == true,
@@ -138,7 +138,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("must have a function type") == true,
@@ -159,7 +159,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("'pub' is not allowed on ability declarations") == true,
@@ -176,7 +176,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("'pub' is not allowed on impl declarations") == true,
@@ -195,7 +195,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         // Empty ability body is allowed (no operations is fine)
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
     }
 
@@ -206,7 +206,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         // Empty impl body is allowed (no operations is fine)
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
     }
 
@@ -223,7 +223,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Type variable must start with '") == true
@@ -241,7 +241,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Expected type variable after ','") == true
@@ -264,7 +264,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Missing ',' between ability impl methods") == true,
@@ -285,7 +285,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("Expected 'for' keyword in ability declaration") == true,
@@ -300,7 +300,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("MyAbility") == true,
@@ -315,7 +315,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("ability Foo for 'a where") == true,
@@ -330,7 +330,7 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(
             exception.message?.contains("ability Foo for 'a where") == true,

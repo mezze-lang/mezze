@@ -16,7 +16,7 @@ class DebugTest {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             println("✅ Success: $program")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")
@@ -42,7 +42,7 @@ let obj = {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             println("✅ Success: $program")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")
@@ -64,7 +64,7 @@ let obj = {
 
         println("First parse:")
         try {
-            val program1 = parser.parse(source)
+            val program1 = parser.parseParsedModule(source)
             println("✅ First parse succeeded")
         } catch (e: ParseException) {
             println("❌ First parse failed: ${e.message}")
@@ -72,7 +72,7 @@ let obj = {
 
         println("Second parse (same instance):")
         try {
-            val program2 = parser.parse(source)
+            val program2 = parser.parseParsedModule(source)
             println("✅ Second parse succeeded")
         } catch (e: ParseException) {
             println("❌ Second parse failed: ${e.message}")
@@ -87,7 +87,7 @@ let obj = {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             println("✅ Success: $program")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")

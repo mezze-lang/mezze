@@ -49,8 +49,8 @@ class ContentAddressableHashingE2ETest {
             add {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program, projectRoot)
+        val parsedModule = parser.parseParsedModule(source)
+        val result = typeChecker.typeCheck(parsedModule, projectRoot)
 
         // Find LetBindings and verify they have content hashes
         val letBindings = result.program.items.filterIsInstance<LetBinding>()
@@ -71,12 +71,12 @@ class ContentAddressableHashingE2ETest {
         """.trimIndent()
 
         // Run type checking twice
-        val program1 = parser.parse(source)
-        val result1 = typeChecker.typeCheck(program1, projectRoot)
+        val parsedModule1 = parser.parseParsedModule(source)
+        val result1 = typeChecker.typeCheck(parsedModule1, projectRoot)
 
         // Clear and run again
-        val program2 = parser.parse(source)
-        val result2 = typeChecker.typeCheck(program2, projectRoot)
+        val parsedModule2 = parser.parseParsedModule(source)
+        val result2 = typeChecker.typeCheck(parsedModule2, projectRoot)
 
         // Find the 'identity' binding in both results
         val binding1 = result1.program.items.filterIsInstance<LetBinding>()
@@ -102,8 +102,8 @@ class ContentAddressableHashingE2ETest {
             f {x = 0}
         """.trimIndent()
 
-        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+        val result1 = typeChecker.typeCheck(parser.parseParsedModule(source1), projectRoot)
+        val result2 = typeChecker.typeCheck(parser.parseParsedModule(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<LetBinding>()
             .find { it.variableName == "f" }?.contentHash
@@ -132,8 +132,8 @@ class ContentAddressableHashingE2ETest {
             f {y = 0}
         """.trimIndent()
 
-        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+        val result1 = typeChecker.typeCheck(parser.parseParsedModule(source1), projectRoot)
+        val result2 = typeChecker.typeCheck(parser.parseParsedModule(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<LetBinding>()
             .find { it.variableName == "f" }?.contentHash
@@ -164,7 +164,7 @@ class ContentAddressableHashingE2ETest {
             42.describe {}
         """.trimIndent()
 
-        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+        val result = typeChecker.typeCheck(parser.parseParsedModule(source), projectRoot)
 
         // Find ability impl
         val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
@@ -189,7 +189,7 @@ class ContentAddressableHashingE2ETest {
             21.double {}
         """.trimIndent()
 
-        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+        val result = typeChecker.typeCheck(parser.parseParsedModule(source), projectRoot)
 
         // After ability inlining, the call is rewritten to a direct function call
         // with the impl body. The ability is fully resolved at compile time.
@@ -246,7 +246,7 @@ class ContentAddressableHashingE2ETest {
             perform Console in Log.print {msg = "test"}
         """
 
-        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+        val result = typeChecker.typeCheck(parser.parseParsedModule(source), projectRoot)
 
         // Find effect handler impl
         val impl = result.program.items.filterIsInstance<ImplDeclaration>()
@@ -295,7 +295,7 @@ class ContentAddressableHashingE2ETest {
             Point {x = 1, y = 2}
         """.trimIndent()
 
-        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+        val result = typeChecker.typeCheck(parser.parseParsedModule(source), projectRoot)
 
         val typeDecls = result.program.items.filterIsInstance<TypeDeclaration>()
         assertTrue(typeDecls.isNotEmpty(), "Should have at least 1 type declaration")
@@ -317,8 +317,8 @@ class ContentAddressableHashingE2ETest {
             Coord {x = 0, y = 0}
         """.trimIndent()
 
-        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
-        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+        val result1 = typeChecker.typeCheck(parser.parseParsedModule(source1), projectRoot)
+        val result2 = typeChecker.typeCheck(parser.parseParsedModule(source2), projectRoot)
 
         val hash1 = result1.program.items.filterIsInstance<TypeDeclaration>().first().contentHash
         val hash2 = result2.program.items.filterIsInstance<TypeDeclaration>().first().contentHash
@@ -349,10 +349,10 @@ class ContentAddressableHashingE2ETest {
         """.trimIndent()
 
         // Parse
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source)
 
         // Type check (computes hashes)
-        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
 
         // Verify hashes are populated
         val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
@@ -383,8 +383,8 @@ class ContentAddressableHashingE2ETest {
             42.stringify {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val parsedModule = parser.parseParsedModule(source)
+        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
 
         // Verify each impl has a different content hash
         val impls = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
@@ -534,8 +534,8 @@ class ContentAddressableHashingE2ETest {
             result
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val parsedModule = parser.parseParsedModule(source)
+        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
 
         // Find the identity binding
         val identityBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
@@ -563,8 +563,8 @@ class ContentAddressableHashingE2ETest {
             42.negate {}
         """.trimIndent()
 
-        val program = parser.parse(source)
-        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val parsedModule = parser.parseParsedModule(source)
+        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
 
         // Get the impl's content hash
         val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()

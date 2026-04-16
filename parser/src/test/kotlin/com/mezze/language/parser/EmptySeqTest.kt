@@ -10,7 +10,7 @@ class EmptySeqTest {
     @Test
     fun testEmptySeqAlone() {
         val source = "let x: [Int] = []"
-        val result = parser.parse(source)
+        val result = parser.parseParsedModule(source)
         assertNotNull(result)
         assertEquals(1, result.items.size)
     }
@@ -21,7 +21,7 @@ class EmptySeqTest {
             let nums = [1, 2, 3]
             let empty: [Int] = []
         """.trimIndent()
-        val result = parser.parse(source)
+        val result = parser.parseParsedModule(source)
         assertNotNull(result)
         assertEquals(2, result.items.size)
     }

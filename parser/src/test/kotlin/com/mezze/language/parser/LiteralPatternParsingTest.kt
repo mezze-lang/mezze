@@ -23,7 +23,7 @@ class LiteralPatternParsingTest {
               _ -> "non-zero"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -44,7 +44,7 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -65,7 +65,7 @@ class LiteralPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -85,7 +85,7 @@ class LiteralPatternParsingTest {
               _ -> "unknown command"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -106,7 +106,7 @@ class LiteralPatternParsingTest {
               _ -> "non-empty"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -126,7 +126,7 @@ class LiteralPatternParsingTest {
               False -> "no"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -147,7 +147,7 @@ class LiteralPatternParsingTest {
               _ -> "stop"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -166,7 +166,7 @@ class LiteralPatternParsingTest {
               _ -> "large"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -187,7 +187,7 @@ class LiteralPatternParsingTest {
               _ -> false
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -210,7 +210,7 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -232,7 +232,7 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -250,7 +250,7 @@ class LiteralPatternParsingTest {
               n -> n + 1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -271,7 +271,7 @@ class LiteralPatternParsingTest {
               _ -> "x is not zero"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -292,7 +292,7 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -314,7 +314,7 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -334,7 +334,7 @@ class LiteralPatternParsingTest {
               _ -> "large"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression

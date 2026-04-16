@@ -265,7 +265,7 @@ class InspectAbilityTest {
         val source = "let x = Inspect"
 
         val parser = com.mezze.language.parser.MezzeParser()
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
 
         // Before typechecking, the parser creates a VariantConstruction node
         val letBinding = program.items[0] as com.mezze.language.ast.LetBinding
@@ -288,11 +288,11 @@ class InspectAbilityTest {
 
         val parser = com.mezze.language.parser.MezzeParser()
         val typeChecker = com.mezze.language.typechecker.TypeChecker()
-        val program = parser.parse(source)
+        val parsedModule = parser.parseParsedModule(source)
 
         // Typechecker should fail because Inspect is an ability, not a value
         assertThrows(Exception::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(parsedModule)
         }
     }
 }

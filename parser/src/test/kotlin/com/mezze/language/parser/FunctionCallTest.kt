@@ -13,7 +13,7 @@ class FunctionCallTest {
         val source = "let result = f {x = 1}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -36,7 +36,7 @@ class FunctionCallTest {
         val source = "let result = add {x = 1, y = 2}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -56,7 +56,7 @@ class FunctionCallTest {
         val source = "let value = obj.field"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -74,7 +74,7 @@ class FunctionCallTest {
         val source = "let value = obj.x.y.z"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -99,7 +99,7 @@ class FunctionCallTest {
         val source = "let result = obj.method {x = 1}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -120,7 +120,7 @@ class FunctionCallTest {
         val source = "let result = f {x = g {y = 1}}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -144,7 +144,7 @@ class FunctionCallTest {
         val source = "let result = concat { xss = map { xs = xs, f = f } }"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding

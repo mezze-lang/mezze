@@ -28,7 +28,7 @@ class AbilityConstraintTest {
 
     private fun typeCheck(source: String): String? {
         return try {
-            val ast = parser.parse(source.trimIndent())
+            val ast = parser.parseParsedModule(source.trimIndent())
             typeChecker.typeCheck(ast)
             null // Success - no error
         } catch (e: Exception) {

@@ -16,7 +16,7 @@ class FunctionCallSyntaxErrorsTest {
 
     private fun parseShouldFail(code: String): String {
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         return exception.message ?: ""
     }
@@ -103,7 +103,7 @@ class FunctionCallSyntaxErrorsTest {
         // Should parse successfully - this is two statements:
         // 1. let result = add (binding the function)
         // 2. {x = 1, y = 2} (standalone record literal)
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -117,7 +117,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should parse successfully - multiple newlines don't change the behavior
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -132,7 +132,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should parse successfully - record literal is a separate statement
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -147,7 +147,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Note: Empty braces {} IS a valid record literal (unit type), so this now parses successfully
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     // ========== Tests for Allowed Syntax ==========
@@ -160,7 +160,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -171,7 +171,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -182,7 +182,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -190,7 +190,7 @@ class FunctionCallSyntaxErrorsTest {
         val code = "let add = {x: Int, y: Int} -> x + y\nlet result = add\t{x = 1, y = 2}"
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -200,7 +200,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -210,7 +210,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -224,7 +224,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -235,7 +235,7 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw - this is a variable declaration followed by a record literal expression
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 
     @Test
@@ -246,6 +246,6 @@ class FunctionCallSyntaxErrorsTest {
         """.trimIndent()
 
         // Should not throw - lambdas can have newlines before the opening brace
-        parser.parse(code)
+        parser.parseParsedModule(code)
     }
 }

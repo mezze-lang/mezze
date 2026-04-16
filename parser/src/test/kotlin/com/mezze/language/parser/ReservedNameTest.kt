@@ -21,7 +21,7 @@ class ReservedNameTest {
             let __native_foo = 42
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("__native") && msg.contains("reserved"),
@@ -35,7 +35,7 @@ class ReservedNameTest {
             let foo = {__native_x} -> __native_x
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("__native") && msg.contains("reserved"),
@@ -51,7 +51,7 @@ class ReservedNameTest {
                     __native_val -> __native_val
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("__native") && msg.contains("reserved"),
@@ -67,7 +67,7 @@ class ReservedNameTest {
                     {__native_field} -> 42
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("__native") && msg.contains("reserved"),
@@ -84,7 +84,7 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw - calling native functions is allowed
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 
     @Test
@@ -94,7 +94,7 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 
     @Test
@@ -104,7 +104,7 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 
     // ========================================
@@ -117,7 +117,7 @@ class ReservedNameTest {
             let scope = 42
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -131,7 +131,7 @@ class ReservedNameTest {
             let foo = {scope} -> scope
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -145,7 +145,7 @@ class ReservedNameTest {
             let foo = {scope: Int} -> scope
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -161,7 +161,7 @@ class ReservedNameTest {
                     scope -> scope
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -177,7 +177,7 @@ class ReservedNameTest {
                     {scope} -> 42
         """.trimIndent()
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -190,7 +190,7 @@ class ReservedNameTest {
         // Test that scope can't be bound in let destructuring
         val source = "let {scope} = myRecord"
 
-        val error = assertFails { parser.parse(source) }
+        val error = assertFails { parser.parseParsedModule(source) }
         val msg = error.message ?: ""
         assertTrue(
             msg.contains("'scope'") && msg.contains("reserved"),
@@ -207,7 +207,7 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw - scope as field name is allowed
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 
     @Test
@@ -218,7 +218,7 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw - member access is allowed
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 
     @Test
@@ -230,6 +230,6 @@ class ReservedNameTest {
         """.trimIndent()
 
         // Should not throw
-        parser.parse(source)
+        parser.parseParsedModule(source)
     }
 }

@@ -13,7 +13,7 @@ class StringInterpolationTest {
     fun `test simple interpolation parsing`() {
         val source = """let greeting = "Hello $(name)!""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
         assertEquals(1, program.items.size)
 
@@ -43,7 +43,7 @@ class StringInterpolationTest {
     fun `test multiple interpolations`() {
         val source = """let msg = "$(a) + $(b) = $(result)""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -71,7 +71,7 @@ class StringInterpolationTest {
     fun `test interpolation with complex expressions`() {
         val source = """let x = "Value: $(foo{n = 10})""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -89,7 +89,7 @@ class StringInterpolationTest {
     fun `test plain string without interpolation`() {
         val source = """let msg = "Hello World""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -102,7 +102,7 @@ class StringInterpolationTest {
     fun `test escaped interpolation`() {
         val source = """let msg = "Use \$(var) for interpolation""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -117,7 +117,7 @@ class StringInterpolationTest {
 Line 2: $(b)
 Line 3""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -129,7 +129,7 @@ Line 3""""
     fun `test interpolation with nested string`() {
         val source = """let x = "Outer: $(inner{val = "nested"})""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -141,7 +141,7 @@ Line 3""""
     fun `test only interpolation no surrounding text`() {
         val source = """let x = "$(value)""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -157,7 +157,7 @@ Line 3""""
         // This is valid: outer interpolation contains a string literal that has its own interpolation
         val source = """let x = "outer: $("inner $(name)")""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -178,7 +178,7 @@ Line 3""""
     fun `test empty string`() {
         val source = """let x = """""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -190,7 +190,7 @@ Line 3""""
     fun `test consecutive interpolations no space`() {
         val source = """let x = "$(a)$(b)$(c)""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -207,7 +207,7 @@ Line 3""""
     fun `test interpolation with parentheses in expression`() {
         val source = """let x = "result: $(add{a = (1 + 2), b = 3})""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -222,7 +222,7 @@ Line 3""""
     fun `test interpolation with if expression`() {
         val source = """let x = "$(if true then "yes" else "no")""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -237,7 +237,7 @@ Line 3""""
     fun `test escape sequences mixed with interpolation`() {
         val source = """let x = "line1\n$(middle)\ttab""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -255,7 +255,7 @@ Line 3""""
     fun `test multiple escape sequences for dollar sign`() {
         val source = """let x = "price: \$100 and \$(not interpolated)""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -270,7 +270,7 @@ Line 3""""
         val source = """let x = "$($(name))""""
 
         assertThrows<Exception> {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
     }
 
@@ -278,7 +278,7 @@ Line 3""""
     fun `test interpolation at start of string`() {
         val source = """let x = "$(prefix) suffix""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -294,7 +294,7 @@ Line 3""""
     fun `test interpolation at end of string`() {
         val source = """let x = "prefix $(suffix)""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -312,7 +312,7 @@ Line 3""""
 line 2
 line 3""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 
@@ -324,7 +324,7 @@ line 3""""
     fun `test unicode in interpolated string`() {
         val source = """let x = "Hello $(name) 🎉""""
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val letBinding = program.items[0] as LetBinding
         val stringLit = letBinding.expression as StringLiteral
 

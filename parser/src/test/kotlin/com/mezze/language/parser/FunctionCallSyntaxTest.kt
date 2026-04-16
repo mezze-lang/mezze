@@ -21,7 +21,7 @@ class FunctionCallSyntaxTest {
             z
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -33,7 +33,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -47,7 +47,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("f y") == true)
@@ -61,7 +61,7 @@ class FunctionCallSyntaxTest {
             z
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -74,7 +74,7 @@ class FunctionCallSyntaxTest {
             w
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -88,7 +88,7 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -105,7 +105,7 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -120,7 +120,7 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -132,7 +132,7 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -144,7 +144,7 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -157,7 +157,7 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -169,7 +169,7 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -183,7 +183,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -198,7 +198,7 @@ class FunctionCallSyntaxTest {
             5
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -211,7 +211,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("a b") == true)
@@ -226,7 +226,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("myFunction myArg") == true)
     }
@@ -240,7 +240,7 @@ class FunctionCallSyntaxTest {
             let result = greet { name = "World" }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -251,7 +251,7 @@ class FunctionCallSyntaxTest {
             let result = choose { flag = true, a = 1, b = 2 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -263,7 +263,7 @@ class FunctionCallSyntaxTest {
             let result = getX { point = p }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -275,7 +275,7 @@ class FunctionCallSyntaxTest {
             let result = apply { f = double, x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -286,7 +286,7 @@ class FunctionCallSyntaxTest {
             let result = getFirst { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -299,7 +299,7 @@ class FunctionCallSyntaxTest {
             let result = f { x = g { x = h { x = 10 } } }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -310,7 +310,7 @@ class FunctionCallSyntaxTest {
             let result = double { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -321,7 +321,7 @@ class FunctionCallSyntaxTest {
             add { x = 1, y = 2 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -332,7 +332,7 @@ class FunctionCallSyntaxTest {
             let result = add { x = 2 * 3, y = 4 + 1 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -343,7 +343,7 @@ class FunctionCallSyntaxTest {
             let result = choose { cond = 5 > 3, a = 1, b = 0 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -356,7 +356,7 @@ class FunctionCallSyntaxTest {
             let b = g { x = 2 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -368,7 +368,7 @@ class FunctionCallSyntaxTest {
             let result = double { x = record.value }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -379,7 +379,7 @@ class FunctionCallSyntaxTest {
             let result = negate { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -391,7 +391,7 @@ class FunctionCallSyntaxTest {
             record
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -404,7 +404,7 @@ class FunctionCallSyntaxTest {
             let result = getX { r = updated }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -418,7 +418,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -432,7 +432,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -445,7 +445,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -458,7 +458,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -473,7 +473,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -487,7 +487,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -501,7 +501,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
     }
@@ -515,7 +515,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("func { ... }") == true)
     }
@@ -529,7 +529,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("named arguments") == true)
     }
@@ -545,7 +545,7 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -557,7 +557,7 @@ class FunctionCallSyntaxTest {
             let result = f { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -570,7 +570,7 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -582,7 +582,7 @@ class FunctionCallSyntaxTest {
             let result = x + y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -593,7 +593,7 @@ class FunctionCallSyntaxTest {
             let result = if flag then 1 else 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -603,7 +603,7 @@ class FunctionCallSyntaxTest {
             let result = ({x} -> x + 1) { x = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -615,7 +615,7 @@ class FunctionCallSyntaxTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -626,7 +626,7 @@ class FunctionCallSyntaxTest {
             let result = factorial { n = 5 }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -637,7 +637,7 @@ class FunctionCallSyntaxTest {
             let result = double { x = 5 } + 10
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -649,7 +649,7 @@ class FunctionCallSyntaxTest {
             xs
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -662,7 +662,7 @@ class FunctionCallSyntaxTest {
             let result = f { x, y }
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
     }
 
@@ -676,7 +676,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("string") == true)
@@ -690,7 +690,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("number") == true)
@@ -704,7 +704,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("number") == true)
@@ -718,7 +718,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("fraction") == true)
@@ -734,7 +734,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("True") == true)
@@ -750,7 +750,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("False") == true)
@@ -767,7 +767,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("Parse.decode") == true)
@@ -783,7 +783,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
         assertTrue(exception.message?.contains("number") == true)
@@ -797,7 +797,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         assertTrue(exception.message?.contains("<field>") == true)
     }
@@ -810,7 +810,7 @@ class FunctionCallSyntaxTest {
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         // Should fail on the first literal argument
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)

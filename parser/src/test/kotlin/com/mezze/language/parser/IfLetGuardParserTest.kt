@@ -27,7 +27,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -60,7 +60,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -79,7 +79,7 @@ class IfLetGuardParserTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -99,7 +99,7 @@ class IfLetGuardParserTest {
               _ -> "not matched"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -117,7 +117,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -136,7 +136,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -156,7 +156,7 @@ class IfLetGuardParserTest {
               _ -> "non-positive"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -177,7 +177,7 @@ class IfLetGuardParserTest {
               None -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -200,7 +200,7 @@ class IfLetGuardParserTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -233,7 +233,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -253,7 +253,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -284,7 +284,7 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
@@ -305,7 +305,7 @@ class IfLetGuardParserTest {
         """.trimIndent()
 
         assertFailsWith<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
     }
 
@@ -318,7 +318,7 @@ class IfLetGuardParserTest {
         """.trimIndent()
 
         assertFailsWith<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
     }
 
@@ -333,7 +333,7 @@ class IfLetGuardParserTest {
 
         // This should fail with a helpful error message
         val exception = assertFailsWith<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         // Error message should explain that || is not allowed and suggest using &&
         assertTrue(exception.message?.contains("||") == true,
@@ -355,7 +355,7 @@ class IfLetGuardParserTest {
         """.trimIndent()
 
         val exception = assertFailsWith<ParseException> {
-            parser.parse(code)
+            parser.parseParsedModule(code)
         }
         // Error message should mention 'let' is expected after &&
         assertTrue(exception.message?.contains("let") == true,

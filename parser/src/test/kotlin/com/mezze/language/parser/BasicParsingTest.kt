@@ -17,7 +17,7 @@ let obj = {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Multiline record parsed successfully!")
         }
@@ -28,7 +28,7 @@ let obj = {
         val source = "let obj = {a = 1, b = 2}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Inline record in let parsed successfully!")
         }
@@ -39,7 +39,7 @@ let obj = {
         val source = "let f = {x} -> x + 1"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Lambda expression in let parsed successfully!")
         }
@@ -54,7 +54,7 @@ let obj = {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Record with lambda field in let parsed successfully!")
         }
@@ -65,7 +65,7 @@ let obj = {
         val source = "let f = { } -> 42"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Empty lambda in let parsed successfully!")
         }

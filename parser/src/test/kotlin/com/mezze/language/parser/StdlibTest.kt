@@ -21,7 +21,7 @@ effect Log where {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -46,7 +46,7 @@ pub effect Log where {
 """.trim()
 
         val exception = assertThrows(ParseException::class.java) {
-            parser.parse(source)
+            parser.parseParsedModule(source)
         }
         assertTrue(exception.message?.contains("'pub' is not allowed on effect declarations") == true)
         println("✅ pub effect correctly rejected with helpful error message")
@@ -62,7 +62,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -80,7 +80,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "type Color = | Red, Blue { val: Int }, Green |"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -113,7 +113,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "pub type Option 'a = | Some { val: 'a }, None |"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -142,7 +142,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { }"
 
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -162,7 +162,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         // First verify we can parse the type annotation
         val source = "let x: { msg: String } -> Int = 42"
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
         println("✅ Type annotation in let binding works!")
     }
@@ -172,7 +172,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { info: Int -> Int = 42 }"
 
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -197,7 +197,7 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { info: { msg: String } -> Int = 42 }"
 
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -227,7 +227,7 @@ impl Log for Console where {
 """.trim()
 
         try {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -257,7 +257,7 @@ impl Random for SeededRandom { seed: Int } where {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -280,7 +280,7 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::basic"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -298,7 +298,7 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::basic as m"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -316,7 +316,7 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "pub use std::math::trig"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -334,7 +334,7 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::{trig, random}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -356,7 +356,7 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::{trig as t, random as r}"
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -381,7 +381,7 @@ use std::math::trig
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(2, program.items.size)
 
@@ -413,7 +413,7 @@ pub let cos: { value: Float } -> Float = { value } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(3, program.items.size)
 

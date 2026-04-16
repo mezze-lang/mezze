@@ -29,7 +29,7 @@ class IsolateParseErrorTest {
         println("\n")
 
         try {
-            val result = parser.parse(code)
+            val result = parser.parseParsedModule(code)
             assertNotNull(result)
             println("✓ Parse succeeded!")
         } catch (e: Exception) {
@@ -42,7 +42,7 @@ class IsolateParseErrorTest {
     fun `test record with two empty arrays only`() {
         val code = "{ yes = [], no = [] }"
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -56,7 +56,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -72,7 +72,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -85,7 +85,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -101,7 +101,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -118,7 +118,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -135,7 +135,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -154,7 +154,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -176,7 +176,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -195,7 +195,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -204,7 +204,7 @@ class IsolateParseErrorTest {
     fun `test record with array field containing array literal not empty`() {
         val code = "{ yes = [1], no = [] }"
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -220,7 +220,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -232,7 +232,7 @@ class IsolateParseErrorTest {
             { yes = seq::concat {xs = [1], ys = [2]}, no = [] }
         """.trimIndent()
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }
@@ -249,7 +249,7 @@ class IsolateParseErrorTest {
         """.trimIndent()
 
         println("Parsing: $code")
-        val result = parser.parse(code)
+        val result = parser.parseParsedModule(code)
         assertNotNull(result)
         println("✓ Parse succeeded!")
     }

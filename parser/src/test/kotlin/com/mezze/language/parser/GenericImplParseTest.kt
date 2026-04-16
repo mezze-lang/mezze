@@ -15,7 +15,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals("Eq", impl.abilityName)
@@ -33,7 +33,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals("Eq", impl.abilityName)
@@ -51,7 +51,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals("Eq", impl.abilityName)
@@ -71,7 +71,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals("Eq", impl.abilityName)
@@ -95,7 +95,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals(2, impl.operations.size)
@@ -111,7 +111,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals("Eq", impl.abilityName)
@@ -130,7 +130,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(1, program.items.size)
         val impl = program.items[0] as ImplAbilityDeclaration
         assertEquals(1, impl.operations.size)
@@ -148,7 +148,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         val impl = program.items[1] as ImplAbilityDeclaration
         assertEquals(0, impl.operations[0].abilityConstraints.size)
     }
@@ -162,7 +162,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source, desugar = false)
+        val program = parser.parseParsedModule(source, desugar = false)
         assertEquals(2, program.items.size)
     }
 }

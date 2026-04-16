@@ -36,7 +36,7 @@ class StringInterpolationPatternTest {
                         _ -> "unknown"
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val letBinding = program.items[0] as LetBinding
@@ -66,7 +66,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val letBinding = program.items[0] as LetBinding
             val lambda = letBinding.expression as LambdaExpression
             val matchExpr = lambda.body as MatchExpression
@@ -88,7 +88,7 @@ class StringInterpolationPatternTest {
                         _ -> { month = "", day = "", year = "" }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val letBinding = program.items[0] as LetBinding
             val lambda = letBinding.expression as LambdaExpression
             val matchExpr = lambda.body as MatchExpression
@@ -113,7 +113,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -132,7 +132,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -151,7 +151,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -177,7 +177,7 @@ class StringInterpolationPatternTest {
                         _ -> "no match"
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -193,7 +193,7 @@ class StringInterpolationPatternTest {
                         _ -> { var1 = "", var2 = "" }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -210,7 +210,7 @@ class StringInterpolationPatternTest {
                         _ -> { firstName = "", lastName = "" }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -227,7 +227,7 @@ class StringInterpolationPatternTest {
                         _ -> { first_name = "", last_name = "" }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -253,7 +253,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             // This should be a simple LiteralPattern, not interpolation
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             // With escaped $, it should be a literal pattern
@@ -271,7 +271,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -287,7 +287,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -312,7 +312,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             assertTrue(
                 exception.message?.contains("Expected") == true ||
@@ -331,7 +331,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             assertTrue(
                 exception.message?.contains("variable name") == true ||
@@ -350,7 +350,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             // Should fail to parse
             assertNotNull(exception)
@@ -366,7 +366,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             assertTrue(
                 exception.message?.contains("variable name") == true,
@@ -384,7 +384,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             assertTrue(
                 exception.message?.contains("variable name") == true,
@@ -410,7 +410,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             val exception = assertThrows<Exception> {
-                parser.parse(source)
+                parser.parseParsedModule(source)
             }
             assertTrue(
                 exception.message?.contains("Adjacent") == true ||
@@ -429,7 +429,7 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             // Should parse successfully
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
 
             val matchExpr = getMatchExpression(program)
@@ -446,7 +446,7 @@ class StringInterpolationPatternTest {
                         _ -> { a = "", b = "" }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -471,7 +471,7 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             // Should be a LiteralPattern, not StringInterpolationPattern
@@ -492,7 +492,7 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as LiteralPattern
@@ -517,7 +517,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -534,7 +534,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -559,7 +559,7 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val firstCase = matchExpr.cases[0]
@@ -578,7 +578,7 @@ class StringInterpolationPatternTest {
                         _ -> "stranger"
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             assertEquals(3, matchExpr.cases.size)
@@ -596,7 +596,7 @@ class StringInterpolationPatternTest {
                         x -> Some { val = x }
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             assertTrue(matchExpr.cases[0].patterns[0] is StringInterpolationPattern)
@@ -621,7 +621,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
@@ -637,7 +637,7 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val matchExpr = getMatchExpression(program)
 
             val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern

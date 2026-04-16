@@ -16,7 +16,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -39,7 +39,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val ability = program.items[0] as AbilityDeclaration
 
         assertEquals("Show", ability.name)
@@ -62,7 +62,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val impl = program.items[1] as ImplAbilityDeclaration
@@ -91,7 +91,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         val impl = program.items[1] as ImplAbilityDeclaration
 
         assertEquals("Show", impl.abilityName)
@@ -114,7 +114,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -139,7 +139,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(2, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -161,7 +161,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -182,7 +182,7 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val impl = program.items[0] as ImplAbilityDeclaration
@@ -203,7 +203,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> 'item with Container 'c having 'item = Int = {c} -> 42
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -225,7 +225,7 @@ class AbilityParserTest {
             let f: {iter: 'i} -> {} with Iterator 'i having 'item = Int, 'state = Boolean = {iter} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -247,7 +247,7 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with Container 'a having 'item = Int, Iterator 'b having 'elem = String = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -272,7 +272,7 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with Eq 'a, Container 'b having 'item = Int = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -299,7 +299,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (List String) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -318,7 +318,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = {x: Int, y: Int} = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -337,7 +337,7 @@ class AbilityParserTest {
             let f: {a: 'a} with Eq 'a having 'ordering = Int -> Boolean = {a} -> true
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -356,7 +356,7 @@ class AbilityParserTest {
             let f: {a: 'a} -> {} with std::collections::Container 'a having 'item = Int = {a} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -374,7 +374,7 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with BiContainer 'a 'b having 'joined = String = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -403,7 +403,7 @@ class AbilityParserTest {
             let f: {c: 'c, x: 'x} -> {} with Container 'c having 'item = Int, Show 'x = {c, x} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -429,7 +429,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = Int, 'index = String = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -451,7 +451,7 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Eq 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -480,7 +480,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (Option [Int]) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -501,7 +501,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (Result (Option String) Int) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -523,7 +523,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = ({x: Int} -> String) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -543,7 +543,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = [{id: Int, name: String}] = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -563,7 +563,7 @@ class AbilityParserTest {
             let f: {iter: 'i} -> {} with Iterator 'i having 'item = (Option String), 'state = (Result Int String) = {iter} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -594,7 +594,7 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding
@@ -614,7 +614,7 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Show 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val letBinding = program.items[0] as LetBinding

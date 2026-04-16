@@ -30,7 +30,7 @@ class QualifiedRefParsingTest {
                 perform Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -54,7 +54,7 @@ class QualifiedRefParsingTest {
                 perform log::Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -79,7 +79,7 @@ class QualifiedRefParsingTest {
                 perform std::effects::log::Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -104,7 +104,7 @@ class QualifiedRefParsingTest {
                 perform Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -119,7 +119,7 @@ class QualifiedRefParsingTest {
                 perform Console, log::FileLogger, std::Random in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -152,7 +152,7 @@ class QualifiedRefParsingTest {
                 perform log::FileLogger {path = "/tmp/log.txt"} in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -178,7 +178,7 @@ class QualifiedRefParsingTest {
                 perform Console, log::FileLogger {path = "/var/log/app.log"}, std::SystemRandom in someFunc {x = 1}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -220,7 +220,7 @@ class QualifiedRefParsingTest {
                 perform info {msg = "hello"}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
 
@@ -236,7 +236,7 @@ class QualifiedRefParsingTest {
                 perform Log::info {msg = "hello"}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
 
@@ -251,7 +251,7 @@ class QualifiedRefParsingTest {
                 perform std::effects::Log::debug {msg = "debug message"}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
 
@@ -274,7 +274,7 @@ class QualifiedRefParsingTest {
                 perform State in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -288,7 +288,7 @@ class QualifiedRefParsingTest {
                 perform my_handler::Console_Logger in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -302,7 +302,7 @@ class QualifiedRefParsingTest {
                 perform a::b::c::d::e::Handler in someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -323,7 +323,7 @@ class QualifiedRefParsingTest {
                     someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 
@@ -401,7 +401,7 @@ class QualifiedRefParsingTest {
                 let main = {} -> perform log::Console in log::info {msg = "Hello"}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertEquals(2, program.items.size)
 
             // Check use declaration
@@ -428,7 +428,7 @@ class QualifiedRefParsingTest {
                         someExpr {}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val outerPerform = topLevel.expression as PerformExpression
 
@@ -449,7 +449,7 @@ class QualifiedRefParsingTest {
                     else log::warn {msg = "false"}
             """.trimIndent()
 
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             val topLevel = program.items[0] as TopLevelExpression
             val performExpr = topLevel.expression as PerformExpression
 

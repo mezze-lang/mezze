@@ -873,10 +873,10 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
         val source = appFile.readText()
 
         val parser = MezzeParser()
-        val ast = parser.parse(source, file = appFile.name)
+        val parsedModule = parser.parseParsedModule(source, file = appFile.name)
 
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(ast, currentDir.toPath())
+        val result = typeChecker.typeCheck(parsedModule, currentDir.toPath())
 
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
@@ -1187,7 +1187,7 @@ private fun handleExecCommand(args: List<String>) {
     val parseStart = System.nanoTime()
     val parser = MezzeParser()
     val fileName = filePath?.fileName?.toString()
-    val ast = parser.parse(source, file = fileName)
+    val ast = parser.parseParsedModule(source, file = fileName ?: "<unknown>")
     val parseTime = (System.nanoTime() - parseStart) / 1_000_000
 
     // Use the source file's directory for module resolution
@@ -1472,7 +1472,7 @@ private fun handleCompileCommand(args: List<String>) {
         // Parse the source
         val parseStart = System.nanoTime()
         val parser = MezzeParser()
-        val ast = parser.parse(source)
+        val ast = parser.parseParsedModule(source)
         val parseTime = (System.nanoTime() - parseStart) / 1_000_000.0
 
         // Type-check with main validation: main must be {} -> {} <*>
@@ -1566,9 +1566,9 @@ private fun createJavaMainClass(tempDir: File, inputFile: File, source: String) 
     val parser = MezzeParser()
     val typeChecker = TypeChecker()
 
-    val program = parser.parse(source)
+    val parsedModule = parser.parseParsedModule(source, inputFile.name)
     val projectRoot = inputFile.toPath().parent ?: inputFile.toPath()
-    val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+    val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
 
     // Get all modules that were type-checked (stdlib + imports + packages)
     val loadedModules = ModuleResolver.getAllModules()
@@ -2116,7 +2116,7 @@ private fun handleCompileStdlibCommand(args: List<String>) {
 
         try {
             val source = file.readText()
-            val ast = parser.parse(source, file = file.toString())
+            val ast = parser.parseParsedModule(source, file = file.toString())
             // typeCheck throws TypeCheckError on failure, returns TypeCheckResult on success
             val result = typeChecker.typeCheck(ast, projectRoot.toPath(), modulePath = modulePath)
             stdlibModules[modulePath] = result.program

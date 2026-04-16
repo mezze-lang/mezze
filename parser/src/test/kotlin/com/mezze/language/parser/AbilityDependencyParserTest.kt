@@ -16,7 +16,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -43,7 +43,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -72,7 +72,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -100,7 +100,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -123,7 +123,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -142,7 +142,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(1, program.items.size)
 
         val ability = program.items[0] as AbilityDeclaration
@@ -179,7 +179,7 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertEquals(3, program.items.size)
 
         val eq = program.items[0] as AbilityDeclaration

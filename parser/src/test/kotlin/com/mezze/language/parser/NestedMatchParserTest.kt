@@ -26,7 +26,7 @@ let simpleWild = {v} -> match v is
 simpleWild
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         // Find the let binding
@@ -68,7 +68,7 @@ let multiWild = {v1, v2} -> match v1 is
 multiWild
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         // Find the let binding
@@ -130,7 +130,7 @@ let deepNest = {v1, v2, v3} -> match v1 is
 deepNest
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -167,7 +167,7 @@ let processList = {items} -> match items is
 processList
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -206,7 +206,7 @@ let multiCase = {v1, v2} -> match v1 is
 multiCase
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -237,7 +237,7 @@ let chain = {v} -> match v is
 chain
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -271,7 +271,7 @@ let noWild = {v} -> match v is
 noWild
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -297,7 +297,7 @@ let asymmetric = {v1, v2} -> match v1 is
 asymmetric
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()
@@ -326,7 +326,7 @@ let catchAll = {v} -> match v is
 catchAll
 """.trim()
 
-        val program = parser.parse(source)
+        val program = parser.parseParsedModule(source)
         assertNotNull(program)
 
         val letBinding = program.items.filterIsInstance<LetBinding>().first()

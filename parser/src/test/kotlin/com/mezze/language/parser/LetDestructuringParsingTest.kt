@@ -23,7 +23,7 @@ class LetDestructuringParsingTest {
             x
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -42,7 +42,7 @@ class LetDestructuringParsingTest {
             1
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding = program.items.first() as LetBinding
@@ -59,7 +59,7 @@ class LetDestructuringParsingTest {
             x + y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding2 = program.items[1] as LetBinding
@@ -79,7 +79,7 @@ class LetDestructuringParsingTest {
             x + y + z
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val letBinding2 = program.items[1] as LetBinding
@@ -105,7 +105,7 @@ class LetDestructuringParsingTest {
               x + y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val doExpr = (program.items.first() as TopLevelExpression).expression as DoExpression
@@ -125,7 +125,7 @@ class LetDestructuringParsingTest {
               x + y
         """.trimIndent()
 
-        val program = parser.parse(code)
+        val program = parser.parseParsedModule(code)
         assertNotNull(program)
 
         val doExpr = (program.items.first() as TopLevelExpression).expression as DoExpression

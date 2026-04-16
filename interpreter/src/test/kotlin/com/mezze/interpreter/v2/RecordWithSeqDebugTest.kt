@@ -19,7 +19,7 @@ class RecordWithSeqDebugTest {
         val code = "[]"
         println("Parsing: $code")
         try {
-            val program = parser.parse(code)
+            val program = parser.parseParsedModule(code)
             println("Parse succeeded")
         } catch (e: Exception) {
             println("Parse failed: ${e.message}")
@@ -32,7 +32,7 @@ class RecordWithSeqDebugTest {
         val code = "let foo = {x = []}"
         println("Parsing: $code")
         try {
-            val program = parser.parse(code)
+            val program = parser.parseParsedModule(code)
             println("Parse succeeded")
         } catch (e: Exception) {
             println("Parse failed: ${e.message}")
@@ -45,7 +45,7 @@ class RecordWithSeqDebugTest {
         val code = "let foo = {x = [], y = []}"
         println("Parsing: $code")
         try {
-            val program = parser.parse(code)
+            val program = parser.parseParsedModule(code)
             println("Parse succeeded")
         } catch (e: Exception) {
             println("Parse failed: ${e.message}")
@@ -58,7 +58,7 @@ class RecordWithSeqDebugTest {
         val code = "{x = [], y = []}"
         println("Parsing: $code")
         try {
-            val program = parser.parse(code)
+            val program = parser.parseParsedModule(code)
             println("Parse succeeded")
         } catch (e: Exception) {
             println("Parse failed: ${e.message}")

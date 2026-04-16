@@ -80,8 +80,7 @@ object ErrorFormatter {
             appendLine("❌ Type Error [$phase]")
             appendLine("━".repeat(50))
 
-            // Location - try sourceLocation first, then expression.sourceLocation
-            val location = error.sourceLocation ?: error.expression?.sourceLocation
+            val location = error.sourceLocation
             if (location != null) {
                 val fileInfo = location.file ?: "<input>"
                 appendLine("   --> $fileInfo:${location.line}:${location.column}")

@@ -92,11 +92,14 @@ object StandaloneHelper {
             items = enhancedProgram.items + listOf(TopLevelExpression(mainCall))
         )
 
-        // Type-check the program to get TruffleIR (loweredFunctions)
+        // Type-check using v2 pipeline — re-parse the serialized source
+        // (StandaloneHelper is dead code; v1 Program construction above is unused)
         val typeChecker = TypeChecker()
         val projectRoot = java.nio.file.Paths.get(".")
-        val typeCheckResult = typeChecker.typeCheck(programWithMainCall, projectRoot)
-        val functions = typeCheckResult.loweredFunctions ?: emptyList()
+        val parser = com.mezze.language.parser.MezzeParser()
+        val parsedModule = parser.parseParsedModule(astJson, file = "<standalone>")
+        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
+        val functions = typeCheckResult.loweredFunctions
 
         // Execute using full Truffle with JIT optimization
         return executeTruffleFunctions(functions)

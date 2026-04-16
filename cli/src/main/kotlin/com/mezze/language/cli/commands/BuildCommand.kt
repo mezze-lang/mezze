@@ -116,7 +116,7 @@ class BuildCommand {
         try {
             // Parse and type-check
             val parser = MezzeParser()
-            val ast = parser.parse(source, file = appFile.name)
+            val ast = parser.parseParsedModule(source, file = appFile.name)
 
             val typeChecker = TypeChecker()
             val typeCheckResult = typeChecker.typeCheck(ast, currentDir.toPath())

@@ -18,7 +18,7 @@ let map = { opt, f } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             assertEquals(1, program.items.size)
 
@@ -41,7 +41,7 @@ let result = match x is
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Nested match with if-else parsed successfully!")
         }
@@ -54,7 +54,7 @@ let result = obj.field.method { x = 1 }.value
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parse(source)
+            val program = parser.parseParsedModule(source)
             assertNotNull(program)
             println("✅ Chained operations parsed successfully!")
         }
