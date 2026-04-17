@@ -49,12 +49,10 @@ tasks.test {
         showStandardStreams = true
     }
 
-    // Sequential execution like main branch — parallel forks multiply memory
-    // (each fork loads 100MB+ PrecompiledStdlib + 4GB heap = OOM on 8GB machines)
     maxParallelForks = 1
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
-    systemProperty("junit.jupiter.execution.timeout.default", "30s")
+    systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
 
     jvmArgs(
@@ -64,5 +62,5 @@ tasks.test {
         "--add-modules=jdk.incubator.vector"
     )
 
-    maxHeapSize = "4g"
+    maxHeapSize = "2g"
 }

@@ -69,6 +69,8 @@ object V2PipelineRunner {
 
         val userHashes = functions.map { it.hash.hex }.toSet()
         val referencedHashes = collectReferencedHashes(functions, precompiled.preloweredFunctions)
+        // Debug: function counts
+        // System.err.println("V2Pipeline: ${functions.size} user FnIRs, ${referencedHashes.size} ref stdlib")
         language.compileReferencedStdlib(compiler, referencedHashes, userHashes)
 
         // Register user functions for lazy compilation — DON'T pre-compile CallTargets.

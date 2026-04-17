@@ -34,7 +34,8 @@ import java.util.concurrent.atomic.AtomicReference;
     name = "Mezze",
     version = "2.0",
     defaultMimeType = MezzeLanguage.MIME_TYPE,
-    characterMimeTypes = MezzeLanguage.MIME_TYPE
+    characterMimeTypes = MezzeLanguage.MIME_TYPE,
+    contextPolicy = TruffleLanguage.ContextPolicy.SHARED
 )
 public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
@@ -66,45 +67,33 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private volatile java.util.List<String[]> stdlibPerformerRecords = null;
     private volatile boolean stdlibCompiled = false;
 
-    // User function IR registry — FunctionIRs registered per-test, compiled on demand.
-    // Unlike stdlibCallTargetCache (which persists across tests), this is cleared per test.
-    private final java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.truffleir.FunctionIR>
-        userFunctionIRRegistry = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Register a user FunctionIR for lazy compilation. */
+    /** Register a user FunctionIR for lazy compilation (per-context). */
     public void registerFunctionIR(String hash, com.mezze.language.truffleir.FunctionIR ir) {
-        userFunctionIRRegistry.put(hash, ir);
+        getCurrentContext().registerUserFunctionIR(hash, ir);
     }
-
-    /** Clear user function registry between tests. */
-    public void clearUserFunctionRegistry() {
-        userFunctionIRRegistry.clear();
-    }
-
-    // User function CallTarget cache — compiled on demand, cleared between tests.
-    // Separate from stdlibCallTargetCache to prevent accumulation across tests.
-    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> userCallTargetCache =
-        new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Get a cached CallTarget by hash — checks stdlib cache first, then compiles user IR on demand.
      */
     public CallTarget getCachedStdlibCallTarget(String hash) {
+        // 1. Check shared stdlib cache (Language-level, persists across all Contexts)
         CallTarget ct = stdlibCallTargetCache.get(hash);
         if (ct != null) return ct;
-        ct = userCallTargetCache.get(hash);
+        // 2. Check per-context user cache
+        var ctx = getCurrentContext();
+        ct = ctx.getUserCallTarget(hash);
         if (ct != null) return ct;
-        // Try user function IR — compile on demand with full function registry
-        var ir = userFunctionIRRegistry.get(hash);
+        // 3. Try user function IR — compile on demand
+        var ir = ctx.getUserFunctionIR(hash);
         if (ir != null) {
             var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(this);
-            compiler.registerFunctions(new java.util.ArrayList<>(userFunctionIRRegistry.values()));
+            compiler.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
             var rootNode = compiler.compile(ir);
             ct = rootNode.getCallTarget();
-            userCallTargetCache.put(hash, ct);
+            ctx.cacheUserCallTarget(hash, ct);
             return ct;
         }
-        // Try stdlib FunctionIR — may be available if preloweredFunctions not yet cleared
+        // 4. Try stdlib FunctionIR — compile and cache at Language level
         var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
         var stdlibIR = precompiled.getPreloweredFunctions().get(hash);
         if (stdlibIR != null) {
@@ -119,9 +108,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * Compile referenced stdlib functions on demand (lazy, per-Language instance).
-     * Each Language instance (=each Context) compiles only the stdlib functions
-     * needed by the current test. ~35 functions per test instead of 1044.
+     * Compile referenced stdlib functions on demand (lazy).
+     * With SHARED policy, compiled CallTargets accumulate in stdlibCallTargetCache
+     * and are reused across all Contexts — each stdlib function compiled at most once.
      */
     public void compileReferencedStdlib(
             com.mezze.interpreter.v2.compiler.TruffleCompiler compiler,
@@ -206,13 +195,22 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     @Override
+    protected void initializeMultipleContexts() {
+        // Called by Truffle when SHARED policy is active.
+        // Our caches are already thread-safe ConcurrentHashMaps — nothing extra needed.
+    }
+
+    @Override
     protected CallTarget parse(ParsingRequest request) throws Exception {
         Source source = request.getSource();
         String sourceCode = source.getCharacters().toString();
 
-        // Clear previous test's user function state — each test gets fresh functions.
-        userFunctionIRRegistry.clear();
-        userCallTargetCache.clear();
+        // Clear per-context user function state — each test gets fresh user functions.
+        // Stdlib cache (Language-level) is NOT cleared — it persists across all Contexts.
+        var ctx = getCurrentContext();
+        if (ctx != null) {
+            ctx.clearUserState();
+        }
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();

@@ -48,6 +48,14 @@ public final class MezzeContext {
     // Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers)
     private final ConcurrentHashMap<String, Object> closureCache = new ConcurrentHashMap<>();
 
+    // Per-context user function IR registry — FunctionIRs from the current test's source code.
+    // Cleared at start of each parse() via clearUserState().
+    private final ConcurrentHashMap<String, com.mezze.language.truffleir.FunctionIR>
+        userFunctionIRRegistry = new ConcurrentHashMap<>();
+
+    // Per-context user CallTarget cache — compiled on demand from userFunctionIRRegistry.
+    private final ConcurrentHashMap<String, CallTarget> userCallTargetCache = new ConcurrentHashMap<>();
+
     // Polyglot support (lazy initialization)
     private volatile MezzePolyglotSupport polyglotSupport;
 
@@ -70,6 +78,41 @@ public final class MezzeContext {
 
     public Env getEnv() {
         return env;
+    }
+
+    // ========================
+    // User function state (per-context, cleared between tests)
+    // ========================
+
+    @TruffleBoundary
+    public void registerUserFunctionIR(String hash, com.mezze.language.truffleir.FunctionIR ir) {
+        userFunctionIRRegistry.put(hash, ir);
+    }
+
+    @TruffleBoundary
+    public com.mezze.language.truffleir.FunctionIR getUserFunctionIR(String hash) {
+        return userFunctionIRRegistry.get(hash);
+    }
+
+    @TruffleBoundary
+    public java.util.Collection<com.mezze.language.truffleir.FunctionIR> getAllUserFunctionIRs() {
+        return userFunctionIRRegistry.values();
+    }
+
+    @TruffleBoundary
+    public CallTarget getUserCallTarget(String hash) {
+        return userCallTargetCache.get(hash);
+    }
+
+    @TruffleBoundary
+    public void cacheUserCallTarget(String hash, CallTarget ct) {
+        userCallTargetCache.put(hash, ct);
+    }
+
+    /** Clear per-test state at start of each parse(). */
+    public void clearUserState() {
+        userFunctionIRRegistry.clear();
+        userCallTargetCache.clear();
     }
 
     // ========================
