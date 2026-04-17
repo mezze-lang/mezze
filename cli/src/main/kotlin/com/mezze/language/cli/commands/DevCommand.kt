@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.*
+import com.mezze.language.typedast.TypedLetDecl
 import java.io.File
 
 /**
@@ -127,8 +128,9 @@ class DevCommand {
         )
 
         // Check if program has a 'main' function and auto-call it
-        val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
+        val mainBinding = typeCheckResult.typedModule?.decls
+            ?.filterIsInstance<TypedLetDecl>()
+            ?.find { it.name == "main" }
 
         if (mainBinding == null) {
             println("❌ Error: App must have a 'main' function")
@@ -146,7 +148,7 @@ class DevCommand {
         }
 
         // Validate main has type {} -> {}
-        val mainType = mainBinding.inferredType
+        val mainType = mainBinding.scheme.type
         val isValidMainType = mainType is MezzeType.FunctionType &&
                               mainType.paramType is MezzeType.RecordType &&
                               (mainType.paramType as MezzeType.RecordType).fields.isEmpty() &&
@@ -159,7 +161,7 @@ class DevCommand {
             println("❌ Type Error: 'main' must have type {} -> {}")
             println("━".repeat(50))
             println("Expected: {} -> {}")
-            println("Actual:   ${prettyPrintType(mainType!!)}")
+            println("Actual:   ${prettyPrintType(mainType)}")
             println()
             println("💡 The main function must:")
             println("   - Take no arguments: {}")
@@ -169,17 +171,12 @@ class DevCommand {
         }
 
         // Check if user is manually calling main (warn them)
-        val hasManualMainCall = typeCheckResult.program.items.any { item ->
-            when (item) {
-                is TopLevelExpression -> {
-                    // Check if the expression is a call to main
-                    val expr = item.expression
-                    expr is FunctionCall &&
-                    expr.function is Identifier &&
-                    (expr.function as Identifier).localName == "main"
-                }
-                else -> false
-            }
+        // v1 Expression types have been deleted; detect via ParsedModule instead
+        val hasManualMainCall = ast.decls.filterIsInstance<com.mezze.language.parsedast.ParsedTopLevelExpr>().any { tle ->
+            val expr = tle.expression
+            expr is com.mezze.language.parsedast.ParsedFunctionCall &&
+            expr.function is com.mezze.language.parsedast.ParsedIdentifier &&
+            (expr.function as com.mezze.language.parsedast.ParsedIdentifier).localName == "main"
         }
 
         if (hasManualMainCall) {

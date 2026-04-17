@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
@@ -23,16 +23,16 @@ class LiteralPatternParsingTest {
               _ -> "non-zero"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is LiteralPattern)
-        val literal = (firstPattern as LiteralPattern).value
-        assertTrue(literal is IntLiteralValue)
-        assertEquals(0L, (literal as IntLiteralValue).value)
+        assertTrue(firstPattern is ParsedLiteralPattern)
+        val literal = (firstPattern as ParsedLiteralPattern).value
+        assertTrue(literal is ParsedLiteralValue.IntValue)
+        assertEquals(0L, (literal as ParsedLiteralValue.IntValue).value)
     }
 
     @Test
@@ -44,16 +44,16 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertEquals(1L, (pattern1.value as IntLiteralValue).value)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertEquals(1L, (pattern1.value as ParsedLiteralValue.IntValue).value)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as LiteralPattern
-        assertEquals(2L, (pattern2.value as IntLiteralValue).value)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedLiteralPattern
+        assertEquals(2L, (pattern2.value as ParsedLiteralValue.IntValue).value)
     }
 
     @Test
@@ -65,13 +65,13 @@ class LiteralPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertEquals(404L, (pattern1.value as IntLiteralValue).value)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertEquals(404L, (pattern1.value as ParsedLiteralValue.IntValue).value)
     }
 
     // ========== String Literal Patterns ==========
@@ -85,17 +85,17 @@ class LiteralPatternParsingTest {
               _ -> "unknown command"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertTrue(pattern1.value is StringLiteralValue)
-        assertEquals("help", (pattern1.value as StringLiteralValue).value)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertTrue(pattern1.value is ParsedLiteralValue.StringValue)
+        assertEquals("help", (pattern1.value as ParsedLiteralValue.StringValue).value)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as LiteralPattern
-        assertEquals("quit", (pattern2.value as StringLiteralValue).value)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedLiteralPattern
+        assertEquals("quit", (pattern2.value as ParsedLiteralValue.StringValue).value)
     }
 
     @Test
@@ -106,13 +106,13 @@ class LiteralPatternParsingTest {
               _ -> "non-empty"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertEquals("", (pattern.value as StringLiteralValue).value)
+        val pattern = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertEquals("", (pattern.value as ParsedLiteralValue.StringValue).value)
     }
 
     // ========== Boolean Constructor Patterns ==========
@@ -126,16 +126,16 @@ class LiteralPatternParsingTest {
               False -> "no"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
         // True and False are now constructor patterns, not literal patterns
-        val pattern1 = matchExpr.cases[0].patterns.first() as ConstructorPattern
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedConstructorPattern
         assertEquals("True", pattern1.constructor)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as ConstructorPattern
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedConstructorPattern
         assertEquals("False", pattern2.constructor)
     }
 
@@ -147,12 +147,12 @@ class LiteralPatternParsingTest {
               _ -> "stop"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern = matchExpr.cases[0].patterns.first() as ConstructorPattern
+        val pattern = matchExpr.cases[0].patterns.first() as ParsedConstructorPattern
         assertEquals("False", pattern.constructor)
     }
 
@@ -166,16 +166,16 @@ class LiteralPatternParsingTest {
               _ -> "large"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val patterns = matchExpr.cases[0].patterns
 
         assertEquals(3, patterns.size)
-        assertEquals(1L, ((patterns[0] as LiteralPattern).value as IntLiteralValue).value)
-        assertEquals(2L, ((patterns[1] as LiteralPattern).value as IntLiteralValue).value)
-        assertEquals(3L, ((patterns[2] as LiteralPattern).value as IntLiteralValue).value)
+        assertEquals(1L, ((patterns[0] as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
+        assertEquals(2L, ((patterns[1] as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
+        assertEquals(3L, ((patterns[2] as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
     }
 
     @Test
@@ -187,16 +187,16 @@ class LiteralPatternParsingTest {
               _ -> false
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val patterns = matchExpr.cases[0].patterns
 
         assertEquals(3, patterns.size)
-        assertEquals("y", ((patterns[0] as LiteralPattern).value as StringLiteralValue).value)
-        assertEquals("yes", ((patterns[1] as LiteralPattern).value as StringLiteralValue).value)
-        assertEquals("Y", ((patterns[2] as LiteralPattern).value as StringLiteralValue).value)
+        assertEquals("y", ((patterns[0] as ParsedLiteralPattern).value as ParsedLiteralValue.StringValue).value)
+        assertEquals("yes", ((patterns[1] as ParsedLiteralPattern).value as ParsedLiteralValue.StringValue).value)
+        assertEquals("Y", ((patterns[2] as ParsedLiteralPattern).value as ParsedLiteralValue.StringValue).value)
     }
 
     // ========== Literal Patterns with Guards ==========
@@ -210,14 +210,14 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
-        val pattern = firstCase.patterns.first() as LiteralPattern
-        assertEquals(0L, (pattern.value as IntLiteralValue).value)
+        val pattern = firstCase.patterns.first() as ParsedLiteralPattern
+        assertEquals(0L, (pattern.value as ParsedLiteralValue.IntValue).value)
         assertNotNull(firstCase.guard)
     }
 
@@ -232,14 +232,14 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        assertTrue(matchExpr.cases[0].patterns.first() is LiteralPattern)
-        assertTrue(matchExpr.cases[1].patterns.first() is LiteralPattern)
-        assertTrue(matchExpr.cases[2].patterns.first() is WildcardPattern)
+        assertTrue(matchExpr.cases[0].patterns.first() is ParsedLiteralPattern)
+        assertTrue(matchExpr.cases[1].patterns.first() is ParsedLiteralPattern)
+        assertTrue(matchExpr.cases[2].patterns.first() is ParsedWildcardPattern)
     }
 
     @Test
@@ -250,13 +250,13 @@ class LiteralPatternParsingTest {
               n -> n + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        assertTrue(matchExpr.cases[0].patterns.first() is LiteralPattern)
-        assertTrue(matchExpr.cases[1].patterns.first() is VariablePattern)
+        assertTrue(matchExpr.cases[0].patterns.first() is ParsedLiteralPattern)
+        assertTrue(matchExpr.cases[1].patterns.first() is ParsedVariablePattern)
     }
 
     // ========== Nested Match with Literal Patterns ==========
@@ -271,14 +271,14 @@ class LiteralPatternParsingTest {
               _ -> "x is not zero"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val innerMatch = matchExpr.cases[0].expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val innerMatch = matchExpr.cases[0].body as ParsedMatch
 
-        assertTrue(matchExpr.cases[0].patterns.first() is LiteralPattern)
-        assertTrue(innerMatch.cases[0].patterns.first() is LiteralPattern)
+        assertTrue(matchExpr.cases[0].patterns.first() is ParsedLiteralPattern)
+        assertTrue(innerMatch.cases[0].patterns.first() is ParsedLiteralPattern)
     }
 
     // ========== Float Literal Patterns ==========
@@ -292,17 +292,17 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertTrue(pattern1.value is FloatLiteralValue)
-        assertEquals(0.0, (pattern1.value as FloatLiteralValue).value)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertTrue(pattern1.value is ParsedLiteralValue.FloatValue)
+        assertEquals(0.0, (pattern1.value as ParsedLiteralValue.FloatValue).value)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as LiteralPattern
-        assertEquals(1.0, (pattern2.value as FloatLiteralValue).value)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedLiteralPattern
+        assertEquals(1.0, (pattern2.value as ParsedLiteralValue.FloatValue).value)
     }
 
     @Test
@@ -314,16 +314,16 @@ class LiteralPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertEquals(3.14, (pattern1.value as FloatLiteralValue).value, 0.001)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedLiteralPattern
+        assertEquals(3.14, (pattern1.value as ParsedLiteralValue.FloatValue).value, 0.001)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as LiteralPattern
-        assertEquals(2.718, (pattern2.value as FloatLiteralValue).value, 0.001)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedLiteralPattern
+        assertEquals(2.718, (pattern2.value as ParsedLiteralValue.FloatValue).value, 0.001)
     }
 
     @Test
@@ -334,15 +334,15 @@ class LiteralPatternParsingTest {
               _ -> "large"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val patterns = matchExpr.cases[0].patterns
 
         assertEquals(3, patterns.size)
-        assertEquals(0.0, ((patterns[0] as LiteralPattern).value as FloatLiteralValue).value, 0.001)
-        assertEquals(1.0, ((patterns[1] as LiteralPattern).value as FloatLiteralValue).value, 0.001)
-        assertEquals(2.0, ((patterns[2] as LiteralPattern).value as FloatLiteralValue).value, 0.001)
+        assertEquals(0.0, ((patterns[0] as ParsedLiteralPattern).value as ParsedLiteralValue.FloatValue).value, 0.001)
+        assertEquals(1.0, ((patterns[1] as ParsedLiteralPattern).value as ParsedLiteralValue.FloatValue).value, 0.001)
+        assertEquals(2.0, ((patterns[2] as ParsedLiteralPattern).value as ParsedLiteralValue.FloatValue).value, 0.001)
     }
 }

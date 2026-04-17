@@ -221,8 +221,8 @@ class StringInterpolationIntegrationTest {
             let msg = "Number: $(num)"
             """;
 
-        var program = parser.parse(source, true, null);
-        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(program));
+        var module = parser.parseParsedModule(source, "<test>");
+        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(module, java.nio.file.Path.of(".")));
     }
 
     @Test
@@ -235,8 +235,8 @@ class StringInterpolationIntegrationTest {
             let msg = "Flag: $(flag)"
             """;
 
-        var program = parser.parse(source, true, null);
-        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(program));
+        var module = parser.parseParsedModule(source, "<test>");
+        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(module, java.nio.file.Path.of(".")));
     }
 
     @Test
@@ -249,7 +249,7 @@ class StringInterpolationIntegrationTest {
             let msg = "Person: $(person)"
             """;
 
-        var program = parser.parse(source, true, null);
-        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(program));
+        var module = parser.parseParsedModule(source, "<test>");
+        assertThrows(TypeCheckError.class, () -> typeChecker.typeCheck(module, java.nio.file.Path.of(".")));
     }
 }

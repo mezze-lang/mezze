@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.*
+import com.mezze.language.typedast.TypedLetDecl
 import java.io.File
 
 /**
@@ -22,7 +23,7 @@ class BuildCommand {
     fun execute(
         args: List<String>,
         currentDir: File = File(System.getProperty("user.dir")),
-        createJarFunction: (File, File, String, Program) -> Unit
+        createJarFunction: (File, File, String, TypeCheckResult) -> Unit
     ) {
         val mezzeToml = File(currentDir, "Mezze.toml")
 
@@ -133,8 +134,9 @@ class BuildCommand {
             }
 
             // Validate that program has a 'main' function with type {} -> {}
-            val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
-                .find { it.variableName == "main" }
+            val mainBinding = typeCheckResult.typedModule?.decls
+                ?.filterIsInstance<TypedLetDecl>()
+                ?.find { it.name == "main" }
 
             if (mainBinding == null) {
                 println("❌ Build Error: App must have a 'main' function")
@@ -153,7 +155,7 @@ class BuildCommand {
             }
 
             // Check that main has type {} -> {}
-            val mainType = mainBinding.inferredType
+            val mainType = mainBinding.scheme.type
             val isValidMainType = mainType is MezzeType.FunctionType &&
                                   mainType.paramType is MezzeType.RecordType &&
                                   (mainType.paramType as MezzeType.RecordType).fields.isEmpty() &&
@@ -166,7 +168,7 @@ class BuildCommand {
                 println("❌ Type Error: 'main' must have type {} -> {}")
                 println("━".repeat(50))
                 println("Expected: {} -> {}")
-                println("Actual:   ${prettyPrintType(mainType!!)}")
+                println("Actual:   ${prettyPrintType(mainType)}")
                 println()
                 println("💡 The main function must:")
                 println("   - Take no arguments: {}")
@@ -183,7 +185,7 @@ class BuildCommand {
             }
 
             // Create standalone JAR
-            createJarFunction(appFile, outputFile, source, typeCheckResult.program)
+            createJarFunction(appFile, outputFile, source, typeCheckResult)
 
             println("✅ Build successful!")
             println()

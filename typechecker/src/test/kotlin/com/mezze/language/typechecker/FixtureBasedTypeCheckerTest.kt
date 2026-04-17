@@ -68,7 +68,7 @@ class FixtureBasedTypeCheckerTest {
             when (decl) {
                 is TypedLetDecl -> {
                     val ty = decl.scheme.type
-                    val typeStr = prettyPrintTypeWithAliases(ty, typeAliases, showExpansion = false, typeDeclarations = emptyList())
+                    val typeStr = prettyPrintTypeWithAliases(ty, typeAliases, showExpansion = false)
                     actualTypes[decl.name] = typeStr
                 }
                 is TypedTypeDecl -> {

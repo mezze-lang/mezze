@@ -1,6 +1,5 @@
 package com.mezze.language.typechecker.dependencies
 
-import com.mezze.language.ast.Identifier
 import com.mezze.language.ast.hashing.MezzeHash
 
 /**
@@ -66,17 +65,6 @@ class DependencyTracker {
      */
     fun recordReference(name: String, modulePath: String? = null) {
         currentReferences.add(DefinitionRef.ByName(modulePath, name))
-    }
-
-    /**
-     * Record a reference from a structured Identifier.
-     * This is the preferred method - uses structured data instead of string parsing.
-     *
-     * @param identifier The structured identifier with localName and optional qualifier
-     */
-    fun recordIdentifierReference(identifier: Identifier) {
-        val modulePath = identifier.qualifier?.fullPath
-        recordReference(identifier.localName, modulePath)
     }
 
     /**

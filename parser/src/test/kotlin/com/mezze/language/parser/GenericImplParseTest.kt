@@ -2,7 +2,7 @@ package com.mezze.language.parser
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 
 class GenericImplParseTest {
     private val parser = MezzeParser()
@@ -15,13 +15,13 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("Eq", impl.abilityName)
         assertEquals(0, impl.abilityTypeArgs.size)
         assertEquals(1, impl.targetTypes.size)
-        assertTrue(impl.targetTypes[0] is SeqTypeAnnotation)
+        assertTrue(impl.targetTypes[0] is ParsedSeqType)
     }
 
     @Test
@@ -33,14 +33,14 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("Eq", impl.abilityName)
         assertEquals(1, impl.abilityTypeArgs.size)
-        assertEquals("'a", (impl.abilityTypeArgs[0] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (impl.abilityTypeArgs[0] as ParsedNamedType).name)
         assertEquals(1, impl.targetTypes.size)
-        assertTrue(impl.targetTypes[0] is SeqTypeAnnotation)
+        assertTrue(impl.targetTypes[0] is ParsedSeqType)
     }
 
     @Test
@@ -51,15 +51,15 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("Eq", impl.abilityName)
         assertEquals(1, impl.abilityTypeArgs.size)
-        assertEquals("'a", (impl.abilityTypeArgs[0] as IdentifierTypeAnnotation).name)
-        // Target type: Option 'a as a single TypeApplicationAnnotation
+        assertEquals("'a", (impl.abilityTypeArgs[0] as ParsedNamedType).name)
+        // Target type: Option 'a as a single ParsedTypeApp
         assertEquals(1, impl.targetTypes.size)
-        assertTrue(impl.targetTypes[0] is TypeApplicationAnnotation)
+        assertTrue(impl.targetTypes[0] is ParsedTypeApp)
     }
 
     @Test
@@ -71,17 +71,17 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("Eq", impl.abilityName)
         assertEquals(2, impl.abilityTypeArgs.size)
-        assertEquals("'k", (impl.abilityTypeArgs[0] as IdentifierTypeAnnotation).name)
-        assertEquals("'v", (impl.abilityTypeArgs[1] as IdentifierTypeAnnotation).name)
-        // Target type: Map 'k 'v as a single TypeApplicationAnnotation
+        assertEquals("'k", (impl.abilityTypeArgs[0] as ParsedNamedType).name)
+        assertEquals("'v", (impl.abilityTypeArgs[1] as ParsedNamedType).name)
+        // Target type: Map 'k 'v as a single ParsedTypeApp
         assertEquals(1, impl.targetTypes.size)
-        assertTrue(impl.targetTypes[0] is TypeApplicationAnnotation)
-        val mapType = impl.targetTypes[0] as TypeApplicationAnnotation
+        assertTrue(impl.targetTypes[0] is ParsedTypeApp)
+        val mapType = impl.targetTypes[0] as ParsedTypeApp
         assertEquals("Map", mapType.constructor)
         assertEquals(2, mapType.args.size)
     }
@@ -95,9 +95,9 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals(2, impl.operations.size)
         assertEquals("eq", impl.operations[0].name)
         assertEquals("neq", impl.operations[1].name)
@@ -111,9 +111,9 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("Eq", impl.abilityName)
         assertEquals(1, impl.abilityTypeArgs.size)
         assertEquals(1, impl.operations.size)
@@ -130,9 +130,9 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(1, program.items.size)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals(1, impl.operations.size)
         assertEquals(2, impl.operations[0].abilityConstraints.size)
         assertEquals("Eq", impl.operations[0].abilityConstraints[0].abilityName)
@@ -148,8 +148,8 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[1] as ParsedImplAbilityDecl
         assertEquals(0, impl.operations[0].abilityConstraints.size)
     }
 
@@ -162,7 +162,7 @@ class GenericImplParseTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source, desugar = false)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
     }
 }

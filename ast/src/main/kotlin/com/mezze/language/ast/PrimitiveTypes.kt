@@ -75,15 +75,7 @@ object PrimitiveTypes {
      */
     val allTypes: Set<MezzeType> = typeToName.keys
 
-    /**
-     * Convert an internal MezzeType to an IdentifierTypeAnnotation.
-     * Returns null if the type is not a primitive type.
-     *
-     * This is a convenience method that combines toName() with IdentifierTypeAnnotation creation.
-     * Example: toAnnotation(MezzeType.StringType) -> IdentifierTypeAnnotation("Str")
-     */
-    fun toAnnotation(type: MezzeType): IdentifierTypeAnnotation? =
-        toName(type)?.let { IdentifierTypeAnnotation(it) }
+    // toAnnotation removed — IdentifierTypeAnnotation was in the deleted TypeAnnotation.kt
 
     // ========================================================================
     // TYPE CATEGORIES

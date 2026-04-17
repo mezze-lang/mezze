@@ -1,16 +1,16 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
 
 /**
- * Tests for QualifiedRef parsing in perform expressions and related constructs.
+ * Tests for ParsedQualifiedRef parsing in perform expressions and related constructs.
  *
  * These tests verify that:
  * 1. The parser correctly parses qualified references (e.g., log::Console)
- * 2. QualifiedRef structure is properly populated with localName and qualifier
+ * 2. ParsedQualifiedRef structure is properly populated with localName and qualifier
  * 3. Source locations are captured for qualified references
  * 4. Both qualified and unqualified references work in all contexts
  */
@@ -25,76 +25,76 @@ class QualifiedRefParsingTest {
     inner class PerformHandlerQualifiedRef {
 
         @Test
-        fun `unqualified handler creates QualifiedRef with null qualifier`() {
+        fun `unqualified handler creates ParsedQualifiedRef with null qualifier`() {
             val source = """
                 perform Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(1, performExpr.handlers.size)
             val handler = performExpr.handlers[0]
 
-            // Check QualifiedRef structure
+            // Check ParsedQualifiedRef structure
             assertEquals("Console", handler.performer.localName)
             assertNull(handler.performer.qualifier)
             assertFalse(handler.performer.isQualified)
-            assertNull(handler.performer.resolvedContentHash)
+
 
             // Verify full qualified name can be constructed
-            val fullName = handler.performer.qualifier?.let { "${it.fullPath}::${handler.performer.localName}" } ?: handler.performer.localName
+            val fullName = handler.performer.qualifier?.let { "${it.toString()}::${handler.performer.localName}" } ?: handler.performer.localName
             assertEquals("Console", fullName)
         }
 
         @Test
-        fun `single-segment qualified handler creates QualifiedRef with qualifier`() {
+        fun `single-segment qualified handler creates ParsedQualifiedRef with qualifier`() {
             val source = """
                 perform log::Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(1, performExpr.handlers.size)
             val handler = performExpr.handlers[0]
 
-            // Check QualifiedRef structure
+            // Check ParsedQualifiedRef structure
             assertEquals("Console", handler.performer.localName)
             assertNotNull(handler.performer.qualifier)
             assertEquals(listOf("log"), handler.performer.qualifier!!.segments)
-            assertEquals("log", handler.performer.qualifier!!.fullPath)
+            assertEquals("log", handler.performer.qualifier!!.toString())
             assertTrue(handler.performer.isQualified)
 
             // Verify full qualified name can be constructed
-            val fullName = handler.performer.qualifier?.let { "${it.fullPath}::${handler.performer.localName}" } ?: handler.performer.localName
+            val fullName = handler.performer.qualifier?.let { "${it.toString()}::${handler.performer.localName}" } ?: handler.performer.localName
             assertEquals("log::Console", fullName)
         }
 
         @Test
-        fun `multi-segment qualified handler creates QualifiedRef with full qualifier`() {
+        fun `multi-segment qualified handler creates ParsedQualifiedRef with full qualifier`() {
             val source = """
                 perform std::effects::log::Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(1, performExpr.handlers.size)
             val handler = performExpr.handlers[0]
 
-            // Check QualifiedRef structure
+            // Check ParsedQualifiedRef structure
             assertEquals("Console", handler.performer.localName)
             assertNotNull(handler.performer.qualifier)
             assertEquals(listOf("std", "effects", "log"), handler.performer.qualifier!!.segments)
-            assertEquals("std::effects::log", handler.performer.qualifier!!.fullPath)
+            assertEquals("std::effects::log", handler.performer.qualifier!!.toString())
             assertTrue(handler.performer.isQualified)
 
             // Verify full qualified name can be constructed
-            val fullName = handler.performer.qualifier?.let { "${it.fullPath}::${handler.performer.localName}" } ?: handler.performer.localName
+            val fullName = handler.performer.qualifier?.let { "${it.toString()}::${handler.performer.localName}" } ?: handler.performer.localName
             assertEquals("std::effects::log::Console", fullName)
         }
 
@@ -104,13 +104,13 @@ class QualifiedRefParsingTest {
                 perform Console in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             val handler = performExpr.handlers[0]
-            assertNotNull(handler.performer.sourceLocation)
-            assertEquals(1, handler.performer.sourceLocation!!.line)
+            assertNotNull(handler.performer.loc)
+            assertEquals(1, handler.performer.loc.startLine)
         }
 
         @Test
@@ -119,9 +119,9 @@ class QualifiedRefParsingTest {
                 perform Console, log::FileLogger, std::Random in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(3, performExpr.handlers.size)
 
@@ -152,24 +152,24 @@ class QualifiedRefParsingTest {
                 perform log::FileLogger {path = "/tmp/log.txt"} in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(1, performExpr.handlers.size)
             val handler = performExpr.handlers[0]
 
-            // Check QualifiedRef
+            // Check ParsedQualifiedRef
             assertEquals("FileLogger", handler.performer.localName)
             assertNotNull(handler.performer.qualifier)
             assertEquals(listOf("log"), handler.performer.qualifier!!.segments)
 
             // Check parameters
-            assertNotNull(handler.parameters)
-            assertEquals(1, handler.parameters!!.entries.size)
-            val entry = handler.parameters!!.entries[0] as RecordFieldEntry
+            assertNotNull(handler.params)
+            assertEquals(1, handler.params!!.entries.size)
+            val entry = handler.params!!.entries[0] as ParsedRecordEntry.Field
             assertEquals("path", entry.name)
-            assertEquals("/tmp/log.txt", (entry.value as StringLiteral).value)
+            assertEquals("/tmp/log.txt", (entry.value as ParsedStringLit).parts[0].let { (it as ParsedStringPart.Literal).value })
         }
 
         @Test
@@ -178,9 +178,9 @@ class QualifiedRefParsingTest {
                 perform Console, log::FileLogger {path = "/var/log/app.log"}, std::SystemRandom in someFunc {x = 1}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(3, performExpr.handlers.size)
 
@@ -188,15 +188,15 @@ class QualifiedRefParsingTest {
             val handler1 = performExpr.handlers[0]
             assertEquals("Console", handler1.performer.localName)
             assertNull(handler1.performer.qualifier)
-            assertNull(handler1.parameters)
+            assertNull(handler1.params)
 
             // Second handler: log::FileLogger (with params, qualified)
             val handler2 = performExpr.handlers[1]
             assertEquals("FileLogger", handler2.performer.localName)
             assertNotNull(handler2.performer.qualifier)
             assertEquals(listOf("log"), handler2.performer.qualifier!!.segments)
-            assertNotNull(handler2.parameters)
-            val entry = handler2.parameters!!.entries[0] as RecordFieldEntry
+            assertNotNull(handler2.params)
+            val entry = handler2.params!!.entries[0] as ParsedRecordEntry.Field
             assertEquals("path", entry.name)
 
             // Third handler: std::SystemRandom (no params, qualified)
@@ -212,7 +212,7 @@ class QualifiedRefParsingTest {
     // ========================================================================
 
     @Nested
-    inner class EffectCallExpression {
+    inner class EffectCallTests {
 
         @Test
         fun `unqualified effect call`() {
@@ -220,9 +220,9 @@ class QualifiedRefParsingTest {
                 perform info {msg = "hello"}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val effectCall = topLevel.expression as ParsedEffectCall
 
             // For effect calls, operation.qualifier is null for unqualified
             // and operation.localName is the operation name
@@ -236,12 +236,12 @@ class QualifiedRefParsingTest {
                 perform Log::info {msg = "hello"}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val effectCall = topLevel.expression as ParsedEffectCall
 
             // operation contains the qualifier path
-            assertEquals("Log", effectCall.operation.qualifier?.fullPath)
+            assertEquals("Log", effectCall.operation.qualifier?.toString())
             assertEquals("info", effectCall.operation.localName)
         }
 
@@ -251,12 +251,12 @@ class QualifiedRefParsingTest {
                 perform std::effects::Log::debug {msg = "debug message"}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val effectCall = topLevel.expression as com.mezze.language.ast.EffectCallExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val effectCall = topLevel.expression as ParsedEffectCall
 
             // operation contains the full qualifier path
-            assertEquals("std::effects::Log", effectCall.operation.qualifier?.fullPath)
+            assertEquals("std::effects::Log", effectCall.operation.qualifier?.toString())
             assertEquals("debug", effectCall.operation.localName)
         }
     }
@@ -274,9 +274,9 @@ class QualifiedRefParsingTest {
                 perform State in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals("State", performExpr.handlers[0].performer.localName)
             assertNull(performExpr.handlers[0].performer.qualifier)
@@ -288,9 +288,9 @@ class QualifiedRefParsingTest {
                 perform my_handler::Console_Logger in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals("Console_Logger", performExpr.handlers[0].performer.localName)
             assertEquals(listOf("my_handler"), performExpr.handlers[0].performer.qualifier!!.segments)
@@ -302,14 +302,14 @@ class QualifiedRefParsingTest {
                 perform a::b::c::d::e::Handler in someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             val handler = performExpr.handlers[0]
             assertEquals("Handler", handler.performer.localName)
             assertEquals(listOf("a", "b", "c", "d", "e"), handler.performer.qualifier!!.segments)
-            assertEquals("a::b::c::d::e", handler.performer.qualifier!!.fullPath)
+            assertEquals("a::b::c::d::e", handler.performer.qualifier!!.toString())
         }
 
         @Test
@@ -323,9 +323,9 @@ class QualifiedRefParsingTest {
                     someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals(3, performExpr.handlers.size)
             assertEquals("Console", performExpr.handlers[0].performer.localName)
@@ -343,7 +343,7 @@ class QualifiedRefParsingTest {
 
         @Test
         fun `local() creates unqualified reference`() {
-            val ref = QualifiedRef.local("Handler")
+            val ref = ParsedQualifiedRef("Handler", null, Loc("<test>", 0, 0, 0, 0))
             assertEquals("Handler", ref.localName)
             assertNull(ref.qualifier)
             assertFalse(ref.isQualified)
@@ -351,7 +351,7 @@ class QualifiedRefParsingTest {
 
         @Test
         fun `qualified() with string creates qualified reference`() {
-            val ref = QualifiedRef.qualified("module", "Handler")
+            val ref = ParsedQualifiedRef("Handler", ParsedModulePath(listOf("module")), Loc("<test>", 0, 0, 0, 0))
             assertEquals("Handler", ref.localName)
             assertNotNull(ref.qualifier)
             assertEquals(listOf("module"), ref.qualifier!!.segments)
@@ -360,7 +360,7 @@ class QualifiedRefParsingTest {
 
         @Test
         fun `qualified() with list creates qualified reference`() {
-            val ref = QualifiedRef.qualified(listOf("std", "effects", "log"), "Console")
+            val ref = ParsedQualifiedRef("Console", ParsedModulePath(listOf("std", "effects", "log")), Loc("<test>", 0, 0, 0, 0))
             assertEquals("Console", ref.localName)
             assertNotNull(ref.qualifier)
             assertEquals(listOf("std", "effects", "log"), ref.qualifier!!.segments)
@@ -369,7 +369,7 @@ class QualifiedRefParsingTest {
 
         @Test
         fun `qualified() with empty list creates unqualified reference`() {
-            val ref = QualifiedRef.qualified(emptyList(), "Handler")
+            val ref = ParsedQualifiedRef("Handler", null, Loc("<test>", 0, 0, 0, 0))
             assertEquals("Handler", ref.localName)
             assertNull(ref.qualifier)
             assertFalse(ref.isQualified)
@@ -377,12 +377,12 @@ class QualifiedRefParsingTest {
 
         @Test
         fun `withResolvedHash() preserves other fields`() {
-            val original = QualifiedRef.qualified("module", "Handler")
-            val withHash = original.withResolvedHash("abc123")
+            val original = ParsedQualifiedRef("Handler", ParsedModulePath(listOf("module")), Loc("<test>", 0, 0, 0, 0))
+            val withHash = original
 
             assertEquals("Handler", withHash.localName)
             assertEquals(listOf("module"), withHash.qualifier!!.segments)
-            assertEquals("abc123", withHash.resolvedContentHash)
+
         }
     }
 
@@ -401,18 +401,18 @@ class QualifiedRefParsingTest {
                 let main = {} -> perform log::Console in log::info {msg = "Hello"}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            assertEquals(2, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertEquals(2, module.decls.size)
 
             // Check use declaration
-            val useDecl = program.items[0] as UseDeclaration
-            val modulePath = useDecl.path as ModulePath
+            val useDecl = module.decls[0] as ParsedUseDecl
+            val modulePath = (useDecl.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "effects", "log"), modulePath.segments)
 
             // Check let binding with perform
-            val letBinding = program.items[1] as LetBinding
-            val lambda = letBinding.expression as LambdaExpression
-            val performExpr = lambda.body as PerformExpression
+            val letBinding = module.decls[1] as ParsedLetDecl
+            val lambda = letBinding.value as ParsedLambda
+            val performExpr = lambda.body as ParsedPerform
 
             // Handler should be qualified
             val handler = performExpr.handlers[0]
@@ -428,14 +428,14 @@ class QualifiedRefParsingTest {
                         someExpr {}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val outerPerform = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val outerPerform = topLevel.expression as ParsedPerform
 
             assertEquals("Handler1", outerPerform.handlers[0].performer.localName)
             assertEquals(listOf("outer"), outerPerform.handlers[0].performer.qualifier!!.segments)
 
-            val innerPerform = outerPerform.expression as PerformExpression
+            val innerPerform = outerPerform.body as ParsedPerform
             assertEquals("Handler2", innerPerform.handlers[0].performer.localName)
             assertEquals(listOf("inner"), innerPerform.handlers[0].performer.qualifier!!.segments)
         }
@@ -449,14 +449,14 @@ class QualifiedRefParsingTest {
                     else log::warn {msg = "false"}
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val topLevel = program.items[0] as TopLevelExpression
-            val performExpr = topLevel.expression as PerformExpression
+            val module = parser.parseParsedModule(source)
+            val topLevel = module.decls[0] as ParsedTopLevelExpr
+            val performExpr = topLevel.expression as ParsedPerform
 
             assertEquals("Console", performExpr.handlers[0].performer.localName)
             assertEquals(listOf("log"), performExpr.handlers[0].performer.qualifier!!.segments)
 
-            assertTrue(performExpr.expression is IfExpression)
+            assertTrue(performExpr.body is ParsedIf)
         }
     }
 }

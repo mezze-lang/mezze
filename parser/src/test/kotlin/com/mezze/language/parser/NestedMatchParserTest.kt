@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -26,16 +26,16 @@ let simpleWild = {v} -> match v is
 simpleWild
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
         // Find the let binding
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
         assertEquals("simpleWild", letBinding.variableName)
 
         // Verify it's a lambda with a match expression
-        val lambda = letBinding.expression as LambdaExpression
-        val matchExpr = lambda.body as MatchExpression
+        val lambda = letBinding.value as ParsedLambda
+        val matchExpr = lambda.body as ParsedMatch
 
         // Should have 2 cases: A and wildcard
         assertEquals(2, matchExpr.cases.size, "Match should have exactly 2 cases")
@@ -43,17 +43,17 @@ simpleWild
         // First case: A -> 1
         val firstCase = matchExpr.cases[0]
         assertEquals(1, firstCase.patterns.size)
-        assertTrue(firstCase.patterns[0] is ConstructorPattern)
-        assertEquals("A", (firstCase.patterns[0] as ConstructorPattern).constructor)
-        assertTrue(firstCase.expression is IntLiteral)
-        assertEquals(1L, (firstCase.expression as IntLiteral).value)
+        assertTrue(firstCase.patterns[0] is ParsedConstructorPattern)
+        assertEquals("A", (firstCase.patterns[0] as ParsedConstructorPattern).constructor)
+        assertTrue(firstCase.body is ParsedIntLit)
+        assertEquals(1L, (firstCase.body as ParsedIntLit).value)
 
         // Second case: _ -> 2
         val secondCase = matchExpr.cases[1]
         assertEquals(1, secondCase.patterns.size)
-        assertTrue(secondCase.patterns[0] is WildcardPattern)
-        assertTrue(secondCase.expression is IntLiteral)
-        assertEquals(2L, (secondCase.expression as IntLiteral).value)
+        assertTrue(secondCase.patterns[0] is ParsedWildcardPattern)
+        assertTrue(secondCase.body is ParsedIntLit)
+        assertEquals(2L, (secondCase.body as ParsedIntLit).value)
     }
 
     @Test
@@ -68,16 +68,16 @@ let multiWild = {v1, v2} -> match v1 is
 multiWild
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
         // Find the let binding
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
         assertEquals("multiWild", letBinding.variableName)
 
         // Verify it's a lambda with a match expression
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Outer match should have 2 cases: A and wildcard
         assertEquals(2, outerMatch.cases.size, "Outer match should have exactly 2 cases")
@@ -85,35 +85,35 @@ multiWild
         // First case: A -> (inner match)
         val firstCase = outerMatch.cases[0]
         assertEquals(1, firstCase.patterns.size)
-        assertTrue(firstCase.patterns[0] is ConstructorPattern)
-        assertEquals("A", (firstCase.patterns[0] as ConstructorPattern).constructor)
+        assertTrue(firstCase.patterns[0] is ParsedConstructorPattern)
+        assertEquals("A", (firstCase.patterns[0] as ParsedConstructorPattern).constructor)
 
         // The expression should be an inner match
-        assertTrue(firstCase.expression is MatchExpression, "First case should contain a nested match expression")
-        val innerMatch = firstCase.expression as MatchExpression
+        assertTrue(firstCase.body is ParsedMatch, "First case should contain a nested match expression")
+        val innerMatch = firstCase.body as ParsedMatch
 
         // Inner match should have 2 cases: B and wildcard
         assertEquals(2, innerMatch.cases.size, "Inner match should have exactly 2 cases")
 
         // Inner first case: B -> 1
         val innerFirstCase = innerMatch.cases[0]
-        assertTrue(innerFirstCase.patterns[0] is ConstructorPattern)
-        assertEquals("B", (innerFirstCase.patterns[0] as ConstructorPattern).constructor)
-        assertTrue(innerFirstCase.expression is IntLiteral)
-        assertEquals(1L, (innerFirstCase.expression as IntLiteral).value)
+        assertTrue(innerFirstCase.patterns[0] is ParsedConstructorPattern)
+        assertEquals("B", (innerFirstCase.patterns[0] as ParsedConstructorPattern).constructor)
+        assertTrue(innerFirstCase.body is ParsedIntLit)
+        assertEquals(1L, (innerFirstCase.body as ParsedIntLit).value)
 
         // Inner second case: _ -> 2
         val innerSecondCase = innerMatch.cases[1]
-        assertTrue(innerSecondCase.patterns[0] is WildcardPattern)
-        assertTrue(innerSecondCase.expression is IntLiteral)
-        assertEquals(2L, (innerSecondCase.expression as IntLiteral).value)
+        assertTrue(innerSecondCase.patterns[0] is ParsedWildcardPattern)
+        assertTrue(innerSecondCase.body is ParsedIntLit)
+        assertEquals(2L, (innerSecondCase.body as ParsedIntLit).value)
 
         // Second case of outer match: _ -> 3
         val secondCase = outerMatch.cases[1]
         assertEquals(1, secondCase.patterns.size)
-        assertTrue(secondCase.patterns[0] is WildcardPattern, "Second outer case should be a wildcard")
-        assertTrue(secondCase.expression is IntLiteral)
-        assertEquals(3L, (secondCase.expression as IntLiteral).value, "Second outer case should return 3")
+        assertTrue(secondCase.patterns[0] is ParsedWildcardPattern, "Second outer case should be a wildcard")
+        assertTrue(secondCase.body is ParsedIntLit)
+        assertEquals(3L, (secondCase.body as ParsedIntLit).value, "Second outer case should return 3")
     }
 
     @Test
@@ -130,29 +130,29 @@ let deepNest = {v1, v2, v3} -> match v1 is
 deepNest
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Outer match: 2 cases (A, wildcard)
         assertEquals(2, outerMatch.cases.size, "Outer match should have 2 cases")
 
         // Get middle match from first case
-        val middleMatch = outerMatch.cases[0].expression as MatchExpression
+        val middleMatch = outerMatch.cases[0].body as ParsedMatch
         assertEquals(2, middleMatch.cases.size, "Middle match should have 2 cases")
 
         // Get inner match from middle's first case
-        val innerMatch = middleMatch.cases[0].expression as MatchExpression
+        val innerMatch = middleMatch.cases[0].body as ParsedMatch
         assertEquals(2, innerMatch.cases.size, "Inner match should have 2 cases")
 
         // Verify values at each level
-        assertEquals(1L, (innerMatch.cases[0].expression as IntLiteral).value)  // C -> 1
-        assertEquals(2L, (innerMatch.cases[1].expression as IntLiteral).value)  // _ -> 2 (inner)
-        assertEquals(3L, (middleMatch.cases[1].expression as IntLiteral).value) // _ -> 3 (middle)
-        assertEquals(4L, (outerMatch.cases[1].expression as IntLiteral).value)  // _ -> 4 (outer)
+        assertEquals(1L, (innerMatch.cases[0].body as ParsedIntLit).value)  // C -> 1
+        assertEquals(2L, (innerMatch.cases[1].body as ParsedIntLit).value)  // _ -> 2 (inner)
+        assertEquals(3L, (middleMatch.cases[1].body as ParsedIntLit).value) // _ -> 3 (middle)
+        assertEquals(4L, (outerMatch.cases[1].body as ParsedIntLit).value)  // _ -> 4 (outer)
     }
 
     @Test
@@ -167,29 +167,29 @@ let processList = {items} -> match items is
 processList
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Outer match should have 2 cases
         assertEquals(2, outerMatch.cases.size)
 
         // First case: Cons {head, tail}
         val firstCase = outerMatch.cases[0]
-        val constructorPattern = firstCase.patterns[0] as ConstructorPattern
+        val constructorPattern = firstCase.patterns[0] as ParsedConstructorPattern
         assertEquals("Cons", constructorPattern.constructor)
-        assertNotNull(constructorPattern.recordPattern)
+        assertNotNull(constructorPattern.payload)
 
         // Should contain nested match
-        assertTrue(firstCase.expression is MatchExpression)
-        val innerMatch = firstCase.expression as MatchExpression
+        assertTrue(firstCase.body is ParsedMatch)
+        val innerMatch = firstCase.body as ParsedMatch
         assertEquals(2, innerMatch.cases.size)
 
         // Second case: wildcard at outer level
-        assertTrue(outerMatch.cases[1].patterns[0] is WildcardPattern)
+        assertTrue(outerMatch.cases[1].patterns[0] is ParsedWildcardPattern)
     }
 
     @Test
@@ -206,23 +206,23 @@ let multiCase = {v1, v2} -> match v1 is
 multiCase
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Outer match should have 3 cases: A, B, C
         assertEquals(3, outerMatch.cases.size, "Outer match should have 3 cases")
 
         // First case contains nested match
-        val innerMatch = outerMatch.cases[0].expression as MatchExpression
+        val innerMatch = outerMatch.cases[0].body as ParsedMatch
         assertEquals(3, innerMatch.cases.size, "Inner match should have 3 cases")
 
         // Second and third cases at outer level
-        assertEquals("B", (outerMatch.cases[1].patterns[0] as ConstructorPattern).constructor)
-        assertEquals("C", (outerMatch.cases[2].patterns[0] as ConstructorPattern).constructor)
+        assertEquals("B", (outerMatch.cases[1].patterns[0] as ParsedConstructorPattern).constructor)
+        assertEquals("C", (outerMatch.cases[2].patterns[0] as ParsedConstructorPattern).constructor)
     }
 
     @Test
@@ -237,27 +237,27 @@ let chain = {v} -> match v is
 chain
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Verify structure: 2 outer cases
         assertEquals(2, outerMatch.cases.size)
 
         // First outer case has nested match
-        val innerMatch = outerMatch.cases[0].expression as MatchExpression
+        val innerMatch = outerMatch.cases[0].body as ParsedMatch
         assertEquals(2, innerMatch.cases.size)
 
         // Verify patterns
-        assertEquals("First", (outerMatch.cases[0].patterns[0] as ConstructorPattern).constructor)
-        assertEquals("Second", (innerMatch.cases[0].patterns[0] as ConstructorPattern).constructor)
+        assertEquals("First", (outerMatch.cases[0].patterns[0] as ParsedConstructorPattern).constructor)
+        assertEquals("Second", (innerMatch.cases[0].patterns[0] as ParsedConstructorPattern).constructor)
 
         // Both outer and inner have wildcards
-        assertTrue(innerMatch.cases[1].patterns[0] is WildcardPattern)
-        assertTrue(outerMatch.cases[1].patterns[0] is WildcardPattern)
+        assertTrue(innerMatch.cases[1].patterns[0] is ParsedWildcardPattern)
+        assertTrue(outerMatch.cases[1].patterns[0] is ParsedWildcardPattern)
     }
 
     @Test
@@ -271,17 +271,17 @@ let noWild = {v} -> match v is
 noWild
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val matchExpr = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val matchExpr = lambda.body as ParsedMatch
 
         // Should have 3 cases, all constructors
         assertEquals(3, matchExpr.cases.size)
         matchExpr.cases.forEach { case ->
-            assertTrue(case.patterns[0] is ConstructorPattern)
+            assertTrue(case.patterns[0] is ParsedConstructorPattern)
         }
     }
 
@@ -297,24 +297,24 @@ let asymmetric = {v1, v2} -> match v1 is
 asymmetric
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val outerMatch = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val outerMatch = lambda.body as ParsedMatch
 
         // Outer: 2 cases (A with nested match, wildcard)
         assertEquals(2, outerMatch.cases.size)
 
         // Inner: 2 cases (X, Y) - no wildcard
-        val innerMatch = outerMatch.cases[0].expression as MatchExpression
+        val innerMatch = outerMatch.cases[0].body as ParsedMatch
         assertEquals(2, innerMatch.cases.size)
-        assertTrue(innerMatch.cases[0].patterns[0] is ConstructorPattern)
-        assertTrue(innerMatch.cases[1].patterns[0] is ConstructorPattern)
+        assertTrue(innerMatch.cases[0].patterns[0] is ParsedConstructorPattern)
+        assertTrue(innerMatch.cases[1].patterns[0] is ParsedConstructorPattern)
 
         // Outer has wildcard
-        assertTrue(outerMatch.cases[1].patterns[0] is WildcardPattern)
+        assertTrue(outerMatch.cases[1].patterns[0] is ParsedWildcardPattern)
     }
 
     @Test
@@ -326,16 +326,16 @@ let catchAll = {v} -> match v is
 catchAll
 """.trim()
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val matchExpr = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val matchExpr = lambda.body as ParsedMatch
 
         // Should have 1 case with wildcard
         assertEquals(1, matchExpr.cases.size)
-        assertTrue(matchExpr.cases[0].patterns[0] is WildcardPattern)
-        assertEquals(42L, (matchExpr.cases[0].expression as IntLiteral).value)
+        assertTrue(matchExpr.cases[0].patterns[0] is ParsedWildcardPattern)
+        assertEquals(42L, (matchExpr.cases[0].body as ParsedIntLit).value)
     }
 }

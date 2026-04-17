@@ -195,8 +195,8 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         // Empty ability body is allowed (no operations is fine)
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
     }
 
     @Test
@@ -206,8 +206,8 @@ class AbilityImplParserErrorTest {
         """.trimIndent()
 
         // Empty impl body is allowed (no operations is fine)
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
     }
 
     // ========================================================================

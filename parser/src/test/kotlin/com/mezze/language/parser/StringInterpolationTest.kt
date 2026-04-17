@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.assertThrows
@@ -13,29 +13,29 @@ class StringInterpolationTest {
     fun `test simple interpolation parsing`() {
         val source = """let greeting = "Hello $(name)!""""
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertEquals("greeting", letBinding.variableName)
 
-        val stringLit = letBinding.expression as StringLiteral
-        assertTrue(stringLit.isInterpolated)
+        val stringLit = letBinding.value as ParsedStringLit
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
         assertNotNull(stringLit.parts)
-        assertEquals(3, stringLit.parts!!.size)
+        assertEquals(3, stringLit.parts.size)
 
         // First part: "Hello "
-        val part0 = stringLit.parts!![0] as StringPart
+        val part0 = stringLit.parts[0] as ParsedStringPart.Literal
         assertEquals("Hello ", part0.value)
 
         // Second part: expression (name)
-        val part1 = stringLit.parts!![1] as ExpressionPart
-        assertTrue(part1.expression is Identifier)
-        assertEquals("name", (part1.expression as Identifier).localName)
+        val part1 = stringLit.parts[1] as ParsedStringPart.Interpolation
+        assertTrue(part1.expr is ParsedIdentifier)
+        assertEquals("name", (part1.expr as ParsedIdentifier).localName)
 
         // Third part: "!"
-        val part2 = stringLit.parts!![2] as StringPart
+        val part2 = stringLit.parts[2] as ParsedStringPart.Literal
         assertEquals("!", part2.value)
     }
 
@@ -43,27 +43,27 @@ class StringInterpolationTest {
     fun `test multiple interpolations`() {
         val source = """let msg = "$(a) + $(b) = $(result)""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(5, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(5, stringLit.parts.size)
 
         // Check expression parts
-        val expr1 = (stringLit.parts!![0] as ExpressionPart).expression as Identifier
+        val expr1 = (stringLit.parts[0] as ParsedStringPart.Interpolation).expr as ParsedIdentifier
         assertEquals("a", expr1.localName)
 
-        val strPart1 = stringLit.parts!![1] as StringPart
+        val strPart1 = stringLit.parts[1] as ParsedStringPart.Literal
         assertEquals(" + ", strPart1.value)
 
-        val expr2 = (stringLit.parts!![2] as ExpressionPart).expression as Identifier
+        val expr2 = (stringLit.parts[2] as ParsedStringPart.Interpolation).expr as ParsedIdentifier
         assertEquals("b", expr2.localName)
 
-        val strPart2 = stringLit.parts!![3] as StringPart
+        val strPart2 = stringLit.parts[3] as ParsedStringPart.Literal
         assertEquals(" = ", strPart2.value)
 
-        val expr3 = (stringLit.parts!![4] as ExpressionPart).expression as Identifier
+        val expr3 = (stringLit.parts[4] as ParsedStringPart.Interpolation).expr as ParsedIdentifier
         assertEquals("result", expr3.localName)
     }
 
@@ -71,44 +71,44 @@ class StringInterpolationTest {
     fun `test interpolation with complex expressions`() {
         val source = """let x = "Value: $(foo{n = 10})""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(2, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(2, stringLit.parts.size)
 
-        val strPart = stringLit.parts!![0] as StringPart
+        val strPart = stringLit.parts[0] as ParsedStringPart.Literal
         assertEquals("Value: ", strPart.value)
 
-        val exprPart = stringLit.parts!![1] as ExpressionPart
-        assertTrue(exprPart.expression is FunctionCall)
+        val exprPart = stringLit.parts[1] as ParsedStringPart.Interpolation
+        assertTrue(exprPart.expr is ParsedFunctionCall)
     }
 
     @Test
     fun `test plain string without interpolation`() {
         val source = """let msg = "Hello World""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertFalse(stringLit.isInterpolated)
-        assertNull(stringLit.parts)
-        assertEquals("Hello World", stringLit.value)
+        assertFalse(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(1, stringLit.parts.size)
+        assertEquals("Hello World", (stringLit.parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
     fun `test escaped interpolation`() {
         val source = """let msg = "Use \$(var) for interpolation""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
         // Escaped $() should NOT be interpolated
-        assertFalse(stringLit.isInterpolated)
-        assertEquals("Use \$(var) for interpolation", stringLit.value)
+        assertFalse(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals("Use \$(var) for interpolation", (stringLit.parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
@@ -117,11 +117,11 @@ class StringInterpolationTest {
 Line 2: $(b)
 Line 3""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
         // Should have parts for Line 1, a, newline + Line 2, b, newline + Line 3
     }
 
@@ -129,11 +129,11 @@ Line 3""""
     fun `test interpolation with nested string`() {
         val source = """let x = "Outer: $(inner{val = "nested"})""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
         assertNotNull(stringLit.parts)
     }
 
@@ -141,15 +141,15 @@ Line 3""""
     fun `test only interpolation no surrounding text`() {
         val source = """let x = "$(value)""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(1, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(1, stringLit.parts.size)
 
-        val exprPart = stringLit.parts!![0] as ExpressionPart
-        assertTrue(exprPart.expression is Identifier)
+        val exprPart = stringLit.parts[0] as ParsedStringPart.Interpolation
+        assertTrue(exprPart.expr is ParsedIdentifier)
     }
 
     @Test
@@ -157,97 +157,97 @@ Line 3""""
         // This is valid: outer interpolation contains a string literal that has its own interpolation
         val source = """let x = "outer: $("inner $(name)")""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(2, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(2, stringLit.parts.size)
 
-        val strPart = stringLit.parts!![0] as StringPart
+        val strPart = stringLit.parts[0] as ParsedStringPart.Literal
         assertEquals("outer: ", strPart.value)
 
-        val exprPart = stringLit.parts!![1] as ExpressionPart
+        val exprPart = stringLit.parts[1] as ParsedStringPart.Interpolation
         // The inner expression should be an interpolated StringLiteral
-        assertTrue(exprPart.expression is StringLiteral)
-        val innerString = exprPart.expression as StringLiteral
-        assertTrue(innerString.isInterpolated)
+        assertTrue(exprPart.expr is ParsedStringLit)
+        val innerString = exprPart.expr as ParsedStringLit
+        assertTrue(innerString.parts.any { it is ParsedStringPart.Interpolation })
     }
 
     @Test
     fun `test empty string`() {
         val source = """let x = """""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertFalse(stringLit.isInterpolated)
-        assertEquals("", stringLit.value)
+        assertFalse(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals("", (stringLit.parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
     fun `test consecutive interpolations no space`() {
         val source = """let x = "$(a)$(b)$(c)""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(3, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(3, stringLit.parts.size)
 
         // All parts should be expression parts
-        assertTrue(stringLit.parts!![0] is ExpressionPart)
-        assertTrue(stringLit.parts!![1] is ExpressionPart)
-        assertTrue(stringLit.parts!![2] is ExpressionPart)
+        assertTrue(stringLit.parts[0] is ParsedStringPart.Interpolation)
+        assertTrue(stringLit.parts[1] is ParsedStringPart.Interpolation)
+        assertTrue(stringLit.parts[2] is ParsedStringPart.Interpolation)
     }
 
     @Test
     fun `test interpolation with parentheses in expression`() {
         val source = """let x = "result: $(add{a = (1 + 2), b = 3})""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(2, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(2, stringLit.parts.size)
 
-        val exprPart = stringLit.parts!![1] as ExpressionPart
-        assertTrue(exprPart.expression is FunctionCall)
+        val exprPart = stringLit.parts[1] as ParsedStringPart.Interpolation
+        assertTrue(exprPart.expr is ParsedFunctionCall)
     }
 
     @Test
     fun `test interpolation with if expression`() {
         val source = """let x = "$(if true then "yes" else "no")""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(1, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(1, stringLit.parts.size)
 
-        val exprPart = stringLit.parts!![0] as ExpressionPart
-        assertTrue(exprPart.expression is IfExpression)
+        val exprPart = stringLit.parts[0] as ParsedStringPart.Interpolation
+        assertTrue(exprPart.expr is ParsedIf)
     }
 
     @Test
     fun `test escape sequences mixed with interpolation`() {
         val source = """let x = "line1\n$(middle)\ttab""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(3, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(3, stringLit.parts.size)
 
-        val part0 = stringLit.parts!![0] as StringPart
+        val part0 = stringLit.parts[0] as ParsedStringPart.Literal
         assertEquals("line1\n", part0.value)
 
-        val part2 = stringLit.parts!![2] as StringPart
+        val part2 = stringLit.parts[2] as ParsedStringPart.Literal
         assertEquals("\ttab", part2.value)
     }
 
@@ -255,13 +255,13 @@ Line 3""""
     fun `test multiple escape sequences for dollar sign`() {
         val source = """let x = "price: \$100 and \$(not interpolated)""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
         // Should NOT be interpolated because all $ are escaped
-        assertFalse(stringLit.isInterpolated)
-        assertEquals("price: \$100 and \$(not interpolated)", stringLit.value)
+        assertFalse(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals("price: \$100 and \$(not interpolated)", (stringLit.parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
@@ -278,15 +278,15 @@ Line 3""""
     fun `test interpolation at start of string`() {
         val source = """let x = "$(prefix) suffix""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(2, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(2, stringLit.parts.size)
 
-        assertTrue(stringLit.parts!![0] is ExpressionPart)
-        val strPart = stringLit.parts!![1] as StringPart
+        assertTrue(stringLit.parts[0] is ParsedStringPart.Interpolation)
+        val strPart = stringLit.parts[1] as ParsedStringPart.Literal
         assertEquals(" suffix", strPart.value)
     }
 
@@ -294,16 +294,16 @@ Line 3""""
     fun `test interpolation at end of string`() {
         val source = """let x = "prefix $(suffix)""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        assertEquals(2, stringLit.parts!!.size)
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals(2, stringLit.parts.size)
 
-        val strPart = stringLit.parts!![0] as StringPart
+        val strPart = stringLit.parts[0] as ParsedStringPart.Literal
         assertEquals("prefix ", strPart.value)
-        assertTrue(stringLit.parts!![1] is ExpressionPart)
+        assertTrue(stringLit.parts[1] is ParsedStringPart.Interpolation)
     }
 
     @Test
@@ -312,24 +312,24 @@ Line 3""""
 line 2
 line 3""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertFalse(stringLit.isInterpolated)
-        assertEquals("line 1\nline 2\nline 3", stringLit.value)
+        assertFalse(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        assertEquals("line 1\nline 2\nline 3", (stringLit.parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
     fun `test unicode in interpolated string`() {
         val source = """let x = "Hello $(name) 🎉""""
 
-        val program = parser.parseParsedModule(source)
-        val letBinding = program.items[0] as LetBinding
-        val stringLit = letBinding.expression as StringLiteral
+        val module = parser.parseParsedModule(source)
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val stringLit = letBinding.value as ParsedStringLit
 
-        assertTrue(stringLit.isInterpolated)
-        val lastPart = stringLit.parts!!.last() as StringPart
+        assertTrue(stringLit.parts.any { it is ParsedStringPart.Interpolation })
+        val lastPart = stringLit.parts.last() as ParsedStringPart.Literal
         assertEquals(" 🎉", lastPart.value)
     }
 }

@@ -1,6 +1,10 @@
 package com.mezze.language.typechecker.scope
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.ParsedPerformerOp
+import com.mezze.language.parsedast.ParsedRecordType
+import com.mezze.language.parsedast.ParsedTypeAnnotation
 
 /**
  * Constants for scoped effects detection.
@@ -20,61 +24,24 @@ object ScopedEffectConstants {
  * from regular operations.
  */
 data class ScopedEffectInfo(
-    /**
-     * The initialize_scope operation, if present.
-     * When present, this impl uses scoped effects and 'scope' variable
-     * will be available in operations and finalize_scope.
-     */
-    val initializeScope: PerformerOperation?,
-
-    /**
-     * The finalize_scope operation, if present.
-     * Only valid when initializeScope is also present.
-     * Runs in a finally block at the end of perform.
-     */
-    val finalizeScope: PerformerOperation?,
-
-    /**
-     * Regular operations (not initialize_scope or finalize_scope).
-     * These operations will have access to the 'scope' variable if
-     * initializeScope is present.
-     */
-    val regularOperations: List<PerformerOperation>,
-
-    /**
-     * The inferred type of the scope variable.
-     * Derived from the return type of initialize_scope.
-     * Null if initializeScope is not present or type couldn't be inferred.
-     */
+    val initializeScope: ParsedPerformerOp?,
+    val finalizeScope: ParsedPerformerOp?,
+    val regularOperations: List<ParsedPerformerOp>,
     val scopeType: MezzeType? = null
 ) {
-    /**
-     * Whether this impl uses scoped effects (has initialize_scope).
-     */
-    val isScopedEffect: Boolean
-        get() = initializeScope != null
-
-    /**
-     * Whether this impl has a finalizer.
-     */
-    val hasFinalizer: Boolean
-        get() = finalizeScope != null
+    val isScopedEffect: Boolean get() = initializeScope != null
+    val hasFinalizer: Boolean get() = finalizeScope != null
 }
 
 /**
- * Detects scoped effect members in an impl declaration.
- *
- * This function separates the special scope-related members from regular operations:
- * - `initialize_scope`: Creates the scope at the start of perform
- * - `finalize_scope`: Cleans up the scope at the end of perform (in finally block)
- * - All other operations are regular operations
+ * Detects scoped effect members in a list of performer operations.
  */
-fun detectScopedEffectMembers(impl: ImplDeclaration): ScopedEffectInfo {
-    var initializeScope: PerformerOperation? = null
-    var finalizeScope: PerformerOperation? = null
-    val regularOperations = mutableListOf<PerformerOperation>()
+fun detectScopedEffectMembers(operations: List<ParsedPerformerOp>): ScopedEffectInfo {
+    var initializeScope: ParsedPerformerOp? = null
+    var finalizeScope: ParsedPerformerOp? = null
+    val regularOperations = mutableListOf<ParsedPerformerOp>()
 
-    for (operation in impl.operations) {
+    for (operation in operations) {
         when (operation.name) {
             ScopedEffectConstants.INITIALIZE_SCOPE -> initializeScope = operation
             ScopedEffectConstants.FINALIZE_SCOPE -> finalizeScope = operation
@@ -96,11 +63,8 @@ sealed class ScopedEffectValidationError {
     abstract val message: String
     abstract val sourceLocation: SourceLocation?
 
-    /**
-     * initialize_scope has wrong parameter type (must be empty record `{}`).
-     */
     data class InitializeScopeWrongParams(
-        val actualParams: TypeAnnotation?,
+        val actualParams: ParsedTypeAnnotation?,
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
         override val message: String
@@ -109,11 +73,8 @@ sealed class ScopedEffectValidationError {
                     "initialize_scope must take no parameters."
     }
 
-    /**
-     * initialize_scope has wrong return type (must return a record).
-     */
     data class InitializeScopeMustReturnRecord(
-        val actualReturnType: TypeAnnotation?,
+        val actualReturnType: ParsedTypeAnnotation?,
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
         override val message: String
@@ -121,11 +82,8 @@ sealed class ScopedEffectValidationError {
                     "The returned record becomes the 'scope' variable available in operations."
     }
 
-    /**
-     * finalize_scope has wrong parameter type (must be empty record `{}`).
-     */
     data class FinalizeScopeWrongParams(
-        val actualParams: TypeAnnotation?,
+        val actualParams: ParsedTypeAnnotation?,
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
         override val message: String
@@ -134,11 +92,8 @@ sealed class ScopedEffectValidationError {
                     "finalize_scope must take no parameters (use 'scope' variable instead)."
     }
 
-    /**
-     * finalize_scope has wrong return type (must return empty record `{}`).
-     */
     data class FinalizeScopeMustReturnUnit(
-        val actualReturnType: TypeAnnotation?,
+        val actualReturnType: ParsedTypeAnnotation?,
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
         override val message: String
@@ -146,9 +101,6 @@ sealed class ScopedEffectValidationError {
                     "It's for cleanup side effects only, not for returning values."
     }
 
-    /**
-     * finalize_scope without initialize_scope.
-     */
     data class FinalizeScopeWithoutInitialize(
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
@@ -157,10 +109,6 @@ sealed class ScopedEffectValidationError {
                     "Add initialize_scope to create the scope that finalize_scope cleans up."
     }
 
-    /**
-     * initialize_scope without finalize_scope.
-     * Resource acquisition requires cleanup for safety.
-     */
     data class InitializeScopeWithoutFinalize(
         override val sourceLocation: SourceLocation?
     ) : ScopedEffectValidationError() {
@@ -170,41 +118,27 @@ sealed class ScopedEffectValidationError {
     }
 }
 
-/**
- * Validates the signature of initialize_scope.
- *
- * Expected signature: {} -> { ... }
- * - Must take no parameters (empty record)
- * - Must return a record type
- * - Must have a corresponding finalize_scope
- *
- * @return List of validation errors (empty if valid)
- */
 fun validateInitializeScopeSignature(
-    operation: PerformerOperation,
+    operation: ParsedPerformerOp,
     hasFinalizeScope: Boolean,
     inferredReturnType: MezzeType? = null
 ): List<ScopedEffectValidationError> {
     val errors = mutableListOf<ScopedEffectValidationError>()
-    val location = operation.implementation.sourceLocation
+    val loc = operation.loc
+    val location = SourceLocation(line = loc.startLine, column = loc.startCol, file = loc.file)
 
-    // initialize_scope requires finalize_scope for resource safety
     if (!hasFinalizeScope) {
         errors.add(ScopedEffectValidationError.InitializeScopeWithoutFinalize(location))
     }
 
-    // Check parameter type is empty record {}
     val paramType = operation.paramType
     if (paramType != null && !isEmptyRecordAnnotation(paramType)) {
         errors.add(ScopedEffectValidationError.InitializeScopeWrongParams(paramType, location))
     }
 
-    // Check return type is a record
-    // If explicit annotation exists, check it
-    // Otherwise, check inferred type
     val returnType = operation.returnType
     if (returnType != null) {
-        if (!isRecordAnnotation(returnType)) {
+        if (returnType !is ParsedRecordType) {
             errors.add(ScopedEffectValidationError.InitializeScopeMustReturnRecord(returnType, location))
         }
     } else if (inferredReturnType != null) {
@@ -216,34 +150,23 @@ fun validateInitializeScopeSignature(
     return errors
 }
 
-/**
- * Validates the signature of finalize_scope.
- *
- * Expected signature: {} -> {}
- * - Must take no parameters (empty record)
- * - Must return empty record (unit)
- *
- * @return List of validation errors (empty if valid)
- */
 fun validateFinalizeScopeSignature(
-    operation: PerformerOperation,
+    operation: ParsedPerformerOp,
     hasInitializeScope: Boolean
 ): List<ScopedEffectValidationError> {
     val errors = mutableListOf<ScopedEffectValidationError>()
-    val location = operation.implementation.sourceLocation
+    val loc = operation.loc
+    val location = SourceLocation(line = loc.startLine, column = loc.startCol, file = loc.file)
 
-    // finalize_scope requires initialize_scope
     if (!hasInitializeScope) {
         errors.add(ScopedEffectValidationError.FinalizeScopeWithoutInitialize(location))
     }
 
-    // Check parameter type is empty record {}
     val paramType = operation.paramType
     if (paramType != null && !isEmptyRecordAnnotation(paramType)) {
         errors.add(ScopedEffectValidationError.FinalizeScopeWrongParams(paramType, location))
     }
 
-    // Check return type is empty record {}
     val returnType = operation.returnType
     if (returnType != null && !isEmptyRecordAnnotation(returnType)) {
         errors.add(ScopedEffectValidationError.FinalizeScopeMustReturnUnit(returnType, location))
@@ -252,20 +175,13 @@ fun validateFinalizeScopeSignature(
     return errors
 }
 
-/**
- * Validates all scoped effect signatures in an impl declaration.
- *
- * @return List of validation errors (empty if valid)
- */
 fun validateScopedEffectSignatures(info: ScopedEffectInfo): List<ScopedEffectValidationError> {
     val errors = mutableListOf<ScopedEffectValidationError>()
 
-    // Validate initialize_scope if present
     info.initializeScope?.let { initOp ->
         errors.addAll(validateInitializeScopeSignature(initOp, info.hasFinalizer))
     }
 
-    // Validate finalize_scope if present
     info.finalizeScope?.let { finalOp ->
         errors.addAll(validateFinalizeScopeSignature(finalOp, info.isScopedEffect))
     }
@@ -273,53 +189,25 @@ fun validateScopedEffectSignatures(info: ScopedEffectInfo): List<ScopedEffectVal
     return errors
 }
 
-/**
- * Checks if a type annotation is an empty record {}.
- */
-private fun isEmptyRecordAnnotation(annotation: TypeAnnotation): Boolean {
-    return annotation is RecordTypeAnnotation &&
+private fun isEmptyRecordAnnotation(annotation: ParsedTypeAnnotation): Boolean {
+    return annotation is ParsedRecordType &&
             annotation.entries.isEmpty() &&
             !annotation.isOpen
 }
 
-/**
- * Checks if a type annotation is a record type (possibly with fields).
- */
-private fun isRecordAnnotation(annotation: TypeAnnotation): Boolean {
-    return annotation is RecordTypeAnnotation
-}
-
-/**
- * Extracts the scope type from initialize_scope's return type annotation.
- *
- * @param initializeScope The initialize_scope operation
- * @param typeConverter A function to convert TypeAnnotation to MezzeType
- * @return The scope type as MezzeType, or null if can't be determined
- */
 fun extractScopeTypeFromAnnotation(
-    initializeScope: PerformerOperation,
-    typeConverter: (TypeAnnotation) -> MezzeType
+    initializeScope: ParsedPerformerOp,
+    typeConverter: (ParsedTypeAnnotation) -> MezzeType
 ): MezzeType? {
     val returnType = initializeScope.returnType ?: return null
 
-    // Only accept record type annotations
-    if (returnType !is RecordTypeAnnotation) {
+    if (returnType !is ParsedRecordType) {
         return null
     }
 
     return typeConverter(returnType)
 }
 
-/**
- * Creates a ScopedEffectInfo with inferred scope type.
- *
- * This is called after type inference to populate the scope type
- * from the inferred return type of initialize_scope.
- *
- * @param info The base ScopedEffectInfo from detection
- * @param inferredScopeType The inferred type of the scope (from initialize_scope body)
- * @return Updated ScopedEffectInfo with scopeType populated
- */
 fun ScopedEffectInfo.withScopeType(inferredScopeType: MezzeType?): ScopedEffectInfo {
     return this.copy(scopeType = inferredScopeType)
 }

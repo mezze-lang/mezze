@@ -136,8 +136,8 @@ class ParseErrorMessageTest {
                 a + b
         """.trimIndent()
         // Should not throw - valid do block ends with expression
-        val program = parser.parseParsedModule(code)
-        assertTrue(program.items.isNotEmpty(), "Should parse valid do block")
+        val module = parser.parseParsedModule(code)
+        assertTrue(module.decls.isNotEmpty(), "Should parse valid do block")
     }
 
     @Test
@@ -148,7 +148,7 @@ class ParseErrorMessageTest {
                 42
         """.trimIndent()
         // Should not throw - do block with side effect and result
-        val program = parser.parseParsedModule(code)
-        assertTrue(program.items.isNotEmpty(), "Should parse do block with side effects")
+        val module = parser.parseParsedModule(code)
+        assertTrue(module.decls.isNotEmpty(), "Should parse do block with side effects")
     }
 }

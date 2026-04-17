@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.scope.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -14,28 +15,23 @@ import kotlin.test.assertTrue
  */
 class ScopedEffectDetectionTest {
 
-    private fun makeOperation(name: String): PerformerOperation {
-        return PerformerOperation(
-            name = name,
-            paramType = RecordTypeAnnotation(emptyList()),
-            returnType = RecordTypeAnnotation(emptyList()),
-            implementation = RecordLiteral(emptyList())
-        )
-    }
+    private val dummyLoc = Loc("test", 0, 0, 0, 0)
 
-    private fun makeImpl(vararg operationNames: String): ImplDeclaration {
-        return ImplDeclaration(
-            effect = QualifiedRef(localName = "TestEffect", qualifier = null),
-            performerName = "TestPerformer",
-            operations = operationNames.map { makeOperation(it) }
+    private fun makeOperation(name: String): ParsedPerformerOp {
+        return ParsedPerformerOp(
+            name = name,
+            paramType = ParsedRecordType(emptyList(), loc = dummyLoc),
+            returnType = ParsedRecordType(emptyList(), loc = dummyLoc),
+            implementation = ParsedRecordLit(emptyList(), loc = dummyLoc),
+            loc = dummyLoc
         )
     }
 
     @Test
     fun `simple effect with no scope members works unchanged`() {
-        val impl = makeImpl("read", "write", "close")
+        val operations = listOf("read", "write", "close").map { makeOperation(it) }
 
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(operations)
 
         assertFalse(info.isScopedEffect)
         assertNull(info.initializeScope)
@@ -47,9 +43,9 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `impl with only initialize_scope is detected`() {
-        val impl = makeImpl("initialize_scope", "query", "execute")
+        val operations = listOf("initialize_scope", "query", "execute").map { makeOperation(it) }
 
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(operations)
 
         assertTrue(info.isScopedEffect)
         assertNotNull(info.initializeScope)
@@ -62,9 +58,9 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `impl with both initialize_scope and finalize_scope is detected`() {
-        val impl = makeImpl("initialize_scope", "finalize_scope", "query")
+        val operations = listOf("initialize_scope", "finalize_scope", "query").map { makeOperation(it) }
 
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(operations)
 
         assertTrue(info.isScopedEffect)
         assertNotNull(info.initializeScope)
@@ -78,11 +74,9 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `finalize_scope without initialize_scope is still detected separately`() {
-        // This is an invalid configuration but detection should still work
-        // Validation will catch this error later
-        val impl = makeImpl("finalize_scope", "query")
+        val operations = listOf("finalize_scope", "query").map { makeOperation(it) }
 
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(operations)
 
         assertFalse(info.isScopedEffect) // No initialize_scope means not a scoped effect
         assertNull(info.initializeScope)
@@ -94,14 +88,14 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `operation names similar to scope names are not confused`() {
-        val impl = makeImpl(
+        val operations = listOf(
             "initialize_scope_data",  // Not initialize_scope
             "finalize_scope_cleanup", // Not finalize_scope
             "init_scope",             // Not initialize_scope
             "scope_initialize"        // Not initialize_scope
-        )
+        ).map { makeOperation(it) }
 
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(operations)
 
         assertFalse(info.isScopedEffect)
         assertNull(info.initializeScope)
@@ -117,9 +111,7 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `empty impl has no scope members`() {
-        val impl = makeImpl()
-
-        val info = detectScopedEffectMembers(impl)
+        val info = detectScopedEffectMembers(emptyList())
 
         assertFalse(info.isScopedEffect)
         assertNull(info.initializeScope)
@@ -133,21 +125,22 @@ class ScopedEffectDetectionTest {
 
     private fun makeOperationWithTypes(
         name: String,
-        paramType: TypeAnnotation?,
-        returnType: TypeAnnotation?
-    ): PerformerOperation {
-        return PerformerOperation(
+        paramType: ParsedTypeAnnotation?,
+        returnType: ParsedTypeAnnotation?
+    ): ParsedPerformerOp {
+        return ParsedPerformerOp(
             name = name,
             paramType = paramType,
             returnType = returnType,
-            implementation = RecordLiteral(emptyList())
+            implementation = ParsedRecordLit(emptyList(), loc = dummyLoc),
+            loc = dummyLoc
         )
     }
 
-    private fun emptyRecord(): RecordTypeAnnotation = RecordTypeAnnotation(emptyList())
+    private fun emptyRecord(): ParsedRecordType = ParsedRecordType(emptyList(), loc = dummyLoc)
 
-    private fun recordWithFields(vararg fields: String): RecordTypeAnnotation =
-        RecordTypeAnnotation(fields.map { RecordTypeEntry(it, IdentifierTypeAnnotation("Int")) })
+    private fun recordWithFields(vararg fields: String): ParsedRecordType =
+        ParsedRecordType(fields.map { ParsedRecordTypeEntry(it, ParsedNamedType("Int", dummyLoc), dummyLoc) }, loc = dummyLoc)
 
     @Test
     fun `initialize_scope with empty params and record return passes validation`() {
@@ -157,7 +150,6 @@ class ScopedEffectDetectionTest {
             returnType = recordWithFields("conn", "pool")
         )
 
-        // Pass hasFinalizeScope = true to avoid that error
         val errors = validateInitializeScopeSignature(operation, hasFinalizeScope = true)
 
         assertTrue(errors.isEmpty(), "Expected no errors but got: $errors")
@@ -183,7 +175,7 @@ class ScopedEffectDetectionTest {
         val operation = makeOperationWithTypes(
             "initialize_scope",
             paramType = emptyRecord(),
-            returnType = IdentifierTypeAnnotation("Int")
+            returnType = ParsedNamedType("Int", dummyLoc)
         )
 
         val errors = validateInitializeScopeSignature(operation, hasFinalizeScope = true)
@@ -210,7 +202,6 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `initialize_scope with empty record return passes`() {
-        // Even an empty record {} is valid - scope will just have no fields
         val operation = makeOperationWithTypes(
             "initialize_scope",
             paramType = emptyRecord(),
@@ -269,7 +260,7 @@ class ScopedEffectDetectionTest {
         val operation = makeOperationWithTypes(
             "finalize_scope",
             paramType = emptyRecord(),
-            returnType = IdentifierTypeAnnotation("Bool")
+            returnType = ParsedNamedType("Bool", dummyLoc)
         )
 
         val errors = validateFinalizeScopeSignature(operation, hasInitializeScope = true)
@@ -281,11 +272,10 @@ class ScopedEffectDetectionTest {
 
     @Test
     fun `validateScopedEffectSignatures validates all members`() {
-        // Create an impl with invalid signatures
         val initOp = makeOperationWithTypes(
             "initialize_scope",
             paramType = recordWithFields("x"),  // Wrong - should be empty
-            returnType = IdentifierTypeAnnotation("Int")  // Wrong - should be record
+            returnType = ParsedNamedType("Int", dummyLoc)  // Wrong - should be record
         )
         val finalOp = makeOperationWithTypes(
             "finalize_scope",
@@ -301,7 +291,6 @@ class ScopedEffectDetectionTest {
 
         val errors = validateScopedEffectSignatures(info)
 
-        // Should have 4 errors total
         assertEquals(4, errors.size)
         assertTrue(errors.any { it is ScopedEffectValidationError.InitializeScopeWrongParams })
         assertTrue(errors.any { it is ScopedEffectValidationError.InitializeScopeMustReturnRecord })
@@ -313,16 +302,15 @@ class ScopedEffectDetectionTest {
     // Scope Type Extraction Tests
     // ========================================
 
-    // Simple type converter for testing
-    private fun simpleTypeConverter(annotation: TypeAnnotation): MezzeType {
+    private fun simpleTypeConverter(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is RecordTypeAnnotation -> {
+            is ParsedRecordType -> {
                 val fields = annotation.entries.associate { entry ->
-                    entry.name to MezzeType.IntType // Simplified for testing
+                    entry.name to MezzeType.IntType
                 }
                 MezzeType.RecordType(fields)
             }
-            is IdentifierTypeAnnotation -> {
+            is ParsedNamedType -> {
                 when (annotation.name) {
                     "Int" -> MezzeType.IntType
                     "Str" -> MezzeType.StringType
@@ -356,7 +344,7 @@ class ScopedEffectDetectionTest {
         val operation = makeOperationWithTypes(
             "initialize_scope",
             paramType = emptyRecord(),
-            returnType = IdentifierTypeAnnotation("Int")
+            returnType = ParsedNamedType("Int", dummyLoc)
         )
 
         val scopeType = extractScopeTypeFromAnnotation(operation, ::simpleTypeConverter)
@@ -389,7 +377,7 @@ class ScopedEffectDetectionTest {
         val scopeType = MezzeType.RecordType(mapOf("x" to MezzeType.IntType))
         val updated = info.withScopeType(scopeType)
 
-        assertNull(info.scopeType) // Original unchanged
+        assertNull(info.scopeType)
         assertNotNull(updated.scopeType)
         assertEquals(scopeType, updated.scopeType)
     }

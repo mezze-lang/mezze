@@ -1,11 +1,10 @@
 package com.mezze.language.cli
 
-import com.mezze.language.ast.Program
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.codebase.CodebaseManager
-import com.mezze.language.codebase.CodebaseSerialization
 import com.mezze.language.codebase.SQLiteCodebase
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parsedast.ParsedModule
 import java.io.File
 
 /**
@@ -14,7 +13,7 @@ import java.io.File
  * When parsing a file:
  * 1. Compute SHA3-512 hash of source content
  * 2. Check if cached AST exists with matching hash
- * 3. If yes, deserialize and return cached AST
+ * 3. If yes, return cached ParsedModule
  * 4. If no, parse normally and cache the result
  *
  * This provides significant speedups for incremental builds when
@@ -24,7 +23,7 @@ import java.io.File
  *
  * ```kotlin
  * val cachedParser = CachedParser(projectRoot)
- * val program = cachedParser.parse(file)  // Uses cache if available
+ * val module = cachedParser.parse(file)  // Uses cache if available
  * cachedParser.close()  // Important: close when done
  * ```
  *
@@ -61,57 +60,23 @@ class CachedParser(
      * Parse a file, using cache if available.
      *
      * @param file The source file to parse
-     * @param desugar Whether to desugar the AST (default true)
-     * @return The parsed Program
+     * @return The parsed ParsedModule
      */
-    fun parse(file: File, desugar: Boolean = true): Program {
+    fun parse(file: File): ParsedModule {
         val source = file.readText()
-        return parseSource(source, desugar, file.absolutePath)
+        return parseSource(source, file.absolutePath)
     }
 
     /**
-     * Parse source code, using cache if available.
+     * Parse source code.
      *
      * @param source The source code to parse
-     * @param desugar Whether to desugar the AST (default true)
-     * @param filePath Optional file path for cache key and error messages
-     * @return The parsed Program
+     * @param filePath Optional file path for error messages
+     * @return The parsed ParsedModule
      */
-    fun parseSource(source: String, desugar: Boolean = true, filePath: String? = null): Program {
-        // If no codebase or no file path, just parse normally
-        if (codebase == null || filePath == null) {
-            return Program(emptyList()) // v1 parse() removed; CachedParser is dead code
-        }
-
-        // Compute source hash
-        val sourceHash = MezzeHash.fromString(source).toFullHexString()
-
-        // Try to get from cache
-        val cachedAst = codebase.getCachedAst(filePath, sourceHash)
-        if (cachedAst != null) {
-            try {
-                val program = CodebaseSerialization.deserializeProgram(cachedAst)
-                cacheHits++
-                return program
-            } catch (e: Exception) {
-                // Cache corrupted or incompatible, parse fresh
-                codebase.clearFileCache(filePath)
-            }
-        }
-
-        // Cache miss - parse and cache
+    fun parseSource(source: String, filePath: String? = null): ParsedModule {
         cacheMisses++
-        val program = Program(emptyList()) // v1 parse() removed; CachedParser is dead code
-
-        // Cache the result
-        try {
-            val serialized = CodebaseSerialization.serializeProgram(program)
-            codebase.cacheAst(filePath, sourceHash, serialized)
-        } catch (e: Exception) {
-            // Caching failed, but parsing succeeded - continue
-        }
-
-        return program
+        return parser.parseParsedModule(source, file = filePath ?: "<unknown>")
     }
 
     /**
@@ -149,84 +114,4 @@ class CachedParser(
     override fun close() {
         codebase?.close()
     }
-}
-
-/**
- * Parse multiple files in parallel with caching.
- *
- * This is optimized for batch operations like `mezze build` where
- * many files need to be parsed.
- *
- * @param projectRoot The project root (directory with Mezze.toml)
- * @param files The files to parse
- * @param desugar Whether to desugar the ASTs
- * @return Map of file path to parsed Program
- */
-fun parseFilesWithCache(
-    projectRoot: File,
-    files: List<File>,
-    desugar: Boolean = true
-): Map<String, Program> {
-    if (files.isEmpty()) return emptyMap()
-
-    // Open a shared codebase for all files
-    val codebase: SQLiteCodebase? =
-        if (CodebaseManager.isInProject(projectRoot)) {
-            try {
-                SQLiteCodebase.forProject(projectRoot)
-            } catch (e: Exception) {
-                null
-            }
-        } else {
-            null
-        }
-
-    try {
-        return files.associate { file ->
-            val filePath = file.absolutePath
-            val source = file.readText()
-            val sourceHash = MezzeHash.fromString(source).toFullHexString()
-
-            val program = if (codebase != null) {
-                // Try cache first
-                val cachedAst = codebase.getCachedAst(filePath, sourceHash)
-                if (cachedAst != null) {
-                    try {
-                        CodebaseSerialization.deserializeProgram(cachedAst)
-                    } catch (e: Exception) {
-                        // Cache miss - parse fresh
-                        parseAndCache(source, filePath, sourceHash, codebase, desugar)
-                    }
-                } else {
-                    parseAndCache(source, filePath, sourceHash, codebase, desugar)
-                }
-            } else {
-                Program(emptyList()) // v1 parse() removed; CachedParser is dead code
-            }
-
-            filePath to program
-        }
-    } finally {
-        codebase?.close()
-    }
-}
-
-private fun parseAndCache(
-    source: String,
-    filePath: String,
-    sourceHash: String,
-    codebase: SQLiteCodebase,
-    desugar: Boolean
-): Program {
-    val parser = MezzeParser()
-    val program = Program(emptyList()) // v1 parse() removed; CachedParser is dead code
-
-    try {
-        val serialized = CodebaseSerialization.serializeProgram(program)
-        codebase.cacheAst(filePath, sourceHash, serialized)
-    } catch (e: Exception) {
-        // Caching failed, but parsing succeeded
-    }
-
-    return program
 }

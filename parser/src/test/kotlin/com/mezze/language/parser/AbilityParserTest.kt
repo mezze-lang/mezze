@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -16,10 +16,10 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Encoder", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(0, ability.dependencies.size)
@@ -27,7 +27,7 @@ class AbilityParserTest {
 
         val operation = ability.operations[0]
         assertEquals("encode", operation.name)
-        assertEquals("String", (operation.returnType as IdentifierTypeAnnotation).name)
+        assertEquals("String", (operation.returnType as ParsedNamedType).name)
     }
 
     @Test
@@ -39,8 +39,8 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val ability = program.items[0] as AbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val ability = module.decls[0] as ParsedAbilityDecl
 
         assertEquals("Show", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
@@ -62,19 +62,19 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val impl = module.decls[1] as ParsedImplAbilityDecl
         assertEquals("Encoder", impl.abilityName)
         assertEquals(1, impl.targetTypes.size)
-        assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
 
         val operation = impl.operations[0]
         assertEquals("encode", operation.name)
-        assertEquals("String", (operation.returnType as IdentifierTypeAnnotation).name)
-        assertTrue(operation.implementation is LambdaExpression)
+        assertEquals("String", (operation.returnType as ParsedNamedType).name)
+        assertTrue(operation.implementation is ParsedLambda)
     }
 
     @Test
@@ -91,11 +91,11 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[1] as ParsedImplAbilityDecl
 
         assertEquals("Show", impl.abilityName)
-        assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals(2, impl.operations.size)
 
         assertEquals("show", impl.operations[0].name)
@@ -114,15 +114,15 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Encoder", ability.name)
 
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val impl = module.decls[1] as ParsedImplAbilityDecl
         assertEquals("Encoder", impl.abilityName)
-        assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (impl.targetTypes[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -139,16 +139,16 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Serializer", ability.name)
         assertEquals(2, ability.operations.size)
         assertEquals("serialize", ability.operations[0].name)
         assertEquals("deserialize", ability.operations[1].name)
 
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val impl = module.decls[1] as ParsedImplAbilityDecl
         assertEquals("Serializer", impl.abilityName)
         assertEquals(2, impl.operations.size)
     }
@@ -161,10 +161,10 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("KVStore", ability.name)
         assertEquals(listOf("'b", "'a"), ability.typeParams)
         assertEquals("'a", ability.receiverTypeParam)
@@ -182,14 +182,14 @@ class AbilityParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertEquals("KVStore", impl.abilityName)
         assertEquals(2, impl.targetTypes.size)
-        assertEquals("String", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
-        assertEquals("Int", (impl.targetTypes[1] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (impl.targetTypes[0] as ParsedNamedType).name)
+        assertEquals("Int", (impl.targetTypes[1] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
     }
 
@@ -203,20 +203,20 @@ class AbilityParserTest {
             let f: {c: 'c} -> 'item with Container 'c having 'item = Int = {c} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         assertEquals("Container", constraint.abilityName)
         assertEquals(1, constraint.typeArgs.size)
-        assertTrue(constraint.hasAssociatedTypes)
+        assertTrue(constraint.associatedTypeBindings.isNotEmpty())
         assertEquals(1, constraint.associatedTypeBindings.size)
         assertTrue(constraint.associatedTypeBindings.containsKey("'item"))
-        assertEquals("Int", (constraint.associatedTypeBindings["'item"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (constraint.associatedTypeBindings["'item"] as ParsedNamedType).name)
     }
 
     @Test
@@ -225,11 +225,11 @@ class AbilityParserTest {
             let f: {iter: 'i} -> {} with Iterator 'i having 'item = Int, 'state = Boolean = {iter} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
@@ -237,8 +237,8 @@ class AbilityParserTest {
         assertEquals(2, constraint.associatedTypeBindings.size)
         assertTrue(constraint.associatedTypeBindings.containsKey("'item"))
         assertTrue(constraint.associatedTypeBindings.containsKey("'state"))
-        assertEquals("Int", (constraint.associatedTypeBindings["'item"] as IdentifierTypeAnnotation).name)
-        assertEquals("Boolean", (constraint.associatedTypeBindings["'state"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (constraint.associatedTypeBindings["'item"] as ParsedNamedType).name)
+        assertEquals("Boolean", (constraint.associatedTypeBindings["'state"] as ParsedNamedType).name)
     }
 
     @Test
@@ -247,23 +247,23 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with Container 'a having 'item = Int, Iterator 'b having 'elem = String = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(2, typeAnnotation.abilityConstraints.size)
 
         val containerConstraint = typeAnnotation.abilityConstraints[0]
         assertEquals("Container", containerConstraint.abilityName)
         assertEquals(1, containerConstraint.associatedTypeBindings.size)
-        assertEquals("Int", (containerConstraint.associatedTypeBindings["'item"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (containerConstraint.associatedTypeBindings["'item"] as ParsedNamedType).name)
 
         val iteratorConstraint = typeAnnotation.abilityConstraints[1]
         assertEquals("Iterator", iteratorConstraint.abilityName)
         assertEquals(1, iteratorConstraint.associatedTypeBindings.size)
-        assertEquals("String", (iteratorConstraint.associatedTypeBindings["'elem"] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (iteratorConstraint.associatedTypeBindings["'elem"] as ParsedNamedType).name)
     }
 
     @Test
@@ -272,25 +272,25 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with Eq 'a, Container 'b having 'item = Int = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(2, typeAnnotation.abilityConstraints.size)
 
         // First constraint: Eq 'a (no associated types)
         val eqConstraint = typeAnnotation.abilityConstraints[0]
         assertEquals("Eq", eqConstraint.abilityName)
-        assertFalse(eqConstraint.hasAssociatedTypes)
+        assertFalse(eqConstraint.associatedTypeBindings.isNotEmpty())
         assertTrue(eqConstraint.associatedTypeBindings.isEmpty())
 
         // Second constraint: Container 'b having 'item = Int
         val containerConstraint = typeAnnotation.abilityConstraints[1]
         assertEquals("Container", containerConstraint.abilityName)
-        assertTrue(containerConstraint.hasAssociatedTypes)
-        assertEquals("Int", (containerConstraint.associatedTypeBindings["'item"] as IdentifierTypeAnnotation).name)
+        assertTrue(containerConstraint.associatedTypeBindings.isNotEmpty())
+        assertEquals("Int", (containerConstraint.associatedTypeBindings["'item"] as ParsedNamedType).name)
     }
 
     @Test
@@ -299,17 +299,17 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (List String) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         val itemType = constraint.associatedTypeBindings["'item"]
-        assertTrue(itemType is TypeApplicationAnnotation)
-        assertEquals("List", (itemType as TypeApplicationAnnotation).constructor)
+        assertTrue(itemType is ParsedTypeApp)
+        assertEquals("List", (itemType as ParsedTypeApp).constructor)
     }
 
     @Test
@@ -318,17 +318,17 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = {x: Int, y: Int} = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         val itemType = constraint.associatedTypeBindings["'item"]
-        assertTrue(itemType is RecordTypeAnnotation)
-        assertEquals(2, (itemType as RecordTypeAnnotation).entries.size)
+        assertTrue(itemType is ParsedRecordType)
+        assertEquals(2, (itemType as ParsedRecordType).entries.size)
     }
 
     @Test
@@ -337,17 +337,17 @@ class AbilityParserTest {
             let f: {a: 'a} with Eq 'a having 'ordering = Int -> Boolean = {a} -> true
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         assertEquals("Eq", constraint.abilityName)
         assertEquals(1, constraint.associatedTypeBindings.size)
-        assertEquals("Int", (constraint.associatedTypeBindings["'ordering"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (constraint.associatedTypeBindings["'ordering"] as ParsedNamedType).name)
     }
 
     @Test
@@ -356,11 +356,11 @@ class AbilityParserTest {
             let f: {a: 'a} -> {} with std::collections::Container 'a having 'item = Int = {a} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
@@ -374,20 +374,20 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b} -> {} with BiContainer 'a 'b having 'joined = String = {a, b} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         assertEquals("BiContainer", constraint.abilityName)
         assertEquals(2, constraint.typeArgs.size)
-        assertEquals("'a", (constraint.typeArgs[0] as IdentifierTypeAnnotation).name)
-        assertEquals("'b", (constraint.typeArgs[1] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (constraint.typeArgs[0] as ParsedNamedType).name)
+        assertEquals("'b", (constraint.typeArgs[1] as ParsedNamedType).name)
         assertEquals(1, constraint.associatedTypeBindings.size)
-        assertEquals("String", (constraint.associatedTypeBindings["'joined"] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (constraint.associatedTypeBindings["'joined"] as ParsedNamedType).name)
     }
 
     // ========================================================================
@@ -403,11 +403,11 @@ class AbilityParserTest {
             let f: {c: 'c, x: 'x} -> {} with Container 'c having 'item = Int, Show 'x = {c, x} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         // Should have two constraints: Container and Show
         assertEquals(2, typeAnnotation.abilityConstraints.size)
@@ -429,11 +429,11 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = Int, 'index = String = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         // Should have one constraint with two associated types
         assertEquals(1, typeAnnotation.abilityConstraints.size)
@@ -451,23 +451,23 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Eq 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         // Should have three constraints
         assertEquals(3, typeAnnotation.abilityConstraints.size)
 
         assertEquals("Container", typeAnnotation.abilityConstraints[0].abilityName)
-        assertTrue(typeAnnotation.abilityConstraints[0].hasAssociatedTypes)
+        assertTrue(typeAnnotation.abilityConstraints[0].associatedTypeBindings.isNotEmpty())
 
         assertEquals("Eq", typeAnnotation.abilityConstraints[1].abilityName)
-        assertFalse(typeAnnotation.abilityConstraints[1].hasAssociatedTypes)
+        assertFalse(typeAnnotation.abilityConstraints[1].associatedTypeBindings.isNotEmpty())
 
         assertEquals("Iterator", typeAnnotation.abilityConstraints[2].abilityName)
-        assertTrue(typeAnnotation.abilityConstraints[2].hasAssociatedTypes)
+        assertTrue(typeAnnotation.abilityConstraints[2].associatedTypeBindings.isNotEmpty())
     }
 
     // ========================================================================
@@ -480,19 +480,19 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (Option [Int]) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val itemType = typeAnnotation.abilityConstraints[0].associatedTypeBindings["'item"]
-        assertTrue(itemType is TypeApplicationAnnotation)
-        val optionType = itemType as TypeApplicationAnnotation
+        assertTrue(itemType is ParsedTypeApp)
+        val optionType = itemType as ParsedTypeApp
         assertEquals("Option", optionType.constructor)
         assertEquals(1, optionType.args.size)
-        assertTrue(optionType.args[0] is SeqTypeAnnotation)
+        assertTrue(optionType.args[0] is ParsedSeqType)
     }
 
     @Test
@@ -501,20 +501,20 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = (Result (Option String) Int) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val itemType = typeAnnotation.abilityConstraints[0].associatedTypeBindings["'item"]
-        assertTrue(itemType is TypeApplicationAnnotation)
-        val resultType = itemType as TypeApplicationAnnotation
+        assertTrue(itemType is ParsedTypeApp)
+        val resultType = itemType as ParsedTypeApp
         assertEquals("Result", resultType.constructor)
         assertEquals(2, resultType.args.size)
-        assertTrue(resultType.args[0] is TypeApplicationAnnotation)
-        assertEquals("Option", (resultType.args[0] as TypeApplicationAnnotation).constructor)
+        assertTrue(resultType.args[0] is ParsedTypeApp)
+        assertEquals("Option", (resultType.args[0] as ParsedTypeApp).constructor)
     }
 
     @Test
@@ -523,18 +523,18 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = ({x: Int} -> String) = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val itemType = typeAnnotation.abilityConstraints[0].associatedTypeBindings["'item"]
-        assertTrue(itemType is FunctionTypeAnnotation)
-        val funcType = itemType as FunctionTypeAnnotation
-        assertTrue(funcType.paramType is RecordTypeAnnotation)
-        assertTrue(funcType.returnType is IdentifierTypeAnnotation)
+        assertTrue(itemType is ParsedFunctionType)
+        val funcType = itemType as ParsedFunctionType
+        assertTrue(funcType.paramType is ParsedRecordType)
+        assertTrue(funcType.returnType is ParsedNamedType)
     }
 
     @Test
@@ -543,18 +543,18 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c having 'item = [{id: Int, name: String}] = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val itemType = typeAnnotation.abilityConstraints[0].associatedTypeBindings["'item"]
-        assertTrue(itemType is SeqTypeAnnotation)
-        val seqType = itemType as SeqTypeAnnotation
-        assertTrue(seqType.elementType is RecordTypeAnnotation)
-        assertEquals(2, (seqType.elementType as RecordTypeAnnotation).entries.size)
+        assertTrue(itemType is ParsedSeqType)
+        val seqType = itemType as ParsedSeqType
+        assertTrue(seqType.elementType is ParsedRecordType)
+        assertEquals(2, (seqType.elementType as ParsedRecordType).entries.size)
     }
 
     @Test
@@ -563,11 +563,11 @@ class AbilityParserTest {
             let f: {iter: 'i} -> {} with Iterator 'i having 'item = (Option String), 'state = (Result Int String) = {iter} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
@@ -575,12 +575,12 @@ class AbilityParserTest {
         assertEquals(2, constraint.associatedTypeBindings.size)
 
         val itemType = constraint.associatedTypeBindings["'item"]
-        assertTrue(itemType is TypeApplicationAnnotation)
-        assertEquals("Option", (itemType as TypeApplicationAnnotation).constructor)
+        assertTrue(itemType is ParsedTypeApp)
+        assertEquals("Option", (itemType as ParsedTypeApp).constructor)
 
         val stateType = constraint.associatedTypeBindings["'state"]
-        assertTrue(stateType is TypeApplicationAnnotation)
-        assertEquals("Result", (stateType as TypeApplicationAnnotation).constructor)
+        assertTrue(stateType is ParsedTypeApp)
+        assertEquals("Result", (stateType as ParsedTypeApp).constructor)
     }
 
     // ========================================================================
@@ -594,16 +594,16 @@ class AbilityParserTest {
             let f: {c: 'c} -> {} with Container 'c = {c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(1, typeAnnotation.abilityConstraints.size)
         val constraint = typeAnnotation.abilityConstraints[0]
         assertEquals("Container", constraint.abilityName)
-        assertFalse(constraint.hasAssociatedTypes)
+        assertFalse(constraint.associatedTypeBindings.isNotEmpty())
         assertTrue(constraint.associatedTypeBindings.isEmpty())
     }
 
@@ -614,16 +614,16 @@ class AbilityParserTest {
             let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Show 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
 
         assertEquals(3, typeAnnotation.abilityConstraints.size)
 
-        assertTrue(typeAnnotation.abilityConstraints[0].hasAssociatedTypes)
-        assertFalse(typeAnnotation.abilityConstraints[1].hasAssociatedTypes)
-        assertTrue(typeAnnotation.abilityConstraints[2].hasAssociatedTypes)
+        assertTrue(typeAnnotation.abilityConstraints[0].associatedTypeBindings.isNotEmpty())
+        assertFalse(typeAnnotation.abilityConstraints[1].associatedTypeBindings.isNotEmpty())
+        assertTrue(typeAnnotation.abilityConstraints[2].associatedTypeBindings.isNotEmpty())
     }
 }

@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
@@ -24,14 +24,14 @@ class RecordPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is RecordPattern)
-        val recordPattern = firstPattern as RecordPattern
+        assertTrue(firstPattern is ParsedRecordPattern)
+        val recordPattern = firstPattern as ParsedRecordPattern
         assertEquals(1, recordPattern.entries.size)
         assertEquals("name", recordPattern.entries[0].name)
         assertNull(recordPattern.entries[0].pattern) // shorthand
@@ -45,11 +45,11 @@ class RecordPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertEquals(2, recordPattern.entries.size)
         assertEquals("x", recordPattern.entries[0].name)
@@ -64,20 +64,20 @@ class RecordPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertEquals(2, recordPattern.entries.size)
         assertEquals("name", recordPattern.entries[0].name)
-        assertTrue(recordPattern.entries[0].pattern is VariablePattern)
-        assertEquals("n", (recordPattern.entries[0].pattern as VariablePattern).name)
+        assertTrue(recordPattern.entries[0].pattern is ParsedVariablePattern)
+        assertEquals("n", (recordPattern.entries[0].pattern as ParsedVariablePattern).name)
 
         assertEquals("age", recordPattern.entries[1].name)
-        assertTrue(recordPattern.entries[1].pattern is VariablePattern)
-        assertEquals("a", (recordPattern.entries[1].pattern as VariablePattern).name)
+        assertTrue(recordPattern.entries[1].pattern is ParsedVariablePattern)
+        assertEquals("a", (recordPattern.entries[1].pattern as ParsedVariablePattern).name)
     }
 
     @Test
@@ -88,19 +88,19 @@ class RecordPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertEquals(2, recordPattern.entries.size)
         assertEquals("name", recordPattern.entries[0].name)
         assertNull(recordPattern.entries[0].pattern) // shorthand
 
         assertEquals("age", recordPattern.entries[1].name)
-        assertTrue(recordPattern.entries[1].pattern is VariablePattern)
-        assertEquals("years", (recordPattern.entries[1].pattern as VariablePattern).name)
+        assertTrue(recordPattern.entries[1].pattern is ParsedVariablePattern)
+        assertEquals("years", (recordPattern.entries[1].pattern as ParsedVariablePattern).name)
     }
 
     // ========== Open Record Patterns ==========
@@ -113,11 +113,11 @@ class RecordPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertTrue(recordPattern.isOpen)
         assertEquals(1, recordPattern.entries.size)
@@ -132,11 +132,11 @@ class RecordPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertTrue(recordPattern.isOpen)
         assertEquals(2, recordPattern.entries.size)
@@ -149,11 +149,11 @@ class RecordPatternParsingTest {
               { x, y } -> x + y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertTrue(!recordPattern.isOpen)
     }
@@ -168,13 +168,13 @@ class RecordPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
-        assertTrue(recordPattern.entries[0].pattern is WildcardPattern)
+        assertTrue(recordPattern.entries[0].pattern is ParsedWildcardPattern)
     }
 
     @Test
@@ -186,17 +186,17 @@ class RecordPatternParsingTest {
               _ -> "Unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as RecordPattern
-        assertTrue(pattern1.entries[0].pattern is LiteralPattern)
-        assertEquals(200L, ((pattern1.entries[0].pattern as LiteralPattern).value as IntLiteralValue).value)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
+        assertTrue(pattern1.entries[0].pattern is ParsedLiteralPattern)
+        assertEquals(200L, ((pattern1.entries[0].pattern as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as RecordPattern
-        assertEquals(404L, ((pattern2.entries[0].pattern as LiteralPattern).value as IntLiteralValue).value)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedRecordPattern
+        assertEquals(404L, ((pattern2.entries[0].pattern as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
     }
 
     // ========== Record Pattern with Guards ==========
@@ -209,17 +209,17 @@ class RecordPatternParsingTest {
               { age } -> "minor"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
         val firstCase = matchExpr.cases[0]
-        assertTrue(firstCase.patterns.first() is RecordPattern)
+        assertTrue(firstCase.patterns.first() is ParsedRecordPattern)
         assertNotNull(firstCase.guard)
 
         val secondCase = matchExpr.cases[1]
-        assertTrue(secondCase.patterns.first() is RecordPattern)
+        assertTrue(secondCase.patterns.first() is ParsedRecordPattern)
         assertNull(secondCase.guard)
     }
 
@@ -233,15 +233,15 @@ class RecordPatternParsingTest {
               _ -> "elsewhere"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val patterns = matchExpr.cases[0].patterns
 
         assertEquals(2, patterns.size)
-        assertTrue(patterns[0] is RecordPattern)
-        assertTrue(patterns[1] is RecordPattern)
+        assertTrue(patterns[0] is ParsedRecordPattern)
+        assertTrue(patterns[1] is ParsedRecordPattern)
     }
 
     // ========== Mixed Pattern Types ==========
@@ -254,13 +254,13 @@ class RecordPatternParsingTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        assertTrue(matchExpr.cases[0].patterns.first() is RecordPattern)
-        assertTrue(matchExpr.cases[1].patterns.first() is WildcardPattern)
+        assertTrue(matchExpr.cases[0].patterns.first() is ParsedRecordPattern)
+        assertTrue(matchExpr.cases[1].patterns.first() is ParsedWildcardPattern)
     }
 
     @Test
@@ -271,13 +271,13 @@ class RecordPatternParsingTest {
               other -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        assertTrue(matchExpr.cases[0].patterns.first() is RecordPattern)
-        assertTrue(matchExpr.cases[1].patterns.first() is VariablePattern)
+        assertTrue(matchExpr.cases[0].patterns.first() is ParsedRecordPattern)
+        assertTrue(matchExpr.cases[1].patterns.first() is ParsedVariablePattern)
     }
 
     // ========== Empty Record Pattern ==========
@@ -290,11 +290,11 @@ class RecordPatternParsingTest {
               _ -> "not empty"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val recordPattern = matchExpr.cases[0].patterns.first() as RecordPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
         assertEquals(0, recordPattern.entries.size)
         assertTrue(!recordPattern.isOpen)

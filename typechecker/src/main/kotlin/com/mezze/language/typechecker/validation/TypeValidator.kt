@@ -839,76 +839,6 @@ class TypeValidator(
         }
     }
 
-    private fun extractTypeParamMappings(
-        annotation: TypeAnnotation,
-        concreteType: MezzeType,
-        typeParams: List<String>,
-        mappings: MutableMap<String, MezzeType>
-    ) {
-        when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // If this is a type parameter reference like 'a
-                if (annotation.name in typeParams) {
-                    // Map this type parameter to the concrete type
-                    mappings[annotation.name] = concreteType
-                }
-            }
-            is RecordTypeAnnotation -> {
-                // Match record fields
-                if (concreteType is MezzeType.RecordType) {
-                    for (entry in annotation.entries) {
-                        val fieldType = concreteType.fields[entry.name] ?: continue
-                        extractTypeParamMappings(entry.type, fieldType, typeParams, mappings)
-                    }
-                }
-            }
-            is TypeApplicationAnnotation -> {
-                // Match type applications like List 'a
-                if (concreteType is MezzeType.TypeApplication && concreteType.constructor == annotation.constructor) {
-                    for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
-                        extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
-                    }
-                } else if (concreteType is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ) {
-                    // Handle Seq type specially
-                    annotation.args.firstOrNull()?.let { elementAnnotation ->
-                        extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
-                    }
-                } else if (concreteType is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST) {
-                    // Handle List type specially
-                    annotation.args.firstOrNull()?.let { elementAnnotation ->
-                        extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
-                    }
-                }
-            }
-            is VariantTypeAnnotation -> {
-                // Match variant constructors
-                if (concreteType is MezzeType.VariantType) {
-                    for (constructor in annotation.constructors) {
-                        val concretePayload = concreteType.constructors[constructor.name] ?: continue
-                        val annPayload = constructor.dataType ?: continue
-                        extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
-                    }
-                }
-            }
-            is FunctionTypeAnnotation -> {
-                // Match function parameter and return types
-                if (concreteType is MezzeType.FunctionType) {
-                    extractTypeParamMappings(annotation.paramType, concreteType.paramType, typeParams, mappings)
-                    extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
-                }
-            }
-            is SeqTypeAnnotation -> {
-                // Match seq element types
-                if (concreteType is MezzeType.SeqType) {
-                    extractTypeParamMappings(annotation.elementType, concreteType.elementType, typeParams, mappings)
-                }
-            }
-            // These annotation types don't contain type parameters we need to extract
-            is QualifiedTypeAnnotation,
-            is EffectRowAnnotation -> { /* no type parameters to extract */ }
-        }
-    }
-
     /**
      * Check if an ability can be derived without an explicit impl in context.
      * Only handles things that CAN'T come from .mz files:
@@ -1147,83 +1077,6 @@ class TypeValidator(
      * Thin bridge for EffectValidator which still operates on v1 types.
      */
     // parsedPerformerDeclToV1 deleted — v1 bridge no longer needed
-
-    /**
-     * Validate a top-level expression for effect restrictions.
-     *
-     * Top-level expressions (bare function calls, etc.) cannot have performed effects (<*>)
-     * because that would mean executing effects at module load time without assignment.
-     *
-     * Example of invalid code:
-     *   myEffectfulFunc {}  // Can't call effectful function at top-level
-     */
-    private fun validateTopLevelExpressionEffects(
-        topLevelExpr: TopLevelExpression,
-        substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult> = emptyMap()
-    ): List<ValidationError> {
-        val errors = mutableListOf<ValidationError>()
-
-        // TODO: TopLevelExpression types are keyed as "_toplevel" in constraintResults.
-        // For now, skip validation if the type is not available — constraint solver catches most errors.
-        val rawType = constraintResults["_toplevel"]?.type ?: return emptyList()
-        val finalType = substitution.apply(rawType)
-
-        // Check if this expression has performed effects
-        when (finalType) {
-            is MezzeType.FunctionType -> {
-                // A function value at top-level is fine - it's just a value
-                // (though unusual to have a bare function expression at top-level)
-            }
-            is MezzeType.SuspendedType -> {
-                // SuspendedType wraps a value with its effects
-                // If it has performed=true, that means effects were executed
-                if (finalType.effects.performed) {
-                    errors.add(
-                        ValidationError.TopLevelExpressionPerformedEffects(
-                            effectRow = finalType.effects,
-                            sourceLocation = topLevelExpr.expression.sourceLocation
-                        )
-                    )
-                }
-            }
-            else -> {
-                // Other types are fine at top-level
-            }
-        }
-
-        return errors
-    }
-
-    /**
-     * Validate top-level expressions for execution.
-     *
-     * Call this AFTER type-checking when you want to run the program as an executable.
-     * This validates that no top-level expressions have performed effects (<*>).
-     *
-     * This is NOT called during normal type-checking (checkProgram) because:
-     * - Tests and REPL use top-level expressions to evaluate effectful code
-     * - Only actual program execution (exec/build) needs this validation
-     *
-     * @param program The type-checked program
-     * @param substitution The substitution from constraint solving
-     * @return List of validation errors for any top-level expressions with <*>
-     */
-    fun validateTopLevelExpressionsForExecution(
-        program: Program,
-        substitution: Substitution,
-        constraintResults: Map<String, ConstraintResult> = emptyMap()
-    ): List<ValidationError> {
-        val errors = mutableListOf<ValidationError>()
-
-        for (item in program.items) {
-            if (item is TopLevelExpression) {
-                errors.addAll(validateTopLevelExpressionEffects(item, substitution, constraintResults))
-            }
-        }
-
-        return errors
-    }
 
     /**
      * Validate that main has the correct type: {} -> {} <*>
@@ -1625,17 +1478,44 @@ class TypeValidator(
         return true
     }
 
-    /**
-     * Convert TypeAnnotation to MezzeType.
-     *
-     * This is used to convert user-written type annotations to internal MezzeType
-     * for comparison with inferred types.
-     *
-     * We use the existing convertTypeAnnotation function from the AST module.
-     */
     /** Convert ParsedTypeAnnotation to MezzeType (native v2). */
     private fun convertParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
-        return com.mezze.language.ast.convertParsedTypeAnnotation(annotation)
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                PrimitiveTypes.fromName(annotation.name)?.let { return it }
+                MezzeType.VarType(TypeVar(annotation.name))
+            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                val effectRow = annotation.effects?.let { row ->
+                    val rowVar = if (row.isPolymorphic) RowVar.fresh() else null
+                    MezzeType.EffectRow.simple(row.effects.toSet(), rowVar, row.isPerformed)
+                }
+                val abilityConstraints = annotation.abilityConstraints.map { c ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = c.abilityName,
+                        typeArgs = c.typeArgs.map { convertParsedTypeAnnotation(it) }
+                    )
+                }
+                MezzeType.FunctionType(
+                    paramType = convertParsedTypeAnnotation(annotation.paramType),
+                    returnType = convertParsedTypeAnnotation(annotation.returnType),
+                    effects = effectRow,
+                    abilityConstraints = abilityConstraints
+                )
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                MezzeType.RecordType(annotation.entries.associate { e ->
+                    e.name to convertParsedTypeAnnotation(e.type)
+                })
+            }
+            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertParsedTypeAnnotation(annotation.elementType))
+            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(
+                constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedTypeAnnotation(dt) } },
+                rowVar = null
+            )
+            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.VarType(TypeVar.fresh())
+        }
     }
 
     /**
@@ -1671,170 +1551,6 @@ class TypeValidator(
         }
 
         return errors
-    }
-
-    /**
-     * Validate pattern matching exhaustiveness.
-     *
-     * Ensures all constructors are covered.
-     */
-    fun validateExhaustiveness(
-        matchExpr: MatchExpression,
-        scrutineeType: MezzeType
-    ): ValidationResult {
-        val errors = mutableListOf<ValidationError>()
-
-        // CRITICAL FIX: If scrutineeType is a TypeApplication, expand it to VariantType
-        // This matches OldTypeChecker behavior where type aliases are expanded
-        // IMPORTANT: Use expandTypeApplicationToVariant to properly substitute type parameters!
-        // e.g., Result Int String should expand to | Ok {val: Int}, Err {error: String} |
-        val expandedType = when (scrutineeType) {
-            is MezzeType.TypeApplication -> {
-                // Use expandTypeApplicationToVariant to properly substitute type params
-                // This handles lookup in both local declarations and cached modules
-                expandTypeApplicationToVariant(scrutineeType, typeDeclarations) ?: scrutineeType
-            }
-            // BoolType is internally optimized but behaves like variant for pattern matching
-            is MezzeType.BoolType -> MezzeType.VariantType(
-                constructors = mapOf("True" to null, "False" to null),
-                rowVar = null
-            )
-            else -> scrutineeType
-        }
-
-        // Only variant types need exhaustiveness checking
-        if (expandedType !is MezzeType.VariantType) {
-            return ValidationResult.Success()
-        }
-
-        // For OPEN variants, we need a wildcard to handle unknown constructors
-        // For CLOSED variants, we need to cover all constructors OR have a wildcard
-        val isOpenVariant = expandedType.rowVar != null
-
-        // Check exhaustiveness
-        // Matches OldTypeChecker.kt lines 8103-8141
-        val allConstructors = expandedType.constructors.keys
-        val coveredConstructors = mutableSetOf<String>()
-        var hasWildcard = false
-
-        for (case in matchExpr.cases) {
-            // Check each pattern in the case
-            for (pattern in case.patterns) {
-                when (pattern) {
-                    is ConstructorPattern -> {
-                        // CRITICAL: Only count as covered if there's no guard condition
-                        // Guards and if-let bindings make coverage conditional
-                        // Matches OldTypeChecker.kt lines 8112-8118
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
-                            coveredConstructors.add(pattern.constructor)
-                        }
-
-                        // BUG FIX: Validate that unit variants (no payload) don't have payload patterns
-                        // If the constructor has no payload (null in constructors map) but the pattern
-                        // has a recordPattern, that's an error
-                        val constructorPayload = expandedType.constructors[pattern.constructor]
-                        if (constructorPayload == null && pattern.recordPattern != null) {
-                            errors.add(
-                                ValidationError.UnitVariantPayloadMismatch(
-                                    constructorName = pattern.constructor,
-                                    variantType = expandedType,
-                                    sourceLocation = case.expression.sourceLocation
-                                )
-                            )
-                        }
-                    }
-                    is WildcardPattern -> {
-                        // Only count as wildcard if there's no guard or if-let condition
-                        // Matches OldTypeChecker.kt lines 8119-8123
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
-                            hasWildcard = true
-                        }
-                    }
-                    is VariablePattern -> {
-                        // Variable patterns also act as wildcards if no guard or if-let
-                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
-                            hasWildcard = true
-                        }
-                    }
-                    is LiteralPattern -> {
-                        // SPECIAL CASE: Boolean literal patterns cover Bool constructors
-                        // Bool is defined as | True, False | but we use true/false literals
-                        // So we need to map boolean literal patterns to Bool constructors
-                        if (case.guard == null && case.ifLetBindings.isEmpty() && pattern.value is BooleanLiteralValue) {
-                            val boolLit = pattern.value as BooleanLiteralValue
-                            val constructorName = if (boolLit.value) "True" else "False"
-                            coveredConstructors.add(constructorName)
-                        }
-                        // Other literal patterns don't cover constructors
-                    }
-                    is RecordPattern, is SeqPattern -> {
-                        // Other patterns don't cover specific constructors
-                    }
-                    is StringInterpolationPattern -> {
-                        // String interpolation patterns don't cover variant constructors
-                        // They can only match String type values
-                    }
-                }
-            }
-        }
-
-        val uncoveredConstructors = allConstructors - coveredConstructors
-
-        if (isOpenVariant) {
-            // OPEN variant: MUST have a wildcard to handle unknown constructors
-            if (!hasWildcard) {
-                errors.add(
-                    ValidationError.NonExhaustiveMatch(
-                        expression = matchExpr,
-                        coveredConstructors = coveredConstructors.toList(),
-                        missingConstructors = listOf("_ (wildcard required for open variant)"),
-                        sourceLocation = matchExpr.sourceLocation
-                    )
-                )
-            }
-            // Open variants with wildcard are fine - no unreachable pattern check needed
-        } else {
-            // CLOSED variant: must cover all constructors OR have a wildcard
-            if (uncoveredConstructors.isNotEmpty() && !hasWildcard) {
-                errors.add(
-                    ValidationError.NonExhaustiveMatch(
-                        expression = matchExpr,
-                        coveredConstructors = coveredConstructors.toList(),
-                        missingConstructors = uncoveredConstructors.toList(),
-                        sourceLocation = matchExpr.sourceLocation
-                    )
-                )
-            }
-
-            // Check for unreachable patterns: if all constructors of a CLOSED variant are covered
-            // BEFORE a wildcard, the wildcard is unreachable and is an error.
-            //
-            // This applies to ALL closed variants (Bool, Option, Result, user-defined types like Color).
-            // A wildcard after exhaustive constructor patterns is dead code that can hide type errors.
-            if (hasWildcard && uncoveredConstructors.isEmpty()) {
-                // Find the wildcard/variable pattern to report its location
-                for (case in matchExpr.cases) {
-                    for (pattern in case.patterns) {
-                        if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null && case.ifLetBindings.isEmpty()) {
-                            errors.add(
-                                ValidationError.UnreachablePattern(
-                                    pattern = pattern,
-                                    reason = "All constructors of this closed variant are already matched: ${allConstructors.sorted().joinToString(", ")}. " +
-                                        "This pattern will never execute.",
-                                    sourceLocation = case.expression.sourceLocation ?: matchExpr.sourceLocation
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        return if (errors.isEmpty()) {
-            ValidationResult.Success()
-        } else {
-            ValidationResult.Failure(errors)
-        }
     }
 
     /**
@@ -1934,58 +1650,6 @@ class TypeValidator(
 
         return if (errors.isEmpty()) ValidationResult.Success()
         else ValidationResult.Failure(errors)
-    }
-
-    /**
-     * Validate that there are no unreachable patterns in a match expression.
-     *
-     * A pattern is unreachable if a previous pattern (without a guard) already matches all cases.
-     * This applies to:
-     * - Wildcard patterns `_`
-     * - Variable patterns `x`
-     *
-     * This check applies to ALL match expressions, not just variants.
-     * Matches OldTypeChecker.kt lines 8147-8213.
-     */
-    fun validateUnreachablePatterns(
-        matchExpr: MatchExpression
-    ): ValidationResult {
-        val errors = mutableListOf<ValidationError>()
-        var isExhausted = false
-
-        for ((index, case) in matchExpr.cases.withIndex()) {
-            if (isExhausted) {
-                // Previous pattern was exhaustive - this pattern is unreachable
-                errors.add(
-                    ValidationError.UnreachablePattern(
-                        pattern = case.patterns.firstOrNull() ?: WildcardPattern(),
-                        reason = "Previous pattern already matches all cases",
-                        sourceLocation = case.expression.sourceLocation
-                    )
-                )
-                // Continue checking to report all unreachable patterns
-                continue
-            }
-
-            // Check if this case makes subsequent patterns unreachable
-            // A case is only exhaustive if it has no guard AND no if-let bindings
-            // (guards and if-let bindings can fail, so subsequent cases may still be reachable)
-            if (case.guard == null && case.ifLetBindings.isEmpty()) {
-                for (pattern in case.patterns) {
-                    // Wildcard and variable patterns are exhaustive - they match everything
-                    if (pattern is WildcardPattern || pattern is VariablePattern) {
-                        isExhausted = true
-                        break
-                    }
-                }
-            }
-        }
-
-        return if (errors.isEmpty()) {
-            ValidationResult.Success()
-        } else {
-            ValidationResult.Failure(errors)
-        }
     }
 
     /**
@@ -2091,42 +1755,6 @@ class TypeValidator(
         }
 
         return ValidationResult.Success()
-    }
-
-    /**
-     * Validate type declaration.
-     *
-     * Checks for circular dependencies and invalid recursion.
-     */
-    fun validateTypeDeclaration(typeDecl: TypeDeclaration): ValidationResult {
-        val errors = mutableListOf<ValidationError>()
-
-        // Check for simple circular dependency (type A = A)
-        when (val definition = typeDecl.definition) {
-            is RecordDefinition -> {
-                // Check if any field has the same type as the record itself
-                for (field in definition.fields) {
-                    // This would need proper recursive type checking
-                    // For now, skip
-                }
-            }
-
-            is VariantDefinition -> {
-                // Variants can be recursive, that's fine
-                // Example: type List 'a = Nil | Cons { head: 'a, tail: List 'a }
-            }
-
-            is NewtypeDefinition -> {
-                // Newtypes can't be directly recursive
-                // type T = T would be invalid
-            }
-        }
-
-        return if (errors.isEmpty()) {
-            ValidationResult.Success()
-        } else {
-            ValidationResult.Failure(errors)
-        }
     }
 
     /**
@@ -2398,108 +2026,6 @@ class TypeValidator(
         }
 
         return errors
-    }
-
-    /**
-     * Validate variant constructor usage.
-     *
-     * Checks that:
-     * - For closed variants (rowVar == null), the constructor exists in the variant's constructors
-     * - For open variants (rowVar != null), any constructor is allowed
-     */
-    private fun validateVariantConstructor(
-        variantExpr: VariantConstruction,
-        substitution: Substitution
-    ): List<ValidationError> {
-        // Get the inferred type for the expression.
-        // inferredType may be null on nested expressions — skip when null.
-        val inferredType = variantExpr.inferredType
-
-        if (inferredType == null) {
-            return emptyList()  // No type yet, skip validation
-        }
-
-        // Apply substitution to get final type
-        val finalType = substitution.apply(inferredType)
-
-        // Only validate if the final type is a VariantType
-        val variantType = finalType as? MezzeType.VariantType
-        if (variantType == null) {
-            return emptyList()
-        }
-
-        // Get the constructor name
-        val constructorName = variantExpr.constructor
-
-        // Check if constructor exists in the variant type
-        if (!variantType.constructors.containsKey(constructorName)) {
-            // For CLOSED variants (rowVar == null), this is an error
-            if (variantType.rowVar == null) {
-                val validConstructors = variantType.constructors.keys.sorted()
-
-                DebugLogger.debug(Category.TypeValidator) {
-                    "validateVariantConstructor: ADDING ERROR for constructor $constructorName not in $validConstructors"
-                }
-
-                return listOf(
-                    ValidationError.ConstructorNotFound(
-                        variantType = variantType,
-                        constructorName = constructorName,
-                        availableConstructors = validConstructors,
-                        sourceLocation = variantExpr.sourceLocation
-                    )
-                )
-            }
-            // For OPEN variants (rowVar != null), extra constructors are allowed
-        }
-
-        return emptyList()
-    }
-
-    /**
-     * Infer scrutinee type from constructor patterns in match expression.
-     *
-     * Infers the scrutinee type from constructor patterns when inferredType is not
-     * available on the expression. Looks at the constructor patterns and finds
-     * the type declaration that contains those constructors.
-     */
-    private fun inferScrutineeTypeFromPatterns(
-        matchExpr: MatchExpression,
-        typeDecls: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
-    ): MezzeType? {
-        // Collect all constructor names from patterns
-        val constructorNames = mutableSetOf<String>()
-        for (case in matchExpr.cases) {
-            for (pattern in case.patterns) {
-                if (pattern is ConstructorPattern) {
-                    constructorNames.add(pattern.constructor)
-                }
-            }
-        }
-
-        if (constructorNames.isEmpty()) {
-            return null  // No constructor patterns to infer from
-        }
-
-        // Find a type declaration that contains these constructors
-        for ((typeName, typeDecl) in typeDecls) {
-            val definition = typeDecl.definition
-            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
-                // Check if this variant has the constructors we're looking for
-                val variantConstructors = definition.constructors.map { it.name }.toSet()
-                if (constructorNames.all { it in variantConstructors }) {
-                    // Found it! Build the VariantType
-                    return MezzeType.VariantType(
-                        constructors = definition.constructors.associate { ctor ->
-                            ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
-                        },
-                        rowVar = if (definition.isOpen) RowVar.fresh() else null
-                    )
-                }
-            }
-        }
-
-        return null  // Couldn't infer type
     }
 
     // ========================================================================
@@ -2862,60 +2388,6 @@ class TypeValidator(
         return result
     }
 
-    /**
-     * Extract associated type values from an effect operation call.
-     *
-     * For an effect like `effect Exception having 'error where { throw: {error: 'error} -> 'a }`,
-     * when we see a call to `throw {error = SomeError}`, this extracts the mapping
-     * from "'error" to the type of SomeError.
-     *
-     * This generalizes the previous hardcoded Exception/throw handling to work with
-     * any effect that has associated types.
-     *
-     * @param effectDecl The effect declaration
-     * @param operationName The name of the operation being called
-     * @param args The arguments passed to the operation
-     * @return A map from associated type names (e.g., "'error") to the extracted types
-     */
-    private fun extractAssociatedTypeValues(
-        effectDecl: com.mezze.language.parsedast.ParsedEffectDecl,
-        operationName: String,
-        args: Expression
-    ): Map<String, MezzeType>? {
-        // Find the operation in the effect declaration
-        val operation = effectDecl.operations.find { it.name == operationName } ?: return null
-
-        // Get the parameter type annotation
-        val paramTypeAnnotation = operation.paramType
-
-        // We need to find which fields in the parameter type use associated types
-        // Associated types are stored with the ' prefix already (e.g., "'error", "'state")
-        val associatedTypeNames = effectDecl.associatedTypes.toSet()
-
-        // Parse the parameter type annotation to find field -> associated type mappings
-        val fieldToAssocType = findAssociatedTypeFieldsV2(paramTypeAnnotation, associatedTypeNames)
-
-        if (fieldToAssocType.isEmpty()) return null
-
-        // Extract the argument values for those fields
-        if (args !is RecordLiteral) return null
-
-        val result = mutableMapOf<String, MezzeType>()
-        for ((fieldName, assocTypeName) in fieldToAssocType) {
-            val fieldEntry = args.entries.filterIsInstance<RecordFieldEntry>()
-                .find { it.name == fieldName }
-
-            val fieldValue = fieldEntry?.value ?: continue
-
-            // Get the type of the field value.
-            // inferredType may be null — fall back to constructTypeFromExpression; skip if both null.
-            val fieldType = fieldValue.inferredType ?: constructTypeFromExpression(fieldValue) ?: continue
-
-            result[assocTypeName] = fieldType
-        }
-
-        return if (result.isNotEmpty()) result else null
-    }
 
     /**
      * Find fields in a type annotation that reference associated types.
@@ -3014,119 +2486,6 @@ class TypeValidator(
         }
     }
 
-    private fun findAssociatedTypeFields(
-        typeAnnotation: TypeAnnotation,
-        associatedTypeNames: Set<String>
-    ): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-
-        when (typeAnnotation) {
-            is RecordTypeAnnotation -> {
-                for (entry in typeAnnotation.entries) {
-                    // Check if the field type is a type variable that matches an associated type
-                    // Type variables in annotations are IdentifierTypeAnnotation with names like 'error
-                    if (entry.type is IdentifierTypeAnnotation) {
-                        val typeName = (entry.type as IdentifierTypeAnnotation).name
-                        if (typeName in associatedTypeNames) {
-                            result[entry.name] = typeName
-                        }
-                    }
-                }
-            }
-            else -> {
-                // Other type annotations (e.g., single type var) - not handled for now
-            }
-        }
-
-        return result
-    }
-
-    /**
-     * Extract the error type from a throw call's arguments.
-     * @deprecated Use extractAssociatedTypeValues instead - this is kept for reference
-     */
-    private fun extractThrownErrorType(args: Expression): MezzeType? {
-        if (args !is RecordLiteral) {
-            return null
-        }
-
-        val errorEntry = args.entries.filterIsInstance<RecordFieldEntry>()
-            .find { it.name == "error" }
-
-        val errorValue = errorEntry?.value ?: return null
-
-        // inferredType may be null — fall back to constructTypeFromExpression.
-        if (errorValue.inferredType != null) {
-            return errorValue.inferredType
-        }
-
-        // If inferredType is not set, try to determine type from the expression itself
-        // For VariantConstruction, we can construct the type directly
-        if (errorValue is VariantConstruction) {
-            val constructorName = errorValue.constructor
-            // Create a VariantType with just this constructor
-            // Recursively construct the payload type from the value expression
-            val payloadType = constructTypeFromExpression(errorValue.value)
-            val variantType = MezzeType.VariantType(
-                constructors = mapOf(constructorName to payloadType),
-                rowVar = RowVar.fresh()  // Open variant - may be extended
-            )
-            return variantType
-        }
-
-        return null
-    }
-
-    /**
-     * Construct a MezzeType from an expression when inferredType is not available.
-     *
-     * This is used for expressions where inferredType is not available.
-     */
-    private fun constructTypeFromExpression(expr: Expression?): MezzeType? {
-        if (expr == null) return null
-
-        // When inferredType is available, use it; otherwise reconstruct structurally.
-        if (expr.inferredType != null) {
-            return expr.inferredType
-        }
-
-        return when (expr) {
-            is RecordLiteral -> {
-                // Construct RecordType from the literal
-                val fields = mutableMapOf<String, MezzeType>()
-                for (entry in expr.entries) {
-                    if (entry is RecordFieldEntry && entry.value != null) {
-                        val fieldType = constructTypeFromExpression(entry.value)
-                        if (fieldType != null) {
-                            fields[entry.name] = fieldType
-                        }
-                    }
-                }
-                MezzeType.RecordType(fields, null)
-            }
-            is VariantConstruction -> {
-                // True and False are Bool type (optimized in interpreter)
-                if (expr.constructor == "True" || expr.constructor == "False") {
-                    MezzeType.BoolType
-                } else {
-                    val payloadType = constructTypeFromExpression(expr.value)
-                    MezzeType.VariantType(
-                        constructors = mapOf(expr.constructor to payloadType),
-                        rowVar = RowVar.fresh()
-                    )
-                }
-            }
-            is StringLiteral -> MezzeType.StringType
-            is IntLiteral -> MezzeType.IntType
-            is FloatLiteral -> MezzeType.FloatType
-            is Identifier -> {
-                // For identifiers without inferredType, we can't determine the type
-                // Return null to skip extraction for this expression
-                null
-            }
-            else -> null
-        }
-    }
 
     /**
      * Expand a type annotation using the type declarations.

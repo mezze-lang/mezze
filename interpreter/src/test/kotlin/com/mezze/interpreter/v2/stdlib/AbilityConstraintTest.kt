@@ -29,7 +29,7 @@ class AbilityConstraintTest {
     private fun typeCheck(source: String): String? {
         return try {
             val ast = parser.parseParsedModule(source.trimIndent())
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(ast, java.nio.file.Path.of("."))
             null // Success - no error
         } catch (e: Exception) {
             e.message

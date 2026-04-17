@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker.dependencies
 
 import com.mezze.language.ast.BindingKey
-import com.mezze.language.ast.Identifier
 import com.mezze.language.ast.hashing.MezzeHash
 
 /**
@@ -82,18 +81,6 @@ class NameRegistry {
     }
 
     /**
-     * Register an Identifier-to-hash mapping.
-     * This is the preferred method - uses structured data.
-     *
-     * @param identifier The identifier with localName and optional qualifier
-     * @param hash The content hash of the definition
-     */
-    fun register(identifier: Identifier, hash: MezzeHash) {
-        val modulePath = identifier.qualifier?.fullPath
-        register(modulePath, identifier.localName, hash)
-    }
-
-    /**
      * Get the hash for a qualified name.
      *
      * @param modulePath The module path (null for current module)
@@ -113,18 +100,6 @@ class NameRegistry {
      */
     fun getHash(key: BindingKey): MezzeHash? {
         return nameToHash[QualifiedName(key.qualifier, key.localName)]
-    }
-
-    /**
-     * Get the hash for an Identifier.
-     * This is the preferred method - uses structured data instead of string parsing.
-     *
-     * @param identifier The identifier with localName and optional qualifier
-     * @return The content hash, or null if not found
-     */
-    fun getHash(identifier: Identifier): MezzeHash? {
-        val modulePath = identifier.qualifier?.fullPath
-        return nameToHash[QualifiedName(modulePath, identifier.localName)]
     }
 
     /**
@@ -163,15 +138,6 @@ class NameRegistry {
     }
 
     /**
-     * Check if an Identifier is registered.
-     * This is the preferred method - uses structured data.
-     */
-    fun hasName(identifier: Identifier): Boolean {
-        val modulePath = identifier.qualifier?.fullPath
-        return nameToHash.containsKey(QualifiedName(modulePath, identifier.localName))
-    }
-
-    /**
      * Check if a hash is registered.
      */
     fun hasHash(hash: MezzeHash): Boolean {
@@ -201,17 +167,6 @@ class NameRegistry {
      */
     fun removeName(key: BindingKey): MezzeHash? {
         return removeName(key.qualifier, key.localName)
-    }
-
-    /**
-     * Remove an Identifier mapping.
-     * This is the preferred method - uses structured data.
-     *
-     * @return The hash that was associated with the identifier, or null if not found
-     */
-    fun removeName(identifier: Identifier): MezzeHash? {
-        val modulePath = identifier.qualifier?.fullPath
-        return removeName(modulePath, identifier.localName)
     }
 
     /**

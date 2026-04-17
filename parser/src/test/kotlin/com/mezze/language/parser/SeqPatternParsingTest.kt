@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
@@ -30,14 +30,14 @@ class SeqPatternParsingTest {
               _ -> "non-empty"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(0, arrayPattern.elements.size)
         assertNull(arrayPattern.restPattern)
     }
@@ -52,17 +52,17 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(1, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is VariablePattern)
-        assertEquals("x", (arrayPattern.elements[0] as VariablePattern).name)
+        assertTrue(arrayPattern.elements[0] is ParsedVariablePattern)
+        assertEquals("x", (arrayPattern.elements[0] as ParsedVariablePattern).name)
         assertNull(arrayPattern.restPattern)
     }
 
@@ -74,19 +74,19 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is VariablePattern)
-        assertTrue(arrayPattern.elements[1] is VariablePattern)
-        assertEquals("x", (arrayPattern.elements[0] as VariablePattern).name)
-        assertEquals("y", (arrayPattern.elements[1] as VariablePattern).name)
+        assertTrue(arrayPattern.elements[0] is ParsedVariablePattern)
+        assertTrue(arrayPattern.elements[1] is ParsedVariablePattern)
+        assertEquals("x", (arrayPattern.elements[0] as ParsedVariablePattern).name)
+        assertEquals("y", (arrayPattern.elements[1] as ParsedVariablePattern).name)
         assertNull(arrayPattern.restPattern)
     }
 
@@ -98,18 +98,18 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(3, arrayPattern.elements.size)
-        assertEquals("a", (arrayPattern.elements[0] as VariablePattern).name)
-        assertEquals("b", (arrayPattern.elements[1] as VariablePattern).name)
-        assertEquals("c", (arrayPattern.elements[2] as VariablePattern).name)
+        assertEquals("a", (arrayPattern.elements[0] as ParsedVariablePattern).name)
+        assertEquals("b", (arrayPattern.elements[1] as ParsedVariablePattern).name)
+        assertEquals("c", (arrayPattern.elements[2] as ParsedVariablePattern).name)
         assertNull(arrayPattern.restPattern)
     }
 
@@ -123,16 +123,16 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(1, arrayPattern.elements.size)
-        assertEquals("head", (arrayPattern.elements[0] as VariablePattern).name)
+        assertEquals("head", (arrayPattern.elements[0] as ParsedVariablePattern).name)
         assertEquals("tail", arrayPattern.restPattern)
     }
 
@@ -144,17 +144,17 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
-        assertEquals("first", (arrayPattern.elements[0] as VariablePattern).name)
-        assertEquals("second", (arrayPattern.elements[1] as VariablePattern).name)
+        assertEquals("first", (arrayPattern.elements[0] as ParsedVariablePattern).name)
+        assertEquals("second", (arrayPattern.elements[1] as ParsedVariablePattern).name)
         assertEquals("rest", arrayPattern.restPattern)
     }
 
@@ -166,14 +166,14 @@ class SeqPatternParsingTest {
               _ -> []
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(0, arrayPattern.elements.size)
         assertEquals("all", arrayPattern.restPattern)
     }
@@ -188,17 +188,17 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is WildcardPattern)
-        assertTrue(arrayPattern.elements[1] is VariablePattern)
+        assertTrue(arrayPattern.elements[0] is ParsedWildcardPattern)
+        assertTrue(arrayPattern.elements[1] is ParsedVariablePattern)
     }
 
     @Test
@@ -209,18 +209,18 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(3, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is WildcardPattern)
-        assertTrue(arrayPattern.elements[1] is WildcardPattern)
-        assertTrue(arrayPattern.elements[2] is VariablePattern)
+        assertTrue(arrayPattern.elements[0] is ParsedWildcardPattern)
+        assertTrue(arrayPattern.elements[1] is ParsedWildcardPattern)
+        assertTrue(arrayPattern.elements[2] is ParsedVariablePattern)
     }
 
     // ========== Literal Patterns in Arrays ==========
@@ -233,19 +233,19 @@ class SeqPatternParsingTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is LiteralPattern)
-        assertTrue(arrayPattern.elements[1] is LiteralPattern)
-        assertEquals(1L, ((arrayPattern.elements[0] as LiteralPattern).value as IntLiteralValue).value)
-        assertEquals(2L, ((arrayPattern.elements[1] as LiteralPattern).value as IntLiteralValue).value)
+        assertTrue(arrayPattern.elements[0] is ParsedLiteralPattern)
+        assertTrue(arrayPattern.elements[1] is ParsedLiteralPattern)
+        assertEquals(1L, ((arrayPattern.elements[0] as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
+        assertEquals(2L, ((arrayPattern.elements[1] as ParsedLiteralPattern).value as ParsedLiteralValue.IntValue).value)
     }
 
     @Test
@@ -257,18 +257,18 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as SeqPattern
-        assertTrue(pattern1.elements[0] is LiteralPattern)
-        assertTrue(pattern1.elements[1] is VariablePattern)
+        val pattern1 = matchExpr.cases[0].patterns.first() as ParsedSeqPattern
+        assertTrue(pattern1.elements[0] is ParsedLiteralPattern)
+        assertTrue(pattern1.elements[1] is ParsedVariablePattern)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as SeqPattern
-        assertTrue(pattern2.elements[0] is VariablePattern)
-        assertTrue(pattern2.elements[1] is LiteralPattern)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ParsedSeqPattern
+        assertTrue(pattern2.elements[0] is ParsedVariablePattern)
+        assertTrue(pattern2.elements[1] is ParsedLiteralPattern)
     }
 
     // ========== Nested Array Patterns ==========
@@ -281,20 +281,20 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val outerArray = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val outerArray = firstPattern as ParsedSeqPattern
         assertEquals(1, outerArray.elements.size)
-        assertTrue(outerArray.elements[0] is SeqPattern)
+        assertTrue(outerArray.elements[0] is ParsedSeqPattern)
 
-        val innerArray = outerArray.elements[0] as SeqPattern
+        val innerArray = outerArray.elements[0] as ParsedSeqPattern
         assertEquals(1, innerArray.elements.size)
-        assertTrue(innerArray.elements[0] is VariablePattern)
+        assertTrue(innerArray.elements[0] is ParsedVariablePattern)
     }
 
     @Test
@@ -305,14 +305,14 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val level1 = matchExpr.cases[0].patterns.first() as SeqPattern
-        val level2 = level1.elements[0] as SeqPattern
-        val level3 = level2.elements[0] as SeqPattern
-        assertTrue(level3.elements[0] is VariablePattern)
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val level1 = matchExpr.cases[0].patterns.first() as ParsedSeqPattern
+        val level2 = level1.elements[0] as ParsedSeqPattern
+        val level3 = level2.elements[0] as ParsedSeqPattern
+        assertTrue(level3.elements[0] is ParsedVariablePattern)
     }
 
     // ========== Constructor Patterns in Arrays ==========
@@ -325,17 +325,17 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
-        assertTrue(arrayPattern.elements[0] is ConstructorPattern)
-        assertTrue(arrayPattern.elements[1] is ConstructorPattern)
+        assertTrue(arrayPattern.elements[0] is ParsedConstructorPattern)
+        assertTrue(arrayPattern.elements[1] is ParsedConstructorPattern)
     }
 
     // ========== Multiple Array Patterns with | ==========
@@ -348,17 +348,17 @@ class SeqPatternParsingTest {
               _ -> "many"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val patterns = matchExpr.cases[0].patterns
 
         assertEquals(2, patterns.size)
-        assertTrue(patterns[0] is SeqPattern)
-        assertTrue(patterns[1] is SeqPattern)
-        assertEquals(0, (patterns[0] as SeqPattern).elements.size)
-        assertEquals(1, (patterns[1] as SeqPattern).elements.size)
+        assertTrue(patterns[0] is ParsedSeqPattern)
+        assertTrue(patterns[1] is ParsedSeqPattern)
+        assertEquals(0, (patterns[0] as ParsedSeqPattern).elements.size)
+        assertEquals(1, (patterns[1] as ParsedSeqPattern).elements.size)
     }
 
     // ========== Common Patterns ==========
@@ -372,22 +372,22 @@ class SeqPatternParsingTest {
                     [_, ...tail] -> 1 + length {xs = tail}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.first() as LetBinding
-        val lambda = letBinding.expression as LambdaExpression
-        val matchExpr = lambda.body as MatchExpression
+        val letBinding = module.decls.first() as ParsedLetDecl
+        val lambda = letBinding.value as ParsedLambda
+        val matchExpr = lambda.body as ParsedMatch
 
         // First pattern: []
-        val emptyPattern = matchExpr.cases[0].patterns.first() as SeqPattern
+        val emptyPattern = matchExpr.cases[0].patterns.first() as ParsedSeqPattern
         assertEquals(0, emptyPattern.elements.size)
         assertNull(emptyPattern.restPattern)
 
         // Second pattern: [_, ...tail]
-        val consPattern = matchExpr.cases[1].patterns.first() as SeqPattern
+        val consPattern = matchExpr.cases[1].patterns.first() as ParsedSeqPattern
         assertEquals(1, consPattern.elements.size)
-        assertTrue(consPattern.elements[0] is WildcardPattern)
+        assertTrue(consPattern.elements[0] is ParsedWildcardPattern)
         assertEquals("tail", consPattern.restPattern)
     }
 
@@ -401,21 +401,21 @@ class SeqPatternParsingTest {
                     [head, ...tail] -> seq::of {x = f {x = head}, xs = map {f = f, xs = tail}}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.filterIsInstance<LetBinding>().first()
-        val lambda = letBinding.expression as LambdaExpression
-        val matchExpr = lambda.body as MatchExpression
+        val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
+        val lambda = letBinding.value as ParsedLambda
+        val matchExpr = lambda.body as ParsedMatch
 
         // First pattern: []
-        val emptyPattern = matchExpr.cases[0].patterns.first() as SeqPattern
+        val emptyPattern = matchExpr.cases[0].patterns.first() as ParsedSeqPattern
         assertEquals(0, emptyPattern.elements.size)
 
         // Second pattern: [head, ...tail]
-        val consPattern = matchExpr.cases[1].patterns.first() as SeqPattern
+        val consPattern = matchExpr.cases[1].patterns.first() as ParsedSeqPattern
         assertEquals(1, consPattern.elements.size)
-        assertEquals("head", (consPattern.elements[0] as VariablePattern).name)
+        assertEquals("head", (consPattern.elements[0] as ParsedVariablePattern).name)
         assertEquals("tail", consPattern.restPattern)
     }
 
@@ -433,14 +433,14 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(3, arrayPattern.elements.size)
     }
 
@@ -452,14 +452,14 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstPattern = matchExpr.cases[0].patterns.first()
 
-        assertTrue(firstPattern is SeqPattern)
-        val arrayPattern = firstPattern as SeqPattern
+        assertTrue(firstPattern is ParsedSeqPattern)
+        val arrayPattern = firstPattern as ParsedSeqPattern
         assertEquals(2, arrayPattern.elements.size)
     }
 
@@ -471,18 +471,18 @@ class SeqPatternParsingTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val firstPattern = matchExpr.cases[0].patterns.first() as SeqPattern
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val firstPattern = matchExpr.cases[0].patterns.first() as ParsedSeqPattern
 
         assertEquals(2, firstPattern.elements.size)
-        assertTrue(firstPattern.elements[0] is SeqPattern)
-        assertTrue(firstPattern.elements[1] is SeqPattern)
+        assertTrue(firstPattern.elements[0] is ParsedSeqPattern)
+        assertTrue(firstPattern.elements[1] is ParsedSeqPattern)
 
-        val first = firstPattern.elements[0] as SeqPattern
-        val second = firstPattern.elements[1] as SeqPattern
+        val first = firstPattern.elements[0] as ParsedSeqPattern
+        val second = firstPattern.elements[1] as ParsedSeqPattern
         assertEquals(2, first.elements.size)
         assertEquals(2, second.elements.size)
     }
@@ -493,11 +493,11 @@ class SeqPatternParsingTest {
     fun `parse record with one empty seq field`() {
         val code = "let foo = {x = []}"
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.first() as LetBinding
-        val record = letBinding.expression as RecordLiteral
+        val letBinding = module.decls.first() as ParsedLetDecl
+        val record = letBinding.value as ParsedRecordLit
         assertEquals(1, record.entries.size)
     }
 
@@ -505,11 +505,11 @@ class SeqPatternParsingTest {
     fun `parse record with two empty seq fields`() {
         val code = "let foo = {x = [], y = []}"
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.first() as LetBinding
-        val record = letBinding.expression as RecordLiteral
+        val letBinding = module.decls.first() as ParsedLetDecl
+        val record = letBinding.value as ParsedRecordLit
         assertEquals(2, record.entries.size)
     }
 
@@ -517,11 +517,11 @@ class SeqPatternParsingTest {
     fun `parse just record expression with empty arrays`() {
         val code = "{yes = [], no = []}"
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val topExpr = program.items.first() as TopLevelExpression
-        val record = topExpr.expression as RecordLiteral
+        val topExpr = module.decls.first() as ParsedTopLevelExpr
+        val record = topExpr.expression as ParsedRecordLit
         assertEquals(2, record.entries.size)
     }
 
@@ -533,11 +533,11 @@ class SeqPatternParsingTest {
               _ -> {yes = [1], no = [2]}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
-        val firstCaseExpr = matchExpr.cases[0].expression as RecordLiteral
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
+        val firstCaseExpr = matchExpr.cases[0].body as ParsedRecordLit
         assertEquals(2, firstCaseExpr.entries.size)
     }
 
@@ -545,8 +545,8 @@ class SeqPatternParsingTest {
     fun `parse modulo operator`() {
         val code = "let is_even = {x: Int} -> x % 2 == 0"
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -561,8 +561,8 @@ class SeqPatternParsingTest {
             my_partition
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -575,8 +575,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -588,8 +588,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -602,8 +602,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -617,8 +617,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -632,8 +632,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -645,8 +645,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -662,8 +662,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -679,8 +679,8 @@ class SeqPatternParsingTest {
             my_func
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -697,8 +697,8 @@ class SeqPatternParsingTest {
             my_partition
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -718,7 +718,7 @@ class SeqPatternParsingTest {
             my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 }

@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertTrue
@@ -13,6 +13,7 @@ import kotlin.test.assertNotNull
 class LetDestructuringParsingTest {
 
     private val parser = MezzeParser()
+    private val testLoc = Loc("<test>", 0, 0, 0, 0)
 
     // ========== Simple Variable Bindings ==========
 
@@ -23,12 +24,12 @@ class LetDestructuringParsingTest {
             x
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.first() as LetBinding
-        assertTrue(letBinding.pattern is VariablePattern)
-        assertEquals("x", (letBinding.pattern as VariablePattern).name)
+        val letBinding = module.decls.first() as ParsedLetDecl
+        assertTrue(letBinding.pattern is ParsedVariablePattern)
+        assertEquals("x", (letBinding.pattern as ParsedVariablePattern).name)
         assertTrue(letBinding.isSimpleBinding)
         assertEquals("x", letBinding.variableName)
     }
@@ -42,11 +43,11 @@ class LetDestructuringParsingTest {
             1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding = program.items.first() as LetBinding
-        assertTrue(letBinding.pattern is WildcardPattern)
+        val letBinding = module.decls.first() as ParsedLetDecl
+        assertTrue(letBinding.pattern is ParsedWildcardPattern)
     }
 
     // ========== Record Pattern in Let ==========
@@ -59,13 +60,13 @@ class LetDestructuringParsingTest {
             x + y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding2 = program.items[1] as LetBinding
-        assertTrue(letBinding2.pattern is RecordPattern)
+        val letBinding2 = module.decls[1] as ParsedLetDecl
+        assertTrue(letBinding2.pattern is ParsedRecordPattern)
 
-        val recordPattern = letBinding2.pattern as RecordPattern
+        val recordPattern = letBinding2.pattern as ParsedRecordPattern
         assertEquals(2, recordPattern.entries.size)
         assertEquals("x", recordPattern.entries[0].name)
         assertEquals("y", recordPattern.entries[1].name)
@@ -79,19 +80,19 @@ class LetDestructuringParsingTest {
             x + y + z
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val letBinding2 = program.items[1] as LetBinding
-        assertTrue(letBinding2.pattern is RecordPattern)
+        val letBinding2 = module.decls[1] as ParsedLetDecl
+        assertTrue(letBinding2.pattern is ParsedRecordPattern)
 
-        val recordPattern = letBinding2.pattern as RecordPattern
+        val recordPattern = letBinding2.pattern as ParsedRecordPattern
         assertEquals(2, recordPattern.entries.size)
 
         // First entry has a nested pattern
         val pointEntry = recordPattern.entries.find { it.name == "point" }
         assertNotNull(pointEntry)
-        assertTrue(pointEntry.pattern is RecordPattern)
+        assertTrue(pointEntry.pattern is ParsedRecordPattern)
     }
 
     // ========== Let Statement in Do Block ==========
@@ -105,15 +106,15 @@ class LetDestructuringParsingTest {
               x + y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val doExpr = (program.items.first() as TopLevelExpression).expression as DoExpression
+        val doExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedDo
         assertEquals(2, doExpr.statements.size)
 
-        val stmt1 = doExpr.statements[0] as LetStatement
-        assertTrue(stmt1.pattern is VariablePattern)
-        assertEquals("x", (stmt1.pattern as VariablePattern).name)
+        val stmt1 = doExpr.statements[0] as ParsedStatement.Let
+        assertTrue(stmt1.pattern is ParsedVariablePattern)
+        assertEquals("x", (stmt1.pattern as ParsedVariablePattern).name)
     }
 
     @Test
@@ -125,49 +126,50 @@ class LetDestructuringParsingTest {
               x + y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val doExpr = (program.items.first() as TopLevelExpression).expression as DoExpression
+        val doExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedDo
 
-        val stmt2 = doExpr.statements[1] as LetStatement
-        assertTrue(stmt2.pattern is RecordPattern)
+        val stmt2 = doExpr.statements[1] as ParsedStatement.Let
+        assertTrue(stmt2.pattern is ParsedRecordPattern)
     }
 
     // ========== Irrefutability Validation ==========
 
     @Test
     fun `simple variable patterns are irrefutable`() {
-        val pattern = VariablePattern("x")
+        val pattern = ParsedVariablePattern("x", testLoc)
         assertTrue(pattern.isIrrefutable())
     }
 
     @Test
     fun `wildcard patterns are irrefutable`() {
-        val pattern = WildcardPattern()
+        val pattern = ParsedWildcardPattern(testLoc)
         assertTrue(pattern.isIrrefutable())
     }
 
     @Test
     fun `record patterns with irrefutable entries are irrefutable`() {
-        val pattern = RecordPattern(
+        val pattern = ParsedRecordPattern(
             entries = listOf(
-                RecordPatternEntry("x", null),  // shorthand binding
-                RecordPatternEntry("y", VariablePattern("yVal"))
-            )
+                ParsedRecordPatternEntry("x", null, testLoc),  // shorthand binding
+                ParsedRecordPatternEntry("y", ParsedVariablePattern("yVal", testLoc), testLoc)
+            ),
+            loc = testLoc
         )
         assertTrue(pattern.isIrrefutable())
     }
 
     @Test
     fun `constructor patterns are refutable`() {
-        val pattern = ConstructorPattern("Some", null)
+        val pattern = ParsedConstructorPattern("Some", null, testLoc)
         assertTrue(!pattern.isIrrefutable())
     }
 
     @Test
     fun `literal patterns are refutable`() {
-        val pattern = LiteralPattern(IntLiteralValue(42))
+        val pattern = ParsedLiteralPattern(ParsedLiteralValue.IntValue(42), testLoc)
         assertTrue(!pattern.isIrrefutable())
     }
 
@@ -175,23 +177,24 @@ class LetDestructuringParsingTest {
 
     @Test
     fun `extract bindings from variable pattern`() {
-        val pattern = VariablePattern("x")
+        val pattern = ParsedVariablePattern("x", testLoc)
         assertEquals(listOf("x"), pattern.extractBindings())
     }
 
     @Test
     fun `extract bindings from wildcard pattern`() {
-        val pattern = WildcardPattern()
+        val pattern = ParsedWildcardPattern(testLoc)
         assertEquals(emptyList(), pattern.extractBindings())
     }
 
     @Test
     fun `extract bindings from record pattern`() {
-        val pattern = RecordPattern(
+        val pattern = ParsedRecordPattern(
             entries = listOf(
-                RecordPatternEntry("x", null),  // shorthand - extracts "x"
-                RecordPatternEntry("y", VariablePattern("yVal"))  // explicit - extracts "yVal"
-            )
+                ParsedRecordPatternEntry("x", null, testLoc),  // shorthand - extracts "x"
+                ParsedRecordPatternEntry("y", ParsedVariablePattern("yVal", testLoc), testLoc)  // explicit - extracts "yVal"
+            ),
+            loc = testLoc
         )
         val bindings = pattern.extractBindings()
         assertTrue("x" in bindings)
@@ -201,24 +204,25 @@ class LetDestructuringParsingTest {
     // ========== Helper Factory Methods ==========
 
     @Test
-    fun `LetBinding simple factory creates correct pattern`() {
-        val letBinding = LetBinding.simple(
-            name = "x",
-            expression = IntLiteral(42)
+    fun `ParsedLetDecl with simple variable pattern`() {
+        val letBinding = ParsedLetDecl(
+            pattern = ParsedVariablePattern("x", testLoc),
+            value = ParsedIntLit(42, testLoc),
+            loc = testLoc
         )
         assertTrue(letBinding.isSimpleBinding)
         assertEquals("x", letBinding.variableName)
-        assertTrue(letBinding.pattern is VariablePattern)
+        assertTrue(letBinding.pattern is ParsedVariablePattern)
     }
 
     @Test
-    fun `LetStatement simple factory creates correct pattern`() {
-        val letStmt = LetStatement.simple(
-            name = "x",
-            expression = IntLiteral(42)
+    fun `ParsedStatement Let with simple variable pattern`() {
+        val letStmt = ParsedStatement.Let(
+            pattern = ParsedVariablePattern("x", testLoc),
+            value = ParsedIntLit(42, testLoc),
+            loc = testLoc
         )
-        assertTrue(letStmt.isSimpleBinding)
-        assertEquals("x", letStmt.variableName)
-        assertTrue(letStmt.pattern is VariablePattern)
+        assertTrue(letStmt.pattern is ParsedVariablePattern)
+        assertEquals("x", (letStmt.pattern as ParsedVariablePattern).name)
     }
 }

@@ -21,8 +21,8 @@ class FunctionCallSyntaxTest {
             z
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -61,8 +61,8 @@ class FunctionCallSyntaxTest {
             z
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -74,8 +74,8 @@ class FunctionCallSyntaxTest {
             w
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -88,8 +88,8 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -105,8 +105,8 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     // ========== ADDITIONAL VALID SYNTAX TESTS ==========
@@ -120,8 +120,8 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -132,8 +132,8 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -144,8 +144,8 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -157,8 +157,8 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -169,8 +169,8 @@ class FunctionCallSyntaxTest {
             result
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     // ========== ADDITIONAL INVALID SYNTAX TESTS ==========
@@ -198,8 +198,8 @@ class FunctionCallSyntaxTest {
             5
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -240,8 +240,8 @@ class FunctionCallSyntaxTest {
             let result = greet { name = "World" }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -251,8 +251,8 @@ class FunctionCallSyntaxTest {
             let result = choose { flag = true, a = 1, b = 2 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -263,8 +263,8 @@ class FunctionCallSyntaxTest {
             let result = getX { point = p }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -275,8 +275,8 @@ class FunctionCallSyntaxTest {
             let result = apply { f = double, x = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -286,8 +286,8 @@ class FunctionCallSyntaxTest {
             let result = getFirst { xs = [1, 2, 3] }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -299,8 +299,8 @@ class FunctionCallSyntaxTest {
             let result = f { x = g { x = h { x = 10 } } }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -310,8 +310,8 @@ class FunctionCallSyntaxTest {
             let result = double { x = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -321,8 +321,8 @@ class FunctionCallSyntaxTest {
             add { x = 1, y = 2 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -332,8 +332,8 @@ class FunctionCallSyntaxTest {
             let result = add { x = 2 * 3, y = 4 + 1 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -343,8 +343,8 @@ class FunctionCallSyntaxTest {
             let result = choose { cond = 5 > 3, a = 1, b = 0 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -356,8 +356,8 @@ class FunctionCallSyntaxTest {
             let b = g { x = 2 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -368,8 +368,8 @@ class FunctionCallSyntaxTest {
             let result = double { x = record.value }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -379,8 +379,8 @@ class FunctionCallSyntaxTest {
             let result = negate { x = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -391,8 +391,8 @@ class FunctionCallSyntaxTest {
             record
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -404,8 +404,8 @@ class FunctionCallSyntaxTest {
             let result = getX { r = updated }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     // ========== COMPREHENSIVE INVALID SYNTAX TESTS ==========
@@ -545,8 +545,8 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -557,8 +557,8 @@ class FunctionCallSyntaxTest {
             let result = f { x = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -570,8 +570,8 @@ class FunctionCallSyntaxTest {
             y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -582,8 +582,8 @@ class FunctionCallSyntaxTest {
             let result = x + y
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -593,8 +593,8 @@ class FunctionCallSyntaxTest {
             let result = if flag then 1 else 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -603,8 +603,8 @@ class FunctionCallSyntaxTest {
             let result = ({x} -> x + 1) { x = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -615,8 +615,8 @@ class FunctionCallSyntaxTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -626,8 +626,8 @@ class FunctionCallSyntaxTest {
             let result = factorial { n = 5 }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -637,8 +637,8 @@ class FunctionCallSyntaxTest {
             let result = double { x = 5 } + 10
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -649,8 +649,8 @@ class FunctionCallSyntaxTest {
             xs
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     @Test
@@ -662,8 +662,8 @@ class FunctionCallSyntaxTest {
             let result = f { x, y }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
     }
 
     // ========== LITERAL ARGUMENT SYNTAX ERRORS ==========

@@ -1,6 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
 
 /**
  * Effect constraint generator - generates effect usage constraints.
@@ -22,74 +22,6 @@ import com.mezze.language.ast.*
  * - Works with validation to ensure effects are handled
  */
 class EffectConstraintGenerator {
-
-    /**
-     * Generate effect constraints from an expression.
-     *
-     * Returns the set of effects used by this expression.
-     */
-    fun generateFromExpression(
-        expr: Expression,
-        context: ConstraintContext
-    ): Set<String> {
-        return when (expr) {
-            // Effect operations directly use effects
-            is EffectCallExpression -> setOf(expr.operation.qualifier?.fullPath ?: "")
-
-            // Perform expressions use effects from inner expression
-            is PerformExpression -> generateFromPerform(expr, context)
-
-            // Function calls might use effects from the function
-            is FunctionCall -> generateFromFunctionCall(expr, context)
-
-            // Other expressions don't directly use effects
-            else -> emptySet()
-        }
-    }
-
-    /**
-     * Generate effect constraints from perform expression.
-     *
-     * perform expr with handlers
-     *
-     * The handlers specify which effects are being handled,
-     * so those effects don't propagate up.
-     */
-    private fun generateFromPerform(
-        expr: PerformExpression,
-        context: ConstraintContext
-    ): Set<String> {
-        // Effects from inner expression
-        val innerEffects = generateFromExpression(expr.expression, context)
-
-        // Effects being handled
-        val handledEffects = expr.handlers.map { it.performer.localName }.toSet()
-
-        // Unhandled effects propagate up
-        return innerEffects - handledEffects
-    }
-
-    /**
-     * Generate effect constraints from function call.
-     *
-     * If the function being called has effects in its type,
-     * those effects are used by the call.
-     */
-    private fun generateFromFunctionCall(
-        expr: FunctionCall,
-        context: ConstraintContext
-    ): Set<String> {
-        val functionType = expr.function.inferredType
-
-        if (functionType is MezzeType.FunctionType) {
-            val effectRow = functionType.effects
-            if (effectRow != null) {
-                return effectRow.effects
-            }
-        }
-
-        return emptySet()
-    }
 
     /**
      * Generate effect row from function type.
@@ -129,12 +61,10 @@ class EffectConstraintGenerator {
      */
     fun generateConstraint(
         effect: String,
-        expr: Expression? = null,
         context: String? = null
     ): Constraint.EffectUsed {
         return Constraint.EffectUsed(
             effect = effect,
-            expression = expr,
             context = context
         )
     }

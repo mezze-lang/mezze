@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -18,15 +18,15 @@ let map = { opt, f } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val letBinding = program.items[0] as LetBinding
+            val letBinding = module.decls[0] as ParsedLetDecl
             assertEquals("map", letBinding.variableName)
 
-            val lambda = letBinding.expression as LambdaExpression
-            val body = lambda.body as MatchExpression
+            val lambda = letBinding.value as ParsedLambda
+            val body = lambda.body as ParsedMatch
 
             println("✅ Real Mezze code (option map) parsed successfully!")
         }
@@ -41,8 +41,8 @@ let result = match x is
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
             println("✅ Nested match with if-else parsed successfully!")
         }
     }
@@ -54,8 +54,8 @@ let result = obj.field.method { x = 1 }.value
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
             println("✅ Chained operations parsed successfully!")
         }
     }

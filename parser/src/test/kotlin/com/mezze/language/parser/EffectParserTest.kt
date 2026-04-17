@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -13,24 +13,24 @@ class EffectParserTest {
             perform Console in Log.print {msg = "hello"}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val topLevel = program.items[0] as TopLevelExpression
-        val performExpr = topLevel.expression as PerformExpression
+        val module = parser.parseParsedModule(source)
+        val topLevel = module.decls[0] as ParsedTopLevelExpr
+        val performExpr = topLevel.expression as ParsedPerform
 
         assertEquals(1, performExpr.handlers.size)
         assertEquals("Console", performExpr.handlers[0].performer.localName)
-        assertNull(performExpr.handlers[0].parameters)
+        assertNull(performExpr.handlers[0].params)
 
         // Check the expression being performed
-        assertTrue(performExpr.expression is FunctionCall)
-        val funcCall = performExpr.expression as FunctionCall
-        assertTrue(funcCall.function is MemberAccess)
+        assertTrue(performExpr.body is ParsedFunctionCall)
+        val funcCall = performExpr.body as ParsedFunctionCall
+        assertTrue(funcCall.function is ParsedMemberAccess)
 
-        val memberAccess = funcCall.function as MemberAccess
+        val memberAccess = funcCall.function as ParsedMemberAccess
         // Handle both Identifier and VariantConstruction cases
         val receiverName = when (memberAccess.receiver) {
-            is Identifier -> (memberAccess.receiver as Identifier).localName
-            is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
+            is ParsedIdentifier -> (memberAccess.receiver as ParsedIdentifier).localName
+            is ParsedVariantConstruct -> (memberAccess.receiver as ParsedVariantConstruct).constructor
             else -> fail("Expected receiver to be Identifier or VariantConstruction, got ${memberAccess.receiver::class.simpleName}")
         }
         assertEquals("Log", receiverName)
@@ -43,9 +43,9 @@ class EffectParserTest {
             perform Console, MathRandom, FileSystem in someFunction {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val topLevel = program.items[0] as TopLevelExpression
-        val performExpr = topLevel.expression as PerformExpression
+        val module = parser.parseParsedModule(source)
+        val topLevel = module.decls[0] as ParsedTopLevelExpr
+        val performExpr = topLevel.expression as ParsedPerform
 
         assertEquals(3, performExpr.handlers.size)
         assertEquals("Console", performExpr.handlers[0].performer.localName)
@@ -59,20 +59,20 @@ class EffectParserTest {
             perform FileLogger {path = "/tmp/log.txt"} in Log.print {msg = "hello"}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val topLevel = program.items[0] as TopLevelExpression
-        val performExpr = topLevel.expression as PerformExpression
+        val module = parser.parseParsedModule(source)
+        val topLevel = module.decls[0] as ParsedTopLevelExpr
+        val performExpr = topLevel.expression as ParsedPerform
 
         assertEquals(1, performExpr.handlers.size)
         assertEquals("FileLogger", performExpr.handlers[0].performer.localName)
-        assertNotNull(performExpr.handlers[0].parameters)
+        assertNotNull(performExpr.handlers[0].params)
 
-        val params = performExpr.handlers[0].parameters!!
+        val params = performExpr.handlers[0].params!!
         assertEquals(1, params.entries.size)
-        val firstEntry = params.entries[0] as RecordFieldEntry
+        val firstEntry = params.entries[0] as ParsedRecordEntry.Field
         assertEquals("path", firstEntry.name)
-        assertTrue(firstEntry.value is StringLiteral)
-        assertEquals("/tmp/log.txt", (firstEntry.value as StringLiteral).value)
+        assertTrue(firstEntry.value is ParsedStringLit)
+        assertEquals("/tmp/log.txt", ((firstEntry.value as ParsedStringLit).parts[0] as ParsedStringPart.Literal).value)
     }
 
     @Test
@@ -81,36 +81,36 @@ class EffectParserTest {
             perform Console, FileLogger {path = "/var/log/app.log"}, SystemRandom in someFunction {x = 1, y = 2}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val topLevelExpr = program.items[0] as TopLevelExpression
-        val performExpr = topLevelExpr.expression as PerformExpression
+        val topLevelExpr = module.decls[0] as ParsedTopLevelExpr
+        val performExpr = topLevelExpr.expression as ParsedPerform
 
         // Should have 3 handlers
         assertEquals(3, performExpr.handlers.size)
 
         // First handler: Console (no parameters)
         assertEquals("Console", performExpr.handlers[0].performer.localName)
-        assertNull(performExpr.handlers[0].parameters)
+        assertNull(performExpr.handlers[0].params)
 
         // Second handler: FileLogger with parameters
         assertEquals("FileLogger", performExpr.handlers[1].performer.localName)
-        assertNotNull(performExpr.handlers[1].parameters)
-        val fileLoggerParams = performExpr.handlers[1].parameters!!
+        assertNotNull(performExpr.handlers[1].params)
+        val fileLoggerParams = performExpr.handlers[1].params!!
         assertEquals(1, fileLoggerParams.entries.size)
-        val fileLoggerEntry = fileLoggerParams.entries[0] as RecordFieldEntry
+        val fileLoggerEntry = fileLoggerParams.entries[0] as ParsedRecordEntry.Field
         assertEquals("path", fileLoggerEntry.name)
-        assertEquals("/var/log/app.log", (fileLoggerEntry.value as StringLiteral).value)
+        assertEquals("/var/log/app.log", ((fileLoggerEntry.value as ParsedStringLit).parts[0] as ParsedStringPart.Literal).value)
 
         // Third handler: SystemRandom (no parameters)
         assertEquals("SystemRandom", performExpr.handlers[2].performer.localName)
-        assertNull(performExpr.handlers[2].parameters)
+        assertNull(performExpr.handlers[2].params)
 
         // Expression should be a function call
-        assertTrue(performExpr.expression is FunctionCall)
-        val functionCall = performExpr.expression as FunctionCall
-        assertEquals("someFunction", (functionCall.function as Identifier).localName)
+        assertTrue(performExpr.body is ParsedFunctionCall)
+        val functionCall = performExpr.body as ParsedFunctionCall
+        assertEquals("someFunction", (functionCall.function as ParsedIdentifier).localName)
     }
 
     @Test
@@ -121,12 +121,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val effectDecl = program.items[0] as EffectDeclaration
+        val effectDecl = module.decls[0] as ParsedEffectDecl
         assertEquals("Log", effectDecl.name)
-        assertNull(effectDecl.associatedType)
+        assertTrue(effectDecl.associatedTypes.isEmpty())
         assertEquals(1, effectDecl.operations.size)
         assertEquals("info", effectDecl.operations[0].name)
     }
@@ -140,12 +140,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val effectDecl = program.items[0] as EffectDeclaration
+        val effectDecl = module.decls[0] as ParsedEffectDecl
         assertEquals("State", effectDecl.name)
-        assertEquals("'state", effectDecl.associatedType)
+        assertEquals(listOf("'state"), effectDecl.associatedTypes)
         assertEquals(2, effectDecl.operations.size)
 
         // Check get operation
@@ -163,12 +163,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val effectDecl = program.items[0] as EffectDeclaration
+        val effectDecl = module.decls[0] as ParsedEffectDecl
         assertEquals("Reader", effectDecl.name)
-        assertEquals("'env", effectDecl.associatedType)
+        assertEquals(listOf("'env"), effectDecl.associatedTypes)
         assertEquals(1, effectDecl.operations.size)
         assertEquals("ask", effectDecl.operations[0].name)
     }
@@ -201,10 +201,10 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val implDecl = program.items[1] as ImplDeclaration
+        val implDecl = module.decls[1] as ParsedPerformerDecl
         assertEquals("Log", implDecl.effect.localName)
         assertEquals("ConsoleLogger", implDecl.performerName)
         assertTrue(implDecl.associatedTypeBindings.entries.isEmpty())
@@ -225,10 +225,10 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val implDecl = program.items[1] as ImplDeclaration
+        val implDecl = module.decls[1] as ParsedPerformerDecl
         assertEquals("State", implDecl.effect.localName)
         assertEquals("Counter", implDecl.performerName)
         val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
@@ -236,8 +236,8 @@ class EffectParserTest {
         assertEquals("'state", associatedTypeBinding!!.first)
 
         val typeAnnotation = associatedTypeBinding.second
-        assertTrue(typeAnnotation is IdentifierTypeAnnotation)
-        assertEquals("Int", (typeAnnotation as IdentifierTypeAnnotation).name)
+        assertTrue(typeAnnotation is ParsedNamedType)
+        assertEquals("Int", (typeAnnotation as ParsedNamedType).name)
 
         assertEquals(2, implDecl.operations.size)
         assertEquals("get", implDecl.operations[0].name)
@@ -256,10 +256,10 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val implDecl = program.items[1] as ImplDeclaration
+        val implDecl = module.decls[1] as ParsedPerformerDecl
         assertEquals("State", implDecl.effect.localName)
         assertEquals("ListState", implDecl.performerName)
         val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
@@ -267,8 +267,8 @@ class EffectParserTest {
         assertEquals("'state", associatedTypeBinding!!.first)
 
         val typeAnnotation = associatedTypeBinding.second
-        assertTrue(typeAnnotation is TypeApplicationAnnotation)
-        val typeApp = typeAnnotation as TypeApplicationAnnotation
+        assertTrue(typeAnnotation is ParsedTypeApp)
+        val typeApp = typeAnnotation as ParsedTypeApp
         assertEquals("List", typeApp.constructor)
         assertEquals(1, typeApp.args.size)
     }
@@ -299,14 +299,14 @@ class EffectParserTest {
             let f: {} -> Int <*> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val pattern = letBinding.pattern as VariablePattern
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val pattern = letBinding.pattern as ParsedVariablePattern
         assertEquals("f", pattern.name)
 
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertTrue(effectRow.effects.isEmpty())
@@ -320,12 +320,12 @@ class EffectParserTest {
             let f: {} -> Int <Log, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertEquals(listOf("Log"), effectRow.effects)
@@ -339,12 +339,12 @@ class EffectParserTest {
             let f: {} -> Int <Log, State, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertEquals(listOf("Log", "State"), effectRow.effects)
@@ -358,12 +358,12 @@ class EffectParserTest {
             let f: {} -> Int <> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         // Empty effect row <> should result in null effects (pure function)
         // since effects.isEmpty() && !isPolymorphic && !isPerformed
         assertNull(typeAnnotation.effects)
@@ -375,12 +375,12 @@ class EffectParserTest {
             let f: {} -> Int <Log> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertEquals(listOf("Log"), effectRow.effects)
@@ -394,12 +394,12 @@ class EffectParserTest {
             let f: {} -> Int <...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertTrue(effectRow.effects.isEmpty())
@@ -413,12 +413,12 @@ class EffectParserTest {
             let f: {} -> Int <Log, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertEquals(listOf("Log"), effectRow.effects)
@@ -432,12 +432,12 @@ class EffectParserTest {
             let f: {} -> Int <console::Log, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
         assertEquals(listOf("console::Log"), effectRow.effects)
@@ -455,12 +455,12 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
+        val letBinding = module.decls[0] as ParsedLetDecl
         assertNotNull(letBinding.typeAnnotation)
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         assertNotNull(typeAnnotation.effects)
         val effectRow = typeAnnotation.effects!!
 
@@ -472,7 +472,7 @@ class EffectParserTest {
         assertEquals("Exception", exceptionEffect.name)
         assertEquals(1, exceptionEffect.associatedTypes.size)
         assertTrue(exceptionEffect.associatedTypes.containsKey("'error"))
-        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as ParsedNamedType).name)
     }
 
     @Test
@@ -481,11 +481,11 @@ class EffectParserTest {
             let f: {} -> Int <Generator having 'item = Int, 'result = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -494,8 +494,8 @@ class EffectParserTest {
         assertEquals(2, genEffect.associatedTypes.size)
         assertTrue(genEffect.associatedTypes.containsKey("'item"))
         assertTrue(genEffect.associatedTypes.containsKey("'result"))
-        assertEquals("Int", (genEffect.associatedTypes["'item"] as IdentifierTypeAnnotation).name)
-        assertEquals("String", (genEffect.associatedTypes["'result"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (genEffect.associatedTypes["'item"] as ParsedNamedType).name)
+        assertEquals("String", (genEffect.associatedTypes["'result"] as ParsedNamedType).name)
     }
 
     @Test
@@ -504,11 +504,11 @@ class EffectParserTest {
             let f: {} -> Int <Log, Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Log is a simple effect
@@ -526,11 +526,11 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertTrue(effectRow.effects.isEmpty())
@@ -539,12 +539,12 @@ class EffectParserTest {
         val exceptionEffect = effectRow.effectAnnotations[0]
         assertEquals("Exception", exceptionEffect.name)
         assertEquals(1, exceptionEffect.associatedTypes.size)
-        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as ParsedNamedType).name)
 
         val stateEffect = effectRow.effectAnnotations[1]
         assertEquals("State", stateEffect.name)
         assertEquals(1, stateEffect.associatedTypes.size)
-        assertEquals("Int", (stateEffect.associatedTypes["'state"] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (stateEffect.associatedTypes["'state"] as ParsedNamedType).name)
     }
 
     @Test
@@ -553,11 +553,11 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -571,11 +571,11 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -589,11 +589,11 @@ class EffectParserTest {
             let f: {} -> Int <Log, Exception having 'error = String, State having 'state = Int, FileSystem, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Simple effects
@@ -614,18 +614,18 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (List String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateEffect = effectRow.effectAnnotations[0]
         val stateType = stateEffect.associatedTypes["'state"]
-        assertTrue(stateType is TypeApplicationAnnotation)
-        assertEquals("List", (stateType as TypeApplicationAnnotation).constructor)
+        assertTrue(stateType is ParsedTypeApp)
+        assertEquals("List", (stateType as ParsedTypeApp).constructor)
     }
 
     @Test
@@ -634,18 +634,18 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = {x: Int, y: Int}> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateEffect = effectRow.effectAnnotations[0]
         val stateType = stateEffect.associatedTypes["'state"]
-        assertTrue(stateType is RecordTypeAnnotation)
-        assertEquals(2, (stateType as RecordTypeAnnotation).entries.size)
+        assertTrue(stateType is ParsedRecordType)
+        assertEquals(2, (stateType as ParsedRecordType).entries.size)
     }
 
     @Test
@@ -654,11 +654,11 @@ class EffectParserTest {
             let f: {} -> Int <std::exception::Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -679,11 +679,11 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, OtherEffect> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Should have one annotated effect (State) and one simple effect (OtherEffect)
@@ -700,11 +700,11 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, 'result = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Should have one annotated effect with two associated types
@@ -723,11 +723,11 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, ...> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -744,11 +744,11 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = Int, *> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -765,11 +765,11 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Should have two annotated effects and one simple effect
@@ -789,20 +789,20 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (Option [Int])> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
-        assertTrue(stateType is TypeApplicationAnnotation)
-        val optionType = stateType as TypeApplicationAnnotation
+        assertTrue(stateType is ParsedTypeApp)
+        val optionType = stateType as ParsedTypeApp
         assertEquals("Option", optionType.constructor)
         assertEquals(1, optionType.args.size)
-        assertTrue(optionType.args[0] is SeqTypeAnnotation)
+        assertTrue(optionType.args[0] is ParsedSeqType)
     }
 
     @Test
@@ -811,21 +811,21 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = (Result (Option String) Int)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
-        assertTrue(stateType is TypeApplicationAnnotation)
-        val resultType = stateType as TypeApplicationAnnotation
+        assertTrue(stateType is ParsedTypeApp)
+        val resultType = stateType as ParsedTypeApp
         assertEquals("Result", resultType.constructor)
         assertEquals(2, resultType.args.size)
-        assertTrue(resultType.args[0] is TypeApplicationAnnotation)
-        assertEquals("Option", (resultType.args[0] as TypeApplicationAnnotation).constructor)
+        assertTrue(resultType.args[0] is ParsedTypeApp)
+        assertEquals("Option", (resultType.args[0] as ParsedTypeApp).constructor)
     }
 
     @Test
@@ -834,19 +834,19 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = ({x: Int} -> String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
-        assertTrue(stateType is FunctionTypeAnnotation)
-        val funcType = stateType as FunctionTypeAnnotation
-        assertTrue(funcType.paramType is RecordTypeAnnotation)
-        assertTrue(funcType.returnType is IdentifierTypeAnnotation)
+        assertTrue(stateType is ParsedFunctionType)
+        val funcType = stateType as ParsedFunctionType
+        assertTrue(funcType.paramType is ParsedRecordType)
+        assertTrue(funcType.returnType is ParsedNamedType)
     }
 
     @Test
@@ -855,19 +855,19 @@ class EffectParserTest {
             let f: {} -> Int <State having 'state = [{id: Int, name: String}]> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
         val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
-        assertTrue(stateType is SeqTypeAnnotation)
-        val arrayType = stateType as SeqTypeAnnotation
-        assertTrue(arrayType.elementType is RecordTypeAnnotation)
-        assertEquals(2, (arrayType.elementType as RecordTypeAnnotation).entries.size)
+        assertTrue(stateType is ParsedSeqType)
+        val arrayType = stateType as ParsedSeqType
+        assertTrue(arrayType.elementType is ParsedRecordType)
+        assertEquals(2, (arrayType.elementType as ParsedRecordType).entries.size)
     }
 
     @Test
@@ -876,11 +876,11 @@ class EffectParserTest {
             let f: {} -> Int <Generator having 'item = (Option String), 'result = (Result Int String)> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(1, effectRow.effectAnnotations.size)
@@ -889,12 +889,12 @@ class EffectParserTest {
         assertEquals(2, genEffect.associatedTypes.size)
 
         val itemType = genEffect.associatedTypes["'item"]
-        assertTrue(itemType is TypeApplicationAnnotation)
-        assertEquals("Option", (itemType as TypeApplicationAnnotation).constructor)
+        assertTrue(itemType is ParsedTypeApp)
+        assertEquals("Option", (itemType as ParsedTypeApp).constructor)
 
         val resultType = genEffect.associatedTypes["'result"]
-        assertTrue(resultType is TypeApplicationAnnotation)
-        assertEquals("Result", (resultType as TypeApplicationAnnotation).constructor)
+        assertTrue(resultType is ParsedTypeApp)
+        assertEquals("Result", (resultType as ParsedTypeApp).constructor)
     }
 
     // ========================================================================
@@ -908,11 +908,11 @@ class EffectParserTest {
             let f: {} -> Int <State> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // Should be parsed as a simple effect (not annotated)
@@ -927,11 +927,11 @@ class EffectParserTest {
             let f: {} -> Int <State, Exception having 'error = String> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         // State is simple, Exception is annotated
@@ -947,11 +947,11 @@ class EffectParserTest {
             let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val letBinding = program.items[0] as LetBinding
-        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = letBinding.typeAnnotation as ParsedFunctionType
         val effectRow = typeAnnotation.effects!!
 
         assertEquals(listOf("Log"), effectRow.effects)
@@ -970,12 +970,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val implDecl = program.items[0] as ImplDeclaration
+        val implDecl = module.decls[0] as ParsedPerformerDecl
         assertEquals("Log", implDecl.effect.localName)
-        assertEquals("log", implDecl.effect.qualifier?.fullPath)
+        assertEquals("log", implDecl.effect.qualifier?.toString())
         assertEquals("ConsoleLogger", implDecl.performerName)
         assertEquals(1, implDecl.operations.size)
         assertEquals("log", implDecl.operations[0].name)
@@ -989,12 +989,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val implDecl = program.items[0] as ImplDeclaration
+        val implDecl = module.decls[0] as ParsedPerformerDecl
         assertEquals("Log", implDecl.effect.localName)
-        assertEquals("std::effects::log", implDecl.effect.qualifier?.fullPath)
+        assertEquals("std::effects::log", implDecl.effect.qualifier?.toString())
         assertEquals("FileLogger", implDecl.performerName)
     }
 
@@ -1007,15 +1007,15 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val implDecl = program.items[0] as ImplDeclaration
+        val implDecl = module.decls[0] as ParsedPerformerDecl
         assertEquals("State", implDecl.effect.localName)
-        assertEquals("effects", implDecl.effect.qualifier?.fullPath)
+        assertEquals("effects", implDecl.effect.qualifier?.toString())
         assertEquals("Counter", implDecl.performerName)
-        assertEquals(1, implDecl.performerParams.size)
-        assertEquals("initial", implDecl.performerParams[0].name)
+        assertEquals(1, implDecl.params.size)
+        assertEquals("initial", implDecl.params[0].name)
         assertEquals(2, implDecl.operations.size)
     }
 
@@ -1028,12 +1028,12 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val implDecl = program.items[0] as ImplDeclaration
+        val implDecl = module.decls[0] as ParsedPerformerDecl
         assertEquals("State", implDecl.effect.localName)
-        assertEquals("effects", implDecl.effect.qualifier?.fullPath)
+        assertEquals("effects", implDecl.effect.qualifier?.toString())
         assertEquals("ListState", implDecl.performerName)
         val associatedTypeBinding = implDecl.associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
         assertNotNull(associatedTypeBinding)
@@ -1048,10 +1048,10 @@ class EffectParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val implDecl = program.items[0] as ImplDeclaration
+        val implDecl = module.decls[0] as ParsedPerformerDecl
         assertEquals("Log", implDecl.effect.localName)
         assertEquals("SimpleLogger", implDecl.performerName)
     }

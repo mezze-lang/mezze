@@ -33,7 +33,7 @@ import java.nio.file.Paths
  * ## Phase Architecture:
  *
  * **PHASE 0: Module Resolution** (optional - only if imports present)
- * - Input: Program with UseDeclaration/PubUseDeclaration (or ParsedModule with ParsedUseDecl)
+ * - Input: ParsedModule with ParsedUseDecl
  * - Output: ModuleImportContext + TypedModules
  * - What: Load and type-check imported modules
  * - Files: ModuleLoader.kt, ImportResolver.kt, ModuleTypeChecker.kt
@@ -176,7 +176,6 @@ class TypeChecker(
      * @param program The program to type-check
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
-    @Deprecated("Prefer checkParsedModule(ParsedModule, ...) — v1 Program overload kept for backward compat")
     /**
      * Type-check a ParsedModule directly (v2 entry point).
      *
@@ -900,14 +899,6 @@ class TypeChecker(
     }
 
 
-    /**
-     * Convert a TypeAnnotation to a string for ability impl key.
-     * Delegates to ContentHashComputer for consistency with ability lookup keys.
-     */
-    private fun typeAnnotationToString(typeAnnotation: TypeAnnotation): String {
-        return ContentHashComputer.typeAnnotationToString(typeAnnotation)
-    }
-
     // ========================================================================
     // COMPATIBILITY API - Instance Methods
     // ========================================================================
@@ -1002,15 +993,6 @@ class TypeChecker(
     }
 
     /**
-     * Test if should use bidirectional inference (compatibility API).
-     * Always returns false (new system doesn't use this heuristic).
-     */
-    fun testShouldUseBidirectionalInference(expr: LambdaExpression): Boolean {
-        // New system doesn't use this heuristic
-        return false
-    }
-
-    /**
      * Type check a ParsedModule (v2 entry point).
      *
      * @param enablePrelude If true, auto-imports inherent impls from all stdlib modules.
@@ -1032,11 +1014,10 @@ class TypeChecker(
                     com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
                 }
                 com.mezze.language.ast.TypeCheckResult(
-                    program = Program(emptyList()),
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
-                    importedAbilities = emptyMap(),
-                    importedEffects = emptyMap(),
+                    importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
+                    importedEffects = result.importContext?.importedEffects ?: emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
@@ -1271,15 +1252,13 @@ class TypeChecker(
         }
 
         /**
-         * Get a cached typed module's Program if available (compatibility API).
-         * Returns the Program if the module has been type-checked, null otherwise.
+         * Get a cached typed module's ParsedModule if available (compatibility API).
+         * Returns the ParsedModule if the module has been loaded, null otherwise.
          */
         @JvmStatic
         @Deprecated("Use ModuleResolver.getFromCache(modulePath)?.parsedModule instead")
-        fun getTypedModule(modulePath: String): Program? {
-            // Get from ModuleResolver's cache
-            @Suppress("DEPRECATION")
-            return ModuleResolver.getFromCache(modulePath)?.program
+        fun getTypedModule(modulePath: String): com.mezze.language.parsedast.ParsedModule? {
+            return ModuleResolver.getFromCache(modulePath)?.parsedModule
         }
 
         /**
@@ -1304,24 +1283,16 @@ class TypeChecker(
          * Preload modules into the cache (for compiled JARs).
          *
          * This is used by compiled JARs to preload stdlib and imported modules
-         * to avoid parsing them at runtime. Modules are deserialized from JSON
-         * and loaded into the ModuleResolver's cache.
+         * to avoid parsing them at runtime. Modules are loaded into the
+         * ModuleResolver's cache.
          *
-         * @param modules Map of module paths to typed Programs
+         * @param modules Map of module paths to ParsedModules
          */
         @JvmStatic
-        fun preloadModules(modules: Map<String, Program>) {
+        fun preloadModules(modules: Map<String, com.mezze.language.parsedast.ParsedModule>) {
             val resolver = ModuleResolver.create()
 
-            for ((modulePath, program) in modules) {
-                // Re-parse each module's source to get a v2 ParsedModule.
-                // The v1 Program doesn't carry source, so we build a minimal
-                // ParsedModule with empty decls — the actual exports are populated
-                // by preloadIntoGlobalCache below.
-                val parsedModule = com.mezze.language.parsedast.ParsedModule(
-                    path = modulePath,
-                    decls = emptyList()
-                )
+            for ((modulePath, parsedModule) in modules) {
                 resolver.updateModuleExportsV2(modulePath, parsedModule)
 
                 // Also cache in ModuleTypeChecker's global cache to prevent re-type-checking.

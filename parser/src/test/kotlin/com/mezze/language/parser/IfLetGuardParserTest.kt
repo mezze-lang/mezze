@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
@@ -27,29 +27,29 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         assertEquals(2, matchExpr.cases.size)
 
         val firstCase = matchExpr.cases[0]
         assertEquals(1, firstCase.patterns.size)
-        assertTrue(firstCase.patterns[0] is VariablePattern)
+        assertTrue(firstCase.patterns[0] is ParsedVariablePattern)
 
         // Should have if-let bindings
         assertEquals(1, firstCase.ifLetBindings.size)
         val binding = firstCase.ifLetBindings[0]
-        assertTrue(binding.pattern is ConstructorPattern)
-        val constructorPattern = binding.pattern as ConstructorPattern
+        assertTrue(binding.pattern is ParsedConstructorPattern)
+        val constructorPattern = binding.pattern as ParsedConstructorPattern
         assertEquals("Some", constructorPattern.constructor)
 
         // No regular guard
         assertNull(firstCase.guard)
 
         // Body should reference v
-        assertTrue(firstCase.expression is Identifier)
-        assertEquals("v", (firstCase.expression as Identifier).localName)
+        assertTrue(firstCase.body is ParsedIdentifier)
+        assertEquals("v", (firstCase.body as ParsedIdentifier).localName)
     }
 
     @Test
@@ -60,15 +60,15 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         assertEquals(1, firstCase.ifLetBindings.size)
-        assertTrue(firstCase.ifLetBindings[0].pattern is VariablePattern)
-        assertEquals("result", (firstCase.ifLetBindings[0].pattern as VariablePattern).name)
+        assertTrue(firstCase.ifLetBindings[0].pattern is ParsedVariablePattern)
+        assertEquals("result", (firstCase.ifLetBindings[0].pattern as ParsedVariablePattern).name)
     }
 
     @Test
@@ -79,15 +79,15 @@ class IfLetGuardParserTest {
               _ -> "unknown"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         assertEquals(1, firstCase.ifLetBindings.size)
-        assertTrue(firstCase.ifLetBindings[0].pattern is RecordPattern)
-        val recordPattern = firstCase.ifLetBindings[0].pattern as RecordPattern
+        assertTrue(firstCase.ifLetBindings[0].pattern is ParsedRecordPattern)
+        val recordPattern = firstCase.ifLetBindings[0].pattern as ParsedRecordPattern
         assertEquals(2, recordPattern.entries.size)
     }
 
@@ -99,14 +99,14 @@ class IfLetGuardParserTest {
               _ -> "not matched"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         assertEquals(1, firstCase.ifLetBindings.size)
-        assertTrue(firstCase.ifLetBindings[0].pattern is LiteralPattern)
+        assertTrue(firstCase.ifLetBindings[0].pattern is ParsedLiteralPattern)
     }
 
     @Test
@@ -117,15 +117,15 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         assertEquals(1, firstCase.ifLetBindings.size)
-        assertTrue(firstCase.ifLetBindings[0].expression is Identifier)
-        assertEquals("maybeValue", (firstCase.ifLetBindings[0].expression as Identifier).localName)
+        assertTrue(firstCase.ifLetBindings[0].expr is ParsedIdentifier)
+        assertEquals("maybeValue", (firstCase.ifLetBindings[0].expr as ParsedIdentifier).localName)
     }
 
     @Test
@@ -136,14 +136,14 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         assertEquals(1, firstCase.ifLetBindings.size)
-        assertTrue(firstCase.ifLetBindings[0].expression is MemberAccess)
+        assertTrue(firstCase.ifLetBindings[0].expr is ParsedMemberAccess)
     }
 
     // ========== Backward Compatibility ==========
@@ -156,10 +156,10 @@ class IfLetGuardParserTest {
               _ -> "non-positive"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         // No if-let bindings
@@ -177,10 +177,10 @@ class IfLetGuardParserTest {
               None -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
 
         for (case in matchExpr.cases) {
             assertTrue(case.ifLetBindings.isEmpty())
@@ -200,10 +200,10 @@ class IfLetGuardParserTest {
               _ -> "other"
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         assertEquals(4, matchExpr.cases.size)
 
         // Case 0: literal, no guard
@@ -233,14 +233,14 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val binding = matchExpr.cases[0].ifLetBindings[0]
 
         // Should have source location
-        assertNotNull(binding.sourceLocation)
+        assertNotNull(binding.loc)
     }
 
     // ========== Multiple If-Let Bindings (chained with &&) ==========
@@ -253,10 +253,10 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         // Should have 2 if-let bindings
@@ -264,13 +264,13 @@ class IfLetGuardParserTest {
 
         // First binding: Some {val = a} = getA {x = n}
         val binding1 = firstCase.ifLetBindings[0]
-        assertTrue(binding1.pattern is ConstructorPattern)
-        assertEquals("Some", (binding1.pattern as ConstructorPattern).constructor)
+        assertTrue(binding1.pattern is ParsedConstructorPattern)
+        assertEquals("Some", (binding1.pattern as ParsedConstructorPattern).constructor)
 
         // Second binding: Some {val = b} = getB {y = a}
         val binding2 = firstCase.ifLetBindings[1]
-        assertTrue(binding2.pattern is ConstructorPattern)
-        assertEquals("Some", (binding2.pattern as ConstructorPattern).constructor)
+        assertTrue(binding2.pattern is ParsedConstructorPattern)
+        assertEquals("Some", (binding2.pattern as ParsedConstructorPattern).constructor)
 
         // No regular guard
         assertNull(firstCase.guard)
@@ -284,10 +284,10 @@ class IfLetGuardParserTest {
               _ -> 0
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(code)
+        assertNotNull(module)
 
-        val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
+        val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val firstCase = matchExpr.cases[0]
 
         // Should have 3 if-let bindings

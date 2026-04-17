@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -16,10 +16,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Ord", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(1, ability.dependencies.size)
@@ -27,8 +27,8 @@ class AbilityDependencyParserTest {
         val dependency = ability.dependencies[0]
         assertEquals("Eq", dependency.abilityName)
         assertEquals(1, dependency.typeArgs.size)
-        assertTrue(dependency.typeArgs[0] is IdentifierTypeAnnotation)
-        assertEquals("'a", (dependency.typeArgs[0] as IdentifierTypeAnnotation).name)
+        assertTrue(dependency.typeArgs[0] is ParsedNamedType)
+        assertEquals("'a", (dependency.typeArgs[0] as ParsedNamedType).name)
 
         assertEquals(1, ability.operations.size)
         assertEquals("compare", ability.operations[0].name)
@@ -43,10 +43,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Serializable", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(2, ability.dependencies.size)
@@ -54,12 +54,12 @@ class AbilityDependencyParserTest {
         val showDep = ability.dependencies[0]
         assertEquals("Show", showDep.abilityName)
         assertEquals(1, showDep.typeArgs.size)
-        assertEquals("'a", (showDep.typeArgs[0] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (showDep.typeArgs[0] as ParsedNamedType).name)
 
         val eqDep = ability.dependencies[1]
         assertEquals("Eq", eqDep.abilityName)
         assertEquals(1, eqDep.typeArgs.size)
-        assertEquals("'a", (eqDep.typeArgs[0] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (eqDep.typeArgs[0] as ParsedNamedType).name)
 
         assertEquals(2, ability.operations.size)
     }
@@ -72,10 +72,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("ComplexStore", ability.name)
         assertEquals(listOf("'b", "'a"), ability.typeParams)
         assertEquals(2, ability.dependencies.size)
@@ -83,13 +83,13 @@ class AbilityDependencyParserTest {
         val kvStoreDep = ability.dependencies[0]
         assertEquals("KVStore", kvStoreDep.abilityName)
         assertEquals(2, kvStoreDep.typeArgs.size)
-        assertEquals("'a", (kvStoreDep.typeArgs[0] as IdentifierTypeAnnotation).name)
-        assertEquals("'b", (kvStoreDep.typeArgs[1] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (kvStoreDep.typeArgs[0] as ParsedNamedType).name)
+        assertEquals("'b", (kvStoreDep.typeArgs[1] as ParsedNamedType).name)
 
         val showDep = ability.dependencies[1]
         assertEquals("Show", showDep.abilityName)
         assertEquals(1, showDep.typeArgs.size)
-        assertEquals("'a", (showDep.typeArgs[0] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (showDep.typeArgs[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -100,10 +100,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Logger", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(1, ability.dependencies.size)
@@ -111,8 +111,8 @@ class AbilityDependencyParserTest {
         val dependency = ability.dependencies[0]
         assertEquals("Show", dependency.abilityName)
         assertEquals(1, dependency.typeArgs.size)
-        assertTrue(dependency.typeArgs[0] is IdentifierTypeAnnotation)
-        assertEquals("String", (dependency.typeArgs[0] as IdentifierTypeAnnotation).name)
+        assertTrue(dependency.typeArgs[0] is ParsedNamedType)
+        assertEquals("String", (dependency.typeArgs[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -123,10 +123,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Show", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(0, ability.dependencies.size)
@@ -142,10 +142,10 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val ability = program.items[0] as AbilityDeclaration
+        val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Container", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
         assertEquals(1, ability.dependencies.size)
@@ -155,11 +155,11 @@ class AbilityDependencyParserTest {
         assertEquals(1, dependency.typeArgs.size)
 
         // The type argument should be a type application (Maybe 'a)
-        assertTrue(dependency.typeArgs[0] is TypeApplicationAnnotation)
-        val typeApp = dependency.typeArgs[0] as TypeApplicationAnnotation
+        assertTrue(dependency.typeArgs[0] is ParsedTypeApp)
+        val typeApp = dependency.typeArgs[0] as ParsedTypeApp
         assertEquals("Maybe", typeApp.constructor)
         assertEquals(1, typeApp.args.size)
-        assertEquals("'a", (typeApp.args[0] as IdentifierTypeAnnotation).name)
+        assertEquals("'a", (typeApp.args[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -179,19 +179,19 @@ class AbilityDependencyParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(3, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(3, module.decls.size)
 
-        val eq = program.items[0] as AbilityDeclaration
+        val eq = module.decls[0] as ParsedAbilityDecl
         assertEquals("Eq", eq.name)
         assertEquals(0, eq.dependencies.size)
 
-        val ord = program.items[1] as AbilityDeclaration
+        val ord = module.decls[1] as ParsedAbilityDecl
         assertEquals("Ord", ord.name)
         assertEquals(1, ord.dependencies.size)
         assertEquals("Eq", ord.dependencies[0].abilityName)
 
-        val bounded = program.items[2] as AbilityDeclaration
+        val bounded = module.decls[2] as ParsedAbilityDecl
         assertEquals("Bounded", bounded.name)
         assertEquals(1, bounded.dependencies.size)
         assertEquals("Ord", bounded.dependencies[0].abilityName)

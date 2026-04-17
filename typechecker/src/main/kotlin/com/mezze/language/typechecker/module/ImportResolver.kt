@@ -61,7 +61,7 @@ class ImportResolver(
 ) {
     /**
      * Resolve imports from a ParsedModule (v2 AST entry point).
-     * Converts v2 use decls to v1 UseDeclaration and delegates.
+     * Converts v2 use path to UsePath and processes each import.
      */
     fun resolveImports(module: com.mezze.language.parsedast.ParsedModule): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
@@ -69,12 +69,18 @@ class ImportResolver(
         val loadedModules = mutableMapOf<String, TypedModule>()
 
         for (decl in module.decls) {
-            val (use, isPublic) = when (decl) {
-                is com.mezze.language.parsedast.ParsedUseDecl -> Pair(parsedUseToV1(decl), false)
-                is com.mezze.language.parsedast.ParsedPubUseDecl -> Pair(parsedPubUseToV1(decl), true)
+            val (usePath, alias, isPublic, loc) = when (decl) {
+                is com.mezze.language.parsedast.ParsedUseDecl -> UseInfo(
+                    parsedUsePathToV1(decl.path), decl.alias, false,
+                    SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                )
+                is com.mezze.language.parsedast.ParsedPubUseDecl -> UseInfo(
+                    parsedUsePathToV1(decl.path), decl.alias, true,
+                    SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                )
                 else -> continue
             }
-            val result = processUseDeclaration(use, isPublic)
+            val result = processUseDeclaration(usePath, alias, isPublic, loc)
             when (result) {
                 is ProcessResult.Success -> {
                     importContext = importContext.merge(result.context)
@@ -91,25 +97,15 @@ class ImportResolver(
         }
     }
 
-    /** Convert v2 ParsedUseDecl to v1 UseDeclaration */
-    private fun parsedUseToV1(decl: com.mezze.language.parsedast.ParsedUseDecl): UseDeclaration {
-        return UseDeclaration(
-            path = parsedUsePathToV1(decl.path),
-            alias = decl.alias,
-            sourceLocation = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
-        )
-    }
+    /** Helper data class for destructuring use declarations. */
+    private data class UseInfo(
+        val path: UsePath,
+        val alias: String?,
+        val isPublic: Boolean,
+        val sourceLocation: SourceLocation?
+    )
 
-    /** Convert v2 ParsedPubUseDecl to v1 UseDeclaration */
-    private fun parsedPubUseToV1(decl: com.mezze.language.parsedast.ParsedPubUseDecl): UseDeclaration {
-        return UseDeclaration(
-            path = parsedUsePathToV1(decl.path),
-            alias = decl.alias,
-            sourceLocation = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
-        )
-    }
-
-    /** Convert v2 ParsedUsePath to v1 UsePath */
+    /** Convert v2 ParsedUsePath to UsePath */
     private fun parsedUsePathToV1(path: com.mezze.language.parsedast.ParsedUsePath): UsePath {
         return when (path) {
             is com.mezze.language.parsedast.ParsedUsePath.Module ->
@@ -125,22 +121,24 @@ class ImportResolver(
     }
 
     /**
-     * Process a single UseDeclaration.
+     * Process a single use declaration.
      *
      * This loads the module and extracts the requested imports.
      */
     private fun processUseDeclaration(
-        use: UseDeclaration,
-        isPublic: Boolean
+        usePath: UsePath,
+        alias: String?,
+        isPublic: Boolean,
+        sourceLocation: SourceLocation?
     ): ProcessResult {
-        return when (val path = use.path) {
+        return when (usePath) {
             is ModulePath -> {
                 // Import all exports: use module
-                processModulePath(path, use.alias, isPublic, use.sourceLocation)
+                processModulePath(usePath, alias, isPublic, sourceLocation)
             }
             is SelectivePath -> {
                 // Import specific items: use module::{foo, bar}
-                processSelectivePath(path, isPublic, use.sourceLocation)
+                processSelectivePath(usePath, isPublic, sourceLocation)
             }
         }
     }

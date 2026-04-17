@@ -2,6 +2,7 @@ package com.mezze.language.lsp
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
+import com.mezze.language.parsedast.*
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.Codebase
@@ -57,10 +58,10 @@ class MezzeTextDocumentService(
         val uri: String,
         val content: String,
         val version: Int,
-        val ast: Program?,
         val typeCheckResult: TypeCheckResult?,
         val typeAliases: Map<String, TypeAliasInfo>,  // For pretty printing types with aliases
-        val diagnostics: List<Diagnostic>
+        val diagnostics: List<Diagnostic>,
+        val parsedModule: ParsedModule? = null
     )
 
     /**
@@ -229,10 +230,9 @@ class MezzeTextDocumentService(
                     }
 
                     typeCheckResult = TypeCheckResult(
-                        program = Program(emptyList()),
                         resolvedImports = buildResolvedImports(result.importContext),
-                        importedAbilities = emptyMap(),
-                        importedEffects = emptyMap()
+                        importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
+                        importedEffects = result.importContext?.importedEffects ?: emptyMap()
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
                 }
@@ -262,7 +262,7 @@ class MezzeTextDocumentService(
             ))
         }
 
-        return DocumentState(uri, content, version, null, typeCheckResult, typeAliases, diagnostics)
+        return DocumentState(uri, content, version, typeCheckResult, typeAliases, diagnostics, parsedModule)
     }
 
     /**
@@ -412,16 +412,11 @@ class MezzeTextDocumentService(
         val word = extractWordAt(line, position.character)
         if (word.isNullOrEmpty()) return null
 
-        // Use AST if available (works even with type errors)
-        val ast = state.ast
         val result = state.typeCheckResult
-
-        // Get type declarations for pretty printing variant types
-        val typeDeclarations = (result?.program ?: ast)?.items?.filterIsInstance<TypeDeclaration>() ?: emptyList()
 
         // Helper to format type with aliases
         fun formatType(type: MezzeType): String {
-            return prettyPrintTypeWithAliases(type, state.typeAliases, false, typeDeclarations)
+            return prettyPrintTypeWithAliases(type, state.typeAliases)
         }
 
         // Helper to wrap in syntax-highlighted code block
@@ -429,14 +424,16 @@ class MezzeTextDocumentService(
 
         // If we have type check result, use it for full type info
         if (result != null) {
-            // 1. Look up top-level bindings with inferred types
-            val binding = result.program.items
-                .filterIsInstance<LetBinding>()
-                .filter { it.isSimpleBinding }
-                .find { it.variableName == word }
+            // 1. Look up top-level bindings with inferred types via TypedModule
+            val typedBinding = result.typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.find { it.name == word }
 
-            if (binding != null && binding.inferredType != null) {
-                return codeBlock("$word : ${formatType(binding.inferredType!!)}")
+            if (typedBinding != null) {
+                val bindingType = typedBinding.scheme.type
+                if (bindingType !is MezzeType.VarType) {
+                    return codeBlock("$word : ${formatType(bindingType)}")
+                }
             }
 
             // 2. Look up in resolved imports
@@ -455,30 +452,19 @@ class MezzeTextDocumentService(
                 } else ""
                 return codeBlock("$kindPrefix$word : $typeStr") + fromModule
             }
-
-            // 6. Look for local bindings (function parameters, let bindings in expressions)
-            val localType = findLocalBindingType(word, result.program, position.line + 1)
-            if (localType != null) {
-                return codeBlock("$word : ${formatType(localType)}")
-            }
         }
 
-        // Fallback: use AST for basic info (even when type check failed)
-        val program = result?.program ?: ast ?: return null
+        // Fallback: use parsedModule for basic info (even when type check failed)
+        val parsedModule = state.parsedModule
 
-        // 3. Look up type declarations
-        val typeDecl = program.items
-            .filterIsInstance<TypeDeclaration>()
-            .find { it.name == word }
-
+        // 3. Look up type declarations from parsed module
+        val typeDecl = parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.find { it.name == word }
         if (typeDecl != null) {
             return codeBlock("type $word")
         }
 
-        // 4-5. Look up ability and effect declarations (local or imported)
-        val abilityDecl = program.items
-            .filterIsInstance<AbilityDeclaration>()
-            .find { it.name == word }
+        // 4-5. Look up ability declarations from parsed module or imports
+        val abilityDecl = parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.find { it.name == word }
             ?: result?.importedAbilities?.get(word)
 
         if (abilityDecl != null) {
@@ -488,10 +474,8 @@ class MezzeTextDocumentService(
             return formatAbilityHover(abilityDecl, fromModule)
         }
 
-        // 5b. Look up effect declarations (local or imported)
-        val effectDecl = program.items
-            .filterIsInstance<EffectDeclaration>()
-            .find { it.name == word }
+        // 5b. Look up effect declarations from parsed module or imports
+        val effectDecl = parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == word }
             ?: result?.importedEffects?.get(word)
 
         if (effectDecl != null) {
@@ -501,14 +485,12 @@ class MezzeTextDocumentService(
             return formatEffectHover(effectDecl, fromModule)
         }
 
-        // 7. Look up let bindings by name (without type info)
-        val letBinding = program.items
-            .filterIsInstance<LetBinding>()
-            .filter { it.isSimpleBinding }
-            .find { it.variableName == word }
+        // 7. Look up let bindings from parsed module
+        val letDecl = parsedModule?.decls?.filterIsInstance<ParsedLetDecl>()
+            ?.filter { it.isSimpleBinding }
+            ?.find { it.variableName == word }
 
-        if (letBinding != null) {
-            // Show function/binding without type if type check failed
+        if (letDecl != null) {
             return codeBlock("let $word = ...")
         }
 
@@ -518,7 +500,7 @@ class MezzeTextDocumentService(
     /**
      * Format hover info for an ability declaration, showing all operations.
      */
-    private fun formatAbilityHover(decl: AbilityDeclaration, fromModule: String?): String {
+    private fun formatAbilityHover(decl: ParsedAbilityDecl, fromModule: String?): String {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
         val typeParams = decl.typeParams.joinToString(" ") { "'$it" }
@@ -538,7 +520,7 @@ class MezzeTextDocumentService(
     /**
      * Format hover info for an effect declaration, showing all operations.
      */
-    private fun formatEffectHover(decl: EffectDeclaration, fromModule: String?): String {
+    private fun formatEffectHover(decl: ParsedEffectDecl, fromModule: String?): String {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
         val header = "effect ${decl.name}"
@@ -554,16 +536,16 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Format a TypeAnnotation to a readable string.
+     * Format a ParsedTypeAnnotation to a readable string.
      */
-    private fun formatTypeAnnotation(type: TypeAnnotation): String {
+    private fun formatTypeAnnotation(type: ParsedTypeAnnotation): String {
         return when (type) {
-            is IdentifierTypeAnnotation -> type.name
-            is RecordTypeAnnotation -> {
+            is ParsedNamedType -> type.name
+            is ParsedRecordType -> {
                 if (type.entries.isEmpty()) "{}"
                 else "{ ${type.entries.joinToString(", ") { "${it.name}: ${formatTypeAnnotation(it.type)}" }} }"
             }
-            is FunctionTypeAnnotation -> {
+            is ParsedFunctionType -> {
                 val constraints = if (type.abilityConstraints.isNotEmpty()) {
                     " with ${type.abilityConstraints.joinToString(", ") { c ->
                         c.abilityName + if (c.typeArgs.isNotEmpty()) " ${c.typeArgs.joinToString(" ") { formatTypeAnnotation(it) }}" else ""
@@ -571,188 +553,23 @@ class MezzeTextDocumentService(
                 } else ""
                 "${formatTypeAnnotation(type.paramType)}$constraints -> ${formatTypeAnnotation(type.returnType)}"
             }
-            is TypeApplicationAnnotation -> {
+            is ParsedTypeApp -> {
                 if (type.args.isEmpty()) type.constructor
                 else "${type.constructor} ${type.args.joinToString(" ") { formatTypeAnnotation(it) }}"
             }
-            is SeqTypeAnnotation -> "[${formatTypeAnnotation(type.elementType)}]"
-            is VariantTypeAnnotation -> "| ${type.constructors.joinToString(", ") { it.name }} |"
-            else -> type.toString()
+            is ParsedSeqType -> "[${formatTypeAnnotation(type.elementType)}]"
+            is ParsedVariantType -> "| ${type.constructors.joinToString(", ") { it.name }} |"
+            is ParsedQualifiedType -> "${type.modulePath}::${type.typeName}"
         }
     }
 
     /**
-     * Find a local binding's type by searching through the AST.
-     * This handles function parameters and local let bindings.
+     * Find a local binding's type by searching through the typed module.
+     * TODO: Rewrite for v2 ParsedExpr when LSP is redesigned.
      */
-    private fun findLocalBindingType(name: String, program: Program, line: Int): MezzeType? {
-        for (item in program.items) {
-            if (item is LetBinding) {
-                val type = searchExpressionForBinding(name, item.expression)
-                if (type != null) return type
-            }
-        }
+    private fun findLocalBindingType(name: String, typedModule: com.mezze.language.typedast.TypedModule?, line: Int): MezzeType? {
+        // Stubbed — needs v2 ParsedExpr rewrite for local scope walking.
         return null
-    }
-
-    /**
-     * Search an expression tree for a binding with the given name.
-     * Returns the type if found in the inferred type of the expression context.
-     */
-    private fun searchExpressionForBinding(name: String, expr: Expression): MezzeType? {
-        return when (expr) {
-            is LambdaExpression -> {
-                // Check lambda parameters - extract parameter names
-                val paramNames = when (val params = expr.parameters) {
-                    is UntypedParameters -> params.names
-                    is TypedParameters -> params.recordType.entries.map { it.name }
-                }
-
-                // If the name matches a parameter, try to get the type from the lambda's inferred type
-                if (name in paramNames) {
-                    val funcType = expr.inferredType
-                    if (funcType is MezzeType.FunctionType) {
-                        val paramType = funcType.paramType
-                        if (paramType is MezzeType.RecordType) {
-                            return paramType.fields[name]
-                        }
-                    }
-                }
-
-                // Search body
-                searchExpressionForBinding(name, expr.body)
-            }
-            is FunctionCall -> {
-                searchExpressionForBinding(name, expr.function)
-                    ?: searchExpressionForBinding(name, expr.arguments)
-            }
-            is IfExpression -> {
-                searchExpressionForBinding(name, expr.condition)
-                    ?: searchExpressionForBinding(name, expr.thenBranch)
-                    ?: searchExpressionForBinding(name, expr.elseBranch)
-            }
-            is MatchExpression -> {
-                // Check pattern bindings in match cases
-                for (case in expr.cases) {
-                    for (pattern in case.patterns) {
-                        val patternType = searchPatternForBinding(name, pattern, expr.expression.inferredType)
-                        if (patternType != null) return patternType
-                    }
-                    val bodyType = searchExpressionForBinding(name, case.expression)
-                    if (bodyType != null) return bodyType
-                }
-                searchExpressionForBinding(name, expr.expression)
-            }
-            is DoExpression -> {
-                // Check do block statements
-                for (stmt in expr.statements) {
-                    when (stmt) {
-                        is LetStatement -> {
-                            val pattern = stmt.pattern
-                            if (pattern is VariablePattern && pattern.name == name) {
-                                // LetStatement doesn't have inferredType, check the expression
-                                return stmt.expression.inferredType
-                            }
-                            val exprType = searchExpressionForBinding(name, stmt.expression)
-                            if (exprType != null) return exprType
-                        }
-                        is ExpressionStatement -> {
-                            val exprType = searchExpressionForBinding(name, stmt.expression)
-                            if (exprType != null) return exprType
-                        }
-                    }
-                }
-                // Also search the result expression
-                searchExpressionForBinding(name, expr.result)
-            }
-            is RecordLiteral -> {
-                for (entry in expr.entries) {
-                    if (entry is RecordFieldEntry) {
-                        val value = entry.value
-                        if (value != null) {
-                            val type = searchExpressionForBinding(name, value)
-                            if (type != null) return type
-                        }
-                    }
-                }
-                null
-            }
-            is PerformExpression -> {
-                searchExpressionForBinding(name, expr.expression)
-            }
-            else -> null
-        }
-    }
-
-    /**
-     * Search a pattern for a binding with the given name.
-     * The scrutineeType is the type of the expression being matched against,
-     * which helps us determine the type of bindings in the pattern.
-     */
-    private fun searchPatternForBinding(name: String, pattern: Pattern, scrutineeType: MezzeType?): MezzeType? {
-        return when (pattern) {
-            is VariablePattern -> if (pattern.name == name) scrutineeType else null
-            is ConstructorPattern -> {
-                // For constructor patterns, search the nested record pattern
-                val recordPattern = pattern.recordPattern
-                if (recordPattern != null) {
-                    // Try to extract the variant's data type from the scrutinee
-                    val dataType = if (scrutineeType is MezzeType.VariantType) {
-                        scrutineeType.constructors[pattern.constructor]
-                    } else null
-                    searchPatternForBinding(name, recordPattern, dataType)
-                } else null
-            }
-            is RecordPattern -> {
-                // For record patterns, check each entry
-                for (entry in pattern.entries) {
-                    // If no nested pattern, the entry binds directly to its name
-                    if (entry.pattern == null && entry.name == name) {
-                        // Get the field type from the scrutinee
-                        if (scrutineeType is MezzeType.RecordType) {
-                            return scrutineeType.fields[name]
-                        }
-                    }
-                    // If there's a nested pattern, search it
-                    val nestedPattern = entry.pattern
-                    if (nestedPattern != null) {
-                        val fieldType = if (scrutineeType is MezzeType.RecordType) {
-                            scrutineeType.fields[entry.name]
-                        } else null
-                        val type = searchPatternForBinding(name, nestedPattern, fieldType)
-                        if (type != null) return type
-                    }
-                }
-                null
-            }
-            is SeqPattern -> {
-                // For seq patterns, the element type would be the seq's element type
-                val elementType = if (scrutineeType is MezzeType.SeqType) {
-                    scrutineeType.elementType
-                } else null
-
-                for (elem in pattern.elements) {
-                    val type = searchPatternForBinding(name, elem, elementType)
-                    if (type != null) return type
-                }
-                // Check rest pattern
-                if (pattern.restPattern == name) {
-                    return scrutineeType  // Rest is the same seq type
-                }
-                null
-            }
-            is WildcardPattern -> null
-            is LiteralPattern -> null
-            is StringInterpolationPattern -> {
-                // String interpolation captures are always String type
-                for (part in pattern.parts) {
-                    if (part is StringPatternCapture && part.variableName == name) {
-                        return MezzeType.StringType
-                    }
-                }
-                null
-            }
-        }
     }
 
     /**
@@ -805,34 +622,37 @@ class MezzeTextDocumentService(
         // Find the definition in the AST
         val result = state.typeCheckResult ?: return emptyList()
 
-        // Look for let bindings
-        for (item in result.program.items) {
-            when (item) {
-                is LetBinding -> {
-                    val loc = item.expression.sourceLocation
-                    if (item.isSimpleBinding && item.variableName == word && loc != null) {
-                        return listOf(Location(
-                            state.uri,
-                            Range(
-                                Position(loc.line - 1, loc.column - 1),
-                                Position(loc.line - 1, loc.column + word.length - 1)
-                            )
-                        ))
+        // Look for definitions in parsed module
+        val parsedModule = state.parsedModule
+        if (parsedModule != null) {
+            for (decl in parsedModule.decls) {
+                when (decl) {
+                    is ParsedLetDecl -> {
+                        if (decl.isSimpleBinding && decl.variableName == word) {
+                            val loc = decl.loc
+                            return listOf(Location(
+                                state.uri,
+                                Range(
+                                    Position(loc.startLine - 1, loc.startCol - 1),
+                                    Position(loc.startLine - 1, loc.startCol + word.length - 1)
+                                )
+                            ))
+                        }
                     }
-                }
-                is TypeDeclaration -> {
-                    if (item.name == word && item.sourceLocation != null) {
-                        val loc = item.sourceLocation!!
-                        return listOf(Location(
-                            state.uri,
-                            Range(
-                                Position(loc.line - 1, loc.column - 1),
-                                Position(loc.line - 1, loc.column + word.length - 1)
-                            )
-                        ))
+                    is ParsedTypeDecl -> {
+                        if (decl.name == word) {
+                            val loc = decl.loc
+                            return listOf(Location(
+                                state.uri,
+                                Range(
+                                    Position(loc.startLine - 1, loc.startCol - 1),
+                                    Position(loc.startLine - 1, loc.startCol + word.length - 1)
+                                )
+                            ))
+                        }
                     }
+                    else -> {}
                 }
-                else -> {}
             }
         }
 
@@ -927,9 +747,6 @@ class MezzeTextDocumentService(
         val recordFields = extractRecordParameterFields(funcType)
         if (recordFields.isEmpty()) return emptyList()
 
-        // Get type declarations for pretty printing
-        val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
-
         val items = mutableListOf<CompletionItem>()
 
         // First item: complete ALL fields at once (most useful)
@@ -949,7 +766,7 @@ class MezzeTextDocumentService(
 
         // Also add individual field completions
         recordFields.forEachIndexed { index, (fieldName, fieldType) ->
-            val typeStr = prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)
+            val typeStr = prettyPrintTypeWithAliases(fieldType, state.typeAliases)
             items.add(CompletionItem(fieldName).apply {
                 kind = CompletionItemKind.Field
                 detail = typeStr
@@ -982,16 +799,13 @@ class MezzeTextDocumentService(
             else -> null
         } ?: return emptyList()
 
-        val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
-            ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
-
         // Just suggest the constructor names - when user types "field = " and triggers completion,
         // they want the value, not "field = value" again
         return variantType.constructors.entries.mapIndexed { constructorIndex, (constructorName, payload) ->
             CompletionItem(constructorName).apply {
                 kind = CompletionItemKind.EnumMember
                 sortText = "2_${fieldIndex.toString().padStart(3, '0')}_${constructorIndex.toString().padStart(3, '0')}"
-                detail = "$fieldName: ${prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)}"
+                detail = "$fieldName: ${prettyPrintTypeWithAliases(fieldType, state.typeAliases)}"
 
                 if (payload != null) {
                     // Constructor has payload
@@ -1076,14 +890,14 @@ class MezzeTextDocumentService(
      * Find the type of a function by name.
      */
     private fun findFunctionType(funcName: String, result: TypeCheckResult): MezzeType? {
-        // Check local bindings
-        val binding = result.program.items
-            .filterIsInstance<LetBinding>()
-            .filter { it.isSimpleBinding }
-            .find { it.variableName == funcName }
+        // Check local bindings via TypedModule
+        val typedBinding = result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == funcName }
 
-        if (binding?.inferredType != null) {
-            return binding.inferredType
+        if (typedBinding != null) {
+            val bindingType = typedBinding.scheme.type
+            if (bindingType !is MezzeType.VarType) return bindingType
         }
 
         // Check imports
@@ -1134,10 +948,9 @@ class MezzeTextDocumentService(
         val result = state.typeCheckResult
             ?: lastSuccessfulResult[state.uri]
             ?: return emptyList()
-        val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
 
         fun formatType(type: MezzeType): String {
-            return prettyPrintTypeWithAliases(type, state.typeAliases, false, typeDeclarations)
+            return prettyPrintTypeWithAliases(type, state.typeAliases)
         }
 
         // Find the receiver's type
@@ -1154,76 +967,43 @@ class MezzeTextDocumentService(
 
         // 1. Collect ability methods available for this type
         // Use both imported abilities (from prelude) and local program abilities
-        val allAbilities = result.importedAbilities.values +
-            result.program.items.filterIsInstance<AbilityDeclaration>()
+        val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
+        val allAbilities = result.importedAbilities.values + localAbilities
 
-        // Check both local impls and builtin ability impls
-        val localImpls = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
-
+        // Check builtin ability impls
         for (abilityDecl in allAbilities) {
-            val hasImpl = isBuiltinAbilityForType(abilityDecl.name, baseType) ||
-                localImpls.any { impl ->
-                    impl.abilityName == abilityDecl.name && impl.targetTypes.any { target ->
-                        formatTypeAnnotation(target).contains(typeName ?: "")
-                    }
-                }
+            if (!isBuiltinAbilityForType(abilityDecl.name, baseType)) continue
 
-            if (hasImpl) {
-                for (op in abilityDecl.operations) {
-                    if (op.name in addedMethods) continue
-                    // Skip construction methods (no `it` param)
-                    val paramStr = formatTypeAnnotation(op.paramType)
-                    if (!paramStr.contains("it")) continue
+            for (op in abilityDecl.operations) {
+                if (op.name in addedMethods) continue
+                // Use v2 parsed operation types
+                val paramStr = formatTypeAnnotation(op.paramType)
+                if (!paramStr.contains("it")) continue
 
-                    val argFields = extractNonItFields(op.paramType)
-                    val snippet = if (argFields.isEmpty()) {
-                        "${op.name} {}"
-                    } else {
-                        val fieldSnippets = argFields.mapIndexed { i, name ->
-                            "$name = \${${i + 1}:}"
-                        }.joinToString(", ")
-                        "${op.name} { $fieldSnippets }"
-                    }
-
-                    items.add(CompletionItem(op.name).apply {
-                        kind = CompletionItemKind.Method
-                        detail = "${abilityDecl.name}.${op.name}"
-                        documentation = Either.forLeft(
-                            "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
-                        )
-                        insertText = snippet
-                        insertTextFormat = InsertTextFormat.Snippet
-                    })
-                    addedMethods.add(op.name)
-                }
+                items.add(CompletionItem(op.name).apply {
+                    kind = CompletionItemKind.Method
+                    detail = "${abilityDecl.name}.${op.name}"
+                    documentation = Either.forLeft("${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}")
+                    insertText = "${op.name} {}"
+                    insertTextFormat = InsertTextFormat.Snippet
+                })
+                addedMethods.add(op.name)
             }
         }
 
-        // 2. Collect inherent methods for this type (both local and imported)
-        for (impl in localImpls) {
-            if (!impl.isInherent) continue
-            val implTypeName = impl.targetTypes.firstOrNull()?.let { formatTypeAnnotation(it) }
-            if (implTypeName != null && (implTypeName == typeName || implTypeName.startsWith(typeName ?: ""))) {
-                for (op in impl.operations) {
-                    if (op.name in addedMethods) continue
-                    val argFields = extractNonItFieldsFromImpl(op)
-                    val snippet = if (argFields.isEmpty()) {
-                        "${op.name} {}"
-                    } else {
-                        val fieldSnippets = argFields.mapIndexed { i, name ->
-                            "$name = \${${i + 1}:}"
-                        }.joinToString(", ")
-                        "${op.name} { $fieldSnippets }"
-                    }
-
-                    items.add(CompletionItem(op.name).apply {
-                        kind = CompletionItemKind.Method
-                        detail = "inherent method"
-                        insertText = snippet
-                        insertTextFormat = InsertTextFormat.Snippet
-                    })
-                    addedMethods.add(op.name)
-                }
+        // 2. Collect inherent methods from parsed module
+        val parsedImpls = state.parsedModule?.decls?.filterIsInstance<ParsedImplAbilityDecl>() ?: emptyList()
+        for (impl in parsedImpls) {
+            if (impl.target !is ParsedImplTarget.Inherent) continue
+            for (op in impl.operations) {
+                if (op.name in addedMethods) continue
+                items.add(CompletionItem(op.name).apply {
+                    kind = CompletionItemKind.Method
+                    detail = "inherent method"
+                    insertText = "${op.name} {}"
+                    insertTextFormat = InsertTextFormat.Snippet
+                })
+                addedMethods.add(op.name)
             }
         }
 
@@ -1274,41 +1054,24 @@ class MezzeTextDocumentService(
         return com.mezze.language.ast.BuiltinAbilities.typeHasAutomaticImplementation(type, abilityName)
     }
 
-    /** Extract non-`it` field names from an ability operation's param type annotation. */
-    private fun extractNonItFields(paramType: TypeAnnotation): List<String> {
-        if (paramType is RecordTypeAnnotation) {
-            return paramType.entries.filter { it.name != "it" }.map { it.name }
-        }
-        return emptyList()
-    }
-
-    /** Extract non-`it` field names from an impl operation's lambda params. */
-    private fun extractNonItFieldsFromImpl(op: ImplAbilityOperation): List<String> {
-        val lambda = op.implementation
-        if (lambda is LambdaExpression && lambda.parameters is RecordLiteral) {
-            val params = lambda.parameters as RecordLiteral
-            return params.entries.filterIsInstance<RecordFieldEntry>()
-                .map { it.name }
-                .filter { it != "it" }
-        }
-        return emptyList()
-    }
 
     /** Find the type of a receiver identifier at a given position. */
     private fun findReceiverType(name: String, result: TypeCheckResult, position: Position): MezzeType? {
-        // Check top-level bindings
-        val binding = result.program.items
-            .filterIsInstance<LetBinding>()
-            .filter { it.isSimpleBinding }
-            .find { it.variableName == name }
-        if (binding?.inferredType != null) return binding.inferredType
+        // Check top-level bindings via TypedModule
+        val typedBinding = result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == name }
+        if (typedBinding != null) {
+            val bindingType = typedBinding.scheme.type
+            if (bindingType !is MezzeType.VarType) return bindingType
+        }
 
         // Check resolved imports
         val resolvedImport = result.resolvedImports.find { it.localName == name }
         if (resolvedImport != null) return resolvedImport.type
 
         // Check local bindings
-        return findLocalBindingType(name, result.program, position.line + 1)
+        return findLocalBindingType(name, result.typedModule, position.line + 1)
     }
 
     private fun getKeywordCompletions(): List<CompletionItem> {
@@ -1327,54 +1090,45 @@ class MezzeTextDocumentService(
     }
 
     private fun getBindingCompletions(state: DocumentState): List<CompletionItem> {
-        // Use AST or type check result - works even with type errors
-        val program = state.typeCheckResult?.program ?: state.ast ?: return emptyList()
-        val typeDeclarations = program.items.filterIsInstance<TypeDeclaration>()
-
+        val typedModule = state.typeCheckResult?.typedModule
+        val parsedModule = state.parsedModule
         val items = mutableListOf<CompletionItem>()
 
-        // Add let bindings (functions and values)
-        program.items
-            .filterIsInstance<LetBinding>()
-            .filter { it.isSimpleBinding }
-            .forEach { binding ->
-                items.add(CompletionItem(binding.variableName).apply {
+        // Add let bindings (functions and values) from TypedModule
+        typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.forEach { decl ->
+                items.add(CompletionItem(decl.name).apply {
                     kind = CompletionItemKind.Function
-                    detail = binding.inferredType?.let {
-                        prettyPrintTypeWithAliases(it, state.typeAliases, false, typeDeclarations)
+                    detail = decl.scheme.type.let {
+                        prettyPrintTypeWithAliases(it, state.typeAliases)
                     }
                 })
             }
 
-        // Add type declarations
-        program.items
-            .filterIsInstance<TypeDeclaration>()
-            .forEach { typeDecl ->
-                items.add(CompletionItem(typeDecl.name).apply {
-                    kind = CompletionItemKind.Struct
-                    detail = "type"
-                })
-            }
+        // Add type declarations from parsed module
+        parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.forEach { typeDecl ->
+            items.add(CompletionItem(typeDecl.name).apply {
+                kind = CompletionItemKind.Struct
+                detail = "type"
+            })
+        }
 
-        // Add effect declarations
-        program.items
-            .filterIsInstance<EffectDeclaration>()
-            .forEach { effectDecl ->
-                items.add(CompletionItem(effectDecl.name).apply {
-                    kind = CompletionItemKind.Interface
-                    detail = "effect"
-                })
-            }
+        // Add effect declarations from parsed module
+        parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach { effectDecl ->
+            items.add(CompletionItem(effectDecl.name).apply {
+                kind = CompletionItemKind.Interface
+                detail = "effect"
+            })
+        }
 
-        // Add ability declarations
-        program.items
-            .filterIsInstance<AbilityDeclaration>()
-            .forEach { abilityDecl ->
-                items.add(CompletionItem(abilityDecl.name).apply {
-                    kind = CompletionItemKind.Interface
-                    detail = "ability"
-                })
-            }
+        // Add ability declarations from parsed module
+        parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach { abilityDecl ->
+            items.add(CompletionItem(abilityDecl.name).apply {
+                kind = CompletionItemKind.Interface
+                detail = "ability"
+            })
+        }
 
         // Add imports (if type check succeeded)
         state.typeCheckResult?.resolvedImports?.forEach { import ->
@@ -1386,7 +1140,7 @@ class MezzeTextDocumentService(
                     ImportKind.ABILITY -> CompletionItemKind.Interface
                     ImportKind.PERFORMER -> CompletionItemKind.Class
                 }
-                detail = prettyPrintTypeWithAliases(import.type, state.typeAliases, false, typeDeclarations)
+                detail = prettyPrintTypeWithAliases(import.type, state.typeAliases)
             })
         }
 
@@ -1395,171 +1149,11 @@ class MezzeTextDocumentService(
 
     /**
      * Get local variable completions - variables in scope at the current position.
-     * This includes function parameters, let bindings in do blocks, and pattern bindings.
+     * TODO: Rewrite for v2 ParsedExpr when LSP is redesigned.
      */
     private fun getLocalVariableCompletions(state: DocumentState, position: Position): List<CompletionItem> {
-        val program = state.typeCheckResult?.program ?: state.ast ?: return emptyList()
-        val items = mutableListOf<CompletionItem>()
-        val line = position.line + 1  // Convert to 1-indexed
-
-        // Find which let binding contains our position and collect its local variables
-        for (item in program.items) {
-            if (item is LetBinding) {
-                val loc = item.expression.sourceLocation
-                // Check if position is within this binding's expression
-                if (loc != null && line >= loc.line) {
-                    collectLocalVariables(item.expression, line, items, state)
-                }
-            }
-        }
-
-        return items.distinctBy { it.label }  // Remove duplicates
-    }
-
-    /**
-     * Collect local variables from an expression that are in scope at the given line.
-     */
-    private fun collectLocalVariables(
-        expr: Expression,
-        line: Int,
-        items: MutableList<CompletionItem>,
-        state: DocumentState
-    ) {
-        val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
-            ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
-
-        when (expr) {
-            is LambdaExpression -> {
-                // Add lambda parameters
-                val paramNames = when (val params = expr.parameters) {
-                    is UntypedParameters -> params.names
-                    is TypedParameters -> params.recordType.entries.map { it.name }
-                }
-
-                // Get parameter types from lambda's inferred type if available
-                val paramTypes = if (expr.inferredType is MezzeType.FunctionType) {
-                    val funcType = expr.inferredType as MezzeType.FunctionType
-                    if (funcType.paramType is MezzeType.RecordType) {
-                        (funcType.paramType as MezzeType.RecordType).fields
-                    } else emptyMap()
-                } else emptyMap()
-
-                paramNames.forEach { name ->
-                    items.add(CompletionItem(name).apply {
-                        kind = CompletionItemKind.Variable
-                        detail = paramTypes[name]?.let {
-                            prettyPrintTypeWithAliases(it, state.typeAliases, false, typeDeclarations)
-                        } ?: "parameter"
-                    })
-                }
-
-                // Recurse into body
-                collectLocalVariables(expr.body, line, items, state)
-            }
-            is DoExpression -> {
-                // Add let bindings from do block
-                for (stmt in expr.statements) {
-                    when (stmt) {
-                        is LetStatement -> {
-                            if (stmt.pattern is VariablePattern) {
-                                val name = (stmt.pattern as VariablePattern).name
-                                items.add(CompletionItem(name).apply {
-                                    kind = CompletionItemKind.Variable
-                                    detail = stmt.expression.inferredType?.let {
-                                        prettyPrintTypeWithAliases(it, state.typeAliases, false, typeDeclarations)
-                                    }
-                                })
-                            }
-                            collectLocalVariables(stmt.expression, line, items, state)
-                        }
-                        is ExpressionStatement -> {
-                            collectLocalVariables(stmt.expression, line, items, state)
-                        }
-                    }
-                }
-                collectLocalVariables(expr.result, line, items, state)
-            }
-            is MatchExpression -> {
-                collectLocalVariables(expr.expression, line, items, state)
-                for (case in expr.cases) {
-                    // Add pattern bindings
-                    for (pattern in case.patterns) {
-                        collectPatternBindings(pattern, items, state)
-                    }
-                    collectLocalVariables(case.expression, line, items, state)
-                }
-            }
-            is IfExpression -> {
-                collectLocalVariables(expr.condition, line, items, state)
-                collectLocalVariables(expr.thenBranch, line, items, state)
-                collectLocalVariables(expr.elseBranch, line, items, state)
-            }
-            is FunctionCall -> {
-                collectLocalVariables(expr.function, line, items, state)
-                collectLocalVariables(expr.arguments, line, items, state)
-            }
-            is RecordLiteral -> {
-                for (entry in expr.entries) {
-                    if (entry is RecordFieldEntry) {
-                        val value = entry.value
-                        if (value != null) {
-                            collectLocalVariables(value, line, items, state)
-                        }
-                    }
-                }
-            }
-            is PerformExpression -> {
-                collectLocalVariables(expr.expression, line, items, state)
-            }
-            else -> {}
-        }
-    }
-
-    /**
-     * Collect variable bindings from a pattern.
-     */
-    private fun collectPatternBindings(
-        pattern: Pattern,
-        items: MutableList<CompletionItem>,
-        state: DocumentState
-    ) {
-        when (pattern) {
-            is VariablePattern -> {
-                items.add(CompletionItem(pattern.name).apply {
-                    kind = CompletionItemKind.Variable
-                    detail = "pattern binding"
-                })
-            }
-            is ConstructorPattern -> {
-                pattern.recordPattern?.let { collectPatternBindings(it, items, state) }
-            }
-            is RecordPattern -> {
-                for (entry in pattern.entries) {
-                    // Shorthand {x} binds x
-                    val nestedPattern = entry.pattern
-                    if (nestedPattern == null) {
-                        items.add(CompletionItem(entry.name).apply {
-                            kind = CompletionItemKind.Variable
-                            detail = "pattern binding"
-                        })
-                    } else {
-                        collectPatternBindings(nestedPattern, items, state)
-                    }
-                }
-            }
-            is SeqPattern -> {
-                for (elem in pattern.elements) {
-                    collectPatternBindings(elem, items, state)
-                }
-                pattern.restPattern?.let { restName ->
-                    items.add(CompletionItem(restName).apply {
-                        kind = CompletionItemKind.Variable
-                        detail = "rest pattern"
-                    })
-                }
-            }
-            else -> {}
-        }
+        // Stubbed — v1 Expression tree walking removed. Needs v2 ParsedExpr rewrite.
+        return emptyList()
     }
 
     /**
@@ -1660,14 +1254,14 @@ class MezzeTextDocumentService(
         // Clean up the expression name (might have braces or other syntax)
         val cleanName = exprName.trim().split(Regex("""\s*\{""")).firstOrNull()?.trim() ?: exprName
 
-        // Check top-level bindings
-        val binding = result.program.items
-            .filterIsInstance<LetBinding>()
-            .filter { it.isSimpleBinding }
-            .find { it.variableName == cleanName }
+        // Check top-level bindings via TypedModule
+        val typedBinding = result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == cleanName }
 
-        if (binding?.inferredType != null) {
-            return unwrapType(binding.inferredType!!)
+        if (typedBinding != null) {
+            val bindingType = typedBinding.scheme.type
+            if (bindingType !is MezzeType.VarType) return unwrapType(bindingType)
         }
 
         // Check imports
@@ -1676,35 +1270,29 @@ class MezzeTextDocumentService(
             return unwrapType(import.type)
         }
 
-        // Search for the variable in function parameters
+        // Search for the variable in function parameters via TypedModule
         // This handles cases like: let f = {x: MyType} -> match x is ...
-        for (item in result.program.items) {
-            if (item is LetBinding) {
-                val paramType = findParameterTypeInBinding(cleanName, item)
+        result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.forEach { decl ->
+                val paramType = findParameterTypeInTypedBinding(cleanName, decl)
                 if (paramType != null) {
                     return unwrapType(paramType)
                 }
             }
-        }
 
         return null
     }
 
     /**
-     * Find a parameter type in a let binding's lambda expression.
+     * Find a parameter type in a typed let binding's function type.
      */
-    private fun findParameterTypeInBinding(paramName: String, binding: LetBinding): MezzeType? {
-        // Get the binding's expression - if it's a lambda, check its parameters
-        val expr = binding.expression
-        if (expr is LambdaExpression) {
-            // Lambda has inferredType which is the full function type
-            val funcType = expr.inferredType
-            if (funcType is MezzeType.FunctionType) {
-                val paramType = funcType.paramType
-                if (paramType is MezzeType.RecordType) {
-                    // Record parameter: {x: Int, y: String} -> ...
-                    return paramType.fields[paramName]
-                }
+    private fun findParameterTypeInTypedBinding(paramName: String, decl: com.mezze.language.typedast.TypedLetDecl): MezzeType? {
+        val funcType = decl.scheme.type
+        if (funcType is MezzeType.FunctionType) {
+            val paramType = funcType.paramType
+            if (paramType is MezzeType.RecordType) {
+                return paramType.fields[paramName]
             }
         }
         return null
@@ -1734,8 +1322,6 @@ class MezzeTextDocumentService(
         } ?: return emptyList()
 
         val items = mutableListOf<CompletionItem>()
-        val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
-            ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
 
         variantType.constructors.entries.forEachIndexed { index, (name, payload) ->
             val item = CompletionItem(name).apply {
@@ -1752,7 +1338,7 @@ class MezzeTextDocumentService(
                             " { $fields }"
                         }
                         else -> {
-                            val typeStr = prettyPrintTypeWithAliases(payload, state.typeAliases, false, typeDeclarations)
+                            val typeStr = prettyPrintTypeWithAliases(payload, state.typeAliases)
                             " { \${1:value}: $typeStr }"
                         }
                     }
@@ -1785,22 +1371,12 @@ class MezzeTextDocumentService(
      */
     private fun findVariantTypeFromApplication(typeApp: MezzeType.TypeApplication, state: DocumentState): MezzeType.VariantType? {
         val typeName = typeApp.constructor
-        val program = state.typeCheckResult?.program ?: state.ast ?: return null
+        val parsedModule = state.parsedModule ?: return null
 
-        // Find the type declaration
-        val typeDecl = program.items
-            .filterIsInstance<TypeDeclaration>()
-            .find { it.name == typeName }
-
-        // Check the type definition
+        val typeDecl = parsedModule.decls.filterIsInstance<ParsedTypeDecl>().find { it.name == typeName }
         return when (val def = typeDecl?.definition) {
-            is VariantDefinition -> {
-                // Build variant type from declaration
-                // Note: VariantConstructorDef has dataType (TypeAnnotation), not a MezzeType
-                // For now, we just track the constructor names - payload handling would need type resolution
-                val constructors = def.constructors.associate { constructor ->
-                    constructor.name to null  // Simplified - we don't resolve TypeAnnotation to MezzeType here
-                }
+            is ParsedVariantDef -> {
+                val constructors = def.constructors.associate { it.name to null as MezzeType? }
                 MezzeType.VariantType(constructors, null)
             }
             else -> null
@@ -1812,31 +1388,30 @@ class MezzeTextDocumentService(
      * Useful for general code completion where a variant value is expected.
      */
     private fun getVariantConstructorCompletions(state: DocumentState): List<CompletionItem> {
-        val program = state.typeCheckResult?.program ?: state.ast ?: return emptyList()
-        val typeDeclarations = program.items.filterIsInstance<TypeDeclaration>()
-
+        val parsedModule = state.parsedModule
         val items = mutableListOf<CompletionItem>()
 
         // Add constructors from local type declarations
-        for (typeDecl in typeDeclarations) {
-            when (val def = typeDecl.definition) {
-                is VariantDefinition -> {
-                    for (constructor in def.constructors) {
-                        items.add(CompletionItem(constructor.name).apply {
-                            kind = CompletionItemKind.EnumMember
-                            detail = typeDecl.name
+        if (parsedModule != null) {
+            for (decl in parsedModule.decls.filterIsInstance<ParsedTypeDecl>()) {
+                when (val def = decl.definition) {
+                    is ParsedVariantDef -> {
+                        for (constructor in def.constructors) {
+                            items.add(CompletionItem(constructor.name).apply {
+                                kind = CompletionItemKind.EnumMember
+                                detail = decl.name
 
-                            if (constructor.dataType != null) {
-                                // Has payload - suggest with braces
-                                insertText = "${constructor.name} { \${1:} }"
-                                insertTextFormat = InsertTextFormat.Snippet
-                            } else {
-                                insertText = constructor.name
-                            }
-                        })
+                                if (constructor.dataType != null) {
+                                    insertText = "${constructor.name} { \${1:} }"
+                                    insertTextFormat = InsertTextFormat.Snippet
+                                } else {
+                                    insertText = constructor.name
+                                }
+                            })
+                        }
                     }
+                    else -> {}
                 }
-                else -> {}
             }
         }
 
@@ -1912,32 +1487,43 @@ class MezzeTextDocumentService(
 
             val symbols = mutableListOf<Either<SymbolInformation, DocumentSymbol>>()
 
-            for (item in result.program.items) {
-                val symbol = when (item) {
-                    is LetBinding -> if (item.isSimpleBinding) createDocumentSymbol(
-                        name = item.variableName,
+            // Add let binding symbols from TypedModule
+            result.typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.forEach { decl ->
+                    val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                    val symbol = createDocumentSymbol(
+                        name = decl.name,
                         kind = SymbolKind.Function,
-                        location = item.expression.sourceLocation,
-                        detail = item.inferredType?.let { prettyPrintType(it) }
-                    ) else null
-                    is TypeDeclaration -> createDocumentSymbol(
-                        name = item.name,
-                        kind = SymbolKind.Struct,
-                        location = item.sourceLocation
+                        location = loc,
+                        detail = prettyPrintType(decl.scheme.type)
                     )
-                    is EffectDeclaration -> createDocumentSymbol(
-                        name = item.name,
-                        kind = SymbolKind.Interface,
-                        location = item.sourceLocation
-                    )
-                    is AbilityDeclaration -> createDocumentSymbol(
-                        name = item.name,
-                        kind = SymbolKind.Interface,
-                        location = item.sourceLocation
-                    )
-                    else -> null
+                    if (symbol != null) {
+                        symbols.add(Either.forRight(symbol))
+                    }
                 }
 
+            // Add effect symbols from parsed module
+            state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach { decl ->
+                val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                val symbol = createDocumentSymbol(
+                    name = decl.name,
+                    kind = SymbolKind.Interface,
+                    location = loc
+                )
+                if (symbol != null) {
+                    symbols.add(Either.forRight(symbol))
+                }
+            }
+
+            // Add ability symbols from parsed module
+            state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach { decl ->
+                val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                val symbol = createDocumentSymbol(
+                    name = decl.name,
+                    kind = SymbolKind.Interface,
+                    location = loc
+                )
                 if (symbol != null) {
                     symbols.add(Either.forRight(symbol))
                 }

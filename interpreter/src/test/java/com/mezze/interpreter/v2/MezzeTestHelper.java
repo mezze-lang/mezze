@@ -3,7 +3,6 @@ package com.mezze.interpreter.v2;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
 import com.mezze.interpreter.v2.values.*;
-import com.mezze.language.ast.Program;
 import com.mezze.language.parser.MezzeParser;
 import com.mezze.language.typechecker.TypeChecker;
 import org.graalvm.polyglot.Context;
@@ -80,23 +79,16 @@ public final class MezzeTestHelper {
     }
 
     /**
-     * Parse source code to AST (without type-checking).
+     * Parse and type-check source code, returning the TypeCheckResult.
      */
-    public static Program parse(String sourceCode) {
-        return parser.parse(sourceCode, true, null);
-    }
-
-    /**
-     * Parse and type-check source code.
-     */
-    public static Program typeCheck(String sourceCode) {
+    public static com.mezze.language.ast.TypeCheckResult typeCheck(String sourceCode) {
         return typeCheck(sourceCode, null);
     }
 
     /**
      * Parse and type-check source code with custom project root.
      */
-    public static Program typeCheck(String sourceCode, Path projectRoot) {
+    public static com.mezze.language.ast.TypeCheckResult typeCheck(String sourceCode, Path projectRoot) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -105,8 +97,7 @@ public final class MezzeTestHelper {
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack();
 
         var parsedModule = parser.parseParsedModule(sourceCode, "<test>");
-        var result = typeChecker.typeCheck(parsedModule, root);
-        return new Program(java.util.Collections.emptyList(), java.util.Collections.emptyList()); // v1 Program no longer used — return empty
+        return typeChecker.typeCheck(parsedModule, root);
     }
 
     // ========================

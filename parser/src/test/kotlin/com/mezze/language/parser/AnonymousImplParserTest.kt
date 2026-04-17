@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -16,13 +16,13 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(1, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
 
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val impl = module.decls[0] as ParsedImplAbilityDecl
         assertTrue(impl.isInherent)
         assertEquals(1, impl.targetTypes.size)
-        assertEquals("Int", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
         assertEquals("double", impl.operations[0].name)
     }
@@ -36,8 +36,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals(2, impl.operations.size)
@@ -53,11 +53,11 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
-        assertEquals("Str", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Str", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals(1, impl.operations.size)
         assertEquals("pad", impl.operations[0].name)
     }
@@ -70,15 +70,15 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals(1, impl.operations.size)
         val op = impl.operations[0]
         assertEquals("to_float", op.name)
         assertNotNull(op.returnType)
-        assertEquals("Float", (op.returnType as IdentifierTypeAnnotation).name)
+        assertEquals("Float", (op.returnType as ParsedNamedType).name)
     }
 
     @Test
@@ -89,8 +89,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals(1, impl.operations.size)
@@ -113,16 +113,16 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(3, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(3, module.decls.size)
 
-        assertTrue(program.items[0] is AbilityDeclaration)
+        assertTrue(module.decls[0] is ParsedAbilityDecl)
 
-        val namedImpl = program.items[1] as ImplAbilityDeclaration
+        val namedImpl = module.decls[1] as ParsedImplAbilityDecl
         assertFalse(namedImpl.isInherent)
         assertEquals("Show", namedImpl.abilityName)
 
-        val anonImpl = program.items[2] as ImplAbilityDeclaration
+        val anonImpl = module.decls[2] as ParsedImplAbilityDecl
         assertTrue(anonImpl.isInherent)
     }
 
@@ -136,12 +136,12 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val impl = module.decls[1] as ParsedImplAbilityDecl
         assertTrue(impl.isInherent)
-        assertEquals("Point", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Point", (impl.targetTypes[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -152,8 +152,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertEquals(emptyList<String>(), impl.forallVars)
         assertTrue(impl.associatedTypeBindings.isEmpty())
@@ -167,10 +167,10 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
-        assertNotNull(impl.sourceLocation)
+        assertNotNull(impl.loc)
     }
 
     @Test
@@ -183,8 +183,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals(3, impl.operations.size)
@@ -205,16 +205,16 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val intImpl = program.items[0] as ImplAbilityDeclaration
+        val intImpl = module.decls[0] as ParsedImplAbilityDecl
         assertTrue(intImpl.isInherent)
-        assertEquals("Int", (intImpl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Int", (intImpl.targetTypes[0] as ParsedNamedType).name)
 
-        val strImpl = program.items[1] as ImplAbilityDeclaration
+        val strImpl = module.decls[1] as ParsedImplAbilityDecl
         assertTrue(strImpl.isInherent)
-        assertEquals("Str", (strImpl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Str", (strImpl.targetTypes[0] as ParsedNamedType).name)
     }
 
     @Test
@@ -225,8 +225,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals(1, impl.operations.size)
@@ -245,10 +245,10 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
-        assertTrue(impl.target is ImplTarget.Inherent)
+        assertTrue(impl.target is ParsedImplTarget.Inherent)
         assertNull(impl.abilityName)
         assertNull(impl.abilityRef)
     }
@@ -265,10 +265,10 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[1] as ParsedImplAbilityDecl
 
-        assertTrue(impl.target is ImplTarget.Named)
+        assertTrue(impl.target is ParsedImplTarget.Named)
         assertEquals("Show", impl.abilityName)
         assertNotNull(impl.abilityRef)
         assertFalse(impl.isInherent)
@@ -285,11 +285,11 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[1] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[1] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
-        assertEquals("Color", (impl.targetTypes[0] as IdentifierTypeAnnotation).name)
+        assertEquals("Color", (impl.targetTypes[0] as ParsedNamedType).name)
         assertEquals(2, impl.operations.size)
     }
 
@@ -301,12 +301,12 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         val body = impl.operations[0].implementation
-        assertTrue(body is LambdaExpression)
+        assertTrue(body is ParsedLambda)
     }
 
     @Test
@@ -323,15 +323,15 @@ class AnonymousImplParserTest {
             let x = 42
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(4, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(4, module.decls.size)
 
-        assertTrue(program.items[0] is TypeDeclaration)
-        assertTrue(program.items[1] is LetBinding)
-        assertTrue(program.items[2] is ImplAbilityDeclaration)
-        assertTrue(program.items[3] is LetBinding)
+        assertTrue(module.decls[0] is ParsedTypeDecl)
+        assertTrue(module.decls[1] is ParsedLetDecl)
+        assertTrue(module.decls[2] is ParsedImplAbilityDecl)
+        assertTrue(module.decls[3] is ParsedLetDecl)
 
-        val impl = program.items[2] as ImplAbilityDeclaration
+        val impl = module.decls[2] as ParsedImplAbilityDecl
         assertTrue(impl.isInherent)
     }
 
@@ -347,11 +347,11 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        assertEquals(2, program.items.size)
+        val module = parser.parseParsedModule(source)
+        assertEquals(2, module.decls.size)
 
-        val impl1 = program.items[0] as ImplAbilityDeclaration
-        val impl2 = program.items[1] as ImplAbilityDeclaration
+        val impl1 = module.decls[0] as ParsedImplAbilityDecl
+        val impl2 = module.decls[1] as ParsedImplAbilityDecl
 
         assertTrue(impl1.isInherent)
         assertTrue(impl2.isInherent)
@@ -372,8 +372,8 @@ class AnonymousImplParserTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val impl = program.items[0] as ImplAbilityDeclaration
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
 
         assertTrue(impl.isInherent)
         assertEquals("classify", impl.operations[0].name)

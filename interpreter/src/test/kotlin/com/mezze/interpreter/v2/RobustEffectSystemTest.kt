@@ -203,9 +203,10 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         // Should parse without errors
-        val program = MezzeTestHelper.parse(source)
-        assertNotNull(program)
-        assertEquals(3, program.items.size) // effect + 2 impls
+        val parser = com.mezze.language.parser.MezzeParser()
+        val parsedModule = parser.parseParsedModule(source, "<test>")
+        assertNotNull(parsedModule)
+        assertEquals(3, parsedModule.decls.size) // effect + 2 impls
     }
 
     @Test
@@ -230,9 +231,10 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         // Should parse without errors
-        val program = MezzeTestHelper.parse(source)
-        assertNotNull(program)
-        assertEquals(5, program.items.size) // effect + impl + 3 expressions
+        val parser = com.mezze.language.parser.MezzeParser()
+        val parsedModule = parser.parseParsedModule(source, "<test>")
+        assertNotNull(parsedModule)
+        assertEquals(5, parsedModule.decls.size) // effect + impl + 3 expressions
     }
 
     // ============================================================================

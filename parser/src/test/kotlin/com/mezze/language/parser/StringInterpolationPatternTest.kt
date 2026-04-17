@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
@@ -16,7 +16,7 @@ import org.junit.jupiter.api.assertThrows
  * Unlike expression interpolation, pattern interpolation only allows variable names,
  * not full expressions.
  */
-class StringInterpolationPatternTest {
+class ParsedStringInterpPatternTest {
 
     private val parser = MezzeParser()
 
@@ -36,24 +36,24 @@ class StringInterpolationPatternTest {
                         _ -> "unknown"
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val lambda = letBinding.expression as LambdaExpression
-            val matchExpr = lambda.body as MatchExpression
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val lambda = letBinding.value as ParsedLambda
+            val matchExpr = lambda.body as ParsedMatch
 
-            // First case should be a StringInterpolationPattern
+            // First case should be a ParsedStringInterpPattern
             val pattern = matchExpr.cases[0].patterns[0]
-            assertTrue(pattern is StringInterpolationPattern, "Expected StringInterpolationPattern but got ${pattern::class.simpleName}")
+            assertTrue(pattern is ParsedStringInterpPattern, "Expected ParsedStringInterpPattern but got ${pattern::class.simpleName}")
 
-            val interpPattern = pattern as StringInterpolationPattern
+            val interpPattern = pattern as ParsedStringInterpPattern
             assertEquals(2, interpPattern.parts.size)
 
-            val literal = interpPattern.parts[0] as StringPatternLiteral
+            val literal = interpPattern.parts[0] as ParsedStringPatternPart.Literal
             assertEquals("hello ", literal.value)
 
-            val capture = interpPattern.parts[1] as StringPatternCapture
+            val capture = interpPattern.parts[1] as ParsedStringPatternPart.Capture
             assertEquals("name", capture.variableName)
         }
 
@@ -66,17 +66,17 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val letBinding = program.items[0] as LetBinding
-            val lambda = letBinding.expression as LambdaExpression
-            val matchExpr = lambda.body as MatchExpression
+            val module = parser.parseParsedModule(source)
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val lambda = letBinding.value as ParsedLambda
+            val matchExpr = lambda.body as ParsedMatch
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(3, pattern.parts.size)
 
-            assertEquals("prefix-", (pattern.parts[0] as StringPatternLiteral).value)
-            assertEquals("middle", (pattern.parts[1] as StringPatternCapture).variableName)
-            assertEquals("-suffix", (pattern.parts[2] as StringPatternLiteral).value)
+            assertEquals("prefix-", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
+            assertEquals("middle", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("-suffix", (pattern.parts[2] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
@@ -88,20 +88,20 @@ class StringInterpolationPatternTest {
                         _ -> { month = "", day = "", year = "" }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val letBinding = program.items[0] as LetBinding
-            val lambda = letBinding.expression as LambdaExpression
-            val matchExpr = lambda.body as MatchExpression
+            val module = parser.parseParsedModule(source)
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val lambda = letBinding.value as ParsedLambda
+            val matchExpr = lambda.body as ParsedMatch
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(5, pattern.parts.size)
 
             // Check captures and literals alternate correctly
-            assertEquals("month", (pattern.parts[0] as StringPatternCapture).variableName)
-            assertEquals("-", (pattern.parts[1] as StringPatternLiteral).value)
-            assertEquals("day", (pattern.parts[2] as StringPatternCapture).variableName)
-            assertEquals("-", (pattern.parts[3] as StringPatternLiteral).value)
-            assertEquals("year", (pattern.parts[4] as StringPatternCapture).variableName)
+            assertEquals("month", (pattern.parts[0] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("-", (pattern.parts[1] as ParsedStringPatternPart.Literal).value)
+            assertEquals("day", (pattern.parts[2] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("-", (pattern.parts[3] as ParsedStringPatternPart.Literal).value)
+            assertEquals("year", (pattern.parts[4] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -113,14 +113,14 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(2, pattern.parts.size)
 
-            assertEquals("prefix", (pattern.parts[0] as StringPatternCapture).variableName)
-            assertEquals(" suffix", (pattern.parts[1] as StringPatternLiteral).value)
+            assertEquals("prefix", (pattern.parts[0] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals(" suffix", (pattern.parts[1] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
@@ -132,14 +132,14 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(2, pattern.parts.size)
 
-            assertEquals("prefix ", (pattern.parts[0] as StringPatternLiteral).value)
-            assertEquals("suffix", (pattern.parts[1] as StringPatternCapture).variableName)
+            assertEquals("prefix ", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
+            assertEquals("suffix", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -151,13 +151,13 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(1, pattern.parts.size)
 
-            assertEquals("whole", (pattern.parts[0] as StringPatternCapture).variableName)
+            assertEquals("whole", (pattern.parts[0] as ParsedStringPatternPart.Capture).variableName)
         }
     }
 
@@ -177,11 +177,11 @@ class StringInterpolationPatternTest {
                         _ -> "no match"
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("_unused", (pattern.parts[1] as StringPatternCapture).variableName)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("_unused", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -193,12 +193,12 @@ class StringInterpolationPatternTest {
                         _ -> { var1 = "", var2 = "" }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("var1", (pattern.parts[0] as StringPatternCapture).variableName)
-            assertEquals("var2", (pattern.parts[2] as StringPatternCapture).variableName)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("var1", (pattern.parts[0] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("var2", (pattern.parts[2] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -210,12 +210,12 @@ class StringInterpolationPatternTest {
                         _ -> { firstName = "", lastName = "" }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("firstName", (pattern.parts[1] as StringPatternCapture).variableName)
-            assertEquals("lastName", (pattern.parts[3] as StringPatternCapture).variableName)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("firstName", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("lastName", (pattern.parts[3] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -227,12 +227,12 @@ class StringInterpolationPatternTest {
                         _ -> { first_name = "", last_name = "" }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("first_name", (pattern.parts[0] as StringPatternCapture).variableName)
-            assertEquals("last_name", (pattern.parts[2] as StringPatternCapture).variableName)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("first_name", (pattern.parts[0] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("last_name", (pattern.parts[2] as ParsedStringPatternPart.Capture).variableName)
         }
     }
 
@@ -252,13 +252,13 @@ class StringInterpolationPatternTest {
                         _ -> "no match"
             """.trimIndent()
 
-            // This should be a simple LiteralPattern, not interpolation
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            // This should be a simple ParsedLiteralPattern, not interpolation
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
             // With escaped $, it should be a literal pattern
             val pattern = matchExpr.cases[0].patterns[0]
-            assertTrue(pattern is LiteralPattern || (pattern is StringInterpolationPattern && pattern.parts.size == 1 && pattern.parts[0] is StringPatternLiteral),
+            assertTrue(pattern is ParsedLiteralPattern || (pattern is ParsedStringInterpPattern && pattern.parts.size == 1 && pattern.parts[0] is ParsedStringPatternPart.Literal),
                 "Escaped dollar should not create interpolation pattern")
         }
 
@@ -271,11 +271,11 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("line1\n", (pattern.parts[0] as StringPatternLiteral).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("line1\n", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
@@ -287,11 +287,11 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("col1\t", (pattern.parts[0] as StringPatternLiteral).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("col1\t", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
     }
 
@@ -429,11 +429,11 @@ class StringInterpolationPatternTest {
             """.trimIndent()
 
             // Should parse successfully
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val matchExpr = getMatchExpression(program)
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val matchExpr = getParsedMatch(module)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(3, pattern.parts.size)
         }
 
@@ -446,12 +446,12 @@ class StringInterpolationPatternTest {
                         _ -> { a = "", b = "" }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             assertEquals(3, pattern.parts.size)
-            assertEquals(" ", (pattern.parts[1] as StringPatternLiteral).value)
+            assertEquals(" ", (pattern.parts[1] as ParsedStringPatternPart.Literal).value)
         }
     }
 
@@ -471,16 +471,16 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            // Should be a LiteralPattern, not StringInterpolationPattern
+            // Should be a ParsedLiteralPattern, not ParsedStringInterpPattern
             val pattern = matchExpr.cases[0].patterns[0]
-            assertTrue(pattern is LiteralPattern, "Expected LiteralPattern for plain string, got ${pattern::class.simpleName}")
+            assertTrue(pattern is ParsedLiteralPattern, "Expected ParsedLiteralPattern for plain string, got ${pattern::class.simpleName}")
 
-            val literalPattern = pattern as LiteralPattern
-            assertTrue(literalPattern.value is StringLiteralValue)
-            assertEquals("hello world", (literalPattern.value as StringLiteralValue).value)
+            val literalPattern = pattern as ParsedLiteralPattern
+            assertTrue(literalPattern.value is ParsedLiteralValue.StringValue)
+            assertEquals("hello world", (literalPattern.value as ParsedLiteralValue.StringValue).value)
         }
 
         @Test
@@ -492,12 +492,12 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as LiteralPattern
-            assertTrue(pattern.value is StringLiteralValue)
-            assertEquals("", (pattern.value as StringLiteralValue).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedLiteralPattern
+            assertTrue(pattern.value is ParsedLiteralValue.StringValue)
+            assertEquals("", (pattern.value as ParsedLiteralValue.StringValue).value)
         }
     }
 
@@ -517,12 +517,12 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
             // Variable name should be trimmed
-            assertEquals("name", (pattern.parts[1] as StringPatternCapture).variableName)
+            assertEquals("name", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
@@ -534,12 +534,12 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("  hello  ", (pattern.parts[0] as StringPatternLiteral).value)
-            assertEquals("  world  ", (pattern.parts[2] as StringPatternLiteral).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("  hello  ", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
+            assertEquals("  world  ", (pattern.parts[2] as ParsedStringPatternPart.Literal).value)
         }
     }
 
@@ -559,11 +559,11 @@ class StringInterpolationPatternTest {
                         _ -> false
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
             val firstCase = matchExpr.cases[0]
-            assertTrue(firstCase.patterns[0] is StringInterpolationPattern)
+            assertTrue(firstCase.patterns[0] is ParsedStringInterpPattern)
             assertNotNull(firstCase.guard, "Guard should be present")
         }
 
@@ -578,12 +578,12 @@ class StringInterpolationPatternTest {
                         _ -> "stranger"
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
             assertEquals(3, matchExpr.cases.size)
-            assertTrue(matchExpr.cases[0].patterns[0] is StringInterpolationPattern)
-            assertTrue(matchExpr.cases[1].patterns[0] is StringInterpolationPattern)
+            assertTrue(matchExpr.cases[0].patterns[0] is ParsedStringInterpPattern)
+            assertTrue(matchExpr.cases[1].patterns[0] is ParsedStringInterpPattern)
         }
 
         @Test
@@ -596,12 +596,12 @@ class StringInterpolationPatternTest {
                         x -> Some { val = x }
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            assertTrue(matchExpr.cases[0].patterns[0] is StringInterpolationPattern)
-            assertTrue(matchExpr.cases[1].patterns[0] is LiteralPattern)
-            assertTrue(matchExpr.cases[2].patterns[0] is VariablePattern)
+            assertTrue(matchExpr.cases[0].patterns[0] is ParsedStringInterpPattern)
+            assertTrue(matchExpr.cases[1].patterns[0] is ParsedLiteralPattern)
+            assertTrue(matchExpr.cases[2].patterns[0] is ParsedVariablePattern)
         }
     }
 
@@ -621,11 +621,11 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals(" 🎉", (pattern.parts[2] as StringPatternLiteral).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals(" 🎉", (pattern.parts[2] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
@@ -637,11 +637,11 @@ class StringInterpolationPatternTest {
                         _ -> ""
             """.trimIndent()
 
-            val program = parser.parseParsedModule(source)
-            val matchExpr = getMatchExpression(program)
+            val module = parser.parseParsedModule(source)
+            val matchExpr = getParsedMatch(module)
 
-            val pattern = matchExpr.cases[0].patterns[0] as StringInterpolationPattern
-            assertEquals("Привет ", (pattern.parts[0] as StringPatternLiteral).value)
+            val pattern = matchExpr.cases[0].patterns[0] as ParsedStringInterpPattern
+            assertEquals("Привет ", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
     }
 
@@ -649,9 +649,9 @@ class StringInterpolationPatternTest {
     // HELPER FUNCTIONS
     // =========================================================================
 
-    private fun getMatchExpression(program: Program): MatchExpression {
-        val letBinding = program.items[0] as LetBinding
-        val lambda = letBinding.expression as LambdaExpression
-        return lambda.body as MatchExpression
+    private fun getParsedMatch(module: ParsedModule): ParsedMatch {
+        val letBinding = module.decls[0] as ParsedLetDecl
+        val lambda = letBinding.value as ParsedLambda
+        return lambda.body as ParsedMatch
     }
 }

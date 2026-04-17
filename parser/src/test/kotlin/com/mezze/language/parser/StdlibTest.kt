@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import java.io.File
@@ -21,11 +21,11 @@ effect Log where {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val effect = program.items[0] as EffectDeclaration
+            val effect = module.decls[0] as ParsedEffectDecl
             assertEquals("Log", effect.name)
             // Effects are always public - no visibility field
             assertEquals(3, effect.operations.size)
@@ -62,11 +62,11 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val letBinding = program.items[0] as LetBinding
+            val letBinding = module.decls[0] as ParsedLetDecl
             assertEquals("map", letBinding.variableName)
             assertEquals(Visibility.PUBLIC, letBinding.visibility)
             assertNotNull(letBinding.typeAnnotation)
@@ -80,16 +80,16 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "type Color = | Red, Blue { val: Int }, Green |"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val typeDecl = program.items[0] as TypeDeclaration
+            val typeDecl = module.decls[0] as ParsedTypeDecl
             assertEquals("Color", typeDecl.name)
             assertEquals(Visibility.PRIVATE, typeDecl.visibility)
             assertEquals(emptyList<String>(), typeDecl.typeParams)
 
-            val variantDef = typeDecl.definition as VariantDefinition
+            val variantDef = typeDecl.definition as ParsedVariantDef
             assertEquals(3, variantDef.constructors.size)
 
             val red = variantDef.constructors[0]
@@ -113,16 +113,16 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "pub type Option 'a = | Some { val: 'a }, None |"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val typeDecl = program.items[0] as TypeDeclaration
+            val typeDecl = module.decls[0] as ParsedTypeDecl
             assertEquals("Option", typeDecl.name)
             assertEquals(Visibility.PUBLIC, typeDecl.visibility)
             assertEquals(listOf("'a"), typeDecl.typeParams)
 
-            val variantDef = typeDecl.definition as VariantDefinition
+            val variantDef = typeDecl.definition as ParsedVariantDef
             assertEquals(2, variantDef.constructors.size)
 
             val some = variantDef.constructors[0]
@@ -142,11 +142,11 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { }"
 
         try {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val impl = program.items[0] as ImplDeclaration
+            val impl = module.decls[0] as ParsedPerformerDecl
             assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
 
@@ -162,8 +162,8 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         // First verify we can parse the type annotation
         val source = "let x: { msg: String } -> Int = 42"
 
-        val program = parser.parseParsedModule(source)
-        assertNotNull(program)
+        val module = parser.parseParsedModule(source)
+        assertNotNull(module)
         println("✅ Type annotation in let binding works!")
     }
 
@@ -172,11 +172,11 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { info: Int -> Int = 42 }"
 
         try {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val impl = program.items[0] as ImplDeclaration
+            val impl = module.decls[0] as ParsedPerformerDecl
             assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
             assertEquals(1, impl.operations.size)
@@ -197,11 +197,11 @@ pub let map: {opt: Option 'a, f: 'a -> 'b} -> Option 'b = { opt, f } ->
         val source = "impl Log for Console where { info: { msg: String } -> Int = 42 }"
 
         try {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val impl = program.items[0] as ImplDeclaration
+            val impl = module.decls[0] as ParsedPerformerDecl
             assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
             assertEquals(1, impl.operations.size)
@@ -227,14 +227,14 @@ impl Log for Console where {
 """.trim()
 
         try {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val impl = program.items[0] as ImplDeclaration
+            val impl = module.decls[0] as ParsedPerformerDecl
             assertEquals("Log", impl.effect.localName)
             assertEquals("Console", impl.performerName)
-            assertEquals(emptyList<PerformerParameter>(), impl.performerParams)
+            assertEquals(emptyList<ParsedPerformerParam>(), impl.params)
             assertEquals(2, impl.operations.size)
 
             val info = impl.operations[0]
@@ -257,16 +257,16 @@ impl Random for SeededRandom { seed: Int } where {
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val impl = program.items[0] as ImplDeclaration
+            val impl = module.decls[0] as ParsedPerformerDecl
             assertEquals("Random", impl.effect.localName)
             assertEquals("SeededRandom", impl.performerName)
-            assertEquals(1, impl.performerParams.size)
+            assertEquals(1, impl.params.size)
 
-            val param = impl.performerParams[0]
+            val param = impl.params[0]
             assertEquals("seed", param.name)
 
             assertEquals(1, impl.operations.size)
@@ -280,12 +280,12 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::basic"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val use = program.items[0] as UseDeclaration
-            val path = use.path as ModulePath
+            val use = module.decls[0] as ParsedUseDecl
+            val path = (use.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "basic"), path.segments)
             assertNull(use.alias)
 
@@ -298,12 +298,12 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::basic as m"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val use = program.items[0] as UseDeclaration
-            val path = use.path as ModulePath
+            val use = module.decls[0] as ParsedUseDecl
+            val path = (use.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "basic"), path.segments)
             assertEquals("m", use.alias)
 
@@ -316,12 +316,12 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "pub use std::math::trig"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val use = program.items[0] as PubUseDeclaration
-            val path = use.path as ModulePath
+            val use = module.decls[0] as ParsedPubUseDecl
+            val path = (use.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "trig"), path.segments)
             assertNull(use.alias)
 
@@ -334,13 +334,13 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::{trig, random}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val use = program.items[0] as UseDeclaration
-            val path = use.path as SelectivePath
-            assertEquals(listOf("std", "math"), path.module)
+            val use = module.decls[0] as ParsedUseDecl
+            val path = use.path as ParsedUsePath.Selective
+            assertEquals(listOf("std", "math"), path.modulePath.segments)
             assertEquals(2, path.items.size)
             assertEquals("trig", path.items[0].name)
             assertNull(path.items[0].alias)
@@ -356,13 +356,13 @@ impl Random for SeededRandom { seed: Int } where {
         val source = "use std::math::{trig as t, random as r}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val use = program.items[0] as UseDeclaration
-            val path = use.path as SelectivePath
-            assertEquals(listOf("std", "math"), path.module)
+            val use = module.decls[0] as ParsedUseDecl
+            val path = use.path as ParsedUsePath.Selective
+            assertEquals(listOf("std", "math"), path.modulePath.segments)
             assertEquals(2, path.items.size)
             assertEquals("trig", path.items[0].name)
             assertEquals("t", path.items[0].alias)
@@ -381,16 +381,16 @@ use std::math::trig
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(2, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(2, module.decls.size)
 
-            val use1 = program.items[0] as UseDeclaration
-            val path1 = use1.path as ModulePath
+            val use1 = module.decls[0] as ParsedUseDecl
+            val path1 = (use1.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "basic"), path1.segments)
 
-            val use2 = program.items[1] as UseDeclaration
-            val path2 = use2.path as ModulePath
+            val use2 = module.decls[1] as ParsedUseDecl
+            val path2 = (use2.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "trig"), path2.segments)
 
             println("✅ Multiple use declarations parsed successfully!")
@@ -413,21 +413,21 @@ pub let cos: { value: Float } -> Float = { value } ->
 """.trim()
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(3, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(3, module.decls.size)
 
             // First item should be a use declaration
-            val use = program.items[0] as UseDeclaration
-            val path = use.path as ModulePath
+            val use = module.decls[0] as ParsedUseDecl
+            val path = (use.path as ParsedUsePath.Module).path
             assertEquals(listOf("std", "math", "basic"), path.segments)
 
             // Second and third items should be let bindings
-            val sin = program.items[1] as LetBinding
+            val sin = module.decls[1] as ParsedLetDecl
             assertEquals("sin", sin.variableName)
             assertEquals(Visibility.PUBLIC, sin.visibility)
 
-            val cos = program.items[2] as LetBinding
+            val cos = module.decls[2] as ParsedLetDecl
             assertEquals("cos", cos.variableName)
             assertEquals(Visibility.PUBLIC, cos.visibility)
 

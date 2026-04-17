@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeVar
 
 /**
  * Ability constraint generator - generates ability requirements.
@@ -22,28 +23,6 @@ import com.mezze.language.ast.*
  * - Works with constraint solver to satisfy constraints
  */
 class AbilityConstraintGenerator {
-
-    /**
-     * Generate ability constraints from an expression.
-     *
-     * This is called during expression constraint generation
-     * to collect ability requirements.
-     */
-    fun generateFromExpression(
-        expr: Expression,
-        context: ConstraintContext
-    ): List<Constraint.AbilityRequired> {
-        return when (expr) {
-            // Function calls might have ability constraints
-            is FunctionCall -> generateFromFunctionCall(expr, context)
-
-            // Member access on ability methods
-            is MemberAccess -> generateFromMemberAccess(expr, context)
-
-            // Other expressions don't directly introduce ability constraints
-            else -> emptyList()
-        }
-    }
 
     /**
      * Generate ability constraints from function type.
@@ -84,41 +63,6 @@ class AbilityConstraintGenerator {
         }
 
         return constraints
-    }
-
-    /**
-     * Generate ability constraints from function call.
-     *
-     * If the function being called has ability constraints,
-     * we need to ensure they're satisfied.
-     */
-    private fun generateFromFunctionCall(
-        expr: FunctionCall,
-        context: ConstraintContext
-    ): List<Constraint.AbilityRequired> {
-        // Check if function has inferred type with ability constraints
-        val functionType = expr.function.inferredType
-
-        if (functionType is MezzeType.FunctionType) {
-            return generateFromFunctionType(functionType)
-        }
-
-        return emptyList()
-    }
-
-    /**
-     * Generate ability constraints from member access.
-     *
-     * Ability.method access requires the ability to be in scope.
-     */
-    private fun generateFromMemberAccess(
-        expr: MemberAccess,
-        context: ConstraintContext
-    ): List<Constraint.AbilityRequired> {
-        // Check if receiver is an ability name
-        // This would require looking up in context to see if it's an ability
-        // For now, return empty list (will be enhanced later)
-        return emptyList()
     }
 
     /**

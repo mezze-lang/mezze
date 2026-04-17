@@ -209,18 +209,18 @@ class ImportResolutionTest {
         }
 
         @Test
-        fun `PerformHandler stores QualifiedRef not string`() {
-            val handler = PerformHandler(
-                performer = QualifiedRef.qualified("log", "Console"),
-                parameters = null
+        fun `ParsedPerformHandler stores ParsedQualifiedRef not string`() {
+            val handler = ParsedPerformHandler(
+                performer = ParsedQualifiedRef("Console", ParsedModulePath(listOf("log")), Loc("test.mz", 1, 1, 1, 1)),
+                params = null
             )
 
             // Stored as structured data
             assertEquals("Console", handler.performer.localName)
             assertEquals(listOf("log"), handler.performer.qualifier?.segments)
 
-            // Check key string format for lookups
-            assertEquals("log::Console", handler.performer.toBindingKey().toKeyString())
+            // Check string format for display
+            assertEquals("log::Console", handler.performer.toString())
         }
 
         @Test

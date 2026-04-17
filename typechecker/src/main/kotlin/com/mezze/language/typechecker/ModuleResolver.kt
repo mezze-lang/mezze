@@ -146,7 +146,6 @@ data class ProgramIndex(
  *
  * @property path The module path as structured ModulePath
  * @property filePath The file system path to the source file
- * @property program The parsed and type-checked program
  * @property exports Map of exported items (functions, types, etc.)
  * @property dependencies List of module dependencies
  * @property sourceHash Content hash of the source file (for cache invalidation)
@@ -155,8 +154,6 @@ data class ProgramIndex(
 data class Module(
     val path: ModulePath,
     val filePath: String,
-    @Deprecated("Use parsedModule instead — v1 Program kept temporarily for backward compat")
-    val program: Program = Program(emptyList()),
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
     val sourceHash: String? = null,
@@ -399,12 +396,8 @@ class ModuleResolver(
         }
 
         @JvmStatic
-        @Deprecated("Use getAllParsedModules() instead — v1 Program overload kept for CLI compat")
-        fun getAllModules(): Map<String, Program> {
-            synchronized(cacheLock) {
-                @Suppress("DEPRECATION")
-                return moduleCache.mapValues { (_, module) -> module.program }
-            }
+        fun getAllModules(): Map<String, com.mezze.language.parsedast.ParsedModule> {
+            return getAllParsedModules()
         }
 
         /**
@@ -455,7 +448,7 @@ class ModuleResolver(
          * the type itself wasn't explicitly imported.
          *
          * @param typeName The simple name of the type to look up (e.g., "LogLevel")
-         * @return The TypeDeclaration if found in any cached module, null otherwise
+         * @return The ParsedTypeDecl if found in any cached module, null otherwise
          */
         @JvmStatic
         fun lookupTypeDeclaration(typeName: String): ParsedTypeDecl? {
@@ -1185,44 +1178,6 @@ class ModuleResolver(
         }
     }
     
-    /**
-     * Convert TypeAnnotation to MezzeType (simplified version)
-     */
-    private fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // Check primitive types first (includes Bool -> MezzeType.BoolType)
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-
-                // Not a primitive type - treat as type variable
-                MezzeType.VarType(TypeVar.fresh())
-            }
-            is FunctionTypeAnnotation -> {
-                val effectRow = annotation.effects?.let { effectRowAnnotation ->
-                    // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
-                    val rowVar = if (effectRowAnnotation.isPolymorphic) RowVar.fresh() else null
-                    MezzeType.EffectRow.simple(effectRowAnnotation.effects.toSet(), rowVar, effectRowAnnotation.isPerformed)
-                }
-                MezzeType.FunctionType(
-                    paramType = convertTypeAnnotation(annotation.paramType),
-                    returnType = convertTypeAnnotation(annotation.returnType),
-                    effects = effectRow
-                )
-            }
-            is RecordTypeAnnotation -> {
-                val fields = annotation.entries.associate { entry ->
-                    entry.name to convertTypeAnnotation(entry.type)
-                }
-                MezzeType.RecordType(fields)
-            }
-            is SeqTypeAnnotation -> {
-                MezzeType.SeqType(convertTypeAnnotation(annotation.elementType))
-            }
-            else -> {
-                MezzeType.VarType(TypeVar.fresh())
-            }
-        }
-    }
     
     /**
      * Check if a module can access internal/private modules of another module.
@@ -1361,25 +1316,6 @@ class ModuleResolver(
 
             DebugLogger.debug(Category.ModuleResolver) {
                 "Cached module (v2, new) with ${newModule.exports.size} exports"
-            }
-        }
-    }
-
-    private fun checkIdentifiersInExpression(expr: Expression, indent: String) {
-        when (expr) {
-            is Identifier -> {
-                DebugLogger.debug(Category.ModuleResolver) { "${indent}Identifier: '${expr.toBindingKey().toKeyString()}'" }
-            }
-            is FunctionCall -> {
-                DebugLogger.debug(Category.ModuleResolver) { "${indent}FunctionCall:" }
-                checkIdentifiersInExpression(expr.function, "$indent  ")
-                checkIdentifiersInExpression(expr.arguments, "$indent  ")
-            }
-            is RecordLiteral -> {
-                // Don't recurse into record literals for now
-            }
-            else -> {
-                // Don't recurse into other expressions for now
             }
         }
     }

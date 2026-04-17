@@ -46,7 +46,7 @@ object CodebaseHelper {
             // Module programs are stored separately when they are type-checked
             CodebasePopulator.populate(
                 codebase = codebase,
-                mainProgram = typeCheckResult.program,
+                typeCheckResult = typeCheckResult,
                 modules = emptyMap(),  // Modules stored separately
                 mainModulePath = modulePath
             )

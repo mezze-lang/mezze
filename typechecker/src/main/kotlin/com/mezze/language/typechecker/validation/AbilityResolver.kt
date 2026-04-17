@@ -187,7 +187,7 @@ class AbilityResolver(
         val isNewtype = typeDecl?.definition is com.mezze.language.parsedast.ParsedNewtypeDef
 
         if (isNewtype) {
-            return checkNewtypeAbility(type, abilityName, typeArgs, typeDecl!!.definition as NewtypeDefinition, abilityHash)
+            return checkNewtypeAbility(type, abilityName, typeArgs, typeDecl!!.definition as com.mezze.language.parsedast.ParsedNewtypeDef, abilityHash)
         }
 
         // Regular variant handling
@@ -235,7 +235,7 @@ class AbilityResolver(
         type: MezzeType.VariantType,
         abilityName: String,
         typeArgs: List<MezzeType>,
-        definition: NewtypeDefinition,
+        definition: com.mezze.language.parsedast.ParsedNewtypeDef,
         abilityHash: String? = null
     ): AbilityCheckResult {
         val typeName = type.typeName ?: return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
@@ -598,70 +598,8 @@ class AbilityResolver(
         }
     }
 
-    private fun extractTypeParamMappings(
-        annotation: TypeAnnotation,
-        concreteType: MezzeType,
-        typeParams: List<String>,
-        mappings: MutableMap<String, MezzeType>
-    ) {
-        when (annotation) {
-            is IdentifierTypeAnnotation -> {
-                // If this is a type parameter reference like 'a
-                if (annotation.name in typeParams) {
-                    // Map this type parameter to the concrete type
-                    mappings[annotation.name] = concreteType
-                }
-            }
-            is RecordTypeAnnotation -> {
-                // Match record fields
-                if (concreteType is MezzeType.RecordType) {
-                    for (entry in annotation.entries) {
-                        val fieldType = concreteType.fields[entry.name] ?: continue
-                        extractTypeParamMappings(entry.type, fieldType, typeParams, mappings)
-                    }
-                }
-            }
-            is TypeApplicationAnnotation -> {
-                // Match type applications like List 'a
-                if (concreteType is MezzeType.TypeApplication && concreteType.constructor == annotation.constructor) {
-                    for ((annArg, concreteArg) in annotation.args.zip(concreteType.args)) {
-                        extractTypeParamMappings(annArg, concreteArg, typeParams, mappings)
-                    }
-                } else if (concreteType is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ) {
-                    // Handle Seq type specially
-                    annotation.args.firstOrNull()?.let { elementAnnotation ->
-                        extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
-                    }
-                } else if (concreteType is MezzeType.ListType && annotation.constructor == BuiltinTypes.LIST) {
-                    // Handle List type specially
-                    annotation.args.firstOrNull()?.let { elementAnnotation ->
-                        extractTypeParamMappings(elementAnnotation, concreteType.elementType, typeParams, mappings)
-                    }
-                }
-            }
-            is VariantTypeAnnotation -> {
-                // Match variant constructors
-                if (concreteType is MezzeType.VariantType) {
-                    for (constructor in annotation.constructors) {
-                        val concretePayload = concreteType.constructors[constructor.name] ?: continue
-                        val annPayload = constructor.dataType ?: continue
-                        extractTypeParamMappings(annPayload, concretePayload, typeParams, mappings)
-                    }
-                }
-            }
-            else -> {
-                // Other annotation types don't contain type parameters we need to extract
-            }
-        }
-    }
-
     /**
-     * Check if a concrete MezzeType matches a TypeAnnotation.
-     *
-     * This enables structural matching for ability implementations.
-     */
-    /**
-     * Convert a simple TypeAnnotation to MezzeType (for constraint checking on generic impls).
+     * Convert a simple ParsedTypeAnnotation to MezzeType (for constraint checking on generic impls).
      */
     private fun resolveTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
@@ -671,16 +609,6 @@ class AbilityResolver(
         }
     }
 
-    private fun resolveTypeAnnotation(annotation: TypeAnnotation): MezzeType {
-        if (annotation is IdentifierTypeAnnotation) {
-            PrimitiveTypes.fromName(annotation.name)?.let { return it }
-            return MezzeType.TypeApplication(annotation.name, emptyList())
-        }
-        if (annotation is SeqTypeAnnotation) {
-            return MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
-        }
-        return MezzeType.TypeApplication(annotation.toString(), emptyList())
-    }
 
     private fun typeMatchesAnnotation(
         type: MezzeType,

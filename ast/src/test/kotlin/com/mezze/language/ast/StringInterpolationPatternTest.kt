@@ -1,11 +1,12 @@
 package com.mezze.language.ast
 
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
 
 /**
- * Comprehensive tests for StringInterpolationPattern AST node.
+ * Comprehensive tests for ParsedStringInterpPattern AST node.
  *
  * Tests cover:
  * 1. Pattern construction and structure
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Nested
  * 4. kindDescription() - pattern description for error messages
  */
 class StringInterpolationPatternTest {
+
+    private val testLoc = Loc("<test>", 0, 0, 0, 0)
 
     // =========================================================================
     // PATTERN CONSTRUCTION
@@ -24,87 +27,91 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `simple literal pattern with no captures`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("hello world"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("hello world")),
+                loc = testLoc
             )
 
             assertEquals(1, pattern.parts.size)
-            assertTrue(pattern.parts[0] is StringPatternLiteral)
-            assertEquals("hello world", (pattern.parts[0] as StringPatternLiteral).value)
+            assertTrue(pattern.parts[0] is ParsedStringPatternPart.Literal)
+            assertEquals("hello world", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `pattern with single capture`() {
             // "hello $(name)"
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral("hello "),
-                    StringPatternCapture("name")
-                )
+                    ParsedStringPatternPart.Literal("hello "),
+                    ParsedStringPatternPart.Capture("name")
+                ),
+                loc = testLoc
             )
 
             assertEquals(2, pattern.parts.size)
-            assertTrue(pattern.parts[0] is StringPatternLiteral)
-            assertTrue(pattern.parts[1] is StringPatternCapture)
-            assertEquals("name", (pattern.parts[1] as StringPatternCapture).variableName)
+            assertTrue(pattern.parts[0] is ParsedStringPatternPart.Literal)
+            assertTrue(pattern.parts[1] is ParsedStringPatternPart.Capture)
+            assertEquals("name", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
         }
 
         @Test
         fun `pattern with multiple captures`() {
             // "$(month)-$(day)-$(year)"
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternCapture("month"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("day"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("year")
-                )
+                    ParsedStringPatternPart.Capture("month"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("day"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("year")
+                ),
+                loc = testLoc
             )
 
             assertEquals(5, pattern.parts.size)
-            assertTrue(pattern.parts[0] is StringPatternCapture)
-            assertTrue(pattern.parts[1] is StringPatternLiteral)
-            assertTrue(pattern.parts[2] is StringPatternCapture)
-            assertTrue(pattern.parts[3] is StringPatternLiteral)
-            assertTrue(pattern.parts[4] is StringPatternCapture)
+            assertTrue(pattern.parts[0] is ParsedStringPatternPart.Capture)
+            assertTrue(pattern.parts[1] is ParsedStringPatternPart.Literal)
+            assertTrue(pattern.parts[2] is ParsedStringPatternPart.Capture)
+            assertTrue(pattern.parts[3] is ParsedStringPatternPart.Literal)
+            assertTrue(pattern.parts[4] is ParsedStringPatternPart.Capture)
         }
 
         @Test
         fun `pattern with prefix and suffix`() {
             // "prefix-$(middle)-suffix"
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral("prefix-"),
-                    StringPatternCapture("middle"),
-                    StringPatternLiteral("-suffix")
-                )
+                    ParsedStringPatternPart.Literal("prefix-"),
+                    ParsedStringPatternPart.Capture("middle"),
+                    ParsedStringPatternPart.Literal("-suffix")
+                ),
+                loc = testLoc
             )
 
             assertEquals(3, pattern.parts.size)
-            assertEquals("prefix-", (pattern.parts[0] as StringPatternLiteral).value)
-            assertEquals("middle", (pattern.parts[1] as StringPatternCapture).variableName)
-            assertEquals("-suffix", (pattern.parts[2] as StringPatternLiteral).value)
+            assertEquals("prefix-", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
+            assertEquals("middle", (pattern.parts[1] as ParsedStringPatternPart.Capture).variableName)
+            assertEquals("-suffix", (pattern.parts[2] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `pattern with source location`() {
-            val location = SourceLocation(10, 5, "test.mz")
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("test")),
-                sourceLocation = location
+            val location = Loc("test.mz", 10, 5, 10, 20)
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("test")),
+                loc = location
             )
 
-            assertNotNull(pattern.sourceLocation)
-            assertEquals(10, pattern.sourceLocation?.line)
-            assertEquals(5, pattern.sourceLocation?.column)
-            assertEquals("test.mz", pattern.sourceLocation?.file)
+            assertNotNull(pattern.loc)
+            assertEquals(10, pattern.loc.startLine)
+            assertEquals(5, pattern.loc.startCol)
+            assertEquals("test.mz", pattern.loc.file)
         }
 
         @Test
         fun `empty pattern parts list`() {
             // Edge case: empty pattern
-            val pattern = StringInterpolationPattern(parts = emptyList())
+            val pattern = ParsedStringInterpPattern(parts = emptyList(), loc = testLoc)
             assertEquals(0, pattern.parts.size)
         }
     }
@@ -118,8 +125,9 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `string interpolation pattern is always refutable`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("hello"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("hello")),
+                loc = testLoc
             )
 
             assertFalse(pattern.isIrrefutable())
@@ -127,11 +135,12 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `pattern with captures is refutable`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral("prefix-"),
-                    StringPatternCapture("x")
-                )
+                    ParsedStringPatternPart.Literal("prefix-"),
+                    ParsedStringPatternPart.Capture("x")
+                ),
+                loc = testLoc
             )
 
             assertFalse(pattern.isIrrefutable())
@@ -139,19 +148,20 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `empty pattern is still refutable`() {
-            val pattern = StringInterpolationPattern(parts = emptyList())
+            val pattern = ParsedStringInterpPattern(parts = emptyList(), loc = testLoc)
             assertFalse(pattern.isIrrefutable())
         }
 
         @Test
         fun `compare with other refutable patterns`() {
             // All refutable patterns should return false
-            val stringPattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("test"))
+            val stringPattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("test")),
+                loc = testLoc
             )
-            val literalPattern = LiteralPattern(IntLiteralValue(42))
-            val constructorPattern = ConstructorPattern("Some", null)
-            val seqPattern = SeqPattern(listOf(VariablePattern("x")), null)
+            val literalPattern = ParsedLiteralPattern(ParsedLiteralValue.IntValue(42), testLoc)
+            val constructorPattern = ParsedConstructorPattern("Some", null, testLoc)
+            val seqPattern = ParsedSeqPattern(listOf(ParsedVariablePattern("x", testLoc)), null, testLoc)
 
             assertFalse(stringPattern.isIrrefutable())
             assertFalse(literalPattern.isIrrefutable())
@@ -162,11 +172,12 @@ class StringInterpolationPatternTest {
         @Test
         fun `compare with irrefutable patterns`() {
             // Irrefutable patterns should return true
-            val wildcardPattern = WildcardPattern()
-            val variablePattern = VariablePattern("x")
-            val recordPattern = RecordPattern(
-                entries = listOf(RecordPatternEntry("x", null)),
-                isOpen = false
+            val wildcardPattern = ParsedWildcardPattern(testLoc)
+            val variablePattern = ParsedVariablePattern("x", testLoc)
+            val recordPattern = ParsedRecordPattern(
+                entries = listOf(ParsedRecordPatternEntry("x", null, testLoc)),
+                isOpen = false,
+                loc = testLoc
             )
 
             assertTrue(wildcardPattern.isIrrefutable())
@@ -184,8 +195,9 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `literal only pattern has no bindings`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("hello world"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("hello world")),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()
@@ -194,11 +206,12 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `single capture has one binding`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral("hello "),
-                    StringPatternCapture("name")
-                )
+                    ParsedStringPatternPart.Literal("hello "),
+                    ParsedStringPatternPart.Capture("name")
+                ),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()
@@ -209,14 +222,15 @@ class StringInterpolationPatternTest {
         @Test
         fun `multiple captures have multiple bindings in order`() {
             // "$(month)-$(day)-$(year)"
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternCapture("month"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("day"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("year")
-                )
+                    ParsedStringPatternPart.Capture("month"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("day"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("year")
+                ),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()
@@ -228,7 +242,7 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `empty pattern has no bindings`() {
-            val pattern = StringInterpolationPattern(parts = emptyList())
+            val pattern = ParsedStringInterpPattern(parts = emptyList(), loc = testLoc)
 
             val bindings = pattern.extractBindings()
             assertTrue(bindings.isEmpty())
@@ -236,14 +250,15 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `captures with various names`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternCapture("camelCase"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("snake_case"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("x1")
-                )
+                    ParsedStringPatternPart.Capture("camelCase"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("snake_case"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("x1")
+                ),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()
@@ -260,8 +275,9 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `string interpolation pattern description`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("test"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("test")),
+                loc = testLoc
             )
 
             assertEquals("string interpolation pattern", pattern.kindDescription())
@@ -269,12 +285,12 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `compare with other pattern descriptions`() {
-            assertEquals("variable pattern", VariablePattern("x").kindDescription())
-            assertEquals("wildcard pattern", WildcardPattern().kindDescription())
-            assertEquals("constructor pattern", ConstructorPattern("Some", null).kindDescription())
-            assertEquals("record pattern", RecordPattern(emptyList()).kindDescription())
-            assertEquals("literal pattern", LiteralPattern(IntLiteralValue(42)).kindDescription())
-            assertEquals("seq pattern", SeqPattern(emptyList(), null).kindDescription())
+            assertEquals("variable pattern", ParsedVariablePattern("x", testLoc).kindDescription())
+            assertEquals("wildcard pattern", ParsedWildcardPattern(testLoc).kindDescription())
+            assertEquals("constructor pattern", ParsedConstructorPattern("Some", null, testLoc).kindDescription())
+            assertEquals("record pattern", ParsedRecordPattern(emptyList(), loc = testLoc).kindDescription())
+            assertEquals("literal pattern", ParsedLiteralPattern(ParsedLiteralValue.IntValue(42), testLoc).kindDescription())
+            assertEquals("seq pattern", ParsedSeqPattern(emptyList(), null, testLoc).kindDescription())
         }
     }
 
@@ -286,14 +302,14 @@ class StringInterpolationPatternTest {
     inner class SerializationDiscriminator {
 
         @Test
-        fun `StringPatternPart has correct discriminator annotation`() {
+        fun `ParsedStringPatternPart has correct discriminator annotation`() {
             // Verify the annotation exists via reflection-based test
-            val literalClass = StringPatternLiteral::class.java
-            val captureClass = StringPatternCapture::class.java
+            val literalClass = ParsedStringPatternPart.Literal::class.java
+            val captureClass = ParsedStringPatternPart.Capture::class.java
 
-            // Both should implement StringPatternPart
-            assertTrue(StringPatternPart::class.java.isAssignableFrom(literalClass))
-            assertTrue(StringPatternPart::class.java.isAssignableFrom(captureClass))
+            // Both should implement ParsedStringPatternPart
+            assertTrue(ParsedStringPatternPart::class.java.isAssignableFrom(literalClass))
+            assertTrue(ParsedStringPatternPart::class.java.isAssignableFrom(captureClass))
         }
     }
 
@@ -306,47 +322,51 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `pattern with empty literal string`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral(""),
-                    StringPatternCapture("x")
-                )
+                    ParsedStringPatternPart.Literal(""),
+                    ParsedStringPatternPart.Capture("x")
+                ),
+                loc = testLoc
             )
 
             assertEquals(2, pattern.parts.size)
-            assertEquals("", (pattern.parts[0] as StringPatternLiteral).value)
+            assertEquals("", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `pattern with special characters in literal`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternLiteral("hello\nworld\ttab"),
-                    StringPatternCapture("x")
-                )
+                    ParsedStringPatternPart.Literal("hello\nworld\ttab"),
+                    ParsedStringPatternPart.Capture("x")
+                ),
+                loc = testLoc
             )
 
-            assertEquals("hello\nworld\ttab", (pattern.parts[0] as StringPatternLiteral).value)
+            assertEquals("hello\nworld\ttab", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `pattern with unicode in literal`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("Hello! Привет! こんにちは!"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("Hello! Привет! こんにちは!")),
+                loc = testLoc
             )
 
-            assertEquals("Hello! Привет! こんにちは!", (pattern.parts[0] as StringPatternLiteral).value)
+            assertEquals("Hello! Привет! こんにちは!", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `pattern only captures no literals`() {
             // This would only match if the captures are directly adjacent
             // which is typically not allowed in the language, but test AST handles it
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternCapture("a"),
-                    StringPatternCapture("b")
-                )
+                    ParsedStringPatternPart.Capture("a"),
+                    ParsedStringPatternPart.Capture("b")
+                ),
+                loc = testLoc
             )
 
             assertEquals(2, pattern.parts.size)
@@ -357,17 +377,19 @@ class StringInterpolationPatternTest {
         @Test
         fun `pattern with dollar sign in literal - escaped`() {
             // Escaped $( in the literal part
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternLiteral("cost: $100"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Literal("cost: $100")),
+                loc = testLoc
             )
 
-            assertEquals("cost: $100", (pattern.parts[0] as StringPatternLiteral).value)
+            assertEquals("cost: $100", (pattern.parts[0] as ParsedStringPatternPart.Literal).value)
         }
 
         @Test
         fun `variable name with underscore`() {
-            val pattern = StringInterpolationPattern(
-                parts = listOf(StringPatternCapture("_unused"))
+            val pattern = ParsedStringInterpPattern(
+                parts = listOf(ParsedStringPatternPart.Capture("_unused")),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()
@@ -376,12 +398,13 @@ class StringInterpolationPatternTest {
 
         @Test
         fun `variable name with numbers`() {
-            val pattern = StringInterpolationPattern(
+            val pattern = ParsedStringInterpPattern(
                 parts = listOf(
-                    StringPatternCapture("var1"),
-                    StringPatternLiteral("-"),
-                    StringPatternCapture("var2")
-                )
+                    ParsedStringPatternPart.Capture("var1"),
+                    ParsedStringPatternPart.Literal("-"),
+                    ParsedStringPatternPart.Capture("var2")
+                ),
+                loc = testLoc
             )
 
             val bindings = pattern.extractBindings()

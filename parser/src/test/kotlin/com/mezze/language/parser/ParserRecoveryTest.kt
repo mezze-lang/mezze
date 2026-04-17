@@ -32,7 +32,7 @@ class ParserRecoveryTest {
 
         // Specifically, good1 and good2 and good3 should be parsed
         val letDecls = result.module.decls.filterIsInstance<ParsedLetDecl>()
-        val names = letDecls.map { (it.pattern as? ParsedNamePattern)?.name }
+        val names = letDecls.map { (it.pattern as? ParsedVariablePattern)?.name }
         assertTrue("good1" in names, "Should have parsed good1")
     }
 

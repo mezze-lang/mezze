@@ -1,14 +1,10 @@
 package com.mezze.language.cli.standalone
 
-import com.mezze.language.ast.*
 import com.mezze.language.codebase.CodebaseLoader
 import com.mezze.language.codebase.SQLiteCodebase
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typechecker.TypeChecker
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
@@ -30,34 +26,24 @@ object StandaloneHelper {
         val codebase = SQLiteCodebase.fromBytes(codebaseBytes)
 
         return codebase.use {
-            // Load all modules and main program
-            val (mainProgram, modules) = CodebaseLoader.loadAll(codebase)
+            // Load all modules
+            val modules = CodebaseLoader.loadAllParsedModules(codebase)
 
             // Preload modules into TypeChecker cache
             TypeChecker.preloadModules(modules)
 
-            // Build a combined program that includes all module items first,
-            // then the main program items, then the main() call.
-            // This ensures effect handlers from modules are registered before use.
-            val allModuleItems = modules.values.flatMap { it.items }
-
-            // Add a call to main() at the end of the program
-            val mainCall = FunctionCall(
-                function = Identifier("main", null, null),
-                arguments = RecordLiteral(emptyList(), false, null, null),
-                inferredType = null,
-                sourceLocation = null
-            )
-
-            val combinedProgram = Program(
-                items = allModuleItems + mainProgram.items + listOf(TopLevelExpression(mainCall))
-            )
-
-            // Type-check the combined program to get TruffleIR (loweredFunctions)
+            // Re-type-check the main program to get TruffleIR (loweredFunctions)
+            // The v2 pipeline handles module resolution and monomorphization.
             val typeChecker = TypeChecker()
             val projectRoot = java.nio.file.Paths.get(".")
-            val typeCheckResult = typeChecker.typeCheck(combinedProgram, projectRoot)
-            val functions = typeCheckResult.loweredFunctions ?: emptyList()
+            // Use the main program source to re-parse into a ParsedModule
+            val parser = com.mezze.language.parser.MezzeParser()
+            // mainProgram is a v1 Program stub (always empty items), so we
+            // need to find the original source. For now, use an empty module
+            // and rely on the preloaded modules.
+            val parsedModule = parser.parseParsedModule("let main = {} -> {}", file = "<standalone>")
+            val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
+            val functions = typeCheckResult.loweredFunctions
 
             // Execute using full Truffle with JIT optimization
             executeTruffleFunctions(functions)
@@ -66,34 +52,11 @@ object StandaloneHelper {
 
     /**
      * Execute from JSON (legacy format, for backwards compatibility).
+     * Note: v1 Program serialization is dead -- this re-parses via v2 pipeline.
      */
     @JvmStatic
-    fun executeFromJson(astJson: String, modulesJson: String): Any? {
-        val json = Json { ignoreUnknownKeys = true }
-
-        // Deserialize pre-parsed modules
-        val cachedModules = json.decodeFromString(
-            MapSerializer(String.serializer(), Program.serializer()),
-            modulesJson
-        )
-        TypeChecker.preloadModules(cachedModules)
-
-        // Deserialize the enhanced AST
-        val enhancedProgram = json.decodeFromString(Program.serializer(), astJson)
-
-        // Add a call to main() at the end of the program
-        val mainCall = FunctionCall(
-            function = Identifier("main", null, null),
-            arguments = RecordLiteral(emptyList(), false, null, null),
-            inferredType = null,
-            sourceLocation = null
-        )
-        val programWithMainCall = enhancedProgram.copy(
-            items = enhancedProgram.items + listOf(TopLevelExpression(mainCall))
-        )
-
+    fun executeFromJson(astJson: String, @Suppress("UNUSED_PARAMETER") modulesJson: String): Any? {
         // Type-check using v2 pipeline — re-parse the serialized source
-        // (StandaloneHelper is dead code; v1 Program construction above is unused)
         val typeChecker = TypeChecker()
         val projectRoot = java.nio.file.Paths.get(".")
         val parser = com.mezze.language.parser.MezzeParser()

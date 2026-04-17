@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -13,18 +13,18 @@ class FunctionCallTest {
         val source = "let result = f {x = 1}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
-            assertEquals(1, program.items.size)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
+            assertEquals(1, module.decls.size)
 
-            val letBinding = program.items[0] as LetBinding
+            val letBinding = module.decls[0] as ParsedLetDecl
             assertEquals("result", letBinding.variableName)
 
-            val call = letBinding.expression as FunctionCall
-            val func = call.function as Identifier
+            val call = letBinding.value as ParsedFunctionCall
+            val func = call.function as ParsedIdentifier
             assertEquals("f", func.localName)
 
-            val args = call.arguments as RecordLiteral
+            val args = call.arguments as ParsedRecordLit
             assertEquals(1, args.entries.size)
 
             println("✅ Simple function call parsed successfully!")
@@ -36,15 +36,15 @@ class FunctionCallTest {
         val source = "let result = add {x = 1, y = 2}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val call = letBinding.expression as FunctionCall
-            val func = call.function as Identifier
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val call = letBinding.value as ParsedFunctionCall
+            val func = call.function as ParsedIdentifier
             assertEquals("add", func.localName)
 
-            val args = call.arguments as RecordLiteral
+            val args = call.arguments as ParsedRecordLit
             assertEquals(2, args.entries.size)
 
             println("✅ Function call with multiple arguments parsed successfully!")
@@ -56,12 +56,12 @@ class FunctionCallTest {
         val source = "let value = obj.field"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val memberAccess = letBinding.expression as MemberAccess
-            val receiver = memberAccess.receiver as Identifier
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val memberAccess = letBinding.value as ParsedMemberAccess
+            val receiver = memberAccess.receiver as ParsedIdentifier
             assertEquals("obj", receiver.localName)
             assertEquals("field", memberAccess.member)
 
@@ -74,20 +74,20 @@ class FunctionCallTest {
         val source = "let value = obj.x.y.z"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val access3 = letBinding.expression as MemberAccess
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val access3 = letBinding.value as ParsedMemberAccess
             assertEquals("z", access3.member)
 
-            val access2 = access3.receiver as MemberAccess
+            val access2 = access3.receiver as ParsedMemberAccess
             assertEquals("y", access2.member)
 
-            val access1 = access2.receiver as MemberAccess
+            val access1 = access2.receiver as ParsedMemberAccess
             assertEquals("x", access1.member)
 
-            val obj = access1.receiver as Identifier
+            val obj = access1.receiver as ParsedIdentifier
             assertEquals("obj", obj.localName)
 
             println("✅ Chained member access parsed successfully!")
@@ -99,16 +99,16 @@ class FunctionCallTest {
         val source = "let result = obj.method {x = 1}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val call = letBinding.expression as FunctionCall
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val call = letBinding.value as ParsedFunctionCall
 
-            val memberAccess = call.function as MemberAccess
+            val memberAccess = call.function as ParsedMemberAccess
             assertEquals("method", memberAccess.member)
 
-            val obj = memberAccess.receiver as Identifier
+            val obj = memberAccess.receiver as ParsedIdentifier
             assertEquals("obj", obj.localName)
 
             println("✅ Function call on member access parsed successfully!")
@@ -120,17 +120,17 @@ class FunctionCallTest {
         val source = "let result = f {x = g {y = 1}}"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val outerCall = letBinding.expression as FunctionCall
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val outerCall = letBinding.value as ParsedFunctionCall
 
-            val args = outerCall.arguments as RecordLiteral
-            val fieldEntry = args.entries[0] as RecordFieldEntry
+            val args = outerCall.arguments as ParsedRecordLit
+            val fieldEntry = args.entries[0] as ParsedRecordEntry.Field
 
-            val innerCall = fieldEntry.value as FunctionCall
-            val innerFunc = innerCall.function as Identifier
+            val innerCall = fieldEntry.value as ParsedFunctionCall
+            val innerFunc = innerCall.function as ParsedIdentifier
             assertEquals("g", innerFunc.localName)
 
             println("✅ Nested function calls parsed successfully!")
@@ -144,25 +144,25 @@ class FunctionCallTest {
         val source = "let result = concat { xss = map { xs = xs, f = f } }"
 
         assertDoesNotThrow {
-            val program = parser.parseParsedModule(source)
-            assertNotNull(program)
+            val module = parser.parseParsedModule(source)
+            assertNotNull(module)
 
-            val letBinding = program.items[0] as LetBinding
-            val outerCall = letBinding.expression as FunctionCall
-            val outerFunc = outerCall.function as Identifier
+            val letBinding = module.decls[0] as ParsedLetDecl
+            val outerCall = letBinding.value as ParsedFunctionCall
+            val outerFunc = outerCall.function as ParsedIdentifier
             assertEquals("concat", outerFunc.localName)
 
-            val args = outerCall.arguments as RecordLiteral
+            val args = outerCall.arguments as ParsedRecordLit
             assertEquals(1, args.entries.size)
 
-            val fieldEntry = args.entries[0] as RecordFieldEntry
+            val fieldEntry = args.entries[0] as ParsedRecordEntry.Field
             assertEquals("xss", fieldEntry.name)
 
-            val innerCall = fieldEntry.value as FunctionCall
-            val innerFunc = innerCall.function as Identifier
+            val innerCall = fieldEntry.value as ParsedFunctionCall
+            val innerFunc = innerCall.function as ParsedIdentifier
             assertEquals("map", innerFunc.localName)
 
-            val innerArgs = innerCall.arguments as RecordLiteral
+            val innerArgs = innerCall.arguments as ParsedRecordLit
             assertEquals(2, innerArgs.entries.size)
 
             println("✅ Nested function calls without parentheses parsed successfully!")

@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -16,9 +16,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -31,9 +31,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -46,9 +46,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, Console, ...> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(typeAnnotation.effects!!.isPolymorphic, "Effect row should be polymorphic")
@@ -61,9 +61,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, Console> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects, "Effect annotation should not be null")
         assertTrue(!typeAnnotation.effects!!.isPolymorphic, "Closed effect row should NOT be polymorphic")
@@ -76,9 +76,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <> = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         // Empty effect row <> means no effects, so the annotation should be null
         // (Because the parser only creates EffectRowAnnotation when effects.isNotEmpty() || isPolymorphic)
@@ -92,9 +92,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int = { x } -> x + 1
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertEquals(null, typeAnnotation.effects, "Function with no effects should have null effect annotation")
     }
@@ -105,11 +105,11 @@ class EffectPolymorphismParserTest {
             let config: { handler: { x: Int } -> Int <...> } = { handler = { x } -> x }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as RecordTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedRecordType
 
-        val handlerType = typeAnnotation.entries.find { it.name == "handler" }!!.type as FunctionTypeAnnotation
+        val handlerType = typeAnnotation.entries.find { it.name == "handler" }!!.type as ParsedFunctionType
         assertNotNull(handlerType.effects)
         assertTrue(handlerType.effects!!.isPolymorphic)
     }
@@ -121,14 +121,14 @@ class EffectPolymorphismParserTest {
                 { f, g } -> { x } -> f { x = g { x = x } }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         // Check parameter type (record with f and g)
-        val paramType = typeAnnotation.paramType as RecordTypeAnnotation
-        val fType = paramType.entries.find { it.name == "f" }!!.type as FunctionTypeAnnotation
-        val gType = paramType.entries.find { it.name == "g" }!!.type as FunctionTypeAnnotation
+        val paramType = typeAnnotation.paramType as ParsedRecordType
+        val fType = paramType.entries.find { it.name == "f" }!!.type as ParsedFunctionType
+        val gType = paramType.entries.find { it.name == "g" }!!.type as ParsedFunctionType
 
         assertNotNull(fType.effects)
         assertTrue(fType.effects!!.isPolymorphic)
@@ -136,7 +136,7 @@ class EffectPolymorphismParserTest {
         assertTrue(gType.effects!!.isPolymorphic)
 
         // Check return type
-        val returnType = typeAnnotation.returnType as FunctionTypeAnnotation
+        val returnType = typeAnnotation.returnType as ParsedFunctionType
         assertNotNull(returnType.effects)
         assertTrue(returnType.effects!!.isPolymorphic)
     }
@@ -147,9 +147,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, DB, FileSystem, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(typeAnnotation.effects!!.isPolymorphic)
@@ -167,15 +167,15 @@ class EffectPolymorphismParserTest {
             } -> {} = { handlers } -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
-        val paramType = typeAnnotation.paramType as RecordTypeAnnotation
-        val handlersType = paramType.entries.find { it.name == "handlers" }!!.type as RecordTypeAnnotation
+        val paramType = typeAnnotation.paramType as ParsedRecordType
+        val handlersType = paramType.entries.find { it.name == "handlers" }!!.type as ParsedRecordType
 
-        val onSuccessType = handlersType.entries.find { it.name == "onSuccess" }!!.type as FunctionTypeAnnotation
-        val onErrorType = handlersType.entries.find { it.name == "onError" }!!.type as FunctionTypeAnnotation
+        val onSuccessType = handlersType.entries.find { it.name == "onSuccess" }!!.type as ParsedFunctionType
+        val onErrorType = handlersType.entries.find { it.name == "onError" }!!.type as ParsedFunctionType
 
         assertNotNull(onSuccessType.effects)
         assertTrue(onSuccessType.effects!!.isPolymorphic)
@@ -193,14 +193,14 @@ class EffectPolymorphismParserTest {
             } -> {} = { pure_fn, effectful_fn, poly_fn } -> {}
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
-        val paramType = typeAnnotation.paramType as RecordTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
+        val paramType = typeAnnotation.paramType as ParsedRecordType
 
-        val pureFnType = paramType.entries.find { it.name == "pure_fn" }!!.type as FunctionTypeAnnotation
-        val effectfulFnType = paramType.entries.find { it.name == "effectful_fn" }!!.type as FunctionTypeAnnotation
-        val polyFnType = paramType.entries.find { it.name == "poly_fn" }!!.type as FunctionTypeAnnotation
+        val pureFnType = paramType.entries.find { it.name == "pure_fn" }!!.type as ParsedFunctionType
+        val effectfulFnType = paramType.entries.find { it.name == "effectful_fn" }!!.type as ParsedFunctionType
+        val polyFnType = paramType.entries.find { it.name == "poly_fn" }!!.type as ParsedFunctionType
 
         // pure_fn has no effects
         assertEquals(null, pureFnType.effects)
@@ -221,9 +221,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(typeAnnotation.effects!!.isPolymorphic)
@@ -237,9 +237,9 @@ class EffectPolymorphismParserTest {
             let f: { x: Int } -> Int <FileSystem, HTTP_Client, DatabasePool, ...> = { x } -> x
         """.trimIndent()
 
-        val program = parser.parseParsedModule(code)
-        val binding = program.items[0] as LetBinding
-        val typeAnnotation = binding.typeAnnotation as FunctionTypeAnnotation
+        val module = parser.parseParsedModule(code)
+        val binding = module.decls[0] as ParsedLetDecl
+        val typeAnnotation = binding.typeAnnotation as ParsedFunctionType
 
         assertNotNull(typeAnnotation.effects)
         assertTrue(typeAnnotation.effects!!.isPolymorphic)

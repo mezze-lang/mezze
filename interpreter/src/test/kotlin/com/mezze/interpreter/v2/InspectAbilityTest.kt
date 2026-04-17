@@ -267,17 +267,17 @@ class InspectAbilityTest {
         val parser = com.mezze.language.parser.MezzeParser()
         val program = parser.parseParsedModule(source)
 
-        // Before typechecking, the parser creates a VariantConstruction node
-        val letBinding = program.items[0] as com.mezze.language.ast.LetBinding
-        val expression = letBinding.expression
+        // Before typechecking, the parser creates a ParsedVariantConstruct node
+        val letDecl = program.decls[0] as com.mezze.language.parsedast.ParsedLetDecl
+        val expression = letDecl.value
 
         // The parser treats "Inspect" as a variant constructor
         assertTrue(
-            expression is com.mezze.language.ast.VariantConstruction,
-            "Parser should treat uppercase identifier as VariantConstruction"
+            expression is com.mezze.language.parsedast.ParsedVariantConstruct,
+            "Parser should treat uppercase identifier as ParsedVariantConstruct"
         )
 
-        val variantConst = expression as com.mezze.language.ast.VariantConstruction
+        val variantConst = expression as com.mezze.language.parsedast.ParsedVariantConstruct
         assertEquals("Inspect", variantConst.constructor)
         assertNull(variantConst.value, "Unit constructor should have no value")
     }
@@ -292,7 +292,7 @@ class InspectAbilityTest {
 
         // Typechecker should fail because Inspect is an ability, not a value
         assertThrows(Exception::class.java) {
-            typeChecker.typeCheck(parsedModule)
+            typeChecker.typeCheck(parsedModule, java.nio.file.Path.of("."))
         }
     }
 }

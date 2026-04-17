@@ -31,57 +31,7 @@ object ContentHashComputer {
     private val typeStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?) = size > 1000
     }
-    private val annotationStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?) = size > 1000
-    }
-    fun clearCaches() { typeStringCache.clear(); annotationStringCache.clear() }
-
-    /**
-     * Convert type annotation to string with caching for complex types.
-     */
-    fun typeAnnotationToString(annotation: TypeAnnotation): String {
-        // Fast path for simple identifiers
-        if (annotation is IdentifierTypeAnnotation) {
-            return annotation.name
-        }
-        if (annotation is FunctionTypeAnnotation) {
-            return "Function"
-        }
-        if (annotation is EffectRowAnnotation) {
-            return "EffectRow"
-        }
-
-        // Complex types - use cache
-        val key = System.identityHashCode(annotation)
-        annotationStringCache[key]?.let { return it }
-
-        val result = when (annotation) {
-            is TypeApplicationAnnotation -> {
-                val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
-                if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_$args"
-            }
-            is RecordTypeAnnotation -> {
-                // Include sorted field names to distinguish different record structures
-                val fieldNames = annotation.entries.map { it.name }.sorted().joinToString("_")
-                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
-            }
-            is VariantTypeAnnotation -> {
-                // Include sorted constructor names to distinguish different variant structures
-                val constructorNames = annotation.constructors.map { it.name }.sorted().joinToString("_")
-                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
-            }
-            is SeqTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
-            is QualifiedTypeAnnotation -> {
-                val modulePart = annotation.modulePath.joinToString("_")
-                val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
-                if (args.isEmpty()) "${modulePart}_${annotation.typeName}" else "${modulePart}_${annotation.typeName}_$args"
-            }
-            else -> annotation.toString()
-        }
-
-        annotationStringCache[key] = result
-        return result
-    }
+    fun clearCaches() { typeStringCache.clear() }
 
     /**
      * Convert a MezzeType to a canonical string for ability impl lookup keys.
@@ -140,23 +90,6 @@ object ContentHashComputer {
         return result
     }
 
-    /**
-     * Look up the content hash for an ability implementation.
-     *
-     * @param abilityName The ability name (e.g., "NumAdd")
-     * @param targetTypes The target types (e.g., [IntType])
-     * @param hashMap The hash map from computeHashes
-     * @return The content hash if found
-     */
-    fun lookupAbilityImplHash(
-        abilityName: String,
-        targetTypes: List<TypeAnnotation>,
-        hashMap: Map<String, MezzeHash>
-    ): MezzeHash? {
-        val targetTypesStr = targetTypes.joinToString("$") { typeAnnotationToString(it) }
-        val key = "$abilityName\$$targetTypesStr"
-        return hashMap[key]
-    }
 
     /**
      * Look up the content hash for an effect handler implementation.

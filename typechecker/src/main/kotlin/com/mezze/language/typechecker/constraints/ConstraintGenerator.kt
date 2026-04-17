@@ -9,9 +9,6 @@ import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.scope.ScopedEffectConstants
-import com.mezze.language.typechecker.scope.detectScopedEffectMembers
-import com.mezze.language.typechecker.scope.extractScopeTypeFromAnnotation
-import com.mezze.language.typechecker.scope.validateScopedEffectSignatures
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.ast.Keywords
 

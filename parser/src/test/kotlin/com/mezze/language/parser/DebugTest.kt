@@ -16,8 +16,8 @@ class DebugTest {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parseParsedModule(source)
-            println("✅ Success: $program")
+            val module = parser.parseParsedModule(source)
+            println("✅ Success: $module")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")
             e.printStackTrace()
@@ -42,8 +42,8 @@ let obj = {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parseParsedModule(source)
-            println("✅ Success: $program")
+            val module = parser.parseParsedModule(source)
+            println("✅ Success: $module")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")
             e.printStackTrace()
@@ -87,8 +87,8 @@ let obj = {
 
         val parser = MezzeParser()
         try {
-            val program = parser.parseParsedModule(source)
-            println("✅ Success: $program")
+            val module = parser.parseParsedModule(source)
+            println("✅ Success: $module")
         } catch (e: ParseException) {
             println("❌ Failed: ${e.message}")
             e.printStackTrace()

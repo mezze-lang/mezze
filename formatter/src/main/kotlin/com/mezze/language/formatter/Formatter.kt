@@ -1,6 +1,6 @@
 package com.mezze.language.formatter
 
-import com.mezze.language.ast.Program
+import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.parser.MezzeParser
 
 /**
@@ -27,34 +27,24 @@ class Formatter {
      * @return The formatted source code
      * @throws FormatException if the source code cannot be parsed
      */
-    /**
-     * Format Mezze source code.
-     *
-     * @param source The source code to format
-     * @param file Optional file path for error messages
-     * @return The formatted source code
-     * @throws FormatException if the source code cannot be parsed
-     */
     fun format(source: String, file: String? = null): String {
-        try {
-            // Parse to v2 ParsedModule (primary API); PrettyPrinter still uses v1 Program
+        val parsedModule = try {
             parser.parseParsedModule(source, file = file ?: "<unknown>")
         } catch (e: Exception) {
             throw FormatException("Failed to parse source: ${e.message}", e)
         }
 
-        // PrettyPrinter uses v1 Program which is now always empty — formatter needs migration
-        return prettyPrinter.print(com.mezze.language.ast.Program(emptyList()))
+        return prettyPrinter.printModule(parsedModule)
     }
 
     /**
-     * Format an already-parsed program.
+     * Format an already-parsed module.
      *
-     * @param program The parsed program AST
+     * @param module The parsed module AST
      * @return The formatted source code
      */
-    fun format(program: Program): String {
-        return prettyPrinter.print(program)
+    fun format(module: ParsedModule): String {
+        return prettyPrinter.printModule(module)
     }
 
     /**

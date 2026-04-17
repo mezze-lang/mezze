@@ -43,7 +43,7 @@ private fun loadPrecompiledStdlib() {
             val bytes = resourceStream.readBytes()
             val codebase = SQLiteCodebase.fromBytes(bytes)
             codebase.use {
-                val (_, modules) = CodebaseLoader.loadAll(codebase)
+                val modules = CodebaseLoader.loadAllParsedModules(codebase)
                 TypeChecker.preloadModules(modules)
                 stdlibLoaded = true
             }
@@ -670,17 +670,16 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        // Also run v1 typecheck for codebase population (temporary — until codebase uses TypedModule)
+        // Populate codebase from v2 typecheck result
         try {
-            val v1Ast = cachedParser.parseSource(source, filePath = file.absolutePath)
-            val v1Result = typeChecker.typeCheck(v1Ast, typeCheckProjectRoot)
+            val v2Result = typeChecker.typeCheck(parsedModule, typeCheckProjectRoot)
             CodebaseHelper.populateIfInProject(
                 projectRoot = typeCheckProjectRoot,
-                typeCheckResult = v1Result,
+                typeCheckResult = v2Result,
                 modulePath = null
             )
         } catch (_: Exception) {
-            // v1 codebase population is best-effort during migration
+            // Codebase population is best-effort
         }
 
         if (quietMode) {
@@ -922,66 +921,8 @@ private fun readStdin(): String {
 
 
 
-private fun prettyPrintAST(ast: Program): String {
-    val sb = StringBuilder()
-    sb.appendLine("Program with ${ast.items.size} items:")
-    ast.items.forEachIndexed { index, item ->
-        sb.appendLine("  ${index + 1}. ${prettyPrintItem(item)}")
-    }
-    return sb.toString()
-}
-
-private fun prettyPrintItem(item: ProgramItem): String {
-    return when (item) {
-        is LetBinding -> {
-            val typeAnnotation = item.typeAnnotation?.let { ": $it" } ?: ""
-            "let ${item.variableName}$typeAnnotation = ${prettyPrintExpression(item.expression)}"
-        }
-        is TypeDeclaration -> {
-            "type ${item.name} = ${item.definition}"
-        }
-        else -> item.toString()
-    }
-}
-
-private fun prettyPrintExpression(expr: Expression): String {
-    return when (expr) {
-        is IntLiteral -> expr.value.toString()
-        is FloatLiteral -> expr.value.toString()
-        is StringLiteral -> "\"${expr.value}\""
-        is Identifier -> expr.toBindingKey().toKeyString()
-        is LambdaExpression -> {
-            val params = when (val p = expr.parameters) {
-                is TypedParameters -> "typed_params" // Simplified
-                is UntypedParameters -> "{ ${p.names.joinToString(", ")} }"
-            }
-            "$params -> ${prettyPrintExpression(expr.body)}"
-        }
-        // BinaryOperation removed - operators are desugared at parse time
-        is FunctionCall -> {
-            "${prettyPrintExpression(expr.function)} ${prettyPrintExpression(expr.arguments)}"
-        }
-        is RecordLiteral -> {
-            val fieldEntries = expr.getFieldEntries().map { entry ->
-                val value = entry.value
-                if (value != null) {
-                    "${entry.name} = ${prettyPrintExpression(value)}"
-                } else {
-                    entry.name  // Punned syntax
-                }
-            }
-            val spreadEntries = expr.getSpreadEntries().map { spreadEntry ->
-                "...${prettyPrintExpression(spreadEntry.expression)}"
-            }
-            val allEntries = (spreadEntries + fieldEntries).joinToString(", ")
-            "{ $allEntries }"
-        }
-        is IfExpression -> {
-            "if ${prettyPrintExpression(expr.condition)} then ${prettyPrintExpression(expr.thenBranch)} else ${prettyPrintExpression(expr.elseBranch)}"
-        }
-        else -> expr.toString()
-    }
-}
+// prettyPrintAST and prettyPrintItem removed — v1 Program/ProgramItem types deleted.
+// Use prettyPrintParsedModule for formatted output.
 
 // ============================================================================
 // PARSED AST PRETTY PRINTING
@@ -1203,7 +1144,7 @@ private fun handleExecCommand(args: List<String>) {
     val typeCheckStart = System.nanoTime()
     val typeChecker = TypeChecker()
     val typeCheckResult = try {
-        typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot, enablePrelude = true)
+        typeChecker.typeCheck(ast, typeCheckProjectRoot, enablePrelude = true)
     } catch (e: TypeCheckError) {
         // Format error with source location and code snippet
         val formattedError = SourceContext.formatError(
@@ -1301,45 +1242,12 @@ private fun handleExecCommand(args: List<String>) {
         kotlin.system.exitProcess(1)
     }
 
-    // Handle type-check failure
-    if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
-        val error = typeCheckResult.errors.first()
-
-        // Format error with source location and code snippet
-        val formattedError = formatTypeCheckError(error, source, fileName)
-        println(formattedError)
-
-        // Provide helpful suggestions based on error
-        if (error.message.contains("pure", ignoreCase = true)) {
-            println()
-            println("💡 The main function must perform effects using 'perform':")
-            println()
-            println("   use std::effects::log::{println, Log, Console}")
-            println()
-            println("   let main = {} -> perform Console in")
-            println("     println { msg = \"Hello, World!\" }")
-        } else if (error.message.contains("unhandled", ignoreCase = true)) {
-            println()
-            println("💡 Use 'perform <Handler> in' to handle all effects in main")
-        } else if (error.message.contains("no 'main' function", ignoreCase = true)) {
-            println()
-            println("💡 Define a main function:")
-            println()
-            println("   use std::effects::log::{println, Log, Console}")
-            println()
-            println("   let main = {} -> perform Console in")
-            println("     println { msg = \"Hello, World!\" }")
-        }
-        kotlin.system.exitProcess(1)
-    }
-
-    val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
     val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000
 
     // Use TruffleIR (loweredFunctions) — all modules are already included via monomorphization.
     // The compileFromIR path finds "main" or "__entry__" and executes its body directly,
     // so no need to append a main() call.
-    val functions = successResult.loweredFunctions ?: emptyList()
+    val functions = typeCheckResult.loweredFunctions
 
     try {
         // Suppress verbose Truffle logging (JIT compilation is enabled via truffle-runtime)
@@ -1475,49 +1383,15 @@ private fun handleCompileCommand(args: List<String>) {
         val ast = parser.parseParsedModule(source)
         val parseTime = (System.nanoTime() - parseStart) / 1_000_000.0
 
-        // Type-check with main validation: main must be {} -> {} <*>
+        // Type-check (throws TypeCheckError on failure)
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
-        val typeCheckResult = typeChecker.checkProgramForExecution(ast, inputFile.toPath().parent ?: inputFile.toPath(), enablePrelude = true)
+        val typeCheckResult = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath(), enablePrelude = true)
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
-
-        // Handle type-check failure
-        if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
-            val error = typeCheckResult.errors.first()
-
-            // Format error with source location and code snippet
-            val formattedError = formatTypeCheckError(error, source, inputFile.name)
-            println(formattedError)
-
-            // Provide helpful suggestions based on error
-            if (error.message.contains("pure", ignoreCase = true)) {
-                println()
-                println("💡 The main function must perform effects using 'perform':")
-                println()
-                println("   use std::effects::log::{println, Log, Console}")
-                println()
-                println("   let main = {} -> perform Console in")
-                println("     println { msg = \"Hello, World!\" }")
-            } else if (error.message.contains("unhandled", ignoreCase = true)) {
-                println()
-                println("💡 Use 'perform <Handler> in' to handle all effects in main")
-            } else if (error.message.contains("no 'main' function", ignoreCase = true)) {
-                println()
-                println("💡 Compiled programs must define a 'main' function:")
-                println()
-                println("   use std::effects::log::{println, Log, Console}")
-                println()
-                println("   let main = {} -> perform Console in")
-                println("     println { msg = \"Hello, World!\" }")
-            }
-            kotlin.system.exitProcess(1)
-        }
-
-        val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
 
         // Always create standalone JAR (AST + Interpreter + Truffle)
         val jarStart = System.nanoTime()
-        createStandaloneJar(inputFile, outputFile, source, successResult.program)
+        createStandaloneJar(inputFile, outputFile, source)
         val jarTime = (System.nanoTime() - jarStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
@@ -1538,7 +1412,7 @@ private fun handleCompileCommand(args: List<String>) {
     }
 }
 
-private fun createStandaloneJar(inputFile: File, outputFile: File, source: String, typedProgram: Program) {
+private fun createStandaloneJar(inputFile: File, outputFile: File, source: String) {
         println("🔧 Creating standalone JAR with full Truffle JIT support...")
 
     // Create a temporary directory for JAR contents
@@ -1579,7 +1453,7 @@ private fun createJavaMainClass(tempDir: File, inputFile: File, source: String) 
     val codebase = SQLiteCodebase.inMemory()
     CodebasePopulator.populate(
         codebase = codebase,
-        mainProgram = typeCheckResult.program,
+        typeCheckResult = typeCheckResult,
         modules = loadedModules,
         mainModulePath = null  // Script mode has no module path
     )
@@ -1944,8 +1818,8 @@ private fun handleDevCommand(args: List<String>) {
 }
 
 private fun handleBuildCommand(args: List<String>) {
-    com.mezze.language.cli.commands.BuildCommand().execute(args) { inputFile, outputFile, source, program ->
-        createStandaloneJar(inputFile, outputFile, source, program)
+    com.mezze.language.cli.commands.BuildCommand().execute(args) { inputFile, outputFile, source, _ ->
+        createStandaloneJar(inputFile, outputFile, source)
     }
 }
 
@@ -2092,7 +1966,7 @@ private fun handleCompileStdlibCommand(args: List<String>) {
 
     println("Compiling stdlib from ${stdlibDir.absolutePath}...")
 
-    val stdlibModules = mutableMapOf<String, Program>()
+    val stdlibModules = mutableMapOf<String, com.mezze.language.parsedast.ParsedModule>()
     val parser = MezzeParser()
     val typeChecker = TypeChecker()
     var successCount = 0
@@ -2119,7 +1993,7 @@ private fun handleCompileStdlibCommand(args: List<String>) {
             val ast = parser.parseParsedModule(source, file = file.toString())
             // typeCheck throws TypeCheckError on failure, returns TypeCheckResult on success
             val result = typeChecker.typeCheck(ast, projectRoot.toPath(), modulePath = modulePath)
-            stdlibModules[modulePath] = result.program
+            stdlibModules[modulePath] = ast
             successCount++
         } catch (e: TypeCheckError) {
             errorCount++
@@ -2143,7 +2017,7 @@ private fun handleCompileStdlibCommand(args: List<String>) {
     codebase.use {
         com.mezze.language.codebase.CodebasePopulator.populate(
             codebase = codebase,
-            mainProgram = Program(emptyList()),
+            typeCheckResult = TypeCheckResult(),
             modules = stdlibModules,
             mainModulePath = null
         )
@@ -2283,34 +2157,31 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
     println("✅ Type checking successful!")
     println("━".repeat(50))
 
+    val typedModule = result.typedModule
+    if (typedModule == null) {
+        println("(no typed module available)")
+        return
+    }
+
     // Count different types of items
-    val letBindings = result.program.items.filterIsInstance<LetBinding>()
-    val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
-    val effectDeclarations = result.program.items.filterIsInstance<EffectDeclaration>()
-    val implDeclarations = result.program.items.filterIsInstance<ImplDeclaration>()
+    val letBindings = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+    val typeDeclarations = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
+    val effectDeclarations = typedModule.effectDecls
+    val abilityDeclarations = typedModule.abilityDecls
 
     // Print summary
     println("📊 Summary:")
     if (letBindings.isNotEmpty()) println("   ${letBindings.size} variable(s)")
     if (typeDeclarations.isNotEmpty()) println("   ${typeDeclarations.size} type(s)")
     if (effectDeclarations.isNotEmpty()) println("   ${effectDeclarations.size} effect(s)")
-    if (implDeclarations.isNotEmpty()) println("   ${implDeclarations.size} implementation(s)")
+    if (abilityDeclarations.isNotEmpty()) println("   ${abilityDeclarations.size} ability(s)")
     println()
 
     // Print type declarations first
     if (typeDeclarations.isNotEmpty()) {
         println("🏷️  Types:")
         for (item in typeDeclarations) {
-            // Include type parameters in the name (e.g., "Tree 'a")
-            val typeParamsStr = if (item.typeParams.isNotEmpty()) {
-                " " + item.typeParams.joinToString(" ")
-            } else {
-                ""
-            }
-            val expansionStr = item.inferredType?.let {
-                " = ${prettyPrintType(it)}"
-            } ?: ""
-            println("   ${item.name}$typeParamsStr$expansionStr")
+            println("   ${item.name}")
         }
         println()
     }
@@ -2328,17 +2199,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
     if (letBindings.isNotEmpty()) {
         println("📝 Variables:")
         for (item in letBindings) {
-            // Use TypeScheme if available (for polymorphic functions with constraints),
-            // otherwise fall back to inferredType (for monomorphic bindings)
-            val scheme = item.typeScheme
-            val typeStr = if (scheme != null && scheme.type is com.mezze.language.ast.MezzeType.FunctionType) {
-                // For polymorphic functions, display the type from the scheme which includes constraints
-                prettyPrintTypeWithAliases(scheme.type, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
-            } else {
-                item.inferredType?.let {
-                    prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
-                } ?: "unknown"
-            }
+            val typeStr = prettyPrintTypeWithAliases(item.scheme.type, typeAliases, showExpansion = false)
 
             // Add emoji based on type
             val emoji = when {
@@ -2351,7 +2212,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
                 else -> "📋"
             }
 
-            println("   $emoji ${item.variableName} : $typeStr")
+            println("   $emoji ${item.name} : $typeStr")
         }
     }
 
@@ -2372,20 +2233,21 @@ private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
     println("Type check passed")
     println("━".repeat(50))
 
+    val typedModule = result.typedModule
+    if (typedModule == null) {
+        println("(no typed module available)")
+        return
+    }
+
     // Only print main file bindings
-    val mainBindings = result.program.items.filterIsInstance<LetBinding>()
-    val mainTypes = result.program.items.filterIsInstance<TypeDeclaration>()
-    val mainEffects = result.program.items.filterIsInstance<EffectDeclaration>()
+    val mainBindings = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+    val mainTypes = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
+    val mainEffects = typedModule.effectDecls
 
     // Print types
     if (mainTypes.isNotEmpty()) {
         for (typeDecl in mainTypes) {
-            val typeParamsStr = if (typeDecl.typeParams.isNotEmpty()) {
-                " " + typeDecl.typeParams.joinToString(" ")
-            } else {
-                ""
-            }
-            println("type ${typeDecl.name}$typeParamsStr")
+            println("type ${typeDecl.name}")
         }
         println()
     }
@@ -2400,15 +2262,8 @@ private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
 
     // Print bindings
     for (binding in mainBindings) {
-        val scheme = binding.typeScheme
-        val typeStr = if (scheme != null && scheme.type is com.mezze.language.ast.MezzeType.FunctionType) {
-            prettyPrintTypeWithAliases(scheme.type, typeAliases, showExpansion = false, typeDeclarations = mainTypes)
-        } else {
-            binding.inferredType?.let {
-                prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = mainTypes)
-            } ?: "unknown"
-        }
-        println("${binding.variableName} : $typeStr")
+        val typeStr = prettyPrintTypeWithAliases(binding.scheme.type, typeAliases, showExpansion = false)
+        println("${binding.name} : $typeStr")
     }
 }
 

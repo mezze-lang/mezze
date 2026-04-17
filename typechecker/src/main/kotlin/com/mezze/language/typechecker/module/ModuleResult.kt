@@ -62,10 +62,6 @@ data class LoadedModule(
 ) {
     /** Legacy accessor for module path as string. Use path.fullPath instead. */
     val modulePath: String get() = path.fullPath
-
-    /** Deprecated: always returns empty Program. Use parsedModule instead. */
-    @Deprecated("Use parsedModule instead — v1 Program removed")
-    val program: Program get() = Program(emptyList())
 }
 
 /**

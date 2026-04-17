@@ -49,7 +49,7 @@ class ModuleResolverTest {
                 assertEquals(nonCoreModule, module.name)
                 
                 // Should have parsed the actual module file
-                assertNotNull(module.program)
+                assertNotNull(module.parsedModule)
                 
             } catch (e: ModuleError.ModuleNotFound) {
                 // It's okay if the module doesn't exist - we're just testing that

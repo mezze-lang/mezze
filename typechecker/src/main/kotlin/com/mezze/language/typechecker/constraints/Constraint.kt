@@ -1,6 +1,9 @@
 package com.mezze.language.typechecker.constraints
 
-import com.mezze.language.ast.*
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.ModulePath
+import com.mezze.language.ast.SourceLocation
+import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedPerform
 import com.mezze.language.typechecker.context.TypingContext
@@ -155,7 +158,6 @@ sealed interface Constraint {
      */
     data class EffectUsed(
         val effect: String,
-        val expression: Expression? = null,  // For error messages
         val context: String? = null,
         override val sourceLocation: SourceLocation? = null
     ) : Constraint

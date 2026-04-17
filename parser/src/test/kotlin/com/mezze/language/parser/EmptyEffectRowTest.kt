@@ -1,6 +1,6 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -17,15 +17,15 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val effectDecl = program.items[0] as EffectDeclaration
+        val module = parser.parseParsedModule(source)
+        val effectDecl = module.decls[0] as ParsedEffectDecl
 
         assertEquals("Log", effectDecl.name)
         assertEquals(1, effectDecl.operations.size)
 
         val operation = effectDecl.operations[0]
         assertEquals("log", operation.name)
-        assertEquals("Unit", (operation.returnType as IdentifierTypeAnnotation).name)
+        assertEquals("Unit", (operation.returnType as ParsedNamedType).name)
         assertTrue(operation.effects.isEmpty()) // No effects should be present
     }
 
@@ -37,15 +37,15 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val effectDecl = program.items[0] as EffectDeclaration
+        val module = parser.parseParsedModule(source)
+        val effectDecl = module.decls[0] as ParsedEffectDecl
 
         assertEquals("Log", effectDecl.name)
         assertEquals(1, effectDecl.operations.size)
 
         val operation = effectDecl.operations[0]
         assertEquals("log", operation.name)
-        assertEquals("Unit", (operation.returnType as IdentifierTypeAnnotation).name)
+        assertEquals("Unit", (operation.returnType as ParsedNamedType).name)
         assertTrue(operation.effects.isEmpty()) // Empty effect row should result in empty list
     }
 
@@ -57,15 +57,15 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val effectDecl = program.items[0] as EffectDeclaration
+        val module = parser.parseParsedModule(source)
+        val effectDecl = module.decls[0] as ParsedEffectDecl
 
         assertEquals("Database", effectDecl.name)
         assertEquals(1, effectDecl.operations.size)
 
         val operation = effectDecl.operations[0]
         assertEquals("query", operation.name)
-        assertEquals("String", (operation.returnType as IdentifierTypeAnnotation).name)
+        assertEquals("String", (operation.returnType as ParsedNamedType).name)
         assertEquals(listOf("Log"), operation.effects) // Should have Log effect
     }
 
@@ -79,8 +79,8 @@ class EmptyEffectRowTest {
             }
         """.trimIndent()
 
-        val program = parser.parseParsedModule(source)
-        val effectDecl = program.items[0] as EffectDeclaration
+        val module = parser.parseParsedModule(source)
+        val effectDecl = module.decls[0] as ParsedEffectDecl
 
         assertEquals("Mixed", effectDecl.name)
         assertEquals(3, effectDecl.operations.size)
