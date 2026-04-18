@@ -55,11 +55,25 @@ public final class MonomorphicCallNode extends MezzeNode {
         this(functionName, null, argumentNode);
     }
 
+    // When the hash resolves to an already-evaluated value (not a function),
+    // this flag tells execute() to return the cached value directly.
+    @CompilationFinal
+    private boolean isResolvedValue = false;
+
+    @CompilationFinal
+    private Object resolvedValue;
+
     @Override
     public Object execute(VirtualFrame frame) {
-        if (callNode == null) {
+        if (callNode == null && !isResolvedValue) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             resolveFunction();
+        }
+
+        // If the hash resolved to an already-evaluated thunk result (not a function),
+        // return it directly without calling.
+        if (isResolvedValue) {
+            return resolvedValue;
         }
 
         Object arg = argumentNode.execute(frame);
@@ -108,7 +122,12 @@ public final class MonomorphicCallNode extends MezzeNode {
         }
 
         if (!(value instanceof MezzeFunction)) {
-            throw new RuntimeException("Not a function: " + functionName + " is " + value.getClass().getSimpleName());
+            // The hash resolved to an already-evaluated thunk result (e.g., a Long from `let x = 10`).
+            // ReadContextNode.autoEvaluateThunk may have evaluated the thunk and stored the result
+            // in the context, replacing the original MezzeFunction. Return the value directly.
+            isResolvedValue = true;
+            resolvedValue = value;
+            return;
         }
 
         cachedFunction = (MezzeFunction) value;

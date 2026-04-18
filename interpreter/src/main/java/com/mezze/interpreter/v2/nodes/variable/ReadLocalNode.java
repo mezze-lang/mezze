@@ -1,9 +1,14 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.FrameSlotTypeException;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
@@ -36,6 +41,10 @@ public final class ReadLocalNode extends MezzeNode {
     @CompilationFinal
     private final int kind;
 
+    // For forcing MezzeSuspended values (only used for KIND_OBJECT)
+    @Child
+    private IndirectCallNode suspendedCallNode;
+
     public ReadLocalNode(int slot, int kind) {
         this.slot = slot;
         this.kind = kind;
@@ -47,26 +56,63 @@ public final class ReadLocalNode extends MezzeNode {
         // Use try-catch for typed reads to handle slot type mismatches that can
         // occur in concurrent scenarios where the slot type may not match expected
         try {
-            return switch (kind) {
+            Object rawValue = switch (kind) {
                 case KIND_LONG -> frame.getLong(slot);
                 case KIND_DOUBLE -> frame.getDouble(slot);
                 case KIND_BOOLEAN -> frame.getBoolean(slot);
                 default -> readObjectOrPrimitive(frame);
             };
+            // Check for MezzeSuspended regardless of kind
+            // This handles the case where a capture's static type is Int but at runtime
+            // the value is a MezzeSuspended (from lazy effects)
+            if (rawValue instanceof MezzeSuspended suspended) {
+                return forceSuspended(suspended);
+            }
+            return rawValue;
         } catch (FrameSlotTypeException e) {
             // Slot type mismatch - fall back to generic read
-            return frame.getValue(slot);
+            Object value = frame.getValue(slot);
+            if (value instanceof MezzeSuspended suspended) {
+                return forceSuspended(suspended);
+            }
+            return value;
         }
     }
 
     /**
      * Read as Object, with fallback to primitives if slot type doesn't match.
      * Uses frame.getValue() which returns the value regardless of slot type.
+     *
+     * Also handles lazy effect forcing: if the value is a MezzeSuspended and
+     * there are active handlers in scope, force (evaluate) the suspended
+     * computation so that any effect exceptions are raised here.
      */
     private Object readObjectOrPrimitive(VirtualFrame frame) {
         // getValue() returns the value regardless of type (Object, Long, Double, Boolean)
         // It handles all slot types without throwing exceptions
-        return frame.getValue(slot);
+        Object value = frame.getValue(slot);
+        if (value instanceof MezzeSuspended suspended) {
+            return forceSuspended(suspended);
+        }
+        return value;
+    }
+
+    @TruffleBoundary
+    private Object forceSuspended(MezzeSuspended suspended) {
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            return suspended;
+        }
+        if (!context.hasHandlers()) {
+            return suspended;
+        }
+        if (suspendedCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            suspendedCallNode = insert(IndirectCallNode.create());
+        }
+        return suspended.executeWith(context.getCurrentHandlers(), context, suspendedCallNode);
     }
 
     @Override

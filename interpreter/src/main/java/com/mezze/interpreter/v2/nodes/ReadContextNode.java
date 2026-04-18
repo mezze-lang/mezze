@@ -2,11 +2,14 @@ package com.mezze.interpreter.v2.nodes;
 
 import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.values.MezzeFunction;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
 
@@ -27,6 +30,10 @@ public final class ReadContextNode extends MezzeNode {
 
     @CompilationFinal
     private final String name;
+
+    // For forcing MezzeSuspended values
+    @Child
+    private IndirectCallNode suspendedCallNode;
 
     public ReadContextNode(String name) {
         this.name = name;
@@ -61,7 +68,22 @@ public final class ReadContextNode extends MezzeNode {
         if (value instanceof MezzeFunction fn) {
             value = autoEvaluateThunk(fn, context);
         }
+        // Force MezzeSuspended values when inside an active handler scope
+        // This implements lazy effect semantics: suspended computations from
+        // outside a perform block are evaluated when read inside one.
+        if (value instanceof MezzeSuspended suspended && context.hasHandlers()) {
+            value = forceSuspended(suspended, context);
+        }
         return value;
+    }
+
+    @TruffleBoundary
+    private Object forceSuspended(MezzeSuspended suspended, MezzeContext context) {
+        if (suspendedCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            suspendedCallNode = insert(IndirectCallNode.create());
+        }
+        return suspended.executeWith(context.getCurrentHandlers(), context, suspendedCallNode);
     }
 
     /**

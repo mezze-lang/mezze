@@ -340,7 +340,16 @@
       "WebFetch(domain:corfield.org)",
       "WebFetch(domain:clojure.org)",
       "WebFetch(domain:jamalambda.com)",
-      "WebFetch(domain:guide.elm-lang.org)"
+      "WebFetch(domain:guide.elm-lang.org)",
+      "Bash(__NEW_LINE_7ea70a506657ffd5__ echo:*)",
+      "Bash(__NEW_LINE_820464928585f98e__ echo:*)",
+      "Bash(tail:*)",
+      "Bash(__NEW_LINE_f0805463be7b6729__ echo:*)",
+      "Bash(__NEW_LINE_afeec3d2136e7a43__ echo:*)",
+      "Bash(__NEW_LINE_72c6683d54c5630c__ echo:*)",
+      "WebFetch(domain:mattalp.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []

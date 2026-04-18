@@ -259,4 +259,5 @@ object V2PipelineRunner {
         SlotKind.BOOLEAN -> FrameSlotKind.Boolean
         SlotKind.OBJECT -> FrameSlotKind.Object
     }
+
 }

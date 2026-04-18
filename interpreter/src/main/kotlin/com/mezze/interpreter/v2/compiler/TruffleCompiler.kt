@@ -226,9 +226,22 @@ class TruffleCompiler(
 
             // === Records ===
             is MakeRecordIR -> {
-                val fieldNames = node.fields.map { it.name }.toTypedArray()
-                val fieldNodes = node.fields.map { compileNode(it.value, source) }.toTypedArray()
-                RecordLiteralNode.allObjects(fieldNames, fieldNodes)
+                val hasSpreads = node.fields.any { it.name == "__spread__" }
+                if (hasSpreads) {
+                    // Record has spread entries — use RecordSpreadNode
+                    val spreadNodes = node.fields
+                        .filter { it.name == "__spread__" }
+                        .map { compileNode(it.value, source) }
+                        .toTypedArray()
+                    val explicitFields = node.fields.filter { it.name != "__spread__" }
+                    val fieldNames = explicitFields.map { it.name }.toTypedArray()
+                    val fieldNodes = explicitFields.map { compileNode(it.value, source) }.toTypedArray()
+                    RecordSpreadNode.create(spreadNodes, fieldNames, fieldNodes)
+                } else {
+                    val fieldNames = node.fields.map { it.name }.toTypedArray()
+                    val fieldNodes = node.fields.map { compileNode(it.value, source) }.toTypedArray()
+                    RecordLiteralNode.allObjects(fieldNames, fieldNodes)
+                }
             }
             is ReadFieldIR -> {
                 val recordNode = compileNode(node.record, source)
