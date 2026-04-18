@@ -638,9 +638,9 @@ class TypedASTCompiler(
                         if (captureIdx != null) {
                             ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
                         } else {
-                            // Global reference — read from context.
-                            // Note: for value references like trig::pi, this returns MezzeFunction.
-                            // Method receivers are auto-called via compileReceiverExpr instead.
+                            // Read the value/function from context by hash.
+                            // Both value thunks (trig::pi) and function references (trig::sin) are
+                            // registered in context — MonomorphicCallNode handles calling them.
                             ReadContextIR(binding.hash.hex, src)
                         }
                     }

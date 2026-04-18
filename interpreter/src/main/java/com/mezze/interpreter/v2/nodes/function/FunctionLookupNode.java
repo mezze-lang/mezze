@@ -40,6 +40,19 @@ public final class FunctionLookupNode extends MezzeNode {
     private MezzeFunction resolveFunction() {
         MezzeContext context = MezzeContext.get(this);
         Object value = context.lookupGlobal(contentHash);
+
+        // Fall back to Language-level cache (same pattern as MonomorphicCallNode).
+        // User functions are registered via language.registerFunctionIR but not
+        // eagerly placed in the per-context global map.
+        if (value == null) {
+            var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+            var ct = lang.getCachedStdlibCallTarget(contentHash);
+            if (ct != null) {
+                value = MezzeFunction.create(ct, contentHash);
+                context.defineGlobal(contentHash, value);
+            }
+        }
+
         if (value instanceof MezzeFunction fn) {
             cachedFunction = fn;
             return fn;

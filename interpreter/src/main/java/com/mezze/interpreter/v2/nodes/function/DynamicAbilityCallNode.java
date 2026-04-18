@@ -98,6 +98,20 @@ public final class DynamicAbilityCallNode extends MezzeNode {
     private Object callByHash(String hash, Object arg) {
         MezzeContext context = MezzeContext.get(this);
         Object function = context.lookupGlobal(hash);
+
+        // Fall back to Language-level cache (same pattern as MonomorphicCallNode).
+        // User-defined ability impl ops are registered via language.registerFunctionIR
+        // but not eagerly placed in the per-context global map.
+        if (function == null) {
+            var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+            com.oracle.truffle.api.CallTarget ct = lang.getCachedStdlibCallTarget(hash);
+            if (ct != null) {
+                function = MezzeFunction.create(ct, hash);
+                // Cache in context for subsequent calls
+                context.defineGlobal(hash, function);
+            }
+        }
+
         if (function instanceof MezzeFunction fn) {
             return fn.getCallTarget().call(arg);
         }
