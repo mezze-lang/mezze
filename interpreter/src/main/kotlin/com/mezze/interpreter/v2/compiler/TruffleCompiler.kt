@@ -71,6 +71,15 @@ class TruffleCompiler(
             // from the parent frame — not needed here.
             val captureCount = ir.captureSlots.size
             val closureSlotIndices = IntArray(captureCount) { it }
+            // Build slot types for frame binding: [captures..., params...]
+            // This tells MezzeFunctionRootNode.bindSlot how to write each value (Long/Double/Bool/Object)
+            val slotTypes = IntArray(captureCount + ir.paramSlots.size)
+            for (i in ir.captureSlots.indices) {
+                slotTypes[i] = slotKindToInt(ir.captureSlots[i])
+            }
+            for (i in ir.paramSlots.indices) {
+                slotTypes[captureCount + i] = slotKindToInt(ir.paramSlots[i])
+            }
             val rootNode = MezzeFunctionRootNode(
                 language,
                 frameDescriptor,
@@ -78,7 +87,7 @@ class TruffleCompiler(
                 ir.name,
                 ir.paramNames.toTypedArray(),
                 closureSlotIndices,
-                IntArray(0)
+                slotTypes
             )
             if (section != null) rootNode.setSourceSection(section)
             return rootNode
@@ -399,11 +408,15 @@ class TruffleCompiler(
                 if (node.handlers.isNotEmpty()) {
                     val handler = node.handlers.first()
                     val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
-                    // HandlerLookupNode: tries content hash first, then performer name.
-                    // For both parameterized and non-parameterized handlers, lookup returns
-                    // either a MezzeRecord (performer record) or MezzeFunction (closure factory).
-                    // HandlerLookupNode handles MezzeFunction → MezzeRecord evaluation internally.
-                    val handlerNode: MezzeNode = HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
+                    // For parameterized performers (e.g., SeededRandom {seed = 42}),
+                    // compile the params and pass them to the handler factory function.
+                    // For non-parameterized performers, use standard handler lookup.
+                    val handlerNode: MezzeNode = if (handler.params != null) {
+                        val paramsNode = compileNode(handler.params!!, source)
+                        HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash.hex, handler.performerName, paramsNode)
+                    } else {
+                        HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
+                    }
                     HandleNode(
                         -1,                     // no local slot
                         arrayOf(handler.effectHash.hex),  // effect hashes for context registration

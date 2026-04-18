@@ -306,38 +306,154 @@ class TypedASTCompiler(
     private fun compilePerformerDecl(pd: TypedPerformerDecl) {
         val opHashes = mutableListOf<String>()
         val opNames = mutableListOf<String>()
+        val isParameterized = pd.params.isNotEmpty()
 
-        for ((opName, opBody) in pd.operations) {
-            val opHash = pd.operationHashes[opName] ?: Hash.ZERO
-            opHashes.add(opHash.hex)
-            opNames.add(opName)
+        if (isParameterized) {
+            // For parameterized performers (e.g., SeededRandom { seed: Int }),
+            // compile a FACTORY FUNCTION that takes the params record and returns
+            // a performer record with operation closures that capture the params.
+            //
+            // The factory function body is:
+            //   { seed } -> { initialize_scope = ..., random_float = ..., random_int = ..., ... }
+            //
+            // Each operation becomes a MakeLambdaIR (closure) that captures the params.
+            val performerParams = pd.params.map { com.mezze.language.typedast.TypedParam(it.name, it.type, it.loc) }
 
-            // Compile operation as standalone function
-            if (opBody is TypedLambda) {
-                extractedFunctions.add(compileFunctionBody(
+            // Save/reset state for the factory function scope
+            val prevParamCount = currentParamCount
+            val prevNextLocal = nextLocalSlot
+            val prevLocals = localsByName.toMap()
+            val prevParamNames = currentParamNames
+            val prevCaptureNames = currentCaptureNames
+            val prevCaptureCount = currentCaptureCount
+
+            currentParamCount = performerParams.size
+            currentCaptureCount = 0
+            nextLocalSlot = performerParams.size
+            localsByName.clear()
+            currentParamNames = performerParams.map { it.name }
+            currentCaptureNames = emptyMap()
+
+            // Compile each operation as a MakeLambdaIR (closure capturing params)
+            val fieldIRs = mutableListOf<FieldIR>()
+            for ((opName, opBody) in pd.operations) {
+                val opHash = pd.operationHashes[opName] ?: Hash.ZERO
+                opHashes.add(opHash.hex)
+                opNames.add(opName)
+
+                // Determine operation params and body
+                val opParams: List<com.mezze.language.typedast.TypedParam>
+                val opBodyExpr: TypedExpr
+                if (opBody is TypedLambda) {
+                    opParams = opBody.params
+                    opBodyExpr = opBody.body
+                } else {
+                    opParams = emptyList()
+                    opBodyExpr = opBody
+                }
+
+                // The capture info: each performer param is a capture from the factory scope
+                val captureInfo = performerParams.mapIndexed { idx, p ->
+                    p.name to typeToSlotKind(p.type)
+                }
+
+                // Set currentCaptureNames so compileVar can resolve captures correctly.
+                // compileFunctionBody doesn't set this — it's normally set by compileLambda.
+                val prevCaptureNames2 = currentCaptureNames
+                currentCaptureNames = captureInfo.mapIndexed { idx, (name, _) -> name to idx }.toMap()
+
+                // Compile the operation function with captures
+                val fnIR = compileFunctionBody(
                     hash = opHash,
                     name = opName,
-                    params = opBody.params,
-                    body = opBody.body,
-                    loc = opBody.loc
-                ))
-            } else {
-                extractedFunctions.add(compileFunctionBody(
-                    hash = opHash,
-                    name = opName,
-                    params = emptyList(),
-                    body = opBody,
-                    loc = opBody.loc
-                ))
+                    params = opParams,
+                    body = opBodyExpr,
+                    loc = opBody.loc,
+                    captureInfo = captureInfo
+                )
+                extractedFunctions.add(fnIR)
+
+                // Restore capture names
+                currentCaptureNames = prevCaptureNames2
+
+                // Create MakeLambdaIR that captures the params from the factory scope
+                val captures = performerParams.mapIndexed { idx, p ->
+                    // The param is at slot idx in the factory function's frame
+                    CaptureIR(idx, typeToSlotKind(p.type))
+                }
+                val lambdaIR = MakeLambdaIR(opHash, captures, locToSourceInfo(opBody.loc))
+                fieldIRs.add(FieldIR(opName, lambdaIR))
             }
-        }
 
-        performerRecords.add(PerformerRecord(
-            performerHash = pd.hash.hex,
-            effectHash = pd.effectHash.hex,
-            operationHashes = opHashes,
-            operationNames = opNames
-        ))
+            // The factory function body: return a record of operation closures
+            val recordIR = MakeRecordIR(fieldIRs, locToSourceInfo(pd.loc))
+
+            // Restore state
+            currentParamCount = prevParamCount
+            nextLocalSlot = prevNextLocal
+            localsByName.clear()
+            localsByName.putAll(prevLocals)
+            currentCaptureNames = prevCaptureNames
+            currentParamNames = prevParamNames
+            currentCaptureCount = prevCaptureCount
+
+            // Create the factory FunctionIR
+            val factoryFnIR = FunctionIR(
+                hash = pd.hash,
+                name = pd.name,
+                qualifiedName = pd.name,
+                paramSlots = performerParams.map { typeToSlotKind(it.type) },
+                paramNames = performerParams.map { it.name },
+                localSlots = emptyList(),
+                localNames = emptyList(),
+                captureSlots = emptyList(),
+                captureNames = emptyList(),
+                body = recordIR,
+                sourceFile = pd.loc.file,
+                sourceSection = locToSourceInfo(pd.loc)
+            )
+            extractedFunctions.add(factoryFnIR)
+
+            performerRecords.add(PerformerRecord(
+                performerHash = pd.hash.hex,
+                effectHash = pd.effectHash.hex,
+                operationHashes = opHashes,
+                operationNames = opNames
+            ))
+        } else {
+            // Non-parameterized performer: compile operations as standalone functions
+            for ((opName, opBody) in pd.operations) {
+                val opHash = pd.operationHashes[opName] ?: Hash.ZERO
+                opHashes.add(opHash.hex)
+                opNames.add(opName)
+
+                // Compile operation as standalone function
+                if (opBody is TypedLambda) {
+                    extractedFunctions.add(compileFunctionBody(
+                        hash = opHash,
+                        name = opName,
+                        params = opBody.params,
+                        body = opBody.body,
+                        loc = opBody.loc
+                    ))
+                } else {
+                    extractedFunctions.add(compileFunctionBody(
+                        hash = opHash,
+                        name = opName,
+                        params = emptyList(),
+                        body = opBody,
+                        loc = opBody.loc
+                    ))
+                }
+            }
+
+            performerRecords.add(PerformerRecord(
+                performerHash = pd.hash.hex,
+                effectHash = pd.effectHash.hex,
+                operationHashes = opHashes,
+                operationNames = opNames
+            ))
+        }
     }
 
     // ========================================================================
@@ -452,12 +568,14 @@ class TypedASTCompiler(
                 if (expr.name == "scope") {
                     return ReadContextIR("scope", src)
                 }
-                // Check if this is a captured variable (Local with depth > 0 inside a lambda)
-                if (binding.depth > 0) {
-                    val captureIdx = currentCaptureNames[expr.name]
-                    if (captureIdx != null) {
-                        return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
-                    }
+                // Check if this is a captured variable.
+                // For lambdas: depth > 0 means crossing a lambda boundary.
+                // For performer operation functions: depth may be 0 but the variable is
+                // listed in currentCaptureNames because it's a performer param captured
+                // from the factory function's scope.
+                val captureIdx = currentCaptureNames[expr.name]
+                if (captureIdx != null && (binding.depth > 0 || currentCaptureCount > 0)) {
+                    return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
                 }
                 // Use depth to find the right scope
                 if (binding.depth == 0 && scopeStack.isNotEmpty()) {
@@ -494,7 +612,16 @@ class TypedASTCompiler(
                     }
                 }
             }
-            is BindingRef.Param -> ReadLocalIR(currentCaptureCount + binding.index, typeToSlotKind(expr.type), src)
+            is BindingRef.Param -> {
+                // Check if this Param name is actually a capture (e.g., performer params
+                // that are compiled as captures of operation functions)
+                val captureIdx = currentCaptureNames[expr.name]
+                if (captureIdx != null) {
+                    ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
+                } else {
+                    ReadLocalIR(currentCaptureCount + binding.index, typeToSlotKind(expr.type), src)
+                }
+            }
             is BindingRef.Capture -> ReadCaptureIR(binding.index, typeToSlotKind(expr.type), src)
             is BindingRef.ByHash -> {
                 // Check if it's a local variable or param first

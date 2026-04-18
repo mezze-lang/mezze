@@ -76,11 +76,16 @@ final class HandlerLookupNode extends MezzeNode {
             }
         }
         // Fall back to context lookup
-        return lookupInContext();
+        return lookupInContext(MezzeRecord.empty());
     }
 
+    /**
+     * Look up handler in context and evaluate it with the given params record.
+     * For non-parameterized performers, pass MezzeRecord.empty().
+     * For parameterized performers (e.g., SeededRandom {seed = 42}), pass the params.
+     */
     @TruffleBoundary
-    private Object lookupInContext() {
+    Object lookupInContext(Object paramsRecord) {
         MezzeContext context = MezzeContext.get(this);
         // Try by content hash (impl declaration hash)
         Object handler = context.lookupLocal(contentHash);
@@ -112,35 +117,145 @@ final class HandlerLookupNode extends MezzeNode {
         // to get the performer record. Performer functions are closure factories
         // that return a record with operation closures.
         if (handler instanceof com.mezze.interpreter.v2.values.MezzeFunction fn) {
-            try {
-                Object result = fn.getCallTarget().call(
-                    new Object[] { com.mezze.interpreter.v2.values.MezzeRecord.empty() }
-                );
-                if (result instanceof com.mezze.interpreter.v2.values.MezzeFunction innerFn) {
-                    // Double-wrapped closure factory — evaluate again
-                    result = innerFn.getCallTarget().call(
-                        new Object[] { com.mezze.interpreter.v2.values.MezzeRecord.empty() }
-                    );
-                }
-                if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
-                    handler = result;
-                    // Cache the resolved record for next lookup
-                    if (performerName != null) {
-                        context.defineGlobal(performerName, handler);
-                    }
-                    context.defineGlobal(contentHash, handler);
-                }
-            } catch (Exception e) {
-                // Evaluation failed (missing captures, etc.) — return the raw MezzeFunction.
-                // DynamicEffectCallNode will evaluate it lazily when handler operations are called.
-                // This is better than throwing "handler not found" since we DID find a handler.
-            }
+            handler = evaluateHandlerFunction(fn, paramsRecord, context);
         }
         if (handler == null) {
             throw new RuntimeException("Handler not found for: " + contentHash +
                 (performerName != null ? " (performer: " + performerName + ")" : ""));
         }
         return handler;
+    }
+
+    /**
+     * Evaluate a handler function (closure factory) with the given params to get a performer record.
+     * Handles both non-parameterized (params = empty record) and parameterized performers.
+     * Also handles double-wrapped closure factories.
+     */
+    @TruffleBoundary
+    static Object evaluateHandlerFunction(MezzeFunction fn, Object paramsRecord, MezzeContext context) {
+        try {
+            Object[] closureValues = fn.getClosureValues();
+            int closureLength = closureValues.length;
+            Object[] callArgs;
+            if (closureLength == 0) {
+                callArgs = new Object[] { paramsRecord };
+            } else {
+                callArgs = new Object[closureLength + 1];
+                System.arraycopy(closureValues, 0, callArgs, 0, closureLength);
+                callArgs[closureLength] = paramsRecord;
+            }
+            Object result = fn.getCallTarget().call(callArgs);
+            if (result instanceof com.mezze.interpreter.v2.values.MezzeFunction innerFn) {
+                // Double-wrapped closure factory — evaluate again with same params
+                Object[] innerClosureValues = innerFn.getClosureValues();
+                int innerClosureLength = innerClosureValues.length;
+                Object[] innerCallArgs;
+                if (innerClosureLength == 0) {
+                    innerCallArgs = new Object[] { paramsRecord };
+                } else {
+                    innerCallArgs = new Object[innerClosureLength + 1];
+                    System.arraycopy(innerClosureValues, 0, innerCallArgs, 0, innerClosureLength);
+                    innerCallArgs[innerClosureLength] = paramsRecord;
+                }
+                result = innerFn.getCallTarget().call(innerCallArgs);
+            }
+            if (result instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
+                return result;
+            }
+            // Not a record — return the original function for lazy evaluation
+            return fn;
+        } catch (Exception e) {
+            // Evaluation failed (missing captures, etc.) — return the raw MezzeFunction.
+            // DynamicEffectCallNode will evaluate it lazily when handler operations are called.
+            return fn;
+        }
+    }
+}
+
+/**
+ * Node that looks up a parameterized handler by content hash and calls it with
+ * user-provided parameters. For example, `perform SeededRandom {seed = 42} in body`
+ * will evaluate {seed = 42} and pass it to the performer factory function.
+ */
+@NodeInfo(shortName = "parameterized-handler-lookup")
+final class ParameterizedHandlerLookupNode extends MezzeNode {
+
+    @CompilationFinal
+    private final int localSlot;
+
+    @CompilationFinal
+    private final String contentHash;
+
+    @CompilationFinal
+    private final String performerName;
+
+    @Child
+    private MezzeNode paramsNode;
+
+    ParameterizedHandlerLookupNode(int localSlot, String contentHash, String performerName, MezzeNode paramsNode) {
+        this.localSlot = localSlot;
+        this.contentHash = contentHash;
+        this.performerName = performerName;
+        this.paramsNode = paramsNode;
+    }
+
+    @Override
+    public Object execute(VirtualFrame frame) {
+        // Evaluate the params (e.g., {seed = 42})
+        Object params = paramsNode.execute(frame);
+
+        // Try local slot first — but for parameterized performers, we need to
+        // re-evaluate with the new params each time (different seeds produce different performers)
+        // So skip the local slot cache.
+
+        // Fall back to context lookup with the params
+        return lookupInContextWithParams(params);
+    }
+
+    @TruffleBoundary
+    private Object lookupInContextWithParams(Object params) {
+        MezzeContext context = MezzeContext.get(this);
+        // For parameterized performers, we need the FUNCTION (closure factory), not a cached record.
+        // The function must be re-evaluated with the actual params each time, because
+        // different params (e.g., seed=42 vs seed=99) produce different performer records.
+        //
+        // Strategy: check Language-level stdlib cache FIRST (always has the function),
+        // then fall back to context (where it might be cached as a record from non-parameterized path).
+        MezzeFunction handlerFn = null;
+
+        // 1. Language-level stdlib cache — always has the original function
+        var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+        var ct = lang.getCachedStdlibCallTarget(contentHash);
+        if (ct != null) {
+            handlerFn = com.mezze.interpreter.v2.values.MezzeFunction.create(ct, contentHash);
+        }
+        if (handlerFn == null && performerName != null) {
+            ct = lang.getCachedStdlibCallTarget(performerName);
+            if (ct != null) {
+                handlerFn = com.mezze.interpreter.v2.values.MezzeFunction.create(ct, performerName);
+            }
+        }
+
+        // 2. Context lookup — only use if it's a function (skip cached records)
+        if (handlerFn == null) {
+            Object candidate = context.lookupLocal(contentHash);
+            if (candidate == null) candidate = context.lookupGlobal(contentHash);
+            if (candidate instanceof MezzeFunction fn) handlerFn = fn;
+        }
+        if (handlerFn == null && performerName != null) {
+            Object candidate = context.lookupLocal(performerName);
+            if (candidate == null) candidate = context.lookupGlobal(performerName);
+            if (candidate instanceof MezzeFunction fn) handlerFn = fn;
+        }
+
+        if (handlerFn != null) {
+            // Evaluate the handler function with the actual params
+            Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
+            if (handler != null) return handler;
+        }
+
+        throw new RuntimeException("Handler function not found for parameterized performer: " + contentHash +
+            (performerName != null ? " (performer: " + performerName + ")" : ""));
     }
 }
 
@@ -287,6 +402,15 @@ public final class HandleNode extends MezzeNode {
 
     public static MezzeNode createHandlerLookup(int localSlot, String contentHash, String performerName) {
         return new HandlerLookupNode(localSlot, contentHash, performerName);
+    }
+
+    /**
+     * Create a ParameterizedHandlerLookupNode that finds a handler by content hash
+     * and calls it with the user-provided params record.
+     * Used for parameterized performers like `perform SeededRandom {seed = 42} in body`.
+     */
+    public static MezzeNode createParameterizedHandlerLookup(int localSlot, String contentHash, String performerName, MezzeNode paramsNode) {
+        return new ParameterizedHandlerLookupNode(localSlot, contentHash, performerName, paramsNode);
     }
 
     /**

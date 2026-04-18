@@ -113,12 +113,32 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 2: Construct performer records.
+        // For parameterized performers (whose hash maps to a factory function that takes params),
+        // keep the function as-is — it will be called with actual params at perform time.
         for (String[] info : performerInfos) {
             if (info.length < 2) continue;
             String performerHash = info[0];
             String effectHash = info[1];
             int opCount = (info.length - 2) / 2;
             if (opCount > 0) {
+                // Check if performer hash maps to a factory function (parameterized performer).
+                // If so, keep it as a function — ParameterizedHandlerLookupNode will call it
+                // with actual params at perform time.
+                Object existing = context.lookupGlobal(performerHash);
+                if (existing instanceof MezzeFunction fn) {
+                    // Check if this is a factory function (takes params to produce a record).
+                    // Factory functions are compiled by TypedASTCompiler for parameterized performers.
+                    // They're registered in Pass 1 by hash. If the function's CallTarget was compiled
+                    // from a FunctionIR with params, it's a factory. We keep it as-is.
+                    var lang = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(this);
+                    var ct = lang.getCachedStdlibCallTarget(performerHash);
+                    if (ct != null && ct == fn.getCallTarget()) {
+                        // This performer hash maps to a compiled function in stdlib —
+                        // it's a parameterized performer factory. Keep the function, don't
+                        // overwrite with a pre-constructed record.
+                        continue;
+                    }
+                }
                 // Check cache
                 Object cached = context.getCachedClosure(performerHash);
                 if (cached instanceof com.mezze.interpreter.v2.values.MezzeRecord) {
