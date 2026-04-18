@@ -58,29 +58,39 @@ class TruffleCompiler(
 
         val section = createSourceSection(source, ir.sourceSection)
 
-        if (ir.paramSlots.isNotEmpty() && ir.captureSlots.isEmpty()) {
-            // Function has parameters and NO captures — use MezzeFunctionRootNode
-            // for record unpacking. Params go to slots 0..P-1 (matches frame descriptor).
+        if (ir.paramSlots.isNotEmpty() || ir.captureSlots.isNotEmpty()) {
+            // Function has parameters and/or captures — use MezzeFunctionRootNode.
+            // MezzeFunctionRootNode handles:
+            //   1. Binding capture values from args[0..captureCount-1] to frame slots
+            //   2. Unpacking the record arg from args[captureCount] to named param slots
+            // Frame layout: [capture0..captureN, param0..paramM, local0..localK]
+            //
+            // closureSlots here are just placeholder indices [0..captureCount-1] since
+            // MezzeFunctionRootNode only uses closureSlots.length for closureCount.
+            // The actual capture slot values are used by FunctionDefinitionNode to read
+            // from the parent frame — not needed here.
+            val captureCount = ir.captureSlots.size
+            val closureSlotIndices = IntArray(captureCount) { it }
             val rootNode = MezzeFunctionRootNode(
                 language,
                 frameDescriptor,
                 bodyNode,
                 ir.name,
                 ir.paramNames.toTypedArray(),
-                IntArray(0),  // no closure slots
+                closureSlotIndices,
                 IntArray(0)
             )
             if (section != null) rootNode.setSourceSection(section)
             return rootNode
         } else {
-            // No parameters — use MezzeRootNode (entry functions, thunks)
+            // No parameters and no captures — use MezzeRootNode (entry functions, thunks)
             val rootNode = MezzeRootNode(
                 language,
                 frameDescriptor,
                 bodyNode,
                 ir.name,
-                ir.captureSlots.size,
-                ir.paramSlots.size,
+                0,
+                0,
                 IntArray(0)
             )
             if (section != null) rootNode.setSourceSection(section)
