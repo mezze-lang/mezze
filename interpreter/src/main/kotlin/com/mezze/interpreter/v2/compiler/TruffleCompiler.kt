@@ -349,13 +349,26 @@ class TruffleCompiler(
 
             // === Sequences ===
             is MakeSeqIR -> {
-                val elementNodes = node.elements.map { elem ->
-                    when (elem) {
-                        is SeqElementIR.Regular -> compileNode(elem.node, source)
-                        is SeqElementIR.Spread -> compileNode(elem.node, source) // TODO: seq spread
-                    }
-                }.toTypedArray()
-                SeqLiteralNode(elementNodes)
+                val hasSpreads = node.elements.any { it is SeqElementIR.Spread }
+                if (hasSpreads) {
+                    // Use spread-aware node when there are ...spread elements
+                    val elementNodes = node.elements.map { elem ->
+                        when (elem) {
+                            is SeqElementIR.Regular -> compileNode(elem.node, source)
+                            is SeqElementIR.Spread -> compileNode(elem.node, source)
+                        }
+                    }.toTypedArray()
+                    val isSpread = node.elements.map { it is SeqElementIR.Spread }.toBooleanArray()
+                    com.mezze.interpreter.v2.nodes.seq.SeqSpreadLiteralNode.create(elementNodes, isSpread)
+                } else {
+                    val elementNodes = node.elements.map { elem ->
+                        when (elem) {
+                            is SeqElementIR.Regular -> compileNode(elem.node, source)
+                            is SeqElementIR.Spread -> compileNode(elem.node, source)
+                        }
+                    }.toTypedArray()
+                    SeqLiteralNode(elementNodes)
+                }
             }
             is SeqGetIR -> {
                 val seqNode = compileNode(node.seq, source)
