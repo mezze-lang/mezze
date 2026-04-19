@@ -2,10 +2,8 @@ package com.mezze.interpreter.v2
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.BeforeEach
 
 class ChainMethodDebugTest {
-    @BeforeEach
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     @Test

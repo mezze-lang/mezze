@@ -475,30 +475,33 @@ class TruffleCompiler(
             is HandleIR -> {
                 val bodyNode = compileNode(node.body, source)
                 if (node.handlers.isNotEmpty()) {
-                    val handler = node.handlers.first()
-                    val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
-                    // For parameterized performers (e.g., SeededRandom {seed = 42}),
-                    // compile the params and pass them to the handler factory function.
-                    // For non-parameterized performers, use standard handler lookup.
-                    val handlerNode: MezzeNode = if (handler.params != null) {
-                        val paramsNode = compileNode(handler.params!!, source)
-                        HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash.hex, handler.performerName, paramsNode)
-                    } else {
-                        HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
+                    // Nest HandleNodes for multiple handlers: outermost handler wraps
+                    // the next handler which wraps ... which wraps the body.
+                    // Process from last to first so the first handler is outermost.
+                    var currentBody: MezzeNode = bodyNode
+                    for (handler in node.handlers.reversed()) {
+                        val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
+                        val handlerNode: MezzeNode = if (handler.params != null) {
+                            val paramsNode = compileNode(handler.params!!, source)
+                            HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash.hex, handler.performerName, paramsNode)
+                        } else {
+                            HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
+                        }
+                        currentBody = HandleNode(
+                            -1,                     // no local slot
+                            arrayOf(handler.effectHash.hex),  // effect hashes for context registration
+                            handler.performerName,
+                            contentHashes,
+                            handlerNode,
+                            currentBody,
+                            -1,     // no scope slot
+                            null,   // no initialize_scope
+                            null,   // no finalize_scope
+                            false,  // no initialize
+                            false   // no finalize
+                        )
                     }
-                    HandleNode(
-                        -1,                     // no local slot
-                        arrayOf(handler.effectHash.hex),  // effect hashes for context registration
-                        handler.performerName,
-                        contentHashes,
-                        handlerNode,
-                        bodyNode,
-                        -1,     // no scope slot
-                        null,   // no initialize_scope
-                        null,   // no finalize_scope
-                        false,  // no initialize
-                        false   // no finalize
-                    )
+                    currentBody
                 } else {
                     bodyNode
                 }

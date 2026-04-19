@@ -431,6 +431,27 @@ public final class MezzeContext {
         return collapsedHandlers.get().get(effectContentHash);
     }
 
+    /**
+     * Fallback handler search: scan all active handlers for one that contains
+     * the given operation as a field. Used when hash lookup fails due to hash
+     * mismatch between user modules and stdlib modules.
+     *
+     * @param operationName The operation name to look for (e.g., "log", "spawn")
+     * @return The handler record, or null if not found
+     */
+    @TruffleBoundary
+    public Object findHandlerWithOperation(String operationName) {
+        Map<String, Object> collapsed = collapsedHandlers.get();
+        for (Object handler : collapsed.values()) {
+            if (handler instanceof com.mezze.interpreter.v2.values.MezzeRecord record) {
+                Object op = record.getField(operationName);
+                if (op instanceof com.mezze.interpreter.v2.values.MezzeFunction) {
+                    return record;
+                }
+            }
+        }
+        return null;
+    }
 
     /**
      * Get the current handler stack version.

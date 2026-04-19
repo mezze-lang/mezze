@@ -77,22 +77,48 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         // back to the perform boundary (e.g., Exception.throw, Return.return).
         Object value = valueNode.execute(frame);
 
+        // If value is a MezzeSuspended and we have handlers, try to force it first.
+        // This prevents ClassCastException when storing suspended values in typed slots.
+        if (value instanceof MezzeSuspended && kind != KIND_OBJECT) {
+            value = forceSuspendedValue((MezzeSuspended) value);
+        }
+
         // Write to frame slot with correct type (fast path)
         // Switch order matches ReadLocalNode: 0=Long, 1=Double, 2=Boolean, 3=Object
-        switch (kind) {
-            case KIND_LONG:
-                frame.setLong(slot, (long) value);
-                break;
-            case KIND_DOUBLE:
-                frame.setDouble(slot, (double) value);
-                break;
-            case KIND_BOOLEAN:
-                frame.setBoolean(slot, (boolean) value);
-                break;
-            case KIND_OBJECT:
-            default:
-                frame.setObject(slot, value);
-                break;
+        // If value is still MezzeSuspended after forcing attempt, store as Object
+        // to prevent ClassCastException on typed slots.
+        if (value instanceof MezzeSuspended) {
+            frame.setObject(slot, value);
+        } else {
+            switch (kind) {
+                case KIND_LONG:
+                    if (value instanceof Long l) {
+                        frame.setLong(slot, l);
+                    } else {
+                        frame.setObject(slot, value);
+                    }
+                    break;
+                case KIND_DOUBLE:
+                    if (value instanceof Double d) {
+                        frame.setDouble(slot, d);
+                    } else if (value instanceof Long l) {
+                        frame.setDouble(slot, l.doubleValue());
+                    } else {
+                        frame.setObject(slot, value);
+                    }
+                    break;
+                case KIND_BOOLEAN:
+                    if (value instanceof Boolean b) {
+                        frame.setBoolean(slot, b);
+                    } else {
+                        frame.setObject(slot, value);
+                    }
+                    break;
+                case KIND_OBJECT:
+                default:
+                    frame.setObject(slot, value);
+                    break;
+            }
         }
 
         // Register with global context only once (for recursive/nested access)
@@ -106,6 +132,25 @@ public final class WriteLocalWithContextNode extends MezzeNode {
             return MezzeUnit.INSTANCE;
         }
         return value;
+    }
+
+    /**
+     * Try to force a suspended value by executing it with current handlers.
+     * Returns the forced result, or the original MezzeSuspended if forcing fails.
+     */
+    @TruffleBoundary
+    private Object forceSuspendedValue(MezzeSuspended suspended) {
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            return suspended;
+        }
+        if (!context.hasHandlers()) {
+            return suspended;
+        }
+        var callNode = com.oracle.truffle.api.nodes.IndirectCallNode.getUncached();
+        return suspended.executeWith(context.getCurrentHandlers(), context, callNode);
     }
 
     @TruffleBoundary

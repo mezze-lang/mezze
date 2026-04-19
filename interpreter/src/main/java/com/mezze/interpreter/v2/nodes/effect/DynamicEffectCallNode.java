@@ -140,10 +140,18 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // Handlers registered in locals/globals are NOT automatically active -
         // they must be explicitly installed via perform.
 
-        // Content hash lookup only (O(1) via collapsed map) - no fallback
+        // Content hash lookup (O(1) via collapsed map)
         Object handler = null;
         if (effectContentHash != null && !effectContentHash.isEmpty()) {
             handler = context.getHandlerFor(effectContentHash);
+        }
+
+        // FALLBACK: If hash lookup failed, scan all active handlers for one that has
+        // the operation we need. This handles hash mismatches between user modules and
+        // stdlib modules (e.g., user's effectHash differs from stdlib's effectHash for
+        // the same effect due to different Hash.fromV1 inputs).
+        if (handler == null) {
+            handler = context.findHandlerWithOperation(operationName);
         }
 
         // NO HANDLER AVAILABLE - Create suspended computation (LAZY EFFECTS)
