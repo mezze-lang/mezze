@@ -179,6 +179,16 @@ data class TypedCase(
     val bindings: List<PatternBinding>,
     val guard: TypedExpr?,
     val body: TypedExpr,
+    val loc: Loc,
+    val ifLetBindings: List<TypedIfLetBinding> = emptyList()
+)
+
+/** If-let binding in a match guard: `if let Some {val = v} = expr` */
+@Serializable
+data class TypedIfLetBinding(
+    val pattern: TypedPattern,
+    val expr: TypedExpr,
+    val bindingNames: List<String>,
     val loc: Loc
 )
 

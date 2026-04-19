@@ -7,6 +7,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typedast.*
 import com.mezze.language.typedast.TypeScheme as V2TypeScheme
+import com.mezze.language.typechecker.NativeFunctionTypes
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo
 import com.mezze.language.typechecker.context.TypingContext
@@ -994,7 +995,18 @@ class TypedAstBuilder(
 
     private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {
         val patterns = case.patterns.map { buildPattern(it, file) }
-        val bindingNames = case.patterns.flatMap { p -> p.extractBindings() }
+        val bindingNames = case.patterns.flatMap { p -> p.extractBindings() }.toMutableList()
+
+        // Collect if-let binding names and build TypedIfLetBindings
+        val typedIfLetBindings = mutableListOf<TypedIfLetBinding>()
+        for (ifLet in case.ifLetBindings) {
+            val ifLetBindingNames = ifLet.pattern.extractBindings()
+            bindingNames.addAll(ifLetBindingNames)
+            val typedPattern = buildPattern(ifLet.pattern, file)
+            val typedExpr = buildExpr(ifLet.expr, file)
+            typedIfLetBindings.add(TypedIfLetBinding(typedPattern, typedExpr, ifLetBindingNames, ifLet.loc))
+        }
+
         val bindings = bindingNames.map { name ->
             PatternBinding(name, MezzeType.VarType(TypeVar(name)), case.loc)
         }
@@ -1014,7 +1026,7 @@ class TypedAstBuilder(
 
         lambdaParamScopes.removeLast()
 
-        return TypedCase(patterns, bindings, guard, body, case.loc)
+        return TypedCase(patterns, bindings, guard, body, case.loc, typedIfLetBindings)
     }
 
     private fun buildPattern(pattern: ParsedPattern, file: String): TypedPattern {
@@ -1059,8 +1071,16 @@ class TypedAstBuilder(
                 loc = loc
             )
             is ParsedStringInterpPattern ->
-                // TODO: proper string interpolation pattern support
-                TypedWildcardPattern(MezzeType.StringType, loc)
+                TypedStringInterpPattern(
+                    parts = pattern.parts.map { part ->
+                        when (part) {
+                            is ParsedStringPatternPart.Literal -> TypedStringPatternPart.Literal(part.value)
+                            is ParsedStringPatternPart.Capture -> TypedStringPatternPart.Capture(part.variableName)
+                        }
+                    },
+                    type = MezzeType.StringType,
+                    loc = loc
+                )
         }
     }
 
@@ -1315,7 +1335,7 @@ class TypedAstBuilder(
         }
 
         // Check if it's a native function
-        if (name.startsWith("__native_")) {
+        if (name.startsWith("__native_") || NativeFunctionTypes.isNativeFunction(name)) {
             return BindingRef.Native(name)
         }
 

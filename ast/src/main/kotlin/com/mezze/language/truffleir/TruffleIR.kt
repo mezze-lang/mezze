@@ -125,9 +125,19 @@ enum class InlineOp {
     val bindings: List<BindingIR>,
     val guard: NodeIR?,
     val body: NodeIR,
-    val src: SourceInfo
+    val src: SourceInfo,
+    val ifLetBindings: List<IfLetBindingIR> = emptyList()
 )
 @Serializable data class BindingIR(val slot: Int, val kind: SlotKind)
+
+/** IR for if-let guard bindings in match cases */
+@Serializable data class IfLetBindingIR(
+    val expr: NodeIR,
+    val pattern: PatternIR,
+    val fieldNames: List<String>,
+    val fieldSlots: List<Int>,
+    val src: SourceInfo
+)
 
 @Serializable
 sealed interface PatternIR {
@@ -137,6 +147,8 @@ sealed interface PatternIR {
     @Serializable data class Record(val fieldNames: List<String>, val fieldSlots: List<Int>, val isOpen: Boolean) : PatternIR
     /** Seq pattern: matches arrays by length and binds elements to slots. restSlot >= 0 for [x, ...rest] patterns */
     @Serializable data class Seq(val elementSlots: List<Int>, val restSlot: Int = -1) : PatternIR
+    /** String interpolation pattern: partTypes 0=literal, 1=capture; literals has string for literal parts; captureSlots has frame slots for captures */
+    @Serializable data class StringInterp(val partTypes: List<Int>, val literals: List<String?>, val captureSlots: List<Int>) : PatternIR
 }
 
 // Sequences

@@ -204,6 +204,9 @@ object V2PipelineRunner {
                 for (c in node.cases) {
                     collectHashesFromNode(c.body, queue)
                     c.guard?.let { collectHashesFromNode(it, queue) }
+                    for (ilb in c.ifLetBindings) {
+                        collectHashesFromNode(ilb.expr, queue)
+                    }
                 }
             }
             is com.mezze.language.truffleir.IfIR -> {

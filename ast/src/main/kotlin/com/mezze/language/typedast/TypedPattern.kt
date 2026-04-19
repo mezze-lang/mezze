@@ -48,3 +48,16 @@ data class TypedSeqPattern(
     override val type: MezzeType,
     override val loc: Loc
 ) : TypedPattern
+
+@Serializable
+data class TypedStringInterpPattern(
+    val parts: List<TypedStringPatternPart>,
+    override val type: MezzeType,
+    override val loc: Loc
+) : TypedPattern
+
+@Serializable
+sealed interface TypedStringPatternPart {
+    @Serializable data class Literal(val value: String) : TypedStringPatternPart
+    @Serializable data class Capture(val variableName: String) : TypedStringPatternPart
+}

@@ -750,12 +750,11 @@ class TypedASTCompiler(
             val binding = fn.binding
             return when (binding) {
                 is BindingRef.ByHash -> {
-                    val slot = localsByName[fn.name]
-                    if (slot != null) {
-                        CallIndirectIR(ReadLocalIR(slot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
-                    } else {
-                        CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
-                    }
+                    // Always use CallDirectIR for hash-based bindings.
+                    // DO NOT check localsByName — a user variable with the same name
+                    // (e.g., "let chars = str::chars {s = s}") would shadow the function
+                    // reference and read from an uninitialized slot.
+                    CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
                 }
                 is BindingRef.Native -> CallNativeIR(binding.name, argIR, src)
                 is BindingRef.Local -> {
@@ -875,12 +874,23 @@ class TypedASTCompiler(
 
             val patternIR = compilePattern(case.patterns.firstOrNull())
             val guardIR = case.guard?.let { compileExpr(it) }
+
+            // Compile if-let bindings
+            val ifLetIRs = case.ifLetBindings.map { ifLet ->
+                val exprIR = compileExpr(ifLet.expr)
+                val ifLetPatternIR = compilePattern(ifLet.pattern)
+                // Resolve binding slots from the case scope
+                val fieldNames = ifLet.bindingNames
+                val fieldSlots = fieldNames.map { name -> caseScope[name] ?: -1 }
+                IfLetBindingIR(exprIR, ifLetPatternIR, fieldNames, fieldSlots, locToSourceInfo(ifLet.loc))
+            }
+
             val bodyIR = compileExpr(case.body)
 
             // Pop scope
             scopeStack.removeLast()
 
-            CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc))
+            CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
         }
         return MatchIR(scrutineeIR, cases, src)
     }
@@ -889,7 +899,13 @@ class TypedASTCompiler(
         if (pattern == null) return PatternIR.Wildcard()
         return when (pattern) {
             is TypedWildcardPattern -> PatternIR.Wildcard()
-            is TypedVarPattern -> PatternIR.Wildcard()  // binding handled by case bindings
+            is TypedVarPattern -> {
+                // Bind the scrutinee to the variable's frame slot
+                val slot = scopeStack.lastOrNull()?.get(pattern.name)
+                    ?: localsByName[pattern.name]
+                    ?: -1
+                PatternIR.Wildcard(slot)
+            }
             is TypedLiteralPattern -> PatternIR.Literal(compileExpr(pattern.value))
             is TypedVariantPattern -> {
                 val tag = pattern.tag.hashCode() and 0x7FFFFFFF
@@ -933,6 +949,30 @@ class TypedASTCompiler(
                     pattern.elements.map { localsByName[(it as? TypedVarPattern)?.name ?: ""] ?: -1 },
                     if (pattern.rest != null) localsByName[pattern.rest] ?: -1 else -1
                 )
+            }
+            is TypedStringInterpPattern -> {
+                val partTypes = mutableListOf<Int>()
+                val literals = mutableListOf<String?>()
+                // captureSlots is parallel with partTypes: -1 for literals, actual slot for captures
+                val captureSlots = mutableListOf<Int>()
+                for (part in pattern.parts) {
+                    when (part) {
+                        is TypedStringPatternPart.Literal -> {
+                            partTypes.add(0) // 0 = literal
+                            literals.add(part.value)
+                            captureSlots.add(-1) // no slot for literal parts
+                        }
+                        is TypedStringPatternPart.Capture -> {
+                            partTypes.add(1) // 1 = capture
+                            literals.add(null)
+                            val slot = scopeStack.lastOrNull()?.get(part.variableName)
+                                ?: localsByName[part.variableName]
+                                ?: forceAllocLocal(part.variableName)
+                            captureSlots.add(slot)
+                        }
+                    }
+                }
+                PatternIR.StringInterp(partTypes, literals, captureSlots)
             }
         }
     }

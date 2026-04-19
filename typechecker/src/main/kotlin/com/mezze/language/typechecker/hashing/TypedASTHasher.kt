@@ -394,6 +394,22 @@ object TypedASTHasher {
                 b.appendBoolean(pattern.rest != null)
                 pattern.rest?.let { b.append(it) }
             }
+            is TypedStringInterpPattern -> {
+                b.append(byteArrayOf(HashTags.STRING_INTERPOLATION_PATTERN))
+                b.appendInt(pattern.parts.size)
+                for (part in pattern.parts) {
+                    when (part) {
+                        is TypedStringPatternPart.Literal -> {
+                            b.appendBoolean(false)
+                            b.append(part.value)
+                        }
+                        is TypedStringPatternPart.Capture -> {
+                            b.appendBoolean(true)
+                            // Variable name excluded from hash (positional binding)
+                        }
+                    }
+                }
+            }
         }
     }
 

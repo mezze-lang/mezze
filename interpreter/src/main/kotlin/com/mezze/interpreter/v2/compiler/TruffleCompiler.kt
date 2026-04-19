@@ -267,12 +267,40 @@ class TruffleCompiler(
                 val branches = node.cases.mapIndexed { idx, case ->
                     val bodyNode = compileNode(case.body, source)
                     val guardNode = case.guard?.let { compileNode(it, source) }
+
+                    // Compile if-let bindings into IfLetBindingNode instances
+                    val ifLetNodes = case.ifLetBindings.map { ilb ->
+                        val exprNode = compileNode(ilb.expr, source)
+                        when (val ilPat = ilb.pattern) {
+                            is PatternIR.Variant -> {
+                                com.mezze.interpreter.v2.nodes.control.IfLetBindingNode.variantPattern(
+                                    exprNode, ilPat.tag,
+                                    ilPat.fieldNames.toTypedArray(),
+                                    ilPat.fieldSlots.toIntArray()
+                                )
+                            }
+                            is PatternIR.Record -> {
+                                com.mezze.interpreter.v2.nodes.control.IfLetBindingNode.recordPattern(
+                                    exprNode,
+                                    ilPat.fieldNames.toTypedArray(),
+                                    ilPat.fieldSlots.toIntArray()
+                                )
+                            }
+                            else -> {
+                                // Wildcard/literal patterns: always match, bind to first slot if available
+                                val slot = if (ilb.fieldSlots.isNotEmpty()) ilb.fieldSlots[0] else -1
+                                com.mezze.interpreter.v2.nodes.control.IfLetBindingNode.wildcardPattern(exprNode, slot)
+                            }
+                        }
+                    }.toTypedArray()
+                    val hasGuardOrIfLet = guardNode != null || ifLetNodes.isNotEmpty()
+
                     when (val pat = case.pattern) {
                         is PatternIR.Wildcard -> {
                             wildcardIndex = idx
-                            if (guardNode != null) {
+                            if (hasGuardOrIfLet) {
                                 MatchBranchNode.wildcardWithGuard(
-                                    if (pat.slot >= 0) pat.slot else -1, bodyNode, guardNode, emptyArray())
+                                    if (pat.slot >= 0) pat.slot else -1, bodyNode, guardNode, ifLetNodes)
                             } else if (pat.slot >= 0) {
                                 MatchBranchNode.wildcard(pat.slot, bodyNode)
                             } else {
@@ -280,10 +308,10 @@ class TruffleCompiler(
                             }
                         }
                         is PatternIR.Variant -> {
-                            if (guardNode != null) {
+                            if (hasGuardOrIfLet) {
                                 MatchBranchNode.variantPatternWithGuard(
                                     pat.tag, pat.fieldNames.toTypedArray(),
-                                    pat.fieldSlots.toIntArray(), bodyNode, guardNode, emptyArray())
+                                    pat.fieldSlots.toIntArray(), bodyNode, guardNode, ifLetNodes)
                             } else {
                                 MatchBranchNode.variantPatternWithFieldNames(
                                     pat.tag, pat.fieldNames.toTypedArray(),
@@ -299,8 +327,8 @@ class TruffleCompiler(
                                 is StringLitIR -> v.value
                                 else -> 0L
                             }
-                            if (guardNode != null) {
-                                MatchBranchNode.literalPatternWithGuard(litValue, bodyNode, guardNode, emptyArray())
+                            if (hasGuardOrIfLet) {
+                                MatchBranchNode.literalPatternWithGuard(litValue, bodyNode, guardNode, ifLetNodes)
                             } else {
                                 MatchBranchNode.literalPattern(litValue, bodyNode)
                             }
@@ -314,17 +342,32 @@ class TruffleCompiler(
                             )
                         }
                         is PatternIR.Record -> {
-                            if (guardNode != null) {
+                            if (hasGuardOrIfLet) {
                                 MatchBranchNode.recordPatternWithGuard(
                                     pat.fieldNames.toTypedArray(),
                                     pat.fieldSlots.toIntArray(),
                                     pat.isOpen,
-                                    bodyNode, guardNode, emptyArray())
+                                    bodyNode, guardNode, ifLetNodes)
                             } else {
                                 MatchBranchNode.recordPattern(
                                     pat.fieldNames.toTypedArray(),
                                     pat.fieldSlots.toIntArray(),
                                     pat.isOpen,
+                                    bodyNode)
+                            }
+                        }
+                        is PatternIR.StringInterp -> {
+                            if (hasGuardOrIfLet) {
+                                MatchBranchNode.stringPatternWithGuard(
+                                    pat.partTypes.toIntArray(),
+                                    pat.literals.toTypedArray(),
+                                    pat.captureSlots.toIntArray(),
+                                    bodyNode, guardNode, ifLetNodes)
+                            } else {
+                                MatchBranchNode.stringPattern(
+                                    pat.partTypes.toIntArray(),
+                                    pat.literals.toTypedArray(),
+                                    pat.captureSlots.toIntArray(),
                                     bodyNode)
                             }
                         }
