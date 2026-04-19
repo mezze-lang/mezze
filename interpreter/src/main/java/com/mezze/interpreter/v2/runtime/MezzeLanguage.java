@@ -80,7 +80,13 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         CallTarget ct = stdlibCallTargetCache.get(hash);
         if (ct != null) return ct;
         // 2. Check per-context user cache
-        var ctx = getCurrentContext();
+        MezzeContext ctx;
+        try {
+            ctx = getCurrentContext();
+        } catch (Exception e) {
+            ctx = null;
+        }
+        if (ctx == null) return null;
         ct = ctx.getUserCallTarget(hash);
         if (ct != null) return ct;
         // 3. Try user function IR — compile on demand
@@ -303,12 +309,48 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             this.bodyNode = bodyNode;
         }
 
+        @Child private com.oracle.truffle.api.nodes.IndirectCallNode forceCallNode;
+
         @Override
         public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
             Object result = bodyNode.execute(frame);
+            // Force suspended computations — effects should have been handled
+            // by the time we reach the top-level result
+            if (result instanceof com.mezze.interpreter.v2.values.MezzeSuspended suspended) {
+                result = forceSuspended(suspended);
+            }
             lastResultStore.set(result);
             captureGlobalContext();
             return MezzeUnit.INSTANCE;
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        private Object forceSuspended(com.mezze.interpreter.v2.values.MezzeSuspended suspended) {
+            try {
+                MezzeContext context = MezzeContext.get(this);
+                if (forceCallNode == null) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    forceCallNode = insert(com.oracle.truffle.api.nodes.IndirectCallNode.create());
+                }
+                // Try to execute with handlers from the handler stack
+                java.util.Map<String, Object> handlers = new java.util.HashMap<>();
+                // Collect all available handlers from context
+                for (String effect : suspended.getUnhandledEffects()) {
+                    Object handler = context.getHandlerFor(effect);
+                    if (handler != null) {
+                        handlers.put(effect, handler);
+                    }
+                }
+                if (!handlers.isEmpty()) {
+                    Object forced = suspended.executeWith(handlers, context, forceCallNode);
+                    if (!(forced instanceof com.mezze.interpreter.v2.values.MezzeSuspended)) {
+                        return forced;
+                    }
+                }
+            } catch (Exception e) {
+                // Force failed — return suspended as-is
+            }
+            return suspended;
         }
 
         @CompilerDirectives.TruffleBoundary

@@ -82,6 +82,20 @@ object V2PipelineRunner {
             language.registerFunctionIR(fn.hash.hex, fn)
         }
 
+        // Eagerly compile performer factory functions so they're available via HashModuleLoaderNode.
+        // Performer factories are identified by their hash appearing in performer records.
+        val performerFactoryHashes = mutableSetOf<String>()
+        for (pr in performerRecords) {
+            if (pr.isNotEmpty()) performerFactoryHashes.add(pr[0])
+        }
+        for (fn in functions) {
+            if (fn.hash.hex in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
+                // This is a parameterized performer factory — compile eagerly
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[fn.hash.hex] = rootNode.callTarget
+            }
+        }
+
         // Find entry function
         val mainFn = functions.find { it.name == "__entry__" }
             ?: functions.find { it.name == "main" }

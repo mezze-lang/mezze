@@ -254,6 +254,79 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
             if (handler != null) return handler;
         }
 
+        // 3. Fallback: the performer may not actually be parameterized
+        // (e.g., `perform TestLogger {} in ...` where {} is just empty params).
+        // In that case, no factory function exists — only a pre-constructed MezzeRecord
+        // from HashModuleLoaderNode Pass 2. Use it directly.
+        Object record = context.lookupLocal(contentHash);
+        if (record == null) record = context.lookupGlobal(contentHash);
+        if (record == null && performerName != null) {
+            record = context.lookupLocal(performerName);
+            if (record == null) record = context.lookupGlobal(performerName);
+        }
+        if (record instanceof MezzeRecord) {
+            return record;
+        }
+        // Also try HandlerLookupNode's full lookup (which includes stdlib call target → evaluate)
+        try {
+            var lookupNode = new HandlerLookupNode(-1, contentHash, performerName);
+            return lookupNode.lookupInContext(params);
+        } catch (Exception e) {
+            // Fall through to error
+        }
+
+        // 4. Search performer records for the correct stdlib hash.
+        // The contentHash from the user module's compilation may differ from the stdlib's
+        // hash for the same performer. Performer records link performerHash → opHashes.
+        if (performerName != null) {
+            var stdlibPerformers = lang.getStdlibPerformerRecords();
+            var nameMap = lang.getStdlibHashToName();
+            for (var info : stdlibPerformers) {
+                if (info.length < 2) continue;
+                String pHash = info[0];
+                String registeredName = nameMap.get(pHash);
+                if (performerName.equals(registeredName)) {
+                    // Found the stdlib hash for this performer — try to get its factory function
+                    ct = lang.getCachedStdlibCallTarget(pHash);
+                    if (ct != null) {
+                        handlerFn = MezzeFunction.create(ct, pHash);
+                        Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
+                        if (handler != null) return handler;
+                    }
+                }
+            }
+            // Also try: scan prelowered functions by name (factory functions have name = performerName)
+            var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
+            var prelowered = precompiled.getPreloweredFunctions();
+            for (var entry : prelowered.entrySet()) {
+                if (performerName.equals(entry.getValue().getName())) {
+                    ct = lang.getCachedStdlibCallTarget(entry.getKey());
+                    if (ct != null) {
+                        handlerFn = MezzeFunction.create(ct, entry.getKey());
+                        Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
+                        if (handler != null) return handler;
+                    }
+                }
+            }
+        }
+
+        // 5. Direct user function IR lookup — compile on demand
+        // The factory function may be registered as a user FunctionIR
+        // that hasn't been compiled yet
+        if (handlerFn == null) {
+            var userIR = context.getUserFunctionIR(contentHash);
+            if (userIR != null) {
+                var compiler = new com.mezze.interpreter.v2.compiler.TruffleCompiler(lang);
+                compiler.registerFunctions(new java.util.ArrayList<>(context.getAllUserFunctionIRs()));
+                var rootNode = compiler.compile(userIR);
+                ct = rootNode.getCallTarget();
+                context.cacheUserCallTarget(contentHash, ct);
+                handlerFn = MezzeFunction.create(ct, contentHash);
+                Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
+                if (handler != null) return handler;
+            }
+        }
+
         throw new RuntimeException("Handler function not found for parameterized performer: " + contentHash +
             (performerName != null ? " (performer: " + performerName + ")" : ""));
     }
@@ -717,7 +790,7 @@ public final class HandleNode extends MezzeNode {
             return suspendedValue;
         }
 
-        return processResult(result);
+        return processResult(result, handler);
     }
 
     /**
@@ -729,12 +802,15 @@ public final class HandleNode extends MezzeNode {
      * NOTE: We do NOT wrap results in Ok - the user code is responsible for
      * wrapping success values explicitly. This keeps effects as pure userland
      * constructs without hardcoded effect names in the interpreter.
+     *
+     * @param resolvedHandler the handler object that was active during body execution
+     *                        (passed directly since handler stack is already popped by finally block)
      */
     @TruffleBoundary
-    private Object processResult(Object result) {
+    private Object processResult(Object result, Object resolvedHandler) {
         // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
         if (result instanceof MezzeSuspended suspended) {
-            return processSuspended(suspended);
+            return processSuspended(suspended, resolvedHandler);
         }
 
         // Handle suspended continuations - extract the suspended value.
@@ -749,9 +825,11 @@ public final class HandleNode extends MezzeNode {
 
     /**
      * Process a MezzeSuspended result by executing it with our handlers.
+     * Uses the resolved handler object directly since the handler stack has already
+     * been popped by the finally block.
      */
     @TruffleBoundary
-    private Object processSuspended(MezzeSuspended suspended) {
+    private Object processSuspended(MezzeSuspended suspended, Object resolvedHandler) {
         MezzeContext context;
         try {
             context = MezzeContext.get(this);
@@ -760,15 +838,20 @@ public final class HandleNode extends MezzeNode {
             return suspended;
         }
 
-        // Build handler map - reuse pooled map to avoid allocation
+        // Build handler map using the resolved handler directly
+        // (can't look up from context — handler stack already popped)
         Map<String, Object> handlers = HandlerMapPool.acquire();
 
-        // Content hash lookup only (O(1), collision-free) - no fallback
         for (String hash : contentHashes) {
             if (hash != null && !hash.isEmpty()) {
-                Object handler = context.getHandlerFor(hash);
-                if (handler != null) {
-                    handlers.put(hash, handler);
+                if (resolvedHandler != null) {
+                    handlers.put(hash, resolvedHandler);
+                } else {
+                    // Fallback: try context lookup (may work for nested handlers)
+                    Object h = context.getHandlerFor(hash);
+                    if (h != null) {
+                        handlers.put(hash, h);
+                    }
                 }
             }
         }
