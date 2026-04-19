@@ -778,6 +778,15 @@ class TypedASTCompiler(
     // ========================================================================
 
     private fun compileLambda(expr: TypedLambda, src: SourceInfo): NodeIR {
+        // Save parent's capture info BEFORE overwriting for the child.
+        // This is needed to resolve captures from grandparent scope:
+        // e.g., `outer = {a} -> middle = {b} -> inner = {} -> a`
+        // When compiling `inner`, `a` is a capture of `middle`. We need
+        // to know middle's capture layout to find `a`'s slot in middle's frame.
+        val parentCaptureNames = currentCaptureNames
+        val parentCaptureCount = currentCaptureCount
+        val parentParamNames = currentParamNames
+
         // Build capture name → index map so compileVar can emit ReadCaptureIR
         val captureNameMap = mutableMapOf<String, Int>()
         for ((i, c) in expr.captures.withIndex()) {
@@ -802,15 +811,28 @@ class TypedASTCompiler(
         // The parent frame may have typed slots (LONG, DOUBLE) but the robust
         // readSlotTyped fallback in FunctionDefinitionNode handles type mismatches.
         // Using OBJECT avoids issues with VarType captures that should be LONG.
+        //
+        // Use the PARENT's capture/param info to resolve where each captured variable
+        // lives in the parent's frame. Variables can come from:
+        // 1. Parent's locals (localsByName)
+        // 2. Parent's params (parentParamNames, offset by parentCaptureCount)
+        // 3. Parent's captures (parentCaptureNames — variables captured from grandparent)
         val captures = expr.captures.mapNotNull { c ->
             val slot = localsByName[c.name]
             if (slot != null) {
                 CaptureIR(slot, SlotKind.OBJECT)
-            } else if (c.name in currentParamNames) {
+            } else if (c.name in parentParamNames) {
                 // Parent param slot is offset by parent's capture count
-                val paramIdx = currentParamNames.indexOf(c.name)
-                CaptureIR(currentCaptureCount + paramIdx, SlotKind.OBJECT)
-            } else null
+                val paramIdx = parentParamNames.indexOf(c.name)
+                CaptureIR(parentCaptureCount + paramIdx, SlotKind.OBJECT)
+            } else {
+                // Check parent's captures (variable from grandparent scope)
+                val parentCaptureIdx = parentCaptureNames[c.name]
+                if (parentCaptureIdx != null) {
+                    // Parent's capture at index N is at frame slot N (captures are at slots 0..captureCount-1)
+                    CaptureIR(parentCaptureIdx, SlotKind.OBJECT)
+                } else null
+            }
         }
         return MakeLambdaIR(lambdaHash, captures, src)
     }
@@ -835,7 +857,12 @@ class TypedASTCompiler(
                                 val s = localsByName[c.name]
                                 if (s != null) CaptureIR(s, typeToSlotKind(c.type))
                                 else if (c.name in currentParamNames) CaptureIR(currentCaptureCount + currentParamNames.indexOf(c.name), typeToSlotKind(c.type))
-                                else null
+                                else {
+                                    // Check parent's captures (variable from grandparent scope)
+                                    val captIdx = currentCaptureNames[c.name]
+                                    if (captIdx != null) CaptureIR(captIdx, SlotKind.OBJECT)
+                                    else null
+                                }
                             }
                             MakeLambdaIR(topLevelDecl.hash, captures, locToSourceInfo(stmt.loc))
                         } else {
@@ -858,71 +885,137 @@ class TypedASTCompiler(
 
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
         val scrutineeIR = compileExpr(expr.scrutinee)
-        val cases = expr.cases.map { case ->
-            // Push a new scope for this match case's bindings
-            val caseScope = mutableMapOf<String, Int>()
+        // Use flatMap to expand or-patterns (cases with multiple patterns) into
+        // separate CaseIR entries sharing the same body. This way `[] | [_] -> True`
+        // becomes two CaseIR entries: one for `[]` and one for `[_]`.
+        val cases = expr.cases.flatMap { case ->
+            // Determine which patterns to emit. For or-patterns, case.patterns has multiple entries.
+            val patternsToEmit = if (case.patterns.size > 1) case.patterns else listOf(case.patterns.firstOrNull())
 
-            // Allocate slots for pattern bindings (always fresh)
-            val bindings = case.bindings.map { b ->
-                val slot = forceAllocLocal(b.name)
-                caseScope[b.name] = slot
-                BindingIR(slot, typeToSlotKind(b.type))
-            }
+            patternsToEmit.map { pat ->
+                // Push a new scope for this match case's bindings
+                val caseScope = mutableMapOf<String, Int>()
 
-            // Push scope so nested expressions use these bindings at depth 0
-            scopeStack.addLast(caseScope)
+                // Allocate slots for pattern bindings (always fresh)
+                val bindings = case.bindings.map { b ->
+                    val slot = forceAllocLocal(b.name)
+                    caseScope[b.name] = slot
+                    BindingIR(slot, typeToSlotKind(b.type))
+                }
 
-            // Collect nested destructuring info BEFORE compilePattern,
-            // so temp slots for nested records are allocated.
-            val nestedDestructures = mutableListOf<NestedDestructureInfo>()
-            collectNestedDestructuring(case.patterns.firstOrNull(), nestedDestructures)
+                // Push scope so nested expressions use these bindings at depth 0
+                scopeStack.addLast(caseScope)
 
-            val patternIR = compilePattern(case.patterns.firstOrNull())
-            var guardIR = case.guard?.let { compileExpr(it) }
+                // Collect nested destructuring info BEFORE compilePattern,
+                // so temp slots for nested records are allocated.
+                val nestedDestructures = mutableListOf<NestedDestructureInfo>()
+                collectNestedDestructuring(pat, nestedDestructures)
 
-            // Compile if-let bindings.
-            // Also collect nested destructuring from if-let patterns.
-            val ifLetIRs = case.ifLetBindings.map { ifLet ->
-                // Collect nested destructuring from if-let patterns too
-                collectNestedDestructuring(ifLet.pattern, nestedDestructures)
-                val exprIR = compileExpr(ifLet.expr)
-                val ifLetPatternIR = compilePattern(ifLet.pattern)
-                // Resolve binding slots from the case scope
-                val fieldNames = ifLet.bindingNames
-                val fieldSlots = fieldNames.map { name -> caseScope[name] ?: -1 }
-                IfLetBindingIR(exprIR, ifLetPatternIR, fieldNames, fieldSlots, locToSourceInfo(ifLet.loc))
-            }
+                // Collect nested seq destructuring (nested seq patterns like [[x]])
+                val nestedSeqDestructures = mutableListOf<NestedSeqDestructureInfo>()
+                collectNestedSeqDestructuring(pat, nestedSeqDestructures)
 
-            var bodyIR = compileExpr(case.body)
+                val patternIR = compilePattern(pat)
+                var guardIR = case.guard?.let { compileExpr(it) }
 
-            // Wrap guard AND body with nested destructuring let-bindings if needed.
-            // For pattern `Some { val = { x = px, y = py } } if x > 0 -> x`:
-            //   tempSlot holds the intermediate record {x=10, y=20}
-            //   Guard becomes: do { let px = tempSlot.x; let py = tempSlot.y; <originalGuard> }
-            //   Body becomes:  do { let px = tempSlot.x; let py = tempSlot.y; <originalBody> }
-            // Both share the same frame, so the guard's writes are visible to the body.
-            // We wrap both so the variables are available regardless of evaluation order.
-            if (nestedDestructures.isNotEmpty()) {
-                val destructureStmts = mutableListOf<StmtIR>()
-                for (nd in nestedDestructures) {
-                    for ((fieldName, bindingSlot) in nd.fieldBindings) {
-                        val readTemp = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
-                        val readField = ReadFieldIR(readTemp, fieldName, -1, src)
-                        destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
+                // Compile if-let bindings.
+                // Also collect nested destructuring from if-let patterns.
+                val ifLetIRs = case.ifLetBindings.map { ifLet ->
+                    // Collect nested destructuring from if-let patterns too
+                    collectNestedDestructuring(ifLet.pattern, nestedDestructures)
+                    val exprIR = compileExpr(ifLet.expr)
+                    val ifLetPatternIR = compilePattern(ifLet.pattern)
+                    // Resolve binding slots from the case scope
+                    val fieldNames = ifLet.bindingNames
+                    val fieldSlots = fieldNames.map { name -> caseScope[name] ?: -1 }
+                    IfLetBindingIR(exprIR, ifLetPatternIR, fieldNames, fieldSlots, locToSourceInfo(ifLet.loc))
+                }
+
+                var bodyIR = compileExpr(case.body)
+
+                // Wrap guard AND body with nested destructuring let-bindings if needed.
+                // For pattern `Some { val = { x = px, y = py } } if x > 0 -> x`:
+                //   tempSlot holds the intermediate record {x=10, y=20}
+                //   Guard becomes: do { let px = tempSlot.x; let py = tempSlot.y; <originalGuard> }
+                //   Body becomes:  do { let px = tempSlot.x; let py = tempSlot.y; <originalBody> }
+                // Both share the same frame, so the guard's writes are visible to the body.
+                // We wrap both so the variables are available regardless of evaluation order.
+                if (nestedDestructures.isNotEmpty()) {
+                    val destructureStmts = mutableListOf<StmtIR>()
+                    for (nd in nestedDestructures) {
+                        for ((fieldName, bindingSlot) in nd.fieldBindings) {
+                            val readTemp = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
+                            val readField = ReadFieldIR(readTemp, fieldName, -1, src)
+                            destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
+                        }
+                    }
+                    // Wrap guard (if present) with destructuring so guard can reference nested vars
+                    if (guardIR != null) {
+                        guardIR = BlockIR(destructureStmts.toList(), guardIR, src)
+                    }
+                    // Wrap body too (in case guard doesn't exist, or for independent body access)
+                    bodyIR = BlockIR(destructureStmts.toList(), bodyIR, src)
+                }
+
+                // Handle nested seq destructuring: for patterns like [[x, ...rest1], ...rest2],
+                // the inner [x, ...rest1] was bound to a temp slot. Now generate a nested match
+                // in the body that extracts bindings from the temp slot.
+                if (nestedSeqDestructures.isNotEmpty()) {
+                    val seqStmts = mutableListOf<StmtIR>()
+                    for (nsd in nestedSeqDestructures) {
+                        // Generate: let var = seq_get(tempSlot, index) for each binding in the inner pattern
+                        val innerPat = nsd.innerPattern
+                        if (innerPat is TypedSeqPattern) {
+                            // For each element in the inner seq pattern, generate a seq_get
+                            for ((innerIdx, innerElem) in innerPat.elements.withIndex()) {
+                                if (innerElem is TypedVarPattern) {
+                                    val bindingSlot = scopeStack.lastOrNull()?.get(innerElem.name)
+                                        ?: localsByName[innerElem.name]
+                                        ?: forceAllocLocal(innerElem.name)
+                                    val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
+                                    val getElem = SeqGetIR(readTemp, LongLitIR(innerIdx.toLong(), src), src)
+                                    seqStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, innerElem.name, Hash.ZERO, getElem, src))
+                                }
+                            }
+                            // Handle rest binding in inner seq pattern
+                            val restName = innerPat.rest
+                            if (restName != null) {
+                                val restSlot = scopeStack.lastOrNull()?.get(restName)
+                                    ?: localsByName[restName]
+                                    ?: forceAllocLocal(restName)
+                                // Generate a nested match to bind elements and rest from the temp slot.
+                                // match tempSlot is [e0, e1, ...rest] -> rest
+                                val innerCaseBindings = mutableListOf<BindingIR>()
+                                val innerElementSlots = innerPat.elements.mapIndexed { _, iElem ->
+                                    if (iElem is TypedVarPattern) {
+                                        val s = scopeStack.lastOrNull()?.get(iElem.name)
+                                            ?: localsByName[iElem.name]
+                                            ?: forceAllocLocal(iElem.name)
+                                        s
+                                    } else -1
+                                }
+                                val innerPatternIR = PatternIR.Seq(innerElementSlots, restSlot)
+                                val innerCaseBody = ReadLocalIR(restSlot, SlotKind.OBJECT, src)
+                                val innerCase = CaseIR(innerPatternIR, innerCaseBindings, null, innerCaseBody, src)
+                                val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
+                                val innerMatch = MatchIR(readTemp, listOf(innerCase), src)
+                                seqStmts.add(StmtIR.Let(restSlot, SlotKind.OBJECT, restName, Hash.ZERO, innerMatch, src))
+                            }
+                        }
+                    }
+                    if (seqStmts.isNotEmpty()) {
+                        if (guardIR != null) {
+                            guardIR = BlockIR(seqStmts.toList(), guardIR, src)
+                        }
+                        bodyIR = BlockIR(seqStmts.toList(), bodyIR, src)
                     }
                 }
-                // Wrap guard (if present) with destructuring so guard can reference nested vars
-                if (guardIR != null) {
-                    guardIR = BlockIR(destructureStmts.toList(), guardIR, src)
-                }
-                // Wrap body too (in case guard doesn't exist, or for independent body access)
-                bodyIR = BlockIR(destructureStmts.toList(), bodyIR, src)
+
+                // Pop scope
+                scopeStack.removeLast()
+
+                CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
             }
-
-            // Pop scope
-            scopeStack.removeLast()
-
-            CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
         }
         return MatchIR(scrutineeIR, cases, src)
     }
@@ -935,6 +1028,17 @@ class TypedASTCompiler(
     private data class NestedDestructureInfo(
         val tempSlot: Int,
         val fieldBindings: List<Pair<String, Int>>  // (fieldName, targetSlot)
+    )
+
+    /**
+     * Info about a nested seq element destructuring that needs post-bind processing.
+     * tempSlot: the frame slot holding the intermediate seq element value
+     * innerPattern: the full TypedPattern for the nested seq element, compiled to
+     *   a nested match in the body
+     */
+    private data class NestedSeqDestructureInfo(
+        val tempSlot: Int,
+        val innerPattern: TypedPattern
     )
 
     /**
@@ -984,6 +1088,26 @@ class TypedASTCompiler(
                 }
             }
             else -> {} // Other patterns don't have nested records
+        }
+    }
+
+    /**
+     * Collect nested seq element patterns that need post-bind destructuring.
+     * For pattern `[[x, ...rest1], ...rest2]`, the inner `[x, ...rest1]` is a
+     * TypedSeqPattern that can't be represented flat. We bind element 0 to a
+     * temp slot and generate a nested match in the body.
+     */
+    private fun collectNestedSeqDestructuring(pattern: TypedPattern?, out: MutableList<NestedSeqDestructureInfo>) {
+        if (pattern == null) return
+        if (pattern is TypedSeqPattern) {
+            for ((idx, elem) in pattern.elements.withIndex()) {
+                if (elem !is TypedVarPattern && elem !is TypedWildcardPattern) {
+                    // This is a nested pattern (seq, literal, etc.) that needs
+                    // to be bound to a temp slot and matched in the body.
+                    val tempSlot = forceAllocLocal("__seq_tmp_$idx")
+                    out.add(NestedSeqDestructureInfo(tempSlot, elem))
+                }
+            }
         }
     }
 
@@ -1049,8 +1173,29 @@ class TypedASTCompiler(
             }
             is TypedSeqPattern -> {
                 PatternIR.Seq(
-                    pattern.elements.map { localsByName[(it as? TypedVarPattern)?.name ?: ""] ?: -1 },
-                    if (pattern.rest != null) localsByName[pattern.rest] ?: -1 else -1
+                    pattern.elements.mapIndexed { idx, elem ->
+                        when (elem) {
+                            is TypedVarPattern -> {
+                                scopeStack.lastOrNull()?.get(elem.name)
+                                    ?: localsByName[elem.name]
+                                    ?: forceAllocLocal(elem.name)
+                            }
+                            is TypedWildcardPattern -> -1
+                            else -> {
+                                // Nested pattern (seq, literal, etc.) — bind to temp slot
+                                // (allocated by collectNestedSeqDestructuring)
+                                localsByName["__seq_tmp_$idx"] ?: forceAllocLocal("__seq_tmp_$idx")
+                            }
+                        }
+                    },
+                    run {
+                        val restName = pattern.rest
+                        if (restName != null) {
+                            scopeStack.lastOrNull()?.get(restName)
+                                ?: localsByName[restName]
+                                ?: forceAllocLocal(restName)
+                        } else -1
+                    }
                 )
             }
             is TypedStringInterpPattern -> {

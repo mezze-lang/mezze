@@ -347,13 +347,13 @@ class TypedAstBuilder(
     ) {
         val loc = decl.loc
 
-        // Resolve ability hash from target
+        // Resolve ability hash from target — must match the TypedAbilityDecl.hash
+        // which uses computeHash("ability_${name}"). Previously used V1 contentHash
+        // which was a different hash and caused abilityHash != decl.hash mismatch.
         val abilityHash = when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 val abilityName = target.ability.localName
-                val v1AbilityDecl = abilityDeclarations[abilityName]
-                    ?: importContext?.importedAbilities?.get(abilityName)
-                Hash.fromV1(v1AbilityDecl?.contentHash)
+                computeHash("ability_$abilityName")
             }
             is ParsedImplTarget.Inherent -> Hash.ZERO
         }
@@ -422,11 +422,10 @@ class TypedAstBuilder(
             ?: identifierContentHashes[BindingKey(null, decl.performerName)]
         val hash = if (contentHash != null) Hash.fromV1(contentHash) else computeHash("performer_${decl.performerName}")
 
-        // Resolve effect hash
+        // Resolve effect hash — must match the TypedEffectDecl.hash
+        // which uses computeHash("effect_${name}").
         val effectName = decl.effect.localName
-        val v1EffectDecl = effectDeclarations[effectName]
-            ?: importContext?.importedEffects?.get(effectName)
-        val effectHash = Hash.fromV1(v1EffectDecl?.contentHash)
+        val effectHash = computeHash("effect_$effectName")
 
         // Build params
         val params = decl.params.map { param ->
