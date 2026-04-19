@@ -224,9 +224,8 @@ public class AbilityIntegrationTest {
             let result = a - b
             result.cents
             """);
-        // TODO: returns -200 instead of 200 — operand order issue in method dispatch
-        // The subtraction works but it/r params are swapped for sub (not for add)
-        assertEquals(-200L, result);
+        // 500 - 300 = 200 (correct subtraction)
+        assertEquals(200L, result);
     }
 
 }

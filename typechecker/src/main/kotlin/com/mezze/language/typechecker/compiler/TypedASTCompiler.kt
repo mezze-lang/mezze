@@ -872,11 +872,19 @@ class TypedASTCompiler(
             // Push scope so nested expressions use these bindings at depth 0
             scopeStack.addLast(caseScope)
 
-            val patternIR = compilePattern(case.patterns.firstOrNull())
-            val guardIR = case.guard?.let { compileExpr(it) }
+            // Collect nested destructuring info BEFORE compilePattern,
+            // so temp slots for nested records are allocated.
+            val nestedDestructures = mutableListOf<NestedDestructureInfo>()
+            collectNestedDestructuring(case.patterns.firstOrNull(), nestedDestructures)
 
-            // Compile if-let bindings
+            val patternIR = compilePattern(case.patterns.firstOrNull())
+            var guardIR = case.guard?.let { compileExpr(it) }
+
+            // Compile if-let bindings.
+            // Also collect nested destructuring from if-let patterns.
             val ifLetIRs = case.ifLetBindings.map { ifLet ->
+                // Collect nested destructuring from if-let patterns too
+                collectNestedDestructuring(ifLet.pattern, nestedDestructures)
                 val exprIR = compileExpr(ifLet.expr)
                 val ifLetPatternIR = compilePattern(ifLet.pattern)
                 // Resolve binding slots from the case scope
@@ -885,7 +893,31 @@ class TypedASTCompiler(
                 IfLetBindingIR(exprIR, ifLetPatternIR, fieldNames, fieldSlots, locToSourceInfo(ifLet.loc))
             }
 
-            val bodyIR = compileExpr(case.body)
+            var bodyIR = compileExpr(case.body)
+
+            // Wrap guard AND body with nested destructuring let-bindings if needed.
+            // For pattern `Some { val = { x = px, y = py } } if x > 0 -> x`:
+            //   tempSlot holds the intermediate record {x=10, y=20}
+            //   Guard becomes: do { let px = tempSlot.x; let py = tempSlot.y; <originalGuard> }
+            //   Body becomes:  do { let px = tempSlot.x; let py = tempSlot.y; <originalBody> }
+            // Both share the same frame, so the guard's writes are visible to the body.
+            // We wrap both so the variables are available regardless of evaluation order.
+            if (nestedDestructures.isNotEmpty()) {
+                val destructureStmts = mutableListOf<StmtIR>()
+                for (nd in nestedDestructures) {
+                    for ((fieldName, bindingSlot) in nd.fieldBindings) {
+                        val readTemp = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
+                        val readField = ReadFieldIR(readTemp, fieldName, -1, src)
+                        destructureStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
+                    }
+                }
+                // Wrap guard (if present) with destructuring so guard can reference nested vars
+                if (guardIR != null) {
+                    guardIR = BlockIR(destructureStmts.toList(), guardIR, src)
+                }
+                // Wrap body too (in case guard doesn't exist, or for independent body access)
+                bodyIR = BlockIR(destructureStmts.toList(), bodyIR, src)
+            }
 
             // Pop scope
             scopeStack.removeLast()
@@ -893,6 +925,66 @@ class TypedASTCompiler(
             CaseIR(patternIR, bindings, guardIR, bodyIR, locToSourceInfo(case.loc), ifLetIRs)
         }
         return MatchIR(scrutineeIR, cases, src)
+    }
+
+    /**
+     * Info about a nested record destructuring that needs post-bind processing.
+     * tempSlot: the frame slot holding the intermediate record value
+     * fieldBindings: list of (fieldName, targetSlot) pairs to extract from the record
+     */
+    private data class NestedDestructureInfo(
+        val tempSlot: Int,
+        val fieldBindings: List<Pair<String, Int>>  // (fieldName, targetSlot)
+    )
+
+    /**
+     * Walk a typed pattern tree and collect any nested record sub-patterns
+     * that can't be handled by a flat PatternIR. Allocates temp slots for
+     * intermediate records.
+     */
+    private fun collectNestedDestructuring(pattern: TypedPattern?, out: MutableList<NestedDestructureInfo>) {
+        if (pattern == null) return
+        when (pattern) {
+            is TypedVariantPattern -> {
+                val payload = pattern.payload
+                if (payload is TypedRecordPattern) {
+                    for (fp in payload.fields) {
+                        if (fp.pattern is TypedRecordPattern) {
+                            // Nested record: { val = { x = px, y = py } }
+                            // Allocate temp slot for the intermediate field value
+                            val tempSlot = forceAllocLocal("__tmp_${fp.name}")
+                            val nestedRecord = fp.pattern as TypedRecordPattern
+                            val fieldBindings = nestedRecord.fields.map { innerFp ->
+                                val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
+                                val slot = scopeStack.lastOrNull()?.get(bindingName)
+                                    ?: localsByName[bindingName]
+                                    ?: forceAllocLocal(bindingName)
+                                Pair(innerFp.name, slot)
+                            }
+                            out.add(NestedDestructureInfo(tempSlot, fieldBindings))
+                        }
+                    }
+                }
+            }
+            is TypedRecordPattern -> {
+                for (fp in pattern.fields) {
+                    if (fp.pattern is TypedRecordPattern) {
+                        // Nested record: { config = { port = p, host = h } }
+                        val tempSlot = forceAllocLocal("__tmp_${fp.name}")
+                        val nestedRecord = fp.pattern as TypedRecordPattern
+                        val fieldBindings = nestedRecord.fields.map { innerFp ->
+                            val bindingName = if (innerFp.pattern is TypedVarPattern) (innerFp.pattern as TypedVarPattern).name else innerFp.name
+                            val slot = scopeStack.lastOrNull()?.get(bindingName)
+                                ?: localsByName[bindingName]
+                                ?: forceAllocLocal(bindingName)
+                            Pair(innerFp.name, slot)
+                        }
+                        out.add(NestedDestructureInfo(tempSlot, fieldBindings))
+                    }
+                }
+            }
+            else -> {} // Other patterns don't have nested records
+        }
     }
 
     private fun compilePattern(pattern: TypedPattern?): PatternIR {
@@ -915,12 +1007,18 @@ class TypedASTCompiler(
                 if (payload is TypedRecordPattern) {
                     for (fp in payload.fields) {
                         fieldNames.add(fp.name)  // record field name (for extraction at runtime)
-                        // Binding name: { val = ys } → "ys", { val } → "val"
-                        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-                        val slot = scopeStack.lastOrNull()?.get(bindingName)
-                            ?: localsByName[bindingName]
-                            ?: forceAllocLocal(bindingName)
-                        fieldSlots.add(slot)
+                        if (fp.pattern is TypedRecordPattern) {
+                            // Nested record pattern: bind to temp slot (allocated by collectNestedDestructuring)
+                            val tempSlot = localsByName["__tmp_${fp.name}"] ?: forceAllocLocal("__tmp_${fp.name}")
+                            fieldSlots.add(tempSlot)
+                        } else {
+                            // Simple binding: { val = ys } → "ys", { val } → "val"
+                            val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+                            val slot = scopeStack.lastOrNull()?.get(bindingName)
+                                ?: localsByName[bindingName]
+                                ?: forceAllocLocal(bindingName)
+                            fieldSlots.add(slot)
+                        }
                     }
                 } else if (payload is TypedVarPattern) {
                     fieldNames.add(payload.name)
@@ -937,10 +1035,15 @@ class TypedASTCompiler(
                 // { value = v } → fieldName="value", bindingName="v"
                 val fieldNames = pattern.fields.map { it.name }
                 val fieldSlots = pattern.fields.map { fp ->
-                    val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
-                    scopeStack.lastOrNull()?.get(bindingName)
-                        ?: localsByName[bindingName]
-                        ?: forceAllocLocal(bindingName)
+                    if (fp.pattern is TypedRecordPattern) {
+                        // Nested record pattern: bind to temp slot (allocated by collectNestedDestructuring)
+                        localsByName["__tmp_${fp.name}"] ?: forceAllocLocal("__tmp_${fp.name}")
+                    } else {
+                        val bindingName = if (fp.pattern is TypedVarPattern) (fp.pattern as TypedVarPattern).name else fp.name
+                        scopeStack.lastOrNull()?.get(bindingName)
+                            ?: localsByName[bindingName]
+                            ?: forceAllocLocal(bindingName)
+                    }
                 }
                 PatternIR.Record(fieldNames, fieldSlots, pattern.isOpen)
             }

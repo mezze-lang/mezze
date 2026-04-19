@@ -127,12 +127,31 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
     }
 
     /**
+     * Handle method-like field access on Boolean values.
+     * Supports .not, .and, .or on Boolean primitives.
+     * Used when ability impls chain boolean ops like: it.eq {r = r}.not {}
+     */
+    @Specialization(guards = {"isBooleanMethod(recordObj)"})
+    protected Object accessBooleanMethod(Object recordObj) {
+        boolean b = (Boolean) recordObj;
+        if ("not".equals(fieldName)) return !b;
+        if ("and".equals(fieldName)) return b;  // Short-circuit: returns receiver for .and
+        if ("or".equals(fieldName)) return b;   // Short-circuit: returns receiver for .or
+        // Shouldn't reach here due to guard, but fallback
+        throw new RuntimeException("Expected record for field '" + fieldName + "', got: Boolean");
+    }
+
+    /**
      * Error case: not a record.
      */
-    @Specialization(guards = "!isRecord(recordObj)")
+    @Specialization(guards = {"!isRecord(recordObj)", "!isBooleanMethod(recordObj)"})
     protected Object accessNotRecord(Object recordObj) {
         throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
             (recordObj == null ? "null" : recordObj.getClass().getSimpleName()));
+    }
+
+    protected boolean isBooleanMethod(Object obj) {
+        return obj instanceof Boolean && ("not".equals(fieldName) || "and".equals(fieldName) || "or".equals(fieldName));
     }
 
     // ===== Primitive execute overrides for unboxed access =====

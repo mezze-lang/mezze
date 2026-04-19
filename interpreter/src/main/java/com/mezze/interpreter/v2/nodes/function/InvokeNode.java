@@ -385,6 +385,24 @@ public abstract class InvokeNode extends MezzeNode {
     }
 
     /**
+     * Boolean "call" - when .not/.and/.or on a Boolean returns the result directly,
+     * the subsequent "invoke" just passes through the Boolean value.
+     * This supports patterns like: value.not {} where .not returns the negated boolean
+     * and {} is the "argument" that gets ignored.
+     */
+    @Specialization(guards = "isBoolean(function)")
+    protected Object callBoolean(
+            VirtualFrame frame,
+            Object function
+    ) {
+        return function;
+    }
+
+    protected static boolean isBoolean(Object value) {
+        return value instanceof Boolean;
+    }
+
+    /**
      * Fallback for unexpected types.
      */
     @Fallback

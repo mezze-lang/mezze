@@ -2058,6 +2058,11 @@ public final class NativeDispatch extends MezzeNode {
     private static long getLong(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof Long l) return l;
+        // Accept Doubles that are exact integers (e.g., 0.0, 1.0) — handles
+        // cases where float operations produce values used as integer args
+        if (val instanceof Double d && d == Math.floor(d) && !Double.isInfinite(d)) {
+            return (long) d.doubleValue();
+        }
         throw new RuntimeException("Expected Long for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getName() + "=" + val));
     }
