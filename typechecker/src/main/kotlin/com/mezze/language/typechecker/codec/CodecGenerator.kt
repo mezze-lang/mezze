@@ -1901,9 +1901,12 @@ class CodecGenerator {
     private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: ParsedExpr): ParsedImplAbilityDecl {
         val decodeBody = doWithLet("path", array(emptyList()), body)
 
+        // The ability is `ability DecodeRepr 'a for 'repr`.
+        // targetTypes is the types after `for` — the repr/format type.
+        // The data type 'a is passed as an associated type parameter.
         return ParsedImplAbilityDecl(
             target = ParsedImplTarget.Named(ParsedQualifiedRef("DecodeRepr", null, GEN_LOC)),
-            targetTypes = listOf(mezzeTypeToAnnotation(dataType)),
+            targetTypes = listOf(mezzeTypeToAnnotation(formatType)),
             operations = listOf(
                 ParsedImplOp(
                     name = "decode_repr",

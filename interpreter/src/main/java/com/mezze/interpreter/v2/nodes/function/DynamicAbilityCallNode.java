@@ -58,6 +58,11 @@ public final class DynamicAbilityCallNode extends MezzeNode {
 
     @CompilerDirectives.TruffleBoundary
     private String matchCandidate(Object receiver) {
+        if (receiver == null) {
+            // Null receiver — use single candidate if available, else fail
+            if (candidateHashes.length == 1) return candidateHashes[0];
+            return null;
+        }
         String typeName = getTypeName(receiver);
         for (int i = 0; i < candidateTypeTags.length; i++) {
             if (candidateTypeTags[i].equals(typeName)) return candidateHashes[i];

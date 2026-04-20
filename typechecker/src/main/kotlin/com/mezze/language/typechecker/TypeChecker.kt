@@ -524,7 +524,37 @@ class TypeChecker(
                         methodCallResolutions = allMethodCallResolutions
                     )
                     val typed = builder.build(parsedModule)
-                    emittedTypedModule = typed
+
+                    // Generate auto-derived codec impls (EncodeRepr/DecodeRepr) from constraint solver.
+                    // The solver tracks which types need codec impls; CodecGenerator builds parsed ASTs;
+                    // the builder converts them to TypedAbilityImpls that the compiler can emit as FunctionIRs.
+                    val codecImpls = solver.getGeneratedCodecImpls()
+                    if (codecImpls.isNotEmpty()) {
+                        val codecGen = com.mezze.language.typechecker.codec.CodecGenerator()
+                        val extraImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
+                        for (ci in codecImpls) {
+                            try {
+                                val formatType = ci.targetTypes.getOrNull(0) ?: continue
+                                val dataType = ci.targetTypes.getOrNull(1) ?: continue
+                                val parsedImpl = when (ci.abilityName) {
+                                    "Encode", "EncodeRepr" -> codecGen.generateEncodeImpl(formatType, dataType)
+                                    "Decode", "DecodeRepr" -> codecGen.generateDecodeImpl(formatType, dataType)
+                                    else -> continue
+                                }
+                                builder.buildCodecImpl(parsedImpl, extraImpls)
+                            } catch (codecEx: Exception) {
+                                // Codec generation may fail for some types — skip silently
+                            }
+                        }
+                        if (extraImpls.isNotEmpty()) {
+                            val updatedImpls = typed.abilityImpls + extraImpls
+                            emittedTypedModule = typed.copy(abilityImpls = updatedImpls)
+                        } else {
+                            emittedTypedModule = typed
+                        }
+                    } else {
+                        emittedTypedModule = typed
+                    }
                 } catch (emitEx: Exception) {
                     System.err.println("V2 TypedAstBuilder (${currentModulePath}): ${emitEx::class.simpleName}: ${emitEx.message}")
                 }

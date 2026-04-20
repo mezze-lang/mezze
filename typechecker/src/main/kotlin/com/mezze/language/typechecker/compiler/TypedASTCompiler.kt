@@ -574,6 +574,18 @@ class TypedASTCompiler(
                     if (slot != null) {
                         ReadLocalIR(slot, typeToSlotKind(expr.type), src)
                     } else {
+                        // If depth > 0 and not found locally, check if it's a top-level
+                        // declaration. This handles the case where a top-level function
+                        // references a sibling top-level binding (e.g., `test` calling
+                        // `spawn` where both are defined at module scope). The typechecker
+                        // gives these BindingRef.Local(depth>0) but at the IR level they
+                        // should be resolved by hash, not allocated as phantom local slots.
+                        if (binding.depth > 0) {
+                            val topDecl = declIndex?.values?.find { it.name == expr.name }
+                            if (topDecl != null) {
+                                return ReadContextIR(topDecl.hash.hex, src)
+                            }
+                        }
                         val newSlot = allocLocal(expr.name)
                         ReadLocalIR(newSlot, typeToSlotKind(expr.type), src)
                     }
@@ -730,6 +742,14 @@ class TypedASTCompiler(
                     if (resolvedSlot >= 0) {
                         CallIndirectIR(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
+                        // If depth > 0 and not found locally, check if it's a top-level
+                        // declaration. Use CallDirectIR for better performance.
+                        if (binding.depth > 0) {
+                            val topDecl = declIndex?.values?.find { it.name == fn.name }
+                            if (topDecl != null) {
+                                return CallDirectIR(topDecl.hash, argIR, expr.isTailCall, src)
+                            }
+                        }
                         CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
                     }
                 }
@@ -1309,6 +1329,16 @@ class TypedASTCompiler(
             concreteType is SortedMapType && targetType is TypeApplication && targetType.constructor == "SortedMap" -> true
             concreteType is RecordType && targetType is TypeApplication &&
                 concreteType.typeName == targetType.constructor -> true
+            // VariantType to VariantType: match if constructors overlap or type names match
+            concreteType is VariantType && targetType is VariantType -> {
+                // Same type name (e.g., both are "Json")
+                if (concreteType.typeName != null && concreteType.typeName == targetType.typeName) return true
+                // Same constructor set
+                if (concreteType.constructors.keys == targetType.constructors.keys) return true
+                // Concrete has subset of target constructors (e.g., concrete is a single constructor variant)
+                if (concreteType.constructors.keys.all { it in targetType.constructors }) return true
+                false
+            }
             // VarType: don't match — let runtime handle dispatch
             // targetType is VarType -> true
             // concreteType is VarType -> true

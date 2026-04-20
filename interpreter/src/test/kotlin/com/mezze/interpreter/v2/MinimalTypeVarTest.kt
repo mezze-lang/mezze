@@ -45,18 +45,21 @@ class MinimalTypeVarTest {
 
     @Test
     fun testTypeVarsWithEffectSystem() {
-        // Test type variables with the effect system
+        // Test type variables with the effect system using direct native loom calls.
+        // Uses the same native primitives as TruffleAndLoomIntegrationTest to avoid
+        // pulling in the heavy std::effects::async module (which causes OOM).
         val code = """
-            use std::effects::async::{Async, LoomAsync}
+            newtype Promise 'a = Promise __NativePromise
+            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
+            let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
 
-            perform LoomAsync in do
-                let p1 = Async.spawn {f = {} -> 1 * 2}
-                let p2 = Async.spawn {f = {} -> 2 * 2}
-                let p3 = Async.spawn {f = {} -> 3 * 2}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
-                [r1, r2, r3]
+            let p1 = spawn {f = {} -> 1 * 2}
+            let p2 = spawn {f = {} -> 2 * 2}
+            let p3 = spawn {f = {} -> 3 * 2}
+            let r1 = await {p = p1}
+            let r2 = await {p = p2}
+            let r3 = await {p = p3}
+            [r1, r2, r3]
         """
         val result = eval(code)
         assertTrue(result is MezzeSeq<*>, "Expected MezzeSeq but got ${result?.javaClass?.name}")

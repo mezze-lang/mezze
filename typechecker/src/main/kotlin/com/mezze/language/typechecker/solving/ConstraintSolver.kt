@@ -45,7 +45,7 @@ class ConstraintSolver(
     /** Lightweight representation of a generated codec implementation.
      *  Replaces v1 ImplAbilityDeclaration — only stores metadata needed
      *  for dedup (contentHash) and bidirectional inference (abilityName, targetTypes). */
-    private data class GeneratedCodecImpl(
+    data class GeneratedCodecImpl(
         val abilityName: String,
         val targetTypes: List<MezzeType>,  // [formatType, dataType]
         val contentHash: String
@@ -59,6 +59,9 @@ class ConstraintSolver(
      * Key: Content hash of the GeneratedCodecImpl
      */
     private val generatedCodecImpls = mutableMapOf<String, GeneratedCodecImpl>()
+
+    /** Get the auto-derived codec impls metadata for downstream code generation. */
+    fun getGeneratedCodecImpls(): Collection<GeneratedCodecImpl> = generatedCodecImpls.values
     /**
      * Tracked ability constraint entry — carries abilityName, optional content hash, typeArgs, and source location.
      *
@@ -1487,9 +1490,9 @@ class ConstraintSolver(
         // The format type comes from Format/DecodeFormat impl in scope
         if (isCodecAbility(abilityName, abilityHash)) {
             if (typeArgs.size == 2) {
-                // Old-style: 2 type args (format, data)
-                val formatType = typeArgs[0]
-                val dataType = typeArgs[1]
+                // 2 type args: ability DecodeRepr 'a for 'repr → typeArgs = [dataType, reprType]
+                val dataType = typeArgs[0]
+                val formatType = typeArgs[1]
                 if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
                     return true
                 }
