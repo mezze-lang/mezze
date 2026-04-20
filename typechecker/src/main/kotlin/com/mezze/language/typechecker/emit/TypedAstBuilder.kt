@@ -625,13 +625,28 @@ class TypedAstBuilder(
                     }
                     if (receiverName != null) {
                         // Check local + imported effect declarations by name
-                        val effectHash = effectDeclarations[receiverName]?.contentHash
+                        var effectHashStr = effectDeclarations[receiverName]?.contentHash
                             ?: importContext?.importedEffects?.get(receiverName)?.contentHash
-                        if (effectHash != null) {
+                        var resolvedEffectHash: Hash? = if (effectHashStr != null) Hash.fromV1(effectHashStr) else null
+
+                        // Fallback: search ModuleTypeChecker cache for the effect hash
+                        // (same fallback used by buildHandlerRef for handler registration consistency)
+                        if (resolvedEffectHash == null || resolvedEffectHash == Hash.ZERO) {
+                            for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                                val v2m = cachedModule.v2TypedModule ?: continue
+                                val ed = v2m.effectDecls.find { it.name == receiverName }
+                                if (ed != null) {
+                                    resolvedEffectHash = ed.hash
+                                    break
+                                }
+                            }
+                        }
+
+                        if (resolvedEffectHash != null && resolvedEffectHash != Hash.ZERO) {
                             val opName = memberAccess.member
                             val argExpr = buildExpr(expr.arguments, file)
                             return TypedPerformOp(
-                                Hash.fromV1(effectHash), opName, argExpr,
+                                resolvedEffectHash, opName, argExpr,
                                 substitution.apply(contextType), loc
                             )
                         }
@@ -1218,22 +1233,20 @@ class TypedAstBuilder(
         val effectHash = if (effectContentHash != null) {
             Hash.fromV1(effectContentHash)
         } else {
-            // Fallback: look up from PrecompiledStdlib v2Modules' performer decls
-            // These have the correct effectHash already computed
-            val precompiled = try { com.mezze.language.typechecker.PrecompiledStdlib } catch (_: Exception) { null }
+            // Fallback: search ModuleTypeChecker cache for the effect hash by name
+            // This is the same search used by buildPerformOp for consistency
             var found: Hash? = null
-            if (precompiled != null) {
-                for ((_, v2m) in precompiled.v2Modules) {
-                    for (pd in v2m.performerDecls) {
-                        if (pd.name == performerName) {
-                            found = pd.effectHash
-                            break
-                        }
+            if (effectName != null) {
+                for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                    val v2m = cachedModule.v2TypedModule ?: continue
+                    val ed = v2m.effectDecls.find { it.name == effectName }
+                    if (ed != null) {
+                        found = ed.hash
+                        break
                     }
-                    if (found != null) break
                 }
             }
-            // Also search in ModuleTypeChecker's cached modules (non-prelude imports)
+            // Secondary fallback: search performer decls by performer name
             if (found == null) {
                 for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
                     val v2m = cachedModule.v2TypedModule ?: continue
