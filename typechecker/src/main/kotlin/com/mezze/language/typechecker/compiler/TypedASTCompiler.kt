@@ -178,19 +178,21 @@ class TypedASTCompiler(
                 loc = decl.loc
             )
         } else if (value is TypedVar && value.binding is BindingRef.ByHash) {
-            // Value alias: `toggle_bool = toggle`
-            // Compile as a thunk that returns the function reference (not CALLS it).
-            // The body should be a ReadContextIR or FunctionLookup, not a CallDirect.
+            // Function alias: `toggle_bool = toggle`
+            // Emit a no-op FunctionIR whose body just reads the target from context.
+            // Then register toggle_bool's hash → toggle's hash as an alias in the runtime.
+            // This produces a thunk that returns the target function — CalledIR sites for
+            // toggle_bool will use CallDirectIR(toggle_bool_hash, args). The MonomorphicCallNode
+            // will resolve toggle_bool_hash, find the thunk, evaluate it to get the toggle
+            // MezzeFunction, and then the InvokeNode will call that function with the args.
             val targetHash = (value.binding as BindingRef.ByHash).hash
             compileFunctionBody(
                 hash = decl.hash,
                 name = decl.name,
                 params = emptyList(),
-                body = value, // compileExpr will emit CallDirect(hash, Unit) for ByHash
+                body = value, // compileExpr will emit ReadContextIR(targetHash) for ByHash
                 loc = decl.loc
             )
-            // Note: this still has the call-with-empty-args issue for function aliases.
-            // The proper fix needs ReadContextIR or MakeLambdaIR for the target.
         } else {
             // Value (thunk): no params
             compileFunctionBody(

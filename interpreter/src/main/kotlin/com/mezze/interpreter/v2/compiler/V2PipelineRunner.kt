@@ -78,8 +78,42 @@ object V2PipelineRunner {
         // the shared Engine and cause OOM over thousands of tests. Instead, register FunctionIRs
         // and let MonomorphicCallNode compile on-demand via Language.getCachedStdlibCallTarget.
         compiler.registerFunctions(functions)
+
+        // Resolve function aliases: `let toggle_bool = toggle` compiles to a FunctionIR whose
+        // body is ReadContextIR(toggle_hash). Register the alias hash → target's FunctionIR
+        // so MonomorphicCallNode finds the real function (with its params) directly.
+        val aliasMap = mutableMapOf<String, String>() // alias_hash → target_hash
         for (fn in functions) {
-            language.registerFunctionIR(fn.hash.hex, fn)
+            if (fn.paramSlots.isEmpty() && fn.captureSlots.isEmpty() && fn.localSlots.isEmpty()) {
+                val body = fn.body
+                if (body is com.mezze.language.truffleir.ReadContextIR) {
+                    aliasMap[fn.hash.hex] = body.name
+                }
+            }
+        }
+
+        // Build index for resolving aliases to their target FunctionIR
+        val fnByHash = functions.associateBy { it.hash.hex }
+        for (fn in functions) {
+            var targetHash = aliasMap[fn.hash.hex]
+            if (targetHash != null) {
+                // Find the target's FunctionIR (may be in user functions or stdlib)
+                val targetIR = fnByHash[targetHash]
+                if (targetIR != null) {
+                    // Register alias pointing to the target's FunctionIR directly
+                    language.registerFunctionIR(fn.hash.hex, targetIR)
+                } else {
+                    // Target is in stdlib — register alias hash mapping so getCachedStdlibCallTarget resolves it
+                    language.registerFunctionIR(fn.hash.hex, fn)
+                    // Also try to copy the stdlib CallTarget to the alias hash
+                    val stdlibCT = language.getCachedStdlibCallTarget(targetHash)
+                    if (stdlibCT != null) {
+                        language.cachedStdlibCallTargetCache[fn.hash.hex] = stdlibCT
+                    }
+                }
+            } else {
+                language.registerFunctionIR(fn.hash.hex, fn)
+            }
         }
 
         // Eagerly compile performer factory functions so they're available via HashModuleLoaderNode.

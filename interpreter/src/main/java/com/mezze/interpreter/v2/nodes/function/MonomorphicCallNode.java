@@ -77,6 +77,22 @@ public final class MonomorphicCallNode extends MezzeNode {
         }
 
         Object arg = argumentNode.execute(frame);
+
+        // Check for partial application: if the function has named parameters and the
+        // argument record doesn't provide all of them, return a partially applied function.
+        if (cachedFunction != null
+                && cachedFunction.getParameterNames().length > 0
+                && arg instanceof com.mezze.interpreter.v2.values.MezzeRecord record) {
+            if (!cachedFunction.hasAllParameters(record)) {
+                return cachedFunction.withPartialArgs(record);
+            }
+            // Also handle completing a partial application
+            if (cachedFunction.hasPartialArgs() && cachedFunction.hasAllParameters(record)) {
+                com.mezze.interpreter.v2.values.MezzeRecord completeRecord = cachedFunction.buildCompleteRecord(record);
+                return callWithClosure(completeRecord);
+            }
+        }
+
         return callWithClosure(arg);
     }
 

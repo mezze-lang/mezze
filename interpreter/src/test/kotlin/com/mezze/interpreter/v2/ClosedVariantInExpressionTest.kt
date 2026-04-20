@@ -314,6 +314,7 @@ class ClosedVariantInExpressionTest {
                 Debug -> "DEBUG"
                 Trace -> "TRACE"
                 Print -> "PRINT"
+                _ -> "OTHER"
         """.trimIndent()
 
         val result = eval(source)
