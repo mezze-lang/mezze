@@ -4,6 +4,7 @@ import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeRecord.FieldLocation;
 import com.mezze.interpreter.v2.values.MezzeRecord.Shape;
+import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -142,9 +143,19 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
     }
 
     /**
+     * Handle field access on MezzeVariant by unwrapping to the payload record.
+     * This handles cases like codec method access (.decode_repr, .encode_repr)
+     * on variant-wrapped records (e.g., Json, Promise types).
+     */
+    @Specialization(guards = {"isVariantWithRecordPayload(recordObj)"})
+    protected Object accessVariantPayload(Object recordObj) {
+        return unwrapVariantField(recordObj);
+    }
+
+    /**
      * Error case: not a record.
      */
-    @Specialization(guards = {"!isRecord(recordObj)", "!isBooleanMethod(recordObj)"})
+    @Specialization(guards = {"!isRecord(recordObj)", "!isBooleanMethod(recordObj)", "!isVariantWithRecordPayload(recordObj)"})
     protected Object accessNotRecord(Object recordObj) {
         throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
             (recordObj == null ? "null" : recordObj.getClass().getSimpleName()));
@@ -152,6 +163,24 @@ public abstract class CachedFieldAccessNode extends MezzeNode {
 
     protected boolean isBooleanMethod(Object obj) {
         return obj instanceof Boolean && ("not".equals(fieldName) || "and".equals(fieldName) || "or".equals(fieldName));
+    }
+
+    @Idempotent
+    protected static boolean isVariantWithRecordPayload(Object obj) {
+        if (obj instanceof MezzeVariant v && v.hasPayload()) {
+            Object payload = v.getPayloadValue();
+            return payload instanceof MezzeRecord;
+        }
+        return false;
+    }
+
+    @TruffleBoundary
+    private Object unwrapVariantField(Object recordObj) {
+        MezzeVariant variant = (MezzeVariant) recordObj;
+        MezzeRecord record = (MezzeRecord) variant.getPayloadValue();
+        Object value = record.getField(fieldName);
+        if (value != null) return value;
+        throw new RuntimeException("Field '" + fieldName + "' not found in variant payload record");
     }
 
     // ===== Primitive execute overrides for unboxed access =====

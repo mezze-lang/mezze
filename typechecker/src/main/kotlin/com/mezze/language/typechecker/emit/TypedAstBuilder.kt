@@ -1124,7 +1124,22 @@ class TypedAstBuilder(
             }
             return
         }
-        if (expr is TypedLambda) return // nested lambdas compute their own captures
+        if (expr is TypedLambda) {
+            // Nested lambdas compute their own captures, but we need to propagate
+            // captures through: if a nested lambda captures a variable from a grandparent
+            // scope, the current lambda must also capture it to pass it down.
+            for (cap in expr.captures) {
+                if (cap.name !in paramNames && cap.name !in seen) {
+                    val capBinding = cap.source
+                    if (capBinding is BindingRef.Local && capBinding.depth > 1) {
+                        // Variable from grandparent+ scope — current function must also capture it
+                        seen.add(cap.name)
+                        captures.add(TypedCapture(cap.name, cap.type, BindingRef.Local(capBinding.depth - 1, capBinding.index)))
+                    }
+                }
+            }
+            return
+        }
         if (expr is TypedCall) { walkForCaptures(expr.function, paramNames, captures, seen); walkForCaptures(expr.arg, paramNames, captures, seen); return }
         if (expr is TypedIf) { walkForCaptures(expr.condition, paramNames, captures, seen); walkForCaptures(expr.thenBranch, paramNames, captures, seen); walkForCaptures(expr.elseBranch, paramNames, captures, seen); return }
         if (expr is TypedBlock) {

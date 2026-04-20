@@ -155,27 +155,6 @@ class TypedASTCompiler(
         // Add extracted lambdas
         functions.addAll(extractedFunctions)
 
-        // Debug dump
-        try { java.io.FileWriter("/tmp/typed_compiler_debug.txt").use { fw ->
-            fw.write("Functions: ${functions.size}\n")
-            for (fn in functions) {
-                fw.write("  ${fn.name} (${fn.qualifiedName}) hash=${fn.hash.hex.take(16)} params=${fn.paramNames} locals=${fn.localNames} captures=${fn.captureNames}\n")
-                dumpNodeIR(fw, fn.body, "    ")
-            }
-            fw.write("PerformerRecords: ${performerRecords.size}\n")
-            for (pr in performerRecords) {
-                fw.write("  performer=${pr.performerHash.take(16)} effect=${pr.effectHash.take(16)} ops=${pr.operationNames}\n")
-            }
-        } } catch (_: Exception) {}
-
-        // Debug: dump compiled functions
-        try { java.io.FileWriter("/tmp/compiler_debug.txt", true).use { fw ->
-            fw.write("=== compile() produced ${functions.size} functions ===\n")
-            for (fn in functions) {
-                fw.write("  ${fn.name} params=${fn.paramNames} locals=${fn.localNames}\n")
-            }
-        } } catch (_: Exception) {}
-
         return CompileResult(functions, performerRecords.toList())
     }
 
@@ -189,13 +168,6 @@ class TypedASTCompiler(
         currentCaptureNames = emptyMap()
 
         val value = decl.value
-        // Debug: check if map is a lambda
-        if (decl.name == "map") {
-            try { java.io.FileWriter("/tmp/compiler_map_debug.txt", true).use { fw ->
-                fw.write("compileLetDecl: name=${decl.name} valueType=${value::class.simpleName} isLambda=${value is TypedLambda}\n")
-                if (value is TypedLambda) fw.write("  lambdaParams=${value.params.map{it.name}}\n")
-            } } catch (_: Exception) {}
-        }
         return if (value is TypedLambda) {
             // Function: unwrap lambda, use its params directly
             compileFunctionBody(
@@ -293,13 +265,6 @@ class TypedASTCompiler(
             sourceFile = loc.file,
             sourceSection = locToSourceInfo(loc)
         )
-        // Debug: dump map function with FULL match detail
-        if (name == "map" && paramNames.contains("result")) {
-            try { java.io.FileWriter("/tmp/compiler_map_debug.txt", true).use { fw ->
-                fw.write("FN $name params=$paramNames paramSlots=$paramSlots locals=$localNames localSlots=$localSlots\n")
-                dumpNodeIRFull(fw, bodyIR, "  ")
-            } } catch (_: Exception) {}
-        }
         return fnIR
     }
 
@@ -850,7 +815,11 @@ class TypedASTCompiler(
                     val valueIR = if (stmtValue is TypedLambda) {
                         // Let-bound lambda: check if it matches a top-level function.
                         // If so, reference the top-level function's hash (not a re-hashed copy).
-                        val topLevelDecl = declIndex?.values?.find { it.name == stmt.name }
+                        // Only use this optimization in the entry function (no captures/params),
+                        // because nested functions need compileLambda's parent capture resolution.
+                        val topLevelDecl = if (currentCaptureCount == 0 && currentParamNames.isEmpty()) {
+                            declIndex?.values?.find { it.name == stmt.name }
+                        } else null
                         if (topLevelDecl != null && topLevelDecl.value is TypedLambda) {
                             // Top-level function — reference it directly (don't re-compile)
                             val captures = stmtValue.captures.mapNotNull { c ->

@@ -226,11 +226,6 @@ public final class MezzeFunctionRootNode extends RootNode {
      * Slow path: compute field indices and cache them.
      * Split into two parts - boundary for index computation, inline for frame binding.
      */
-    @TruffleBoundary
-    private void debugLog2(String msg) {
-        try { new java.io.FileWriter("/tmp/v2pr-debug.log", true).append("[FnRoot] " + msg + "\n").close(); } catch (Exception e) {}
-    }
-
     private void unpackRecordSlow(VirtualFrame frame, MezzeRecord record, Object shape) {
         // Compute indices in boundary method (can't access frame there)
         Object[] result = computeFieldIndicesAndValues(record, shape);
