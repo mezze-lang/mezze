@@ -861,6 +861,13 @@ class TypedAstBuilder(
             // ------------------------------------------------------------------
 
             is ParsedDo -> {
+                // Push a block scope so let bindings are tracked for capture by inner lambdas.
+                // Without this, top-level do-block let bindings resolve as BindingRef.ByHash
+                // instead of BindingRef.Local, causing inner lambdas to miss captures.
+                val pushedBlockScope = lambdaParamScopes.isEmpty()
+                if (pushedBlockScope) {
+                    lambdaParamScopes.addLast(mutableListOf())
+                }
                 val stmts = mutableListOf<TypedStatement>()
                 for (stmt in expr.statements) {
                     when (stmt) {
@@ -924,6 +931,9 @@ class TypedAstBuilder(
                     }
                 }
                 val result = buildExpr(expr.result, file, contextType)
+                if (pushedBlockScope) {
+                    lambdaParamScopes.removeLast()
+                }
                 TypedBlock(stmts, result, result.type, loc)
             }
 

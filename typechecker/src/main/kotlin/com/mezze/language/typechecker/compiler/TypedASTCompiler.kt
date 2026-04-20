@@ -1255,7 +1255,14 @@ class TypedASTCompiler(
         val match = candidates.firstOrNull { op ->
             op.targetTypes.any { typeMatchesTarget(receiverType, it) }
         }
-        return match?.opHash
+        if (match != null) return match.opHash
+        // Fallback: if there's exactly one candidate and the receiver is a variant/type-application,
+        // use it. This handles user-defined type aliases where the variant type's constructors
+        // don't match the known aliases in typeMatchesTarget.
+        if (candidates.size == 1 && (receiverType is VariantType || receiverType is TypeApplication)) {
+            return candidates.first().opHash
+        }
+        return null
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
@@ -1287,7 +1294,8 @@ class TypedASTCompiler(
                 val ctors = concreteType.constructors.keys.sorted().joinToString(",")
                 val knownAliases = mapOf(
                     "None,Some" to "Option", "Err,Ok" to "Result",
-                    "Cons,Nil" to "List", "False,True" to "Bool"
+                    "Cons,Nil" to "List", "False,True" to "Bool",
+                    "Just,Nothing" to "Maybe"
                 )
                 concreteType.typeName == targetType.constructor ||
                     knownAliases[ctors] == targetType.constructor

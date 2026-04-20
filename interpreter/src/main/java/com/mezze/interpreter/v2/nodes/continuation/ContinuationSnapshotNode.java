@@ -3,6 +3,7 @@ package com.mezze.interpreter.v2.nodes.continuation;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeUnit;
@@ -35,6 +36,7 @@ public final class ContinuationSnapshotNode extends MezzeNode {
 
     private static final int MAGIC = 0x4D5A434B; // "MZCK"
     private static final int VERSION = 1;
+    private static final java.util.concurrent.atomic.AtomicLong SNAPSHOT_COUNTER = new java.util.concurrent.atomic.AtomicLong();
 
     @Child
     private MezzeNode argumentNode;
@@ -73,9 +75,17 @@ public final class ContinuationSnapshotNode extends MezzeNode {
             out.writeInt(MAGIC);
             out.writeInt(VERSION);
 
-            // Write function name
+            // Generate a unique snapshot key for this function so restore can find it.
+            // Lambda functions are all named "lambda" which is not unique, so we
+            // generate a unique key and register the function globally under that key.
             String funcName = func.getName();
-            byte[] nameBytes = funcName.getBytes(StandardCharsets.UTF_8);
+            String snapshotKey = funcName + "__snapshot_" + SNAPSHOT_COUNTER.incrementAndGet();
+
+            // Register the function globally so ContinuationRestoreNode can find it
+            MezzeContext context = MezzeContext.get(this);
+            context.defineGlobal(snapshotKey, func);
+
+            byte[] nameBytes = snapshotKey.getBytes(StandardCharsets.UTF_8);
             out.writeInt(nameBytes.length);
             out.write(nameBytes);
 

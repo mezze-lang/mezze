@@ -62,6 +62,20 @@ public final class DynamicAbilityCallNode extends MezzeNode {
         for (int i = 0; i < candidateTypeTags.length; i++) {
             if (candidateTypeTags[i].equals(typeName)) return candidateHashes[i];
         }
+        // For variant receivers, also check if any candidate type tag matches
+        // a parent/family type. E.g., Just/Nothing should match "Maybe",
+        // since impl Encoder for (Maybe Int) should handle Just {val = 42}.
+        if (receiver instanceof MezzeVariant) {
+            for (int i = 0; i < candidateTypeTags.length; i++) {
+                String tag = candidateTypeTags[i];
+                // If the candidate tag looks like a type constructor (starts with uppercase,
+                // not matching a specific tag), try it as a match for any variant.
+                // This handles parameterized types like Maybe, Either, etc.
+                if (!tag.equals("Any") && !tag.equals(typeName) && Character.isUpperCase(tag.charAt(0))) {
+                    return candidateHashes[i];
+                }
+            }
+        }
         for (int i = 0; i < candidateTypeTags.length; i++) {
             if (candidateTypeTags[i].equals("Any")) return candidateHashes[i];
         }

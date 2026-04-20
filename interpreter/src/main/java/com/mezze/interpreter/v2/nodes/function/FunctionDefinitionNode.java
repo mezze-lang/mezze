@@ -236,18 +236,13 @@ public final class FunctionDefinitionNode extends MezzeNode {
 
         // Capture closure variables from current frame
         // @ExplodeLoop unrolls this based on closureCount
-        // Use typed reads when closureKinds is available for maximum performance
+        // Always use frame.getValue() for captures — it works regardless of the
+        // slot's current type tag (LONG, DOUBLE, OBJECT, etc.). Using typed reads
+        // (e.g., getObject on a LONG slot) can produce null when the slot tag doesn't
+        // match, especially after Truffle's type specialization changes the slot tag.
         Object[] closureValues = new Object[closureCount];
-        if (closureKinds != null) {
-            // Fast path: use static type info from compiler
-            for (int i = 0; i < closureCount; i++) {
-                closureValues[i] = readSlotTyped(frame, closureSlots[i], closureKinds[i]);
-            }
-        } else {
-            // Fallback: use generic getValue (backwards compatible)
-            for (int i = 0; i < closureCount; i++) {
-                closureValues[i] = frame.getValue(closureSlots[i]);
-            }
+        for (int i = 0; i < closureCount; i++) {
+            closureValues[i] = frame.getValue(closureSlots[i]);
         }
 
         // Pass ability slot requirements if present
