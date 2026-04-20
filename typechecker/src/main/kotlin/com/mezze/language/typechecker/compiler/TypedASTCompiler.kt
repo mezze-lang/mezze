@@ -716,7 +716,10 @@ class TypedASTCompiler(
                     val recordIR = MakeRecordIR(fields, src)
                     val hashes = opCandidates.map { it.opHash.hex }
                     val tags = opCandidates.map { op ->
-                        op.targetTypes.firstOrNull()?.let { getTypeTag(it) } ?: "Any"
+                        // Use the LAST target type for matching: in `ability X 'a for 'b`,
+                        // target types are ['a, 'b] and the receiver is 'b (the `for` param).
+                        // For single-type abilities like `ability Eq for 'a`, lastOrNull == firstOrNull.
+                        op.targetTypes.lastOrNull()?.let { getTypeTag(it) } ?: "Any"
                     }
                     return DynamicMethodCallIR(methodName, receiverIR, recordIR, hashes, tags, src)
                 }

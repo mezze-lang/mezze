@@ -474,6 +474,10 @@ class TypeChecker(
                         acc + r.methodCallResolutions
                     }
 
+                if (currentModulePath == null || currentModulePath?.contains("codec") == true) {
+                    java.io.File("/tmp/codec-debug-log.txt").appendText("[CODEC-DEBUG] methodCallResolutions for $currentModulePath: ${allMethodCallResolutions.map { (k, v) -> "${k.second} -> ability=${v.abilityName} hash=${v.methodHash}" }}\n")
+                }
+
                 // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
@@ -529,13 +533,29 @@ class TypeChecker(
                     // The solver tracks which types need codec impls; CodecGenerator builds parsed ASTs;
                     // the builder converts them to TypedAbilityImpls that the compiler can emit as FunctionIRs.
                     val codecImpls = solver.getGeneratedCodecImpls()
+                    if (currentModulePath == null || currentModulePath?.contains("codec") == true) {
+                        java.io.File("/tmp/codec-debug-log.txt").appendText("[CODEC-DEBUG] codecImpls from solver for $currentModulePath: ${codecImpls.size} entries: ${codecImpls.map { "${it.abilityName}(${it.targetTypes})" }}\n")
+                    }
                     if (codecImpls.isNotEmpty()) {
                         val codecGen = com.mezze.language.typechecker.codec.CodecGenerator()
                         val extraImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
                         for (ci in codecImpls) {
                             try {
-                                val formatType = ci.targetTypes.getOrNull(0) ?: continue
-                                val dataType = ci.targetTypes.getOrNull(1) ?: continue
+                                val formatType: com.mezze.language.ast.MezzeType
+                                val dataType: com.mezze.language.ast.MezzeType
+                                if (ci.targetTypes.size == 2) {
+                                    // Two-parameter form: [formatType, dataType]
+                                    formatType = ci.targetTypes[0]
+                                    dataType = ci.targetTypes[1]
+                                } else if (ci.targetTypes.size == 1) {
+                                    // Single-parameter form (EncodeRepr/DecodeRepr method call):
+                                    // Only dataType is known. Use a dummy format type —
+                                    // the generated code references Format/DecodeFormat dynamically.
+                                    dataType = ci.targetTypes[0]
+                                    formatType = com.mezze.language.ast.MezzeType.RecordType(emptyMap())
+                                } else {
+                                    continue
+                                }
                                 val parsedImpl = when (ci.abilityName) {
                                     "Encode", "EncodeRepr" -> codecGen.generateEncodeImpl(formatType, dataType)
                                     "Decode", "DecodeRepr" -> codecGen.generateDecodeImpl(formatType, dataType)
@@ -543,7 +563,7 @@ class TypeChecker(
                                 }
                                 builder.buildCodecImpl(parsedImpl, extraImpls)
                             } catch (codecEx: Exception) {
-                                // Codec generation may fail for some types — skip silently
+                                try { java.io.File("/tmp/codec-error.txt").appendText("[CODEC-ERROR] ${ci.abilityName}: ${codecEx::class.simpleName}: ${codecEx.message}\n${codecEx.stackTraceToString().take(500)}\n") } catch (_: Exception) {}
                             }
                         }
                         if (extraImpls.isNotEmpty()) {

@@ -85,6 +85,20 @@ public final class DynamicAbilityCallNode extends MezzeNode {
             if (candidateTypeTags[i].equals("Any")) return candidateHashes[i];
         }
         if (candidateHashes.length == 1) return candidateHashes[0];
+        // For Record receivers with named type tags (e.g., JsonFmt = {}), the runtime
+        // can't distinguish named record types. If all candidates share the same hash,
+        // use any one of them.
+        if (receiver instanceof MezzeRecord && candidateHashes.length > 0) {
+            String firstHash = candidateHashes[0];
+            boolean allSame = true;
+            for (int i = 1; i < candidateHashes.length; i++) {
+                if (!candidateHashes[i].equals(firstHash)) { allSame = false; break; }
+            }
+            if (allSame) return firstHash;
+            // If tags are named record types (uppercase, not "Record"), try the first match
+            // since records lose their type name at runtime.
+            if ("Record".equals(typeName)) return candidateHashes[0];
+        }
         return null;
     }
 

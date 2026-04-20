@@ -382,14 +382,19 @@ class CodecGenerator {
      * Get the Format ability identifier.
      */
     private fun encodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        return id("Format")
+        // Use the `fmt` parameter directly as the receiver for Format ability methods.
+        // The `fmt` param holds the concrete format impl (e.g., json_fmt) at runtime.
+        // Previously used id("Format") which is an ability name that can't be resolved
+        // as a value in the generated impl's buildExpr pass.
+        return id("fmt")
     }
 
     /**
      * Get the DecodeFormat ability identifier.
      */
     private fun decodeFormatImpl(formatType: MezzeType): ParsedIdentifier {
-        return id("DecodeFormat")
+        // Use the `fmt` parameter directly — see encodeFormatImpl comment.
+        return id("fmt")
     }
 
     /**
@@ -1887,7 +1892,7 @@ class CodecGenerator {
                     name = "encode_repr",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("fmt", "config"), encodeBody),
+                    implementation = lambda(listOf("it", "fmt", "config"), encodeBody),
                     loc = GEN_LOC
                 )
             ),
@@ -1912,7 +1917,7 @@ class CodecGenerator {
                     name = "decode_repr",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("fmt", "config"), decodeBody),
+                    implementation = lambda(listOf("it", "fmt", "config"), decodeBody),
                     loc = GEN_LOC
                 )
             ),

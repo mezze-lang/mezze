@@ -1499,9 +1499,27 @@ class ConstraintSolver(
             } else if (typeArgs.size == 1 && abilityName in setOf("EncodeRepr", "DecodeRepr")) {
                 // Roc-style single-parameter ability: EncodeRepr 'a or DecodeRepr 'a
                 // The format is provided at the method call site, not at constraint time.
-                // We just need to verify the data type is serializable.
+                // We still need to generate the codec impl so the compiler can emit FunctionIR.
+                // The generated code uses Format/DecodeFormat ability dynamically
+                // (encodeFormatImpl always returns id("Format")), so format type is irrelevant.
                 val dataType = typeArgs[0]
                 if (codecGenerator.isSerializable(dataType) && !containsVarType(dataType)) {
+                    // Store codec impl metadata with dataType only (formatType=null sentinel).
+                    // The TypeChecker will use a dummy format type when calling CodecGenerator.
+                    val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+                    hashBuilder.append("codec_impl")
+                    hashBuilder.append(abilityName)
+                    hashBuilder.append("_single_param_")
+                    hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
+                    val hash = hashBuilder.build()
+                    val implKey = hash.toFullHexString()
+                    if (!generatedCodecImpls.containsKey(implKey)) {
+                        generatedCodecImpls[implKey] = GeneratedCodecImpl(
+                            abilityName = abilityName,
+                            targetTypes = listOf(dataType),  // Single type — no format
+                            contentHash = implKey
+                        )
+                    }
                     return true
                 }
             }
