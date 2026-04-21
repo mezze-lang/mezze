@@ -856,23 +856,6 @@ public final class HandleNode extends MezzeNode {
             }
         }
 
-        // FALLBACK: Also register the handler under the suspended value's unhandled
-        // effect hashes. This handles hash mismatches where the suspended computation
-        // was created with a different hash than what this HandleNode registered under.
-        if (resolvedHandler != null) {
-            for (String unhandled : suspended.getUnhandledEffects()) {
-                if (unhandled != null && !handlers.containsKey(unhandled)) {
-                    // Only add if the handler record actually has the right operation
-                    if (resolvedHandler instanceof MezzeRecord rec) {
-                        String opName = suspended.getOperationName();
-                        if (opName != null && rec.getField(opName) instanceof MezzeFunction) {
-                            handlers.put(unhandled, resolvedHandler);
-                        }
-                    }
-                }
-            }
-        }
-
         // Execute the suspended computation with our handlers
         if (indirectCallNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
