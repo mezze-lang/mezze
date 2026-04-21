@@ -633,29 +633,18 @@ class TypedAstBuilder(
                         else -> null
                     }
                     if (receiverName != null) {
-                        // Check local + imported effect declarations by name
-                        var effectHashStr = effectDeclarations[receiverName]?.contentHash
-                            ?: importContext?.importedEffects?.get(receiverName)?.contentHash
-                        var resolvedEffectHash: Hash? = if (effectHashStr != null) Hash.fromV1(effectHashStr) else null
-
-                        // Fallback: search ModuleTypeChecker cache for the effect hash
-                        // (same fallback used by buildHandlerRef for handler registration consistency)
-                        if (resolvedEffectHash == null || resolvedEffectHash == Hash.ZERO) {
-                            for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-                                val v2m = cachedModule.v2TypedModule ?: continue
-                                val ed = v2m.effectDecls.find { it.name == receiverName }
-                                if (ed != null) {
-                                    resolvedEffectHash = ed.hash
-                                    break
-                                }
-                            }
-                        }
-
-                        if (resolvedEffectHash != null && resolvedEffectHash != Hash.ZERO) {
+                        // Check if this is an effect declaration (local or imported)
+                        val isEffect = effectDeclarations.containsKey(receiverName)
+                            || importContext?.importedEffects?.containsKey(receiverName) == true
+                        if (isEffect) {
+                            // Use canonical hash: computeHash("effect_${name}")
+                            // This matches TypedEffectDecl.hash and buildPerformerDecl's effectHash.
+                            // No fallbacks needed — the name IS the canonical source of truth.
+                            val effectHash = computeHash("effect_$receiverName")
                             val opName = memberAccess.member
                             val argExpr = buildExpr(expr.arguments, file)
                             return TypedPerformOp(
-                                resolvedEffectHash, opName, argExpr,
+                                effectHash, opName, argExpr,
                                 substitution.apply(contextType), loc
                             )
                         }
@@ -1012,12 +1001,12 @@ class TypedAstBuilder(
 
                 // Resolve which effect this operation belongs to
                 val effectName = qualifier?.segments?.lastOrNull() ?: opName
-                val effectHash = effectDeclarations[effectName]?.contentHash
-                    ?: importContext?.importedEffects?.values?.find { it.name == effectName }?.contentHash
+                // Use canonical hash — matches TypedEffectDecl.hash
+                val effectHash = computeHash("effect_$effectName")
 
                 val argExpr = buildExpr(expr.arguments, file)
 
-                TypedPerformOp(Hash.fromV1(effectHash), opName, argExpr, substitution.apply(contextType), loc)
+                TypedPerformOp(effectHash, opName, argExpr, substitution.apply(contextType), loc)
             }
         }
     }
@@ -1248,37 +1237,12 @@ class TypedAstBuilder(
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
         val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
-        val effectContentHash = effectDecl?.contentHash
-        val effectHash = if (effectContentHash != null) {
-            Hash.fromV1(effectContentHash)
+        // Use canonical hash — matches TypedEffectDecl.hash and buildPerformOp.
+        // No fallbacks needed — the name IS the canonical source of truth.
+        val effectHash = if (effectName != null) {
+            computeHash("effect_$effectName")
         } else {
-            // Fallback: search ModuleTypeChecker cache for the effect hash by name
-            // This is the same search used by buildPerformOp for consistency
-            var found: Hash? = null
-            if (effectName != null) {
-                for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-                    val v2m = cachedModule.v2TypedModule ?: continue
-                    val ed = v2m.effectDecls.find { it.name == effectName }
-                    if (ed != null) {
-                        found = ed.hash
-                        break
-                    }
-                }
-            }
-            // Secondary fallback: search performer decls by performer name
-            if (found == null) {
-                for ((_, cachedModule) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-                    val v2m = cachedModule.v2TypedModule ?: continue
-                    for (pd in v2m.performerDecls) {
-                        if (pd.name == performerName) {
-                            found = pd.effectHash
-                            break
-                        }
-                    }
-                    if (found != null) break
-                }
-            }
-            found ?: Hash.ZERO
+            Hash.ZERO
         }
 
         // Build params if present
