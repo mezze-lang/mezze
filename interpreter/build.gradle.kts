@@ -62,5 +62,5 @@ tasks.test {
         "--add-modules=jdk.incubator.vector"
     )
 
-    maxHeapSize = "4g"
+    maxHeapSize = "2g"
 }

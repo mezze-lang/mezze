@@ -245,28 +245,31 @@ public final class MatchNode extends MezzeNode {
 
         // Check density: use jump table if span is reasonable
         // (at most 2x the number of branches to avoid wasting memory)
-        int span = maxTag - minTag + 1;
+        long span = (long) maxTag - (long) minTag + 1;
         if (span > variantBranchCount * 2 || span > 64) {
             return new JumpTableInfo(false, null, minTag, maxTag);
         }
 
-        // Build the jump table
-        int[] tagToIndex = new int[maxTag + 1];
+        // Build offset-based jump table: index via (tag - minTag)
+        // This handles hash-based tags (which can be >1 billion) without
+        // allocating a multi-GB array — only allocates span entries.
+        int spanInt = (int) span;
+        int[] tagToIndex = new int[spanInt];
 
         // Initialize with -2 (no match) or -1 (use wildcard)
         int defaultValue = wildcardBranchIndex >= 0 ? -1 : -2;
-        for (int i = 0; i <= maxTag; i++) {
+        for (int i = 0; i < spanInt; i++) {
             tagToIndex[i] = defaultValue;
         }
 
-        // Fill in branch indices - store FIRST branch for each tag (branches are evaluated in order)
-        // If multiple branches have the same tag with guards, the first one is tried first,
-        // and if its guard fails, we fall through to linear search to try remaining branches.
+        // Fill in branch indices using offset: tag - minTag
         for (int i = 0; i < branches.length; i++) {
             int tag = branches[i].getTag();
-            if (tag >= 0 && tagToIndex[tag] == defaultValue) {
-                // Only store the first branch for each tag
-                tagToIndex[tag] = i;
+            if (tag >= 0) {
+                int idx = tag - minTag;
+                if (idx >= 0 && idx < spanInt && tagToIndex[idx] == defaultValue) {
+                    tagToIndex[idx] = i;
+                }
             }
         }
 
@@ -388,8 +391,8 @@ public final class MatchNode extends MezzeNode {
             throw new RuntimeException("No matching pattern for variant tag: " + tag);
         }
 
-        // O(1) lookup
-        int branchIndex = tagToIndex[tag];
+        // O(1) lookup using offset-based indexing
+        int branchIndex = tagToIndex[tag - minTag];
 
         if (branchIndex >= 0) {
             // Direct branch hit
@@ -575,9 +578,9 @@ public final class MatchNode extends MezzeNode {
      * Used for establishing monomorphic state.
      */
     private int findBranchForTag(int tag) {
-        // Use jump table if available (dense tags)
-        if (useJumpTable && tag >= 0 && tag <= maxTag) {
-            int idx = tagToIndex[tag];
+        // Use jump table if available (dense tags) — offset-based indexing
+        if (useJumpTable && tag >= minTag && tag <= maxTag) {
+            int idx = tagToIndex[tag - minTag];
             return idx >= 0 ? idx : wildcardBranchIndex;
         }
         // Use HashMap if available (sparse/hashCode tags)
