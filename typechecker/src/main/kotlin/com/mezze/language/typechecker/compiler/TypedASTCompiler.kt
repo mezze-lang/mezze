@@ -824,6 +824,15 @@ class TypedASTCompiler(
                 } else null
             }
         }
+
+        // Restore parent's capture info so sibling lambdas in the same function body
+        // see the correct capture context. Without this, compiling lambda A inside a
+        // function body clobbers currentCaptureNames, and sibling lambda B (compiled
+        // later in the same body) loses access to the parent's capture map.
+        currentCaptureNames = parentCaptureNames
+        currentCaptureCount = parentCaptureCount
+        currentParamNames = parentParamNames
+
         return MakeLambdaIR(lambdaHash, captures, src)
     }
 
@@ -995,6 +1004,43 @@ class TypedASTCompiler(
                                 val innerMatch = MatchIR(readTemp, listOf(innerCase), src)
                                 seqStmts.add(StmtIR.Let(restSlot, SlotKind.OBJECT, restName, Hash.ZERO, innerMatch, src))
                             }
+                        } else if (innerPat is TypedVariantPattern) {
+                            // Nested variant pattern in seq: [Ok {val}] -> ...
+                            // Generate a nested match on the temp slot to extract variant payload fields.
+                            val innerPatternIR = compilePattern(innerPat)
+                            val innerCaseBindings = mutableListOf<BindingIR>()
+
+                            // Collect nested record destructuring within the variant payload
+                            val innerNestedDestructures = mutableListOf<NestedDestructureInfo>()
+                            collectNestedDestructuring(innerPat, innerNestedDestructures)
+
+                            // Build inner body that produces unit (bindings are side-effects on the frame)
+                            var innerBody: NodeIR = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
+
+                            // Wrap with nested record destructuring if needed
+                            if (innerNestedDestructures.isNotEmpty()) {
+                                val dStmts = mutableListOf<StmtIR>()
+                                for (nd in innerNestedDestructures) {
+                                    for ((fieldName, bindingSlot) in nd.fieldBindings) {
+                                        val readTemp2 = ReadLocalIR(nd.tempSlot, SlotKind.OBJECT, src)
+                                        val readField = ReadFieldIR(readTemp2, fieldName, -1, src)
+                                        dStmts.add(StmtIR.Let(bindingSlot, SlotKind.OBJECT, "__nested_$fieldName", Hash.ZERO, readField, src))
+                                    }
+                                }
+                                innerBody = BlockIR(dStmts, innerBody, src)
+                            }
+
+                            val innerCase = CaseIR(innerPatternIR, innerCaseBindings, null, innerBody, src)
+                            // Add a wildcard fallback that returns the temp slot unchanged
+                            val wildcardCase = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src), src)
+                            val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
+                            val innerMatch = MatchIR(readTemp, listOf(innerCase, wildcardCase), src)
+                            // Use an arbitrary result slot (the match result is not used, only the bindings matter)
+                            val resultSlot = forceAllocLocal("__seq_variant_result_${nsd.tempSlot}")
+                            seqStmts.add(StmtIR.Let(resultSlot, SlotKind.OBJECT, "__seq_variant_result", Hash.ZERO, innerMatch, src))
+                        } else if (innerPat is TypedLiteralPattern) {
+                            // Nested literal pattern in seq: [1, 2] -> ...
+                            // No bindings needed for literals in seq elements
                         }
                     }
                     if (seqStmts.isNotEmpty()) {
