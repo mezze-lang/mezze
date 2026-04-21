@@ -349,7 +349,8 @@
       "Bash(__NEW_LINE_72c6683d54c5630c__ echo:*)",
       "WebFetch(domain:mattalp.com)",
       "WebFetch(domain:deepwiki.com)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(:)"
     ],
     "deny": [],
     "ask": []

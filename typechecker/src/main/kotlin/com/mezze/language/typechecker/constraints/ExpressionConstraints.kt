@@ -3977,6 +3977,8 @@ class ExpressionConstraintGenerator {
             effects = remainingEffects,  // Return remaining unhandled effects
             effectInstances = remainingEffectInstances,  // Return remaining unhandled effect instances
             performed = true,  // Mark that effects were performed
+            abilityConstraints = exprResult.abilityConstraints,  // Propagate ability constraints from body
+            associatedTypeConstraints = exprResult.associatedTypeConstraints,  // Propagate associated type constraints
             undefinedVariables = exprResult.undefinedVariables,
             usedVariables = exprResult.usedVariables,
             referencedBindings = exprResult.referencedBindings,

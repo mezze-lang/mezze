@@ -44,6 +44,17 @@ public final class DynamicAbilityCallNode extends MezzeNode {
     public Object execute(VirtualFrame frame) {
         Object receiver = receiverNode.execute(frame);
         Object arg = argNode.execute(frame);
+
+        // Native codec fast path: decode_repr/encode_repr for record types from/to JSON
+        if ("decode_repr".equals(methodName) && receiver instanceof MezzeVariant) {
+            Object nativeResult = tryNativeDecode(receiver, arg);
+            if (nativeResult != null) return nativeResult;
+        }
+        if ("encode_repr".equals(methodName) && receiver instanceof MezzeRecord rec) {
+            Object nativeResult = tryNativeEncode(rec, arg);
+            if (nativeResult != null) return nativeResult;
+        }
+
         String opHash = matchCandidate(receiver);
 
         if (opHash == null) {
@@ -125,6 +136,120 @@ public final class DynamicAbilityCallNode extends MezzeNode {
         if (className.contains("Map")) return "Map";
         if (className.contains("Deque")) return "Deque";
         return className;
+    }
+
+    /**
+     * Try native record decode: Json variant (JObject) -> Mezze record.
+     * Returns null if native decode is not applicable (non-JObject, unsupported field types).
+     */
+    @CompilerDirectives.TruffleBoundary
+    private Object tryNativeDecode(Object receiver, Object arg) {
+        if (!(receiver instanceof MezzeVariant jv)) return null;
+        if (!"JObject".equals(jv.getConstructorName())) return null;
+
+        // JObject payload is a record with "fields" field
+        Object payloadValue = jv.getPayloadValue();
+        if (!(payloadValue instanceof MezzeRecord payloadRec)) return null;
+        Object fieldsObj = payloadRec.getField("fields");
+        if (!(fieldsObj instanceof MezzeSeq fieldsSeq)) return null;
+
+        // Extract field names and decode values from the JObject
+        int numFields = fieldsSeq.size();
+        String[] fieldNames = new String[numFields];
+        Object[] fieldValues = new Object[numFields];
+
+        for (int i = 0; i < numFields; i++) {
+            Object entry = fieldsSeq.get(i);
+            if (!(entry instanceof MezzeRecord entryRec)) return null;
+            Object key = entryRec.getField("key");
+            if (!(key instanceof String keyStr)) return null;
+            fieldNames[i] = keyStr;
+
+            Object jsonValue = entryRec.getField("value");
+            Object decoded = decodeJsonPrimitive(jsonValue);
+            if (decoded == null) return null; // Unsupported type - fall back to generated impl
+            fieldValues[i] = decoded;
+        }
+
+        MezzeRecord result = MezzeRecord.fromFields(fieldNames, fieldValues);
+        return MezzeVariant.ok(result);
+    }
+
+    /**
+     * Decode a single Json primitive to a Mezze value.
+     * Returns null for unsupported/complex types (arrays, nested objects, etc.)
+     */
+    @CompilerDirectives.TruffleBoundary
+    private static Object decodeJsonPrimitive(Object json) {
+        if (!(json instanceof MezzeVariant jv)) return null;
+        String tag = jv.getConstructorName();
+        Object payloadValue = jv.getPayloadValue();
+        if (payloadValue instanceof MezzeRecord rec) {
+            return switch (tag) {
+                case "JString", "JInt", "JFloat", "JBool" -> rec.getField("val");
+                default -> null;
+            };
+        }
+        if ("JNull".equals(tag)) {
+            int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+        }
+        return null;
+    }
+
+    /**
+     * Try native record encode: Mezze record -> Json JObject variant.
+     * Returns null if native encode is not applicable.
+     */
+    @CompilerDirectives.TruffleBoundary
+    private Object tryNativeEncode(MezzeRecord receiver, Object arg) {
+        // Only apply to simple records with primitive fields
+        int numFields = receiver.getFieldCount();
+
+        Object[] entries = new Object[numFields];
+        for (int i = 0; i < numFields; i++) {
+            String key = receiver.getShape().getFieldName(i);
+            Object value = receiver.getField(i);
+            Object jsonValue = encodeToJsonPrimitive(value);
+            if (jsonValue == null) return null; // Unsupported type - fall back
+            entries[i] = MezzeRecord.fromFields(new String[]{"key", "value"}, new Object[]{key, jsonValue});
+        }
+
+        MezzeSeq fieldsSeq = MezzeSeq.fromArray(entries);
+        MezzeRecord payload = MezzeRecord.fromFields(new String[]{"fields"}, new Object[]{fieldsSeq});
+        int jObjectTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JObject");
+        MezzeVariant jObject = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), jObjectTag, payload);
+        return MezzeVariant.ok(jObject);
+    }
+
+    /**
+     * Encode a Mezze primitive value to a Json variant.
+     * Returns null for unsupported types.
+     */
+    @CompilerDirectives.TruffleBoundary
+    private static Object encodeToJsonPrimitive(Object value) {
+        var registry = MezzeVariant.TagRegistry.getGlobal();
+        if (value instanceof String s) {
+            int tag = registry.getOrCreateTag("JString");
+            return MezzeVariant.singlePayload(registry, tag,
+                MezzeRecord.fromFields(new String[]{"val"}, new Object[]{s}));
+        }
+        if (value instanceof Long l) {
+            int tag = registry.getOrCreateTag("JInt");
+            return MezzeVariant.singlePayload(registry, tag,
+                MezzeRecord.fromFields(new String[]{"val"}, new Object[]{l}));
+        }
+        if (value instanceof Double d) {
+            int tag = registry.getOrCreateTag("JFloat");
+            return MezzeVariant.singlePayload(registry, tag,
+                MezzeRecord.fromFields(new String[]{"val"}, new Object[]{d}));
+        }
+        if (value instanceof Boolean b) {
+            int tag = registry.getOrCreateTag("JBool");
+            return MezzeVariant.singlePayload(registry, tag,
+                MezzeRecord.fromFields(new String[]{"val"}, new Object[]{b}));
+        }
+        return null;
     }
 
     @CompilerDirectives.TruffleBoundary

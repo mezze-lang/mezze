@@ -1331,7 +1331,27 @@ class CodecGenerator {
             return createDecodeImpl(formatType, recordType, body)
         }
 
-        val body = buildRecordDecodeBody(formatType, fields)
+        // Generate a native call body: __native_codec_decode_record { json = it, field_names = [...] }
+        // The native function handles JSON field extraction and primitive decoding in Java,
+        // avoiding the complex nested match AST that causes OOM during Truffle execution.
+        val fieldNameArray = array(fields.map { (fieldName, _) -> str(fieldName) })
+        val fieldTypeArray = array(fields.map { (_, fieldType) ->
+            str(when (fieldType) {
+                is MezzeType.IntType -> "Int"
+                is MezzeType.FloatType -> "Float"
+                is MezzeType.StringType -> "Str"
+                is MezzeType.BoolType -> "Bool"
+                else -> "Any"
+            })
+        })
+        val body = call(
+            id("__native_codec_decode_record"),
+            record(
+                "json" to id("it"),
+                "field_names" to fieldNameArray,
+                "field_types" to fieldTypeArray
+            )
+        )
         return createDecodeImpl(formatType, recordType, body)
     }
 
@@ -1909,9 +1929,18 @@ class CodecGenerator {
         // The ability is `ability DecodeRepr 'a for 'repr`.
         // targetTypes is the types after `for` — the repr/format type.
         // The data type 'a is passed as an associated type parameter.
+        // Use shallow type annotation to avoid infinite recursion for recursive types like Json
+        // (JArray contains [Json], JObject contains [{key: Str, value: Json}]).
+        val shallowFormatAnnotation = when {
+            formatType is MezzeType.VariantType && formatType.typeName != null ->
+                ParsedNamedType(formatType.typeName!!, GEN_LOC)
+            formatType is MezzeType.VariantType ->
+                mezzeTypeToAnnotation(formatType)  // fallback for unnamed variants
+            else -> mezzeTypeToAnnotation(formatType)
+        }
         return ParsedImplAbilityDecl(
             target = ParsedImplTarget.Named(ParsedQualifiedRef("DecodeRepr", null, GEN_LOC)),
-            targetTypes = listOf(mezzeTypeToAnnotation(formatType)),
+            targetTypes = listOf(shallowFormatAnnotation),
             operations = listOf(
                 ParsedImplOp(
                     name = "decode_repr",

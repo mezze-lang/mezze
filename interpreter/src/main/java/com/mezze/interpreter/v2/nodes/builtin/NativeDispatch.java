@@ -2891,6 +2891,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_json_parse", (r, c) -> IONatives.jsonParse(r));
         HANDLERS.put("__native_json_parse_bytes", (r, c) -> IONatives.jsonParseBytes(r));
 
+        // === Codec (auto-generated decode/encode for records) ===
+        HANDLERS.put("__native_codec_decode_record", (r, c) -> nativeCodecDecodeRecord(r));
+
         // === HTTP Mock ===
         HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));
         HANDLERS.put("__native_http_mock_set_response", (r, c) -> IONatives.httpMockSetResponse(r));
@@ -4344,6 +4347,122 @@ public final class NativeDispatch extends MezzeNode {
                 }
             };
         }
+    }
+
+    // ========================================================================
+    // Codec native implementations
+    // ========================================================================
+
+    /**
+     * Native record decode: extract fields from a Json JObject variant and build a Mezze record.
+     * Args: { json: Json, field_names: [Str], field_types: [Str] }
+     * Returns: Result record DecodeError
+     */
+    @CompilerDirectives.TruffleBoundary
+    private static Object nativeCodecDecodeRecord(MezzeRecord args) {
+        Object jsonObj = args.getField("json");
+        Object fieldNamesObj = args.getField("field_names");
+
+        if (!(jsonObj instanceof MezzeVariant jv)) {
+            return makeDecodeError("Expected Json value, got " + (jsonObj == null ? "null" : jsonObj.getClass().getSimpleName()));
+        }
+
+        if (!"JObject".equals(jv.getConstructorName())) {
+            return makeDecodeError("Expected JObject, got " + jv.getConstructorName());
+        }
+
+        // Extract fields sequence from JObject payload
+        Object payload = jv.getPayloadValue();
+        if (!(payload instanceof MezzeRecord payloadRec)) {
+            return makeDecodeError("JObject payload is not a record");
+        }
+        Object fieldsSeqObj = payloadRec.getField("fields");
+        if (!(fieldsSeqObj instanceof com.mezze.datastructures.seq.MezzeSeq<?> fieldsSeq)) {
+            return makeDecodeError("JObject.fields is not a sequence");
+        }
+
+        // Get expected field names
+        if (!(fieldNamesObj instanceof com.mezze.datastructures.seq.MezzeSeq<?> namesSeq)) {
+            return makeDecodeError("field_names is not a sequence");
+        }
+
+        int numFields = namesSeq.size();
+        String[] resultFieldNames = new String[numFields];
+        Object[] resultValues = new Object[numFields];
+
+        for (int i = 0; i < numFields; i++) {
+            String fieldName = (String) namesSeq.get(i);
+            resultFieldNames[i] = fieldName;
+
+            // Find the field in the JObject's fields sequence
+            Object fieldValue = null;
+            for (int j = 0; j < fieldsSeq.size(); j++) {
+                Object entry = fieldsSeq.get(j);
+                if (entry instanceof MezzeRecord entryRec) {
+                    Object key = entryRec.getField("key");
+                    if (fieldName.equals(key)) {
+                        fieldValue = entryRec.getField("value");
+                        break;
+                    }
+                }
+            }
+
+            if (fieldValue == null) {
+                return makeDecodeError("Missing field: " + fieldName);
+            }
+
+            // Decode the Json value to a Mezze primitive
+            Object decoded = decodeJsonFieldValue(fieldValue);
+            if (decoded instanceof MezzeVariant errV && "Err".equals(errV.getConstructorName())) {
+                return decoded; // Propagate error
+            }
+            resultValues[i] = decoded;
+        }
+
+        MezzeRecord result = MezzeRecord.fromFields(resultFieldNames, resultValues);
+        return MezzeVariant.ok(result);
+    }
+
+    /**
+     * Decode a single Json variant value to a Mezze primitive.
+     */
+    @CompilerDirectives.TruffleBoundary
+    private static Object decodeJsonFieldValue(Object json) {
+        if (!(json instanceof MezzeVariant jv)) {
+            return makeDecodeError("Expected Json variant");
+        }
+        String tag = jv.getConstructorName();
+        Object payload = jv.getPayloadValue();
+
+        if (payload instanceof MezzeRecord rec) {
+            return switch (tag) {
+                case "JString", "JInt", "JFloat", "JBool" -> rec.getField("val");
+                case "JNull" -> {
+                    int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+                    yield MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+                }
+                default -> makeDecodeError("Unsupported Json type: " + tag);
+            };
+        }
+        if ("JNull".equals(tag)) {
+            int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+        }
+        return makeDecodeError("Cannot decode Json type: " + tag);
+    }
+
+    /**
+     * Create a DecodeError wrapped in Err variant.
+     */
+    private static MezzeVariant makeDecodeError(String message) {
+        var registry = MezzeVariant.TagRegistry.getGlobal();
+        int noneTag = registry.getOrCreateTag("None");
+        MezzeVariant none = MezzeVariant.noPayload(registry, noneTag);
+        MezzeRecord errorRecord = MezzeRecord.fromFields(
+            new String[]{"expected", "found", "message", "path"},
+            new Object[]{"", none, message, com.mezze.datastructures.seq.MezzeSeq.empty()}
+        );
+        return MezzeVariant.err(errorRecord);
     }
 
 }

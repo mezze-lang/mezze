@@ -474,10 +474,6 @@ class TypeChecker(
                         acc + r.methodCallResolutions
                     }
 
-                if (currentModulePath == null || currentModulePath?.contains("codec") == true) {
-                    java.io.File("/tmp/codec-debug-log.txt").appendText("[CODEC-DEBUG] methodCallResolutions for $currentModulePath: ${allMethodCallResolutions.map { (k, v) -> "${k.second} -> ability=${v.abilityName} hash=${v.methodHash}" }}\n")
-                }
-
                 // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
@@ -533,9 +529,6 @@ class TypeChecker(
                     // The solver tracks which types need codec impls; CodecGenerator builds parsed ASTs;
                     // the builder converts them to TypedAbilityImpls that the compiler can emit as FunctionIRs.
                     val codecImpls = solver.getGeneratedCodecImpls()
-                    if (currentModulePath == null || currentModulePath?.contains("codec") == true) {
-                        java.io.File("/tmp/codec-debug-log.txt").appendText("[CODEC-DEBUG] codecImpls from solver for $currentModulePath: ${codecImpls.size} entries: ${codecImpls.map { "${it.abilityName}(${it.targetTypes})" }}\n")
-                    }
                     if (codecImpls.isNotEmpty()) {
                         val codecGen = com.mezze.language.typechecker.codec.CodecGenerator()
                         val extraImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
