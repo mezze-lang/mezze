@@ -105,12 +105,19 @@ class TypedASTCompiler(
      * Pre-scan all declarations to find functions whose bodies contain VarType
      * method calls that would need DynamicMethodCallIR. These functions will
      * receive hidden dictionary params at compile time.
+     *
+     * Also transitively propagates dict requirements: if function A calls function B
+     * which needs dict params, then A also needs those same dict params (to forward them).
      */
     private fun prescanForDictMethods(modules: List<TypedModule>) {
         dictMethodsForHash.clear()
+
+        // Phase 1: find functions with direct VarType method calls
+        val allDecls = mutableListOf<TypedLetDecl>()
         for (module in modules) {
             for (decl in module.decls) {
                 if (decl is TypedLetDecl) {
+                    allDecls.add(decl)
                     val value = decl.value
                     if (value is TypedLambda) {
                         val methods = scanExprForVarTypeMethodCalls(value.body)
@@ -120,6 +127,138 @@ class TypedASTCompiler(
                     }
                 }
             }
+        }
+
+        // Phase 2: transitively propagate dict requirements.
+        // If function A's body calls function B (by hash) and B needs dict methods,
+        // then A also needs those same dict methods (to forward them to B).
+        // Repeat until no new dict methods are added (fixpoint).
+        var changed = true
+        while (changed) {
+            changed = false
+            for (decl in allDecls) {
+                val value = decl.value
+                if (value is TypedLambda) {
+                    val calleeDictMethods = scanExprForCallsToDictFunctions(value.body)
+                    if (calleeDictMethods.isNotEmpty()) {
+                        val existing = dictMethodsForHash[decl.hash] ?: emptySet()
+                        val merged = existing + calleeDictMethods
+                        if (merged.size > existing.size) {
+                            dictMethodsForHash[decl.hash] = merged
+                            changed = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Scan an expression for calls to functions that need dictionary params.
+     * Returns the set of dict method names required by those callees.
+     */
+    private fun scanExprForCallsToDictFunctions(expr: TypedExpr): Set<String> {
+        val result = mutableSetOf<String>()
+        scanExprForDictFunctionCalls(expr, result)
+        return result
+    }
+
+    private fun scanExprForDictFunctionCalls(expr: TypedExpr, out: MutableSet<String>) {
+        when (expr) {
+            is TypedCall -> {
+                val fn = expr.function
+                // Check if the callee is a ByHash reference to a dict-needing function
+                if (fn is TypedVar && fn.binding is BindingRef.ByHash) {
+                    val calleeHash = (fn.binding as BindingRef.ByHash).hash
+                    val calleeDictMethods = dictMethodsForHash[calleeHash]
+                    if (calleeDictMethods != null) {
+                        // Check if arg types can resolve the dict methods.
+                        // If not (VarType args), the caller needs to forward its own dict params.
+                        val concreteTypes = mutableListOf<MezzeType>()
+                        if (expr.arg is TypedRecord) {
+                            for (entry in (expr.arg as TypedRecord).entries) {
+                                if (entry is TypedRecordEntry.Field) {
+                                    concreteTypes.add(entry.value.type)
+                                }
+                            }
+                        }
+                        for (methodName in calleeDictMethods) {
+                            val resolved = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+                            if (resolved == null) {
+                                // Can't resolve statically — need a dict param to forward
+                                out.add(methodName)
+                            }
+                        }
+                    }
+                }
+                if (fn is TypedFieldAccess) {
+                    scanExprForDictFunctionCalls(fn.record, out)
+                } else {
+                    scanExprForDictFunctionCalls(fn, out)
+                }
+                scanExprForDictFunctionCalls(expr.arg, out)
+            }
+            is TypedLambda -> {
+                // Don't scan into nested lambdas — they get their own dict params
+            }
+            is TypedBlock -> {
+                for (s in expr.statements) {
+                    when (s) {
+                        is TypedStatement.Let -> scanExprForDictFunctionCalls(s.value, out)
+                        is TypedStatement.Expr -> scanExprForDictFunctionCalls(s.expr, out)
+                    }
+                }
+                scanExprForDictFunctionCalls(expr.result, out)
+            }
+            is TypedIf -> {
+                scanExprForDictFunctionCalls(expr.condition, out)
+                scanExprForDictFunctionCalls(expr.thenBranch, out)
+                scanExprForDictFunctionCalls(expr.elseBranch, out)
+            }
+            is TypedMatch -> {
+                scanExprForDictFunctionCalls(expr.scrutinee, out)
+                for (c in expr.cases) {
+                    c.guard?.let { scanExprForDictFunctionCalls(it, out) }
+                    scanExprForDictFunctionCalls(c.body, out)
+                }
+            }
+            is TypedRecord -> {
+                for (e in expr.entries) {
+                    when (e) {
+                        is TypedRecordEntry.Field -> scanExprForDictFunctionCalls(e.value, out)
+                        is TypedRecordEntry.Spread -> scanExprForDictFunctionCalls(e.expr, out)
+                    }
+                }
+            }
+            is TypedFieldAccess -> scanExprForDictFunctionCalls(expr.record, out)
+            is TypedVariantConstruct -> expr.payload?.let { scanExprForDictFunctionCalls(it, out) }
+            is TypedRecordUpdate -> {
+                scanExprForDictFunctionCalls(expr.record, out)
+                for (e in expr.updates) {
+                    if (e is TypedRecordEntry.Field) scanExprForDictFunctionCalls(e.value, out)
+                }
+            }
+            is TypedPerform -> scanExprForDictFunctionCalls(expr.body, out)
+            is TypedPerformOp -> scanExprForDictFunctionCalls(expr.arg, out)
+            is TypedPipe -> {
+                scanExprForDictFunctionCalls(expr.left, out)
+                scanExprForDictFunctionCalls(expr.right, out)
+            }
+            is TypedSeq -> {
+                for (e in expr.elements) {
+                    when (e) {
+                        is TypedSeqElement.Regular -> scanExprForDictFunctionCalls(e.expr, out)
+                        is TypedSeqElement.Spread -> scanExprForDictFunctionCalls(e.expr, out)
+                    }
+                }
+            }
+            is TypedStringLit -> {
+                for (p in expr.parts) {
+                    if (p is TypedStringPart.Interpolation) scanExprForDictFunctionCalls(p.expr, out)
+                }
+            }
+            is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
+            is TypedFracLit, is TypedBoolLit, is TypedCharLit -> {}
         }
     }
 
@@ -814,7 +953,7 @@ class TypedASTCompiler(
 
     private fun compileCall(expr: TypedCall, src: SourceInfo): NodeIR {
         val fn = expr.function
-        val argIR = compileExpr(expr.arg)
+        val argIR = compileArgWithDictWrapping(expr.arg, src)
 
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
@@ -1034,6 +1173,218 @@ class TypedASTCompiler(
             if (opHash != null) return opHash
         }
         return null
+    }
+
+    // ========================================================================
+    // Dictionary wrapping — function values passed to higher-order functions
+    // ========================================================================
+
+    /**
+     * Compile a call argument, wrapping any dict-needing function references in
+     * wrapper lambdas that capture the resolved dict functions.
+     *
+     * When a polymorphic function like `encode_value: {x: 'a} -> Str with Encoder 'a`
+     * is passed as a value (e.g., `apply_encoder {f = encode_value, val = 42}`),
+     * the dict params aren't populated. This method detects such references and
+     * wraps them in closures that inject the resolved dict at call time.
+     */
+    private fun compileArgWithDictWrapping(argExpr: TypedExpr, src: SourceInfo): NodeIR {
+        if (argExpr !is TypedRecord) return compileExpr(argExpr)
+
+        // Collect all concrete types from sibling fields for resolution context
+        val siblingConcreteTypes = mutableListOf<MezzeType>()
+        for (entry in argExpr.entries) {
+            if (entry is TypedRecordEntry.Field) {
+                siblingConcreteTypes.add(entry.value.type)
+            }
+        }
+
+        // Check if any field references a dict-needing function
+        var needsWrapping = false
+        for (entry in argExpr.entries) {
+            if (entry is TypedRecordEntry.Field && isDictNeedingFunctionRef(entry.value)) {
+                needsWrapping = true
+                break
+            }
+        }
+
+        if (!needsWrapping) return compileExpr(argExpr)
+
+        // Build record with wrapped function references
+        val fields = argExpr.entries.map { entry ->
+            when (entry) {
+                is TypedRecordEntry.Field -> {
+                    val wrappedValue = tryWrapDictFunction(entry.value, siblingConcreteTypes, src)
+                    FieldIR(entry.name, wrappedValue ?: compileExpr(entry.value))
+                }
+                is TypedRecordEntry.Spread -> FieldIR("__spread__", compileExpr(entry.expr))
+            }
+        }
+        return MakeRecordIR(fields, src)
+    }
+
+    /**
+     * Check if an expression is a reference to a function that needs dict params.
+     */
+    private fun isDictNeedingFunctionRef(expr: TypedExpr): Boolean {
+        if (expr !is TypedVar) return false
+        val binding = expr.binding
+        if (binding !is BindingRef.ByHash) return false
+        val dictMethods = dictMethodsForHash[binding.hash] ?: return false
+        return dictMethods.isNotEmpty()
+    }
+
+    /**
+     * Try to wrap a dict-needing function reference in a closure that captures
+     * the resolved dict functions. Returns null if wrapping isn't needed or possible.
+     *
+     * The wrapper lambda:
+     * 1. Has the same params as the original function (regular params only, no dict params)
+     * 2. Captures the resolved dict function values
+     * 3. Calls the original function with both the regular args and the dict args injected
+     *
+     * For example, wrapping `encode_value` when called with Int:
+     *   {x} -> encode_value {x = x, __dict_encode = <captured_int_encode_fn>}
+     */
+    private fun tryWrapDictFunction(
+        expr: TypedExpr,
+        contextConcreteTypes: List<MezzeType>,
+        src: SourceInfo
+    ): NodeIR? {
+        if (expr !is TypedVar) return null
+        val binding = expr.binding as? BindingRef.ByHash ?: return null
+        val dictMethods = dictMethodsForHash[binding.hash] ?: return null
+        if (dictMethods.isEmpty()) return null
+
+        // Try to resolve all dict methods using context types and the function's own type
+        val allConcreteTypes = mutableListOf<MezzeType>()
+        allConcreteTypes.addAll(contextConcreteTypes)
+
+        // Also extract concrete types from the function's type at this usage site
+        val fnType = expr.type
+        if (fnType is FunctionType) {
+            extractConcreteTypesFromFnType(fnType, allConcreteTypes)
+        }
+
+        // Resolve each dict method
+        val resolvedDicts = mutableListOf<Pair<String, NodeIR>>() // dictParamName -> resolved value IR
+        for (methodName in dictMethods.sorted()) {
+            val dictParamName = "__dict_$methodName"
+            val opHash = resolveOpHashFromConcreteTypes(methodName, allConcreteTypes)
+            if (opHash != null) {
+                resolvedDicts.add(dictParamName to ReadContextFnIR(opHash.hex, src))
+            } else {
+                // Try forwarding from caller's dict params
+                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                if (callerDictIdx >= 0) {
+                    val slot = currentCaptureCount + callerDictIdx
+                    resolvedDicts.add(dictParamName to ReadLocalIR(slot, SlotKind.OBJECT, src))
+                } else {
+                    // Can't resolve — don't wrap (fall through to normal compilation)
+                    return null
+                }
+            }
+        }
+
+        // Find the original function's regular param names (excluding dict params)
+        val originalDecl = declIndex?.values?.find { it.hash == binding.hash }
+        val originalLambda = originalDecl?.value as? TypedLambda
+        val regularParamNames = originalLambda?.params?.map { it.name } ?: listOf("it")
+
+        // Generate a unique hash for the wrapper lambda
+        val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        hashBuilder.append("dict_wrapper")
+        hashBuilder.append(binding.hash.hex)
+        for ((name, _) in resolvedDicts) {
+            hashBuilder.append(name)
+        }
+        // Include context types to make hash unique per instantiation
+        for (t in allConcreteTypes) {
+            hashBuilder.append(t.toString())
+        }
+        val wrapperHash = Hash(hashBuilder.build().toFullHexString())
+
+        // Build wrapper body: CallDirectIR(original_hash, {param1=param1, ..., __dict_x=capture0, ...})
+        // The wrapper's frame layout: [capture0, ..., captureN, param0, ..., paramM]
+        // where captures hold the resolved dict functions
+        val captureCount = resolvedDicts.size
+        val wrapperParamCount = regularParamNames.size
+
+        // Build arg fields for the inner call
+        val innerArgFields = mutableListOf<FieldIR>()
+        for ((i, paramName) in regularParamNames.withIndex()) {
+            // Read from wrapper's param slots (after captures)
+            innerArgFields.add(FieldIR(paramName, ReadLocalIR(captureCount + i, SlotKind.OBJECT, src)))
+        }
+        for ((i, dictEntry) in resolvedDicts.withIndex()) {
+            // Read dict values from wrapper's capture slots
+            innerArgFields.add(FieldIR(dictEntry.first, ReadLocalIR(i, SlotKind.OBJECT, src)))
+        }
+        val innerArgIR = MakeRecordIR(innerArgFields, src)
+        val wrapperBodyIR = CallDirectIR(binding.hash, innerArgIR, false, src)
+
+        // Create the wrapper FunctionIR
+        val wrapperFnIR = FunctionIR(
+            hash = wrapperHash,
+            name = "dict_wrapper_${originalDecl?.name ?: "fn"}",
+            qualifiedName = "dict_wrapper_${originalDecl?.name ?: "fn"}",
+            paramSlots = regularParamNames.map { SlotKind.OBJECT },
+            paramNames = regularParamNames,
+            localSlots = emptyList(),
+            localNames = emptyList(),
+            captureSlots = resolvedDicts.map { SlotKind.OBJECT },
+            captureNames = resolvedDicts.map { it.first },
+            body = wrapperBodyIR,
+            sourceFile = src.fileIndex.toString(),
+            sourceSection = src
+        )
+        extractedFunctions.add(wrapperFnIR)
+
+        // Build captures: read the resolved dict values from current frame/context
+        val captures = resolvedDicts.mapIndexed { i, (_, dictValueIR) ->
+            // The dictValueIR is either ReadContextFnIR or ReadLocalIR.
+            // For MakeLambdaIR captures, we need CaptureIR with frame slots.
+            // But the dict values aren't in frame slots — they're from context.
+            // We need a different approach: allocate local slots for the dict values
+            // and then capture them.
+            // Actually, for ReadContextFnIR values, we need to materialize them.
+            // Let's use a block that binds the dict values to locals first.
+            CaptureIR(-1, SlotKind.OBJECT) // placeholder — will fix below
+        }
+
+        // We can't use CaptureIR directly for ReadContextFnIR values since they're
+        // not in frame slots. Instead, generate a block that:
+        // 1. Evaluates each dict value and stores in a local
+        // 2. Creates the lambda with captures from those locals
+        val dictLocals = resolvedDicts.map { (name, _) -> allocLocal("__wrap_$name") }
+        val stmts = resolvedDicts.mapIndexed { i, (name, dictValueIR) ->
+            StmtIR.Let(dictLocals[i], SlotKind.OBJECT, "__wrap_$name", wrapperHash, dictValueIR, src)
+        }
+        val captureIRs = dictLocals.map { slot -> CaptureIR(slot, SlotKind.OBJECT) }
+        val makeLambdaIR = MakeLambdaIR(wrapperHash, captureIRs, src)
+
+        return if (stmts.isEmpty()) {
+            makeLambdaIR
+        } else {
+            BlockIR(stmts, makeLambdaIR, src)
+        }
+    }
+
+    /**
+     * Extract concrete types from a FunctionType's param type for dict resolution.
+     * E.g., FunctionType(RecordType({x: Int}), ...) -> [Int]
+     */
+    private fun extractConcreteTypesFromFnType(fnType: FunctionType, out: MutableList<MezzeType>) {
+        val paramType = fnType.paramType
+        if (paramType is RecordType) {
+            for ((_, fieldType) in paramType.fields) {
+                if (fieldType !is VarType) {
+                    out.add(fieldType)
+                }
+            }
+        } else if (paramType !is VarType) {
+            out.add(paramType)
+        }
     }
 
     // ========================================================================
