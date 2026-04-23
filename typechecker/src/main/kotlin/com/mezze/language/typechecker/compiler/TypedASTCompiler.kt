@@ -74,7 +74,7 @@ class TypedASTCompiler(
      * Pre-scanned: function hash → set of ability method names that need dictionary params.
      * Populated by scanForDictMethods() before compilation begins.
      * A function needs dict params when its body contains VarType method calls
-     * to ability methods (would otherwise become DynamicMethodCallIR).
+     * to ability methods that require static resolution via dictionary passing.
      */
     private val dictMethodsForHash = mutableMapOf<Hash, Set<String>>()
 
@@ -102,9 +102,9 @@ class TypedASTCompiler(
     // ========================================================================
 
     /**
-     * Pre-scan all declarations to find functions whose bodies contain VarType
-     * method calls that would need DynamicMethodCallIR. These functions will
-     * receive hidden dictionary params at compile time.
+     * Pre-scan all declarations (including ability impl operation bodies) to find
+     * functions whose bodies contain VarType method calls to ability methods.
+     * These functions will receive hidden dictionary params at compile time.
      *
      * Also transitively propagates dict requirements: if function A calls function B
      * which needs dict params, then A also needs those same dict params (to forward them).
@@ -125,6 +125,20 @@ class TypedASTCompiler(
                             dictMethodsForHash[decl.hash] = methods
                         }
                     }
+                }
+            }
+        }
+
+        // Phase 1b: scan ability impl operation bodies for VarType method calls.
+        // Auto-generated codec impls have bodies like `fmt.encode_int { ... }` where
+        // `fmt` is a VarType param. These need dict params just like regular functions.
+        for (impl in abilityImpls) {
+            for ((opName, opBody) in impl.operations) {
+                val opHash = computeOpHash(impl.hash, opName)
+                val bodyExpr = if (opBody is TypedLambda) opBody.body else opBody
+                val methods = scanExprForVarTypeMethodCalls(bodyExpr)
+                if (methods.isNotEmpty()) {
+                    dictMethodsForHash[opHash] = methods
                 }
             }
         }
@@ -295,7 +309,6 @@ class TypedASTCompiler(
             }
             is TypedLambda -> {
                 // Don't scan into nested lambdas — they get their own dict params
-                // (or use DynamicMethodCallIR fallback)
             }
             is TypedBlock -> {
                 for (s in expr.statements) {
@@ -510,8 +523,8 @@ class TypedASTCompiler(
         // Check if this function needs dictionary params (pre-scanned).
         // Dictionary params are hidden params appended after regular params,
         // named __dict_<methodName>. They carry the ability op function
-        // (as a MezzeFunction) so VarType method calls can use CallIndirectIR
-        // instead of DynamicMethodCallIR.
+        // (as a MezzeFunction) so VarType method calls can use DictMethodCallIR
+        // for statically-resolved indirect dispatch.
         val dictMethods = dictMethodsForHash[hash] ?: emptySet()
         val dictParamNames = dictMethods.sorted().map { "__dict_$it" }
         currentDictParams = dictParamNames
@@ -990,6 +1003,34 @@ class TypedASTCompiler(
                 if (fields.none { it.name == receiverParamName }) {
                     fields.add(0, FieldIR(receiverParamName, receiverIR))
                 }
+                // Check if the resolved op needs dict params (e.g., codec impl bodies
+                // that call `fmt.encode_int` where `fmt` is a VarType param internally).
+                val opDictMethods = dictMethodsForHash[opHash]
+                if (opDictMethods != null && opDictMethods.isNotEmpty()) {
+                    // Collect concrete types from all fields for resolution
+                    val concreteTypesForDict = mutableListOf(receiverType)
+                    if (expr.arg is TypedRecord) {
+                        for (entry in (expr.arg as TypedRecord).entries) {
+                            if (entry is TypedRecordEntry.Field) {
+                                concreteTypesForDict.add(entry.value.type)
+                            }
+                        }
+                    }
+                    for (dictMethodName in opDictMethods.sorted()) {
+                        val dictParamName = "__dict_$dictMethodName"
+                        val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
+                        if (resolvedHash != null) {
+                            fields.add(FieldIR(dictParamName, ReadContextFnIR(resolvedHash.hex, src)))
+                        } else {
+                            // Forward from caller's dict params if available
+                            val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                            if (callerDictIdx >= 0) {
+                                val slot = currentCaptureCount + callerDictIdx
+                                fields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                            }
+                        }
+                    }
+                }
                 val recordIR = MakeRecordIR(fields, src)
                 return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
             }
@@ -1032,11 +1073,13 @@ class TypedASTCompiler(
                         return DictMethodCallIR(dictSlot, recordIR, src)
                     }
 
-                    // No dict param — this path only fires for auto-generated codec impl
-                    // bodies where the CodecGenerator creates polymorphic method calls
-                    // that don't go through the normal dictionary injection pipeline.
-                    // Task #76 will fix this by integrating CodecGenerator with dict passing.
-                    return DynamicMethodCallIR(methodName, receiverIR, recordIR, hashes, tags, src)
+                    // No dict param — no code path should reach here anymore.
+                    // All ability method calls should be resolved statically or via dict passing.
+                    throw IllegalStateException(
+                        "DynamicMethodCallIR eliminated: VarType method call '$methodName' " +
+                        "without dict param should not occur. Receiver type: $receiverType, " +
+                        "source: $src"
+                    )
                 }
             }
         }
@@ -1139,11 +1182,7 @@ class TypedASTCompiler(
                     dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
                 } else {
                     // No resolution — pass UnitLitIR as placeholder.
-                    // The callee will fall through dict check (slot will hold Unit)
-                    // and the DynamicMethodCallIR fallback handles it... but wait,
-                    // we changed the callee to use CallIndirectIR from the dict slot.
-                    // So we must provide SOMETHING callable. Use UnitLitIR; the callee's
-                    // body will use CallIndirectIR which will fail at runtime if this
+                    // The callee's DictMethodCallIR will fail at runtime if this
                     // path is actually taken. In practice, if the caller can't resolve
                     // the dict, the call site must also have VarType and the pre-scan
                     // should have put dict params on the caller too.

@@ -521,16 +521,6 @@ class TruffleCompiler(
                     node.effectHash.hex     // effect content hash
                 )
             }
-            is DynamicMethodCallIR -> {
-                val receiverNode = compileNode(node.receiver, source)
-                val argNode = compileNode(node.arg, source)
-                com.mezze.interpreter.v2.nodes.function.DynamicAbilityCallNode.create(
-                    node.methodName,
-                    node.candidateHashes.toTypedArray(),
-                    node.candidateTypeTags.toTypedArray(),
-                    receiverNode, argNode
-                )
-            }
             is DictMethodCallIR -> {
                 // Pure dictionary call: read impl function from dict slot, call it directly.
                 // No runtime type-tag matching. The typechecker resolved everything statically.

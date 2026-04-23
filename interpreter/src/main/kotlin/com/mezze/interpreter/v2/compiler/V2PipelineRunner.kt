@@ -284,11 +284,6 @@ object V2PipelineRunner {
                 collectHashesFromNode(node.seq, queue)
                 collectHashesFromNode(node.index, queue)
             }
-            is com.mezze.language.truffleir.DynamicMethodCallIR -> {
-                collectHashesFromNode(node.receiver, queue)
-                collectHashesFromNode(node.arg, queue)
-                node.candidateHashes.forEach { queue.add(it) }
-            }
             is com.mezze.language.truffleir.DictMethodCallIR -> {
                 collectHashesFromNode(node.arg, queue)
             }

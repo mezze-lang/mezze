@@ -95,14 +95,6 @@ sealed interface StringPartIR {
 /** Indirect call — evaluate function expression, then invoke */
 @Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 
-/** Dynamic ability method dispatch — receiver type unknown at compile time.
- *  Each candidate maps a runtime type tag to an op hash. */
-@Serializable data class DynamicMethodCallIR(
-    val methodName: String, val receiver: NodeIR, val arg: NodeIR,
-    val candidateHashes: List<String>, val candidateTypeTags: List<String>,
-    override val src: SourceInfo
-) : NodeIR
-
 /** Dictionary-or-dynamic ability method dispatch.
  *  Reads a dict param from the frame: if it holds a MezzeFunction, call it directly.
  *  No runtime dispatch — the typechecker resolved everything statically. */
