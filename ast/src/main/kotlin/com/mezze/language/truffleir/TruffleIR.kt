@@ -84,6 +84,9 @@ sealed interface StringPartIR {
 @Serializable data class ReadCaptureIR(val index: Int, val kind: SlotKind, override val src: SourceInfo) : NodeIR
 @Serializable data class ReadArgIR(val index: Int, val kind: SlotKind, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class ReadContextIR(val name: String, override val src: SourceInfo) : NodeIR
+/** Read a function from context by hash WITHOUT auto-evaluating thunks.
+ *  Used for dictionary passing where we need the raw MezzeFunction, not its return value. */
+@Serializable data class ReadContextFnIR(val name: String, override val src: SourceInfo) : NodeIR
 
 // Calls
 @Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
@@ -97,6 +100,15 @@ sealed interface StringPartIR {
 @Serializable data class DynamicMethodCallIR(
     val methodName: String, val receiver: NodeIR, val arg: NodeIR,
     val candidateHashes: List<String>, val candidateTypeTags: List<String>,
+    override val src: SourceInfo
+) : NodeIR
+
+/** Dictionary-or-dynamic ability method dispatch.
+ *  Reads a dict param from the frame: if it holds a MezzeFunction, call it directly.
+ *  No runtime dispatch — the typechecker resolved everything statically. */
+@Serializable data class DictMethodCallIR(
+    val dictSlot: Int,   // Frame slot holding the resolved impl function
+    val arg: NodeIR,     // Argument record (with receiver injected as "it")
     override val src: SourceInfo
 ) : NodeIR
 

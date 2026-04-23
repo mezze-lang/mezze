@@ -179,27 +179,33 @@ public final class MezzeFunction implements TruffleObject {
 
     /**
      * Get remaining parameter names (those not yet provided).
+     * Excludes hidden dictionary params (__dict_*).
      */
     @TruffleBoundary
     public String[] getRemainingParameterNames() {
-        if (partialArgs == null || partialArgs.isEmpty()) {
-            return parameterNames;
-        }
         java.util.List<String> remaining = new java.util.ArrayList<>();
         for (String param : parameterNames) {
-            if (!partialArgs.containsKey(param)) {
-                remaining.add(param);
-            }
+            // Skip hidden dictionary params — not user-visible
+            if (param.startsWith("__dict_")) continue;
+            if (partialArgs != null && partialArgs.containsKey(param)) continue;
+            remaining.add(param);
         }
         return remaining.toArray(new String[0]);
     }
 
     /**
      * Check if all required parameters are satisfied by the given record.
+     * Hidden dictionary params (__dict_*) are excluded — they are injected by
+     * the compiler for dictionary passing and are not part of the user-visible API.
      */
     @TruffleBoundary
     public boolean hasAllParameters(MezzeRecord record) {
         for (String param : parameterNames) {
+            // Skip hidden dictionary params — these are injected by the compiler
+            // for dictionary passing and should not affect partial application checks.
+            if (param.startsWith("__dict_")) {
+                continue;
+            }
             // Check if param is already provided via partial args
             if (partialArgs != null && partialArgs.containsKey(param)) {
                 continue;

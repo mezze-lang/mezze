@@ -289,11 +289,18 @@ object V2PipelineRunner {
                 collectHashesFromNode(node.arg, queue)
                 node.candidateHashes.forEach { queue.add(it) }
             }
+            is com.mezze.language.truffleir.DictMethodCallIR -> {
+                collectHashesFromNode(node.arg, queue)
+            }
             // Leaf nodes — no children to walk
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}
             is com.mezze.language.truffleir.ReadArgIR -> {}
             is com.mezze.language.truffleir.ReadContextIR -> {}
+            is com.mezze.language.truffleir.ReadContextFnIR -> {
+                // The hash in ReadContextFnIR refers to a function that needs to be available
+                queue.add(node.name)
+            }
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}
             is com.mezze.language.truffleir.BoolLitIR -> {}

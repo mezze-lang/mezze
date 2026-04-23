@@ -136,6 +136,11 @@ class TruffleCompiler(
                 // Read a named value from the MezzeContext (used for `scope` in handler operations)
                 com.mezze.interpreter.v2.nodes.ReadContextNode(node.name)
             }
+            is ReadContextFnIR -> {
+                // Read a function from the MezzeContext by hash WITHOUT auto-evaluating thunks.
+                // Used for dictionary passing to inject ability op functions as hidden params.
+                com.mezze.interpreter.v2.nodes.ReadContextFnNode(node.name)
+            }
             is WriteLocalIR -> {
                 val valueNode = compileNode(node.value, source)
                 WriteLocalNode.create(valueNode, node.slot, slotKindToInt(node.kind))
@@ -524,6 +529,15 @@ class TruffleCompiler(
                     node.candidateHashes.toTypedArray(),
                     node.candidateTypeTags.toTypedArray(),
                     receiverNode, argNode
+                )
+            }
+            is DictMethodCallIR -> {
+                // Pure dictionary call: read impl function from dict slot, call it directly.
+                // No runtime type-tag matching. The typechecker resolved everything statically.
+                val argNode = compileNode(node.arg, source)
+                com.mezze.interpreter.v2.nodes.function.DictMethodCallNode.create(
+                    node.dictSlot,
+                    argNode
                 )
             }
         }

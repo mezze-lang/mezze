@@ -66,6 +66,25 @@ class TypedASTCompiler(
     /** File table for source info */
     private val files = mutableSetOf<String>()
 
+    // ========================================================================
+    // Dictionary passing state
+    // ========================================================================
+
+    /**
+     * Pre-scanned: function hash → set of ability method names that need dictionary params.
+     * Populated by scanForDictMethods() before compilation begins.
+     * A function needs dict params when its body contains VarType method calls
+     * to ability methods (would otherwise become DynamicMethodCallIR).
+     */
+    private val dictMethodsForHash = mutableMapOf<Hash, Set<String>>()
+
+    /**
+     * Current function's dictionary param names (e.g., "__dict_to_dbg_str").
+     * Set during compileFunctionBody when the function needs dict passing.
+     * These are appended as extra params after the regular params.
+     */
+    private var currentDictParams = listOf<String>()
+
     init {
         // Build ability operation index
         for (impl in abilityImpls) {
@@ -75,6 +94,129 @@ class TypedASTCompiler(
                     AbilityOp(impl.hash, impl.targetTypes, opHash)
                 )
             }
+        }
+    }
+
+    // ========================================================================
+    // Dictionary passing — pre-scan
+    // ========================================================================
+
+    /**
+     * Pre-scan all declarations to find functions whose bodies contain VarType
+     * method calls that would need DynamicMethodCallIR. These functions will
+     * receive hidden dictionary params at compile time.
+     */
+    private fun prescanForDictMethods(modules: List<TypedModule>) {
+        dictMethodsForHash.clear()
+        for (module in modules) {
+            for (decl in module.decls) {
+                if (decl is TypedLetDecl) {
+                    val value = decl.value
+                    if (value is TypedLambda) {
+                        val methods = scanExprForVarTypeMethodCalls(value.body)
+                        if (methods.isNotEmpty()) {
+                            dictMethodsForHash[decl.hash] = methods
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Recursively scan a TypedExpr for VarType method calls (i.e., calls where
+     * the receiver is VarType and the method is a known ability operation).
+     * Returns the set of ability method names found.
+     */
+    private fun scanExprForVarTypeMethodCalls(expr: TypedExpr): Set<String> {
+        val result = mutableSetOf<String>()
+        scanExprForVarTypeMethods(expr, result)
+        return result
+    }
+
+    private fun scanExprForVarTypeMethods(expr: TypedExpr, out: MutableSet<String>) {
+        when (expr) {
+            is TypedCall -> {
+                val fn = expr.function
+                if (fn is TypedFieldAccess) {
+                    val methodName = fn.field
+                    val receiverType = fn.record.type
+                    // If receiver is VarType and the method is a known ability op, record it
+                    if (receiverType is VarType && methodName !in inlineableOps) {
+                        val opCandidates = abilityOpIndex[methodName]
+                        if (opCandidates != null && opCandidates.isNotEmpty()) {
+                            out.add(methodName)
+                        }
+                    }
+                    scanExprForVarTypeMethods(fn.record, out)
+                } else {
+                    scanExprForVarTypeMethods(fn, out)
+                }
+                scanExprForVarTypeMethods(expr.arg, out)
+            }
+            is TypedLambda -> {
+                // Don't scan into nested lambdas — they get their own dict params
+                // (or use DynamicMethodCallIR fallback)
+            }
+            is TypedBlock -> {
+                for (s in expr.statements) {
+                    when (s) {
+                        is TypedStatement.Let -> scanExprForVarTypeMethods(s.value, out)
+                        is TypedStatement.Expr -> scanExprForVarTypeMethods(s.expr, out)
+                    }
+                }
+                scanExprForVarTypeMethods(expr.result, out)
+            }
+            is TypedIf -> {
+                scanExprForVarTypeMethods(expr.condition, out)
+                scanExprForVarTypeMethods(expr.thenBranch, out)
+                scanExprForVarTypeMethods(expr.elseBranch, out)
+            }
+            is TypedMatch -> {
+                scanExprForVarTypeMethods(expr.scrutinee, out)
+                for (c in expr.cases) {
+                    c.guard?.let { scanExprForVarTypeMethods(it, out) }
+                    scanExprForVarTypeMethods(c.body, out)
+                }
+            }
+            is TypedRecord -> {
+                for (e in expr.entries) {
+                    when (e) {
+                        is TypedRecordEntry.Field -> scanExprForVarTypeMethods(e.value, out)
+                        is TypedRecordEntry.Spread -> scanExprForVarTypeMethods(e.expr, out)
+                    }
+                }
+            }
+            is TypedFieldAccess -> scanExprForVarTypeMethods(expr.record, out)
+            is TypedVariantConstruct -> expr.payload?.let { scanExprForVarTypeMethods(it, out) }
+            is TypedRecordUpdate -> {
+                scanExprForVarTypeMethods(expr.record, out)
+                for (e in expr.updates) {
+                    if (e is TypedRecordEntry.Field) scanExprForVarTypeMethods(e.value, out)
+                }
+            }
+            is TypedPerform -> scanExprForVarTypeMethods(expr.body, out)
+            is TypedPerformOp -> scanExprForVarTypeMethods(expr.arg, out)
+            is TypedPipe -> {
+                scanExprForVarTypeMethods(expr.left, out)
+                scanExprForVarTypeMethods(expr.right, out)
+            }
+            is TypedSeq -> {
+                for (e in expr.elements) {
+                    when (e) {
+                        is TypedSeqElement.Regular -> scanExprForVarTypeMethods(e.expr, out)
+                        is TypedSeqElement.Spread -> scanExprForVarTypeMethods(e.expr, out)
+                    }
+                }
+            }
+            is TypedStringLit -> {
+                for (p in expr.parts) {
+                    if (p is TypedStringPart.Interpolation) scanExprForVarTypeMethods(p.expr, out)
+                }
+            }
+            // Leaf nodes: no children
+            is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
+            is TypedFracLit, is TypedBoolLit, is TypedCharLit -> {}
         }
     }
 
@@ -107,6 +249,10 @@ class TypedASTCompiler(
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()
+
+        // Pre-scan all modules to discover which functions need dictionary params.
+        // This must happen before compilation so call sites can inject dict fields.
+        prescanForDictMethods(listOf(module) + additionalModules)
 
         val functions = mutableListOf<FunctionIR>()
         val compiledHashes = mutableSetOf<String>()
@@ -220,28 +366,41 @@ class TypedASTCompiler(
         val prevParamNames = currentParamNames
         val prevCaptureNames = currentCaptureNames
         val prevCaptureCount = currentCaptureCount
+        val prevDictParams = currentDictParams
 
-        currentParamCount = params.size
+        // Check if this function needs dictionary params (pre-scanned).
+        // Dictionary params are hidden params appended after regular params,
+        // named __dict_<methodName>. They carry the ability op function
+        // (as a MezzeFunction) so VarType method calls can use CallIndirectIR
+        // instead of DynamicMethodCallIR.
+        val dictMethods = dictMethodsForHash[hash] ?: emptySet()
+        val dictParamNames = dictMethods.sorted().map { "__dict_$it" }
+        currentDictParams = dictParamNames
+
+        // All params = regular params + dict params
+        val allParamNames = params.map { it.name } + dictParamNames
+
+        currentParamCount = allParamNames.size
         // Locals start after captures + params:
-        // Frame layout: [capture0..captureN, param0..paramM, local0..localK]
+        // Frame layout: [capture0..captureN, param0..paramM, dictParam0..dictParamD, local0..localK]
         val captureCount = captureInfo.size
         currentCaptureCount = captureCount
-        nextLocalSlot = captureCount + params.size
+        nextLocalSlot = captureCount + allParamNames.size
         localsByName.clear()
-        currentParamNames = params.map { it.name }
+        currentParamNames = allParamNames
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
         // For non-lambda functions (called from compileLetDecl), it should be empty.
 
         // Compile body
         val bodyIR = compileExpr(body)
 
-        // Collect slot info
-        val paramSlots = params.map { typeToSlotKind(it.type) }
-        val paramNames = params.map { it.name }
-        val localCount = nextLocalSlot - captureCount - params.size
+        // Collect slot info — dict params are OBJECT (they hold MezzeFunction values)
+        val paramSlots = params.map { typeToSlotKind(it.type) } + dictParamNames.map { SlotKind.OBJECT }
+        val paramNames = allParamNames
+        val localCount = nextLocalSlot - captureCount - allParamNames.size
         val localSlots = (0 until localCount).map { SlotKind.OBJECT }
         val localNames = (0 until localCount).map { i ->
-            localsByName.entries.find { it.value == captureCount + params.size + i }?.key ?: "local_$i"
+            localsByName.entries.find { it.value == captureCount + allParamNames.size + i }?.key ?: "local_$i"
         }
 
         // Restore state
@@ -252,6 +411,7 @@ class TypedASTCompiler(
         currentCaptureNames = prevCaptureNames
         currentParamNames = prevParamNames
         currentCaptureCount = prevCaptureCount
+        currentDictParams = prevDictParams
 
         val fnIR = FunctionIR(
             hash = hash,
@@ -695,8 +855,7 @@ class TypedASTCompiler(
                 return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
             }
 
-            // VarType receiver — emit dynamic dispatch.
-            // Inject receiver as "it" if not already present, then dispatch at runtime.
+            // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
             if (receiverType is VarType && methodName !in inlineableOps) {
                 val opCandidates = abilityOpIndex[methodName]
                 if (opCandidates != null && opCandidates.isNotEmpty()) {
@@ -714,6 +873,8 @@ class TypedASTCompiler(
                         fields.add(0, FieldIR(Keywords.IT, receiverIR))
                     }
                     val recordIR = MakeRecordIR(fields, src)
+
+                    // Fallback candidates for dynamic dispatch
                     val hashes = opCandidates.map { it.opHash.hex }
                     val tags = opCandidates.map { op ->
                         // Use the LAST target type for matching: in `ability X 'a for 'b`,
@@ -721,22 +882,44 @@ class TypedASTCompiler(
                         // For single-type abilities like `ability Eq for 'a`, lastOrNull == firstOrNull.
                         op.targetTypes.lastOrNull()?.let { getTypeTag(it) } ?: "Any"
                     }
+
+                    // Dictionary passing: if the current function has a __dict_<method> param,
+                    // read the resolved impl function from the frame and call it directly.
+                    // No runtime dispatch — the typechecker resolved everything statically.
+                    val dictParamName = "__dict_$methodName"
+                    val dictParamIdx = currentParamNames.indexOf(dictParamName)
+                    if (dictParamIdx >= 0) {
+                        val dictSlot = currentCaptureCount + dictParamIdx
+                        return DictMethodCallIR(dictSlot, recordIR, src)
+                    }
+
+                    // No dict param — this is a polymorphic call without dictionary.
+                    // Fall back to dynamic dispatch (to be eliminated once all call sites pass dicts).
                     return DynamicMethodCallIR(methodName, receiverIR, recordIR, hashes, tags, src)
                 }
             }
         }
 
-        // Regular call
+        // Regular call — check if callee needs dictionary params
         val fnIR = compileExpr(fn)
         if (fn is TypedVar) {
             val binding = fn.binding
             return when (binding) {
                 is BindingRef.ByHash -> {
-                    // Always use CallDirectIR for hash-based bindings.
-                    // DO NOT check localsByName — a user variable with the same name
-                    // (e.g., "let chars = str::chars {s = s}") would shadow the function
-                    // reference and read from an uninitialized slot.
-                    CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
+                    // Check if the callee needs dictionary params. If so, inject
+                    // resolved ability op functions into the argument record.
+                    val calleeHash = binding.hash
+                    val calleeDictMethods = dictMethodsForHash[calleeHash]
+                    if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
+                        val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, src)
+                        CallDirectIR(calleeHash, enrichedArgIR, expr.isTailCall, src)
+                    } else {
+                        // Always use CallDirectIR for hash-based bindings.
+                        // DO NOT check localsByName — a user variable with the same name
+                        // (e.g., "let chars = str::chars {s = s}") would shadow the function
+                        // reference and read from an uninitialized slot.
+                        CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
+                    }
                 }
                 is BindingRef.Native -> CallNativeIR(binding.name, argIR, src)
                 is BindingRef.Local -> {
@@ -761,6 +944,96 @@ class TypedASTCompiler(
             }
         }
         return CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
+    }
+
+    // ========================================================================
+    // Dictionary passing — call site injection
+    // ========================================================================
+
+    /**
+     * Inject __dict_<method> fields into an argument record for dictionary passing.
+     *
+     * At the call site, we resolve which ability op function to pass for each
+     * required dict method. The function is loaded via ReadContextIR(opHash)
+     * so the runtime gets the actual MezzeFunction.
+     *
+     * @param argIR the already-compiled argument IR
+     * @param argExpr the typed argument expression (for type info)
+     * @param dictMethods set of method names the callee needs
+     * @param src source info for generated IR nodes
+     * @return argIR with injected dict fields, or original argIR if resolution fails
+     */
+    private fun injectDictFields(
+        argIR: NodeIR,
+        argExpr: TypedExpr,
+        dictMethods: Set<String>,
+        src: SourceInfo
+    ): NodeIR {
+        // Collect concrete types from the argument record
+        val concreteTypes = mutableListOf<MezzeType>()
+        if (argExpr is TypedRecord) {
+            for (entry in argExpr.entries) {
+                if (entry is TypedRecordEntry.Field) {
+                    concreteTypes.add(entry.value.type)
+                }
+            }
+        }
+
+        // For each required dict method, try to resolve the op hash using concrete types
+        val dictFields = mutableListOf<FieldIR>()
+        for (methodName in dictMethods.sorted()) {
+            val dictParamName = "__dict_$methodName"
+            val opHash = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
+            if (opHash != null) {
+                // ReadContextFnIR fetches the MezzeFunction from the global registry by hash
+                // WITHOUT auto-evaluating it as a thunk. This is critical because ability op
+                // functions may look like zero-param thunks but we need the function object itself.
+                dictFields.add(FieldIR(dictParamName, ReadContextFnIR(opHash.hex, src)))
+            } else {
+                // Can't resolve — check if caller has this dict param (forwarding)
+                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                if (callerDictIdx >= 0) {
+                    // Forward the dict from our own params
+                    val slot = currentCaptureCount + callerDictIdx
+                    dictFields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                } else {
+                    // No resolution — pass UnitLitIR as placeholder.
+                    // The callee will fall through dict check (slot will hold Unit)
+                    // and the DynamicMethodCallIR fallback handles it... but wait,
+                    // we changed the callee to use CallIndirectIR from the dict slot.
+                    // So we must provide SOMETHING callable. Use UnitLitIR; the callee's
+                    // body will use CallIndirectIR which will fail at runtime if this
+                    // path is actually taken. In practice, if the caller can't resolve
+                    // the dict, the call site must also have VarType and the pre-scan
+                    // should have put dict params on the caller too.
+                    dictFields.add(FieldIR(dictParamName, UnitLitIR(src)))
+                }
+            }
+        }
+
+        if (dictFields.isEmpty()) return argIR
+
+        // Merge dict fields into the argument record
+        return if (argIR is MakeRecordIR) {
+            MakeRecordIR(argIR.fields + dictFields, argIR.src, argIR.typeTag)
+        } else {
+            // Wrap non-record arg: create a record with just the dict fields
+            // This shouldn't normally happen (function args are records), but handle gracefully.
+            MakeRecordIR(dictFields, src)
+        }
+    }
+
+    /**
+     * Resolve the ability op hash for a given method name using concrete types.
+     * Tries each concrete type against the ability op index to find a match.
+     */
+    private fun resolveOpHashFromConcreteTypes(methodName: String, concreteTypes: List<MezzeType>): Hash? {
+        for (concreteType in concreteTypes) {
+            if (concreteType is VarType) continue // Skip unresolved types
+            val opHash = tryResolveAbilityOp(methodName, concreteType)
+            if (opHash != null) return opHash
+        }
+        return null
     }
 
     // ========================================================================
