@@ -1032,8 +1032,10 @@ class TypedASTCompiler(
                         return DictMethodCallIR(dictSlot, recordIR, src)
                     }
 
-                    // No dict param — this is a polymorphic call without dictionary.
-                    // Fall back to dynamic dispatch (to be eliminated once all call sites pass dicts).
+                    // No dict param — this path only fires for auto-generated codec impl
+                    // bodies where the CodecGenerator creates polymorphic method calls
+                    // that don't go through the normal dictionary injection pipeline.
+                    // Task #76 will fix this by integrating CodecGenerator with dict passing.
                     return DynamicMethodCallIR(methodName, receiverIR, recordIR, hashes, tags, src)
                 }
             }
