@@ -17,9 +17,23 @@ public final class BooleanSeqStorage implements SeqStorage {
     @CompilationFinal
     private final int size;
 
+    /** COW ownership token for O(1) amortized append chains. */
+    private final Object[] ownerToken;
+
     public BooleanSeqStorage(long[] words, int size) {
         this.words = words;
         this.size = size;
+        this.ownerToken = null;
+    }
+
+    private BooleanSeqStorage(long[] words, int size, Object[] ownerToken) {
+        this.words = words;
+        this.size = size;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
     }
 
     /**
@@ -100,18 +114,30 @@ public final class BooleanSeqStorage implements SeqStorage {
     }
 
     /**
-     * Unboxed append.
+     * Unboxed append with COW + spare capacity.
+     * O(1) amortized in append chains.
      */
     public BooleanSeqStorage appendBoolean(boolean value) {
         int newSize = size + 1;
         int requiredWords = (newSize + 63) >>> 6;
 
-        long[] newWords;
-        if (requiredWords > words.length) {
-            newWords = Arrays.copyOf(words, requiredWords);
-        } else {
-            newWords = words.clone();
+        if (isOwner() && requiredWords <= words.length) {
+            // O(1): spare capacity in existing words array — set bit in-place
+            if (value) {
+                int wordIndex = size >>> 6;
+                int bitIndex = size & 63;
+                words[wordIndex] |= (1L << bitIndex);
+            }
+            // Note: if value is false, the bit is already 0 in spare capacity
+            var result = new BooleanSeqStorage(words, newSize, ownerToken);
+            ownerToken[0] = result;
+            return result;
         }
+
+        // Allocate with spare capacity (extra words for future appends)
+        int newCapacity = Math.max(requiredWords, words.length + Math.max(1, words.length >> 1) + 1);
+        long[] newWords = new long[newCapacity];
+        System.arraycopy(words, 0, newWords, 0, words.length);
 
         if (value) {
             int wordIndex = size >>> 6;
@@ -119,7 +145,10 @@ public final class BooleanSeqStorage implements SeqStorage {
             newWords[wordIndex] |= (1L << bitIndex);
         }
 
-        return new BooleanSeqStorage(newWords, newSize);
+        Object[] token = new Object[1];
+        var result = new BooleanSeqStorage(newWords, newSize, token);
+        token[0] = result;
+        return result;
     }
 
     @Override
@@ -218,7 +247,9 @@ public final class BooleanSeqStorage implements SeqStorage {
      * Returns underlying packed words.
      */
     public long[] getWords() {
-        return words;
+        int requiredWords = (size + 63) >>> 6;
+        if (requiredWords == words.length) return words;
+        return Arrays.copyOf(words, requiredWords);
     }
 
     // ===== Boolean-specific operations =====
@@ -227,14 +258,15 @@ public final class BooleanSeqStorage implements SeqStorage {
      * Count true values (popcount).
      */
     public int countTrue() {
+        int requiredWords = (size + 63) >>> 6;
         int count = 0;
-        for (int i = 0; i < words.length; i++) {
+        for (int i = 0; i < requiredWords; i++) {
             count += Long.bitCount(words[i]);
         }
         // Adjust for unused bits in last word
-        int unusedBits = (words.length << 6) - size;
-        if (unusedBits > 0 && words.length > 0) {
-            int lastWordIndex = words.length - 1;
+        int unusedBits = (requiredWords << 6) - size;
+        if (unusedBits > 0 && requiredWords > 0) {
+            int lastWordIndex = requiredWords - 1;
             long mask = (1L << (64 - unusedBits)) - 1;
             int extraBits = Long.bitCount(words[lastWordIndex] & ~mask);
             count -= extraBits;
@@ -260,7 +292,8 @@ public final class BooleanSeqStorage implements SeqStorage {
      * Check if any value is true.
      */
     public boolean anyTrue() {
-        for (int i = 0; i < words.length; i++) {
+        int requiredWords = (size + 63) >>> 6;
+        for (int i = 0; i < requiredWords; i++) {
             if (words[i] != 0) {
                 return true;
             }
@@ -272,7 +305,8 @@ public final class BooleanSeqStorage implements SeqStorage {
      * Find index of first true, or -1 if none.
      */
     public int indexOfTrue() {
-        for (int i = 0; i < words.length; i++) {
+        int requiredWords = (size + 63) >>> 6;
+        for (int i = 0; i < requiredWords; i++) {
             if (words[i] != 0) {
                 int bitIndex = Long.numberOfTrailingZeros(words[i]);
                 int index = (i << 6) + bitIndex;
@@ -302,8 +336,9 @@ public final class BooleanSeqStorage implements SeqStorage {
         if (size != other.size) {
             throw new IllegalArgumentException("Sequences must have same size");
         }
-        long[] newWords = new long[words.length];
-        for (int i = 0; i < words.length; i++) {
+        int requiredWords = (size + 63) >>> 6;
+        long[] newWords = new long[requiredWords];
+        for (int i = 0; i < requiredWords; i++) {
             newWords[i] = words[i] & other.words[i];
         }
         return new BooleanSeqStorage(newWords, size);
@@ -317,8 +352,9 @@ public final class BooleanSeqStorage implements SeqStorage {
         if (size != other.size) {
             throw new IllegalArgumentException("Sequences must have same size");
         }
-        long[] newWords = new long[words.length];
-        for (int i = 0; i < words.length; i++) {
+        int requiredWords = (size + 63) >>> 6;
+        long[] newWords = new long[requiredWords];
+        for (int i = 0; i < requiredWords; i++) {
             newWords[i] = words[i] | other.words[i];
         }
         return new BooleanSeqStorage(newWords, size);
@@ -328,8 +364,9 @@ public final class BooleanSeqStorage implements SeqStorage {
      * Logical NOT (flip all bits).
      */
     public BooleanSeqStorage not() {
-        long[] newWords = new long[words.length];
-        for (int i = 0; i < words.length; i++) {
+        int requiredWords = (size + 63) >>> 6;
+        long[] newWords = new long[requiredWords];
+        for (int i = 0; i < requiredWords; i++) {
             newWords[i] = ~words[i];
         }
         return new BooleanSeqStorage(newWords, size);
@@ -373,8 +410,9 @@ public final class BooleanSeqStorage implements SeqStorage {
 
     @Override
     public int hashCode() {
+        int requiredWords = (size + 63) >>> 6;
         int result = size;
-        for (int i = 0; i < words.length; i++) {
+        for (int i = 0; i < requiredWords; i++) {
             result = 31 * result + Long.hashCode(words[i]);
         }
         return result;
