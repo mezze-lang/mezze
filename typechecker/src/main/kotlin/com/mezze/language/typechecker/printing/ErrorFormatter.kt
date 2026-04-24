@@ -1,6 +1,5 @@
 package com.mezze.language.typechecker.printing
 
-import com.mezze.language.ast.SourceLocation
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.module.ModuleError
 import com.mezze.language.typechecker.module.ModuleTypeCheckResult
@@ -45,14 +44,14 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Location
-            if (error.sourceLocation != null) {
-                val fileInfo = error.sourceLocation.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.sourceLocation.line}:${error.sourceLocation.column}")
+            if (error.loc != null) {
+                val fileInfo = error.loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${error.loc.startLine}:${error.loc.startCol}")
             }
 
             // Source code context
-            if (sourceCode != null && error.sourceLocation != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.sourceLocation))
+            if (sourceCode != null && error.loc != null) {
+                append(SourceContext.formatCodeSnippet(sourceCode, error.loc))
             }
 
             // Error message
@@ -80,10 +79,10 @@ object ErrorFormatter {
             appendLine("❌ Type Error [$phase]")
             appendLine("━".repeat(50))
 
-            val location = error.sourceLocation
+            val location = error.loc
             if (location != null) {
-                val fileInfo = location.file ?: "<input>"
-                appendLine("   --> $fileInfo:${location.line}:${location.column}")
+                val fileInfo = location.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${location.startLine}:${location.startCol}")
             }
 
             // Source code context
@@ -293,8 +292,8 @@ object ErrorFormatter {
 
             // Location
             error.location()?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
             // Source code context
@@ -338,8 +337,8 @@ object ErrorFormatter {
 
             // Location
             error.location()?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
             // Source code context
@@ -554,8 +553,8 @@ object ErrorFormatter {
 
             // Location
             error.location()?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
             // Source code context
@@ -589,8 +588,8 @@ object ErrorFormatter {
 
             // Location
             error.location()?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
             // Source code context
@@ -733,22 +732,22 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Show source location if available
-            error.sourceLocation?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+            error.loc?.let { loc ->
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
 
                 // Try to show source code snippet if we can
-                loc.file?.let { filePath ->
+                if (loc.file.isNotEmpty()) {
                     try {
-                        val file = java.io.File(filePath)
+                        val file = java.io.File(loc.file)
                         if (file.exists()) {
                             val lines = file.readLines()
-                            if (loc.line > 0 && loc.line <= lines.size) {
-                                val line = lines[loc.line - 1]
+                            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                                val line = lines[loc.startLine - 1]
                                 appendLine("    |")
-                                appendLine("${loc.line.toString().padStart(3)} | $line")
-                                val underlineLen = loc.length ?: 1
-                                appendLine("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))}")
+                                appendLine("${loc.startLine.toString().padStart(3)} | $line")
+                                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                                appendLine("    | ${" ".repeat(loc.startCol - 1)}${"^".repeat(maxOf(1, underlineLen))}")
                             }
                         }
                     } catch (_: Exception) {
@@ -773,22 +772,22 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Show source location if available
-            error.sourceLocation?.let { loc ->
-                val fileInfo = loc.file ?: "<input>"
-                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+            error.loc?.let { loc ->
+                val fileInfo = loc.file.ifEmpty { "<input>" }
+                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
 
                 // Try to show source code snippet if we can
-                loc.file?.let { filePath ->
+                if (loc.file.isNotEmpty()) {
                     try {
-                        val file = java.io.File(filePath)
+                        val file = java.io.File(loc.file)
                         if (file.exists()) {
                             val lines = file.readLines()
-                            if (loc.line > 0 && loc.line <= lines.size) {
-                                val line = lines[loc.line - 1]
+                            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                                val line = lines[loc.startLine - 1]
                                 appendLine("    |")
-                                appendLine("${loc.line.toString().padStart(3)} | $line")
-                                val underlineLen = loc.length ?: 1
-                                appendLine("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))}")
+                                appendLine("${loc.startLine.toString().padStart(3)} | $line")
+                                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                                appendLine("    | ${" ".repeat(loc.startCol - 1)}${"^".repeat(maxOf(1, underlineLen))}")
                             }
                         }
                     } catch (_: Exception) {
@@ -812,10 +811,10 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Show source location if available
-            error.sourceLocation?.let { loc ->
+            error.loc?.let { loc ->
                 appendLine()
-                val fileInfo = loc.file?.let { " --> $it" } ?: ""
-                appendLine("$fileInfo:${loc.line}:${loc.column}")
+                val fileInfo = if (loc.file.isNotEmpty()) " --> ${loc.file}" else ""
+                appendLine("$fileInfo:${loc.startLine}:${loc.startCol}")
             }
 
             appendLine()

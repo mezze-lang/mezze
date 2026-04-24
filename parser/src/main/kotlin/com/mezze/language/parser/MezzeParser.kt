@@ -1,6 +1,5 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.SourceLocation
 import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parsedast.*
 import com.mezze.language.parser.internal.*
@@ -20,11 +19,7 @@ class MezzeParser {
     internal var currentSource: String?? = null
     internal var currentFile: String?? = null
 
-    companion object {
-        /** Convert Loc → SourceLocation */
-        @JvmStatic
-        fun toSourceLocation(loc: Loc): SourceLocation = SourceLocation(loc.startLine, loc.startCol, loc.file)
-    }
+    companion object
 
     /**
      * Parse source into ParsedModule (v2 AST — clean, no nullable typechecker fields).

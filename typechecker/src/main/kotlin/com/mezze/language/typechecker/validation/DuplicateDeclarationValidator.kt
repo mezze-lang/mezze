@@ -62,7 +62,7 @@ object DuplicateDeclarationValidator {
             if (declaredTypes.contains(item.name)) {
                 throw TypeCheckError(
                     "Duplicate type declaration: type '${item.name}' is already declared",
-                    item.loc.toSourceLocation()
+                    item.loc
                 )
             }
             declaredTypes.add(item.name)
@@ -98,7 +98,7 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                                 "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                                typeDecl.loc.toSourceLocation()
+                                typeDecl.loc
                             )
                         }
 
@@ -107,7 +107,7 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
                                 "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                                typeDecl.loc.toSourceLocation()
+                                typeDecl.loc
                             )
                         }
                         constructorToTypeMap[constructorName] = typeDecl.name
@@ -121,7 +121,7 @@ object DuplicateDeclarationValidator {
                         throw TypeCheckError(
                             "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                             "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                            typeDecl.loc.toSourceLocation()
+                            typeDecl.loc
                         )
                     }
 
@@ -130,7 +130,7 @@ object DuplicateDeclarationValidator {
                         throw TypeCheckError(
                             "Duplicate constructor name: constructor '$constructorName' is already defined " +
                             "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                            typeDecl.loc.toSourceLocation()
+                            typeDecl.loc
                         )
                     }
                     constructorToTypeMap[constructorName] = typeDecl.name
@@ -154,14 +154,14 @@ object DuplicateDeclarationValidator {
                 if (!constructorName.first().isUpperCase()) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' must start with an uppercase letter",
-                        typeDecl.loc.toSourceLocation()
+                        typeDecl.loc
                     )
                 }
 
                 if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' is already used by a built-in ability",
-                        typeDecl.loc.toSourceLocation()
+                        typeDecl.loc
                     )
                 }
             }
@@ -185,7 +185,7 @@ object DuplicateDeclarationValidator {
                     val params = freeTypeVars.map { it.first }.distinct().sorted().joinToString(" ") { "'$it" }
                     "Add them as type parameters: type ${typeDecl.name} $params = ..."
                 }
-                val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.loc.toSourceLocation()
+                val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.loc
                 throw TypeCheckError(
                     "Type '${typeDecl.name}' has undeclared type variable(s): $freeVarList. $suggestion",
                     errorLocation
@@ -197,7 +197,7 @@ object DuplicateDeclarationValidator {
     /**
      * Collect all type variable names used in a type definition, with their source locations.
      */
-    private fun collectTypeVariablesWithLocation(definition: ParsedTypeDef): List<Pair<String, com.mezze.language.ast.SourceLocation?>> {
+    private fun collectTypeVariablesWithLocation(definition: ParsedTypeDef): List<Pair<String, Loc?>> {
         return when (definition) {
             is ParsedVariantDef -> {
                 definition.constructors.flatMap { ctor ->
@@ -218,13 +218,13 @@ object DuplicateDeclarationValidator {
     /**
      * Collect all type variable names with their source locations from a parsed type annotation.
      */
-    private fun collectTypeVariablesFromParsedAnnotation(annotation: ParsedTypeAnnotation): List<Pair<String, com.mezze.language.ast.SourceLocation?>> {
+    private fun collectTypeVariablesFromParsedAnnotation(annotation: ParsedTypeAnnotation): List<Pair<String, Loc?>> {
         return when (annotation) {
             is ParsedNamedType -> {
                 if (annotation.name.startsWith("'")) {
-                    listOf(annotation.name.removePrefix("'") to annotation.loc.toSourceLocation())
+                    listOf(annotation.name.removePrefix("'") to annotation.loc)
                 } else if (annotation.name.first().isLowerCase()) {
-                    listOf(annotation.name to annotation.loc.toSourceLocation())
+                    listOf(annotation.name to annotation.loc)
                 } else {
                     emptyList()
                 }
@@ -265,7 +265,7 @@ object DuplicateDeclarationValidator {
             if (declaredEffects.contains(effect.name)) {
                 throw TypeCheckError(
                     "Duplicate effect declaration: effect '${effect.name}' is already defined",
-                    effect.loc.toSourceLocation()
+                    effect.loc
                 )
             }
             declaredEffects.add(effect.name)
@@ -282,7 +282,7 @@ object DuplicateDeclarationValidator {
             if (declaredPerformers.contains(impl.performerName)) {
                 throw TypeCheckError(
                     "Duplicate effect handler declaration: performer '${impl.performerName}' is already defined",
-                    impl.loc.toSourceLocation()
+                    impl.loc
                 )
             }
             declaredPerformers.add(impl.performerName)
@@ -299,7 +299,7 @@ object DuplicateDeclarationValidator {
             if (declaredAbilities.contains(ability.name)) {
                 throw TypeCheckError(
                     "Duplicate ability declaration: ability '${ability.name}' is already defined",
-                    ability.loc.toSourceLocation()
+                    ability.loc
                 )
             }
             declaredAbilities.add(ability.name)
@@ -323,7 +323,7 @@ object DuplicateDeclarationValidator {
                 throw TypeCheckError(
                     "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
                     "for type(s) ${allTypeNames.joinToString(", ")}",
-                    impl.loc.toSourceLocation()
+                    impl.loc
                 )
             }
             abilityImplKeys.add(key)
@@ -350,7 +350,7 @@ object DuplicateDeclarationValidator {
                     throw TypeCheckError(
                         "Duplicate method '${op.name}' in inherent impl for type(s) ${targetTypeNames.joinToString(", ")}. " +
                         "Each method name must be unique across all inherent impls for a type.",
-                        op.loc.toSourceLocation()
+                        op.loc
                     )
                 }
                 existingMethods[op.name] = op.loc
@@ -371,7 +371,7 @@ object DuplicateDeclarationValidator {
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",
-                        item.value.loc.toSourceLocation()
+                        item.value.loc
                     )
                 }
                 declaredVariables.add(name)
@@ -408,13 +408,3 @@ object DuplicateDeclarationValidator {
     }
 }
 
-/**
- * Extension to convert v2 Loc to v1 SourceLocation for error reporting.
- */
-private fun Loc.toSourceLocation(): com.mezze.language.ast.SourceLocation {
-    return com.mezze.language.ast.SourceLocation(
-        file = this.file,
-        line = this.startLine,
-        column = this.startCol
-    )
-}

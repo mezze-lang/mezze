@@ -73,7 +73,7 @@ class ConstraintSolver(
         val abilityName: String,
         val abilityHash: String?,
         val typeArgs: List<MezzeType>,
-        val sourceLocation: SourceLocation?
+        val loc: com.mezze.language.parsedast.Loc?
     )
 
     /**
@@ -785,11 +785,11 @@ class ConstraintSolver(
         // Validate ability constraints with the FULL accumulated substitution
         val validationResult = validateAbilityConstraints(substitution)
         if (validationResult != null) {
-            val (validationError, sourceLocation) = validationResult
+            val (validationError, errorLoc) = validationResult
             errors.add(
                 ConstraintError(
                     message = validationError,
-                    constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, sourceLocation = sourceLocation),
+                    constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, loc = errorLoc),
                     context = "ability constraint validation"
                 )
             )
@@ -1165,10 +1165,10 @@ class ConstraintSolver(
      * When a type variable 'a with ability constraints is unified with a concrete type Int,
      * we check that Int has implementations for all abilities required by 'a.
      *
-     * Returns (error message, sourceLocation) pair if validation fails, null if all constraints are satisfied.
+     * Returns (error message, loc) pair if validation fails, null if all constraints are satisfied.
      * Also returns a substitution for any types inferred through bidirectional inference.
      */
-    private fun validateAbilityConstraints(substitution: Substitution): Pair<String, SourceLocation?>? {
+    private fun validateAbilityConstraints(substitution: Substitution): Pair<String, com.mezze.language.parsedast.Loc?>? {
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             // Check if this type variable was bound to a concrete type
             // Use substitution.apply() to transitively resolve type variable chains
@@ -1181,7 +1181,7 @@ class ConstraintSolver(
                 for (tracked in abilityConstraints) {
                     val abilityName = tracked.abilityName
                     val typeArgs = tracked.typeArgs
-                    val sourceLocation = tracked.sourceLocation
+                    val errorLoc = tracked.loc
                     // Skip Inspect - it's universally available
                     val trackedResolvedHash = tracked.abilityHash ?: WellKnownHashes.resolveHash(abilityName)
                     if (WellKnownHashes.isInspect(trackedResolvedHash)) continue
@@ -1213,7 +1213,7 @@ class ConstraintSolver(
                         // Check if implementation exists; pass abilityHash for hash-preferred lookup.
                         val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (!hasImpl) {
-                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs), sourceLocation)
+                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs), errorLoc)
                         }
                     } else {
                         // Some types are still type variables - try bidirectional inference!
@@ -1272,7 +1272,7 @@ class ConstraintSolver(
             listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs  // Prepend the constrained var
         }
         // Use original constraint hash for tracking (used in impl lookup), not the resolved effectiveHash
-        val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.sourceLocation)
+        val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc)
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
             .add(trackedEntry)
 
@@ -3244,7 +3244,7 @@ class ConstraintSolver(
                 left = substitution.apply(constraint.left),
                 right = substitution.apply(constraint.right),
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation,
+                loc = constraint.loc,
                 isMatchCaseContext = constraint.isMatchCaseContext
             )
 
@@ -3254,7 +3254,7 @@ class ConstraintSolver(
                 abilityHash = constraint.abilityHash,
                 typeArgs = constraint.typeArgs.map { substitution.apply(it) },
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                loc = constraint.loc
             )
 
             is Constraint.EffectUsed -> constraint // No types to substitute
@@ -3263,7 +3263,7 @@ class ConstraintSolver(
                 general = substitution.apply(constraint.general),
                 specific = substitution.apply(constraint.specific),
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                loc = constraint.loc
             )
 
             is Constraint.HasField -> Constraint.HasField(
@@ -3271,7 +3271,7 @@ class ConstraintSolver(
                 fieldName = constraint.fieldName,
                 fieldType = substitution.apply(constraint.fieldType),
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation,
+                loc = constraint.loc,
                 strictFieldCheck = constraint.strictFieldCheck
             )
 
@@ -3280,7 +3280,7 @@ class ConstraintSolver(
                 constructorName = constraint.constructorName,
                 payloadType = constraint.payloadType?.let { substitution.apply(it) },
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation,
+                loc = constraint.loc,
                 isPatternContext = constraint.isPatternContext
             )
 
@@ -3288,14 +3288,14 @@ class ConstraintSolver(
                 type = substitution.apply(constraint.type),
                 bindingName = constraint.bindingName,
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                loc = constraint.loc
             )
 
             is Constraint.RecordPatternExhaustive -> Constraint.RecordPatternExhaustive(
                 recordType = substitution.apply(constraint.recordType),
                 patternFields = constraint.patternFields,
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                loc = constraint.loc
             )
 
             is Constraint.AssociatedTypeResolution -> Constraint.AssociatedTypeResolution(
@@ -3303,7 +3303,7 @@ class ConstraintSolver(
                 primaryTypeVar = constraint.primaryTypeVar,  // Type vars don't change
                 associatedTypeVars = constraint.associatedTypeVars,  // Type vars don't change
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                loc = constraint.loc
             )
         }
     }

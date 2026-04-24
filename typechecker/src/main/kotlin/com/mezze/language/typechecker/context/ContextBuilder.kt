@@ -1325,13 +1325,13 @@ class ContextBuilder {
          *
          * @param effects The set of effect names
          * @param effectHashes Map of effectName → contentHash for hash-based identification
-         * @param sourceLocation Optional source location for error messages
+         * @param sourceLoc Optional source location for error messages
          * @throws TypeCheckError if a hermetic effect coexists with other effects
          */
         fun validateHermeticEffects(
             effects: Set<String>,
             effectHashes: Map<String, String> = emptyMap(),
-            sourceLocation: SourceLocation? = null
+            sourceLoc: com.mezze.language.parsedast.Loc? = null
         ) {
             // Resolve effect hash from row or WellKnownHashes
             fun resolveHash(name: String): String? = effectHashes[name] ?: WellKnownHashes.resolveHash(name)
@@ -1348,7 +1348,7 @@ class ContextBuilder {
                         "$hermeticEffect must be the only effect in scope to prevent data races. " +
                         "Either handle the other effects before entering the $hermeticEffect scope, " +
                         "or restructure the code to separate $hermeticEffect from other effectful operations.",
-                    sourceLocation
+                    sourceLoc
                 )
             }
         }

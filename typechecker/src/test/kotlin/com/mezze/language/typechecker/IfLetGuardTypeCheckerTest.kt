@@ -482,7 +482,7 @@ class IfLetGuardTypeCheckerTest {
         val error = assertFailsWith<TypeCheckError> {
             typeCheck(code)
         }
-        assertNotNull(error.sourceLocation, "Error should have source location")
+        assertNotNull(error.loc, "Error should have source location")
     }
 
     @Test
@@ -503,7 +503,7 @@ class IfLetGuardTypeCheckerTest {
         val error = assertFailsWith<TypeCheckError> {
             typeCheck(code)
         }
-        assertNotNull(error.sourceLocation, "Error should have source location")
+        assertNotNull(error.loc, "Error should have source location")
     }
 
     @Test
@@ -523,7 +523,7 @@ class IfLetGuardTypeCheckerTest {
         val error = assertFailsWith<TypeCheckError> {
             typeCheck(code)
         }
-        assertNotNull(error.sourceLocation, "Error should have source location")
+        assertNotNull(error.loc, "Error should have source location")
         assertTrue(error.message?.contains("doesn't handle all cases") == true ||
                    error.message?.contains("exhaustive") == true,
             "Error should mention exhaustiveness. Actual: ${error.message}")

@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.Loc
 import kotlinx.serialization.Serializable
 
 /**
@@ -31,7 +31,7 @@ data class TypeCheckResult(
 @Serializable
 data class TypeCheckWarning(
     val message: String,
-    val sourceLocation: SourceLocation? = null
+    val loc: Loc? = null
 )
 
 @Serializable

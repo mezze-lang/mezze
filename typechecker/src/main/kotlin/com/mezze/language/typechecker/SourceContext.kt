@@ -1,6 +1,6 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.Loc
 
 /**
  * Utility for formatting error messages with source code context.
@@ -14,7 +14,7 @@ object SourceContext {
     fun formatError(
         errorType: String,
         message: String,
-        location: SourceLocation?,
+        location: Loc?,
         sourceCode: String?,
         suggestion: String? = null,
         additionalInfo: Map<String, String> = emptyMap()
@@ -27,8 +27,8 @@ object SourceContext {
 
         // Location info
         if (location != null) {
-            val fileInfo = location.file ?: "<unknown>"
-            sb.appendLine("   --> $fileInfo:${location.line}:${location.column}")
+            val fileInfo = location.file.ifEmpty { "<unknown>" }
+            sb.appendLine("   --> $fileInfo:${location.startLine}:${location.startCol}")
         }
 
         // Code snippet
@@ -65,12 +65,12 @@ object SourceContext {
      */
     fun formatCodeSnippet(
         sourceCode: String,
-        location: SourceLocation,
+        location: Loc,
         contextLines: Int = 2
     ): String {
         val lines = sourceCode.lines()
-        val errorLine = location.line
-        val errorColumn = location.column
+        val errorLine = location.startLine
+        val errorColumn = location.startCol
 
         // Validate line number
         if (errorLine < 1 || errorLine > lines.size) {
@@ -106,7 +106,10 @@ object SourceContext {
                 // Show error pointer - calculate visual column accounting for tabs
                 val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
-                val underlineLength = location.length ?: 1
+                // Compute underline length from Loc span (same-line only)
+                val underlineLength = if (location.startLine == location.endLine && location.endCol > location.startCol)
+                    location.endCol - location.startCol
+                else 1
                 val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, underlineLength))
                 sb.appendLine("$pointerPadding$pointer")
             } else {
@@ -158,13 +161,13 @@ object SourceContext {
      */
     fun formatCodeSnippetWithSpan(
         sourceCode: String,
-        location: SourceLocation,
+        location: Loc,
         spanLength: Int = 1,
         contextLines: Int = 2
     ): String {
         val lines = sourceCode.lines()
-        val errorLine = location.line
-        val errorColumn = location.column
+        val errorLine = location.startLine
+        val errorColumn = location.startCol
 
         // Validate line number
         if (errorLine < 1 || errorLine > lines.size) {
@@ -215,7 +218,7 @@ object SourceContext {
      * Extract source location from character position
      * Useful for converting parser position to line/column
      */
-    fun positionToLocation(source: String, position: Int, file: String? = null): SourceLocation {
+    fun positionToLocation(source: String, position: Int, file: String? = null): Loc {
         var line = 1
         var column = 1
 
@@ -228,7 +231,7 @@ object SourceContext {
             }
         }
 
-        return SourceLocation(line, column, file)
+        return Loc(file ?: "", line, column, line, column)
     }
 
     /**
@@ -249,13 +252,13 @@ object SourceContext {
     fun simpleError(
         errorType: String,
         message: String,
-        location: SourceLocation?
+        location: Loc?
     ): String {
         val sb = StringBuilder()
         sb.append("❌ $errorType")
         if (location != null) {
-            val fileInfo = location.file?.let { "$it:" } ?: ""
-            sb.append(" at $fileInfo${location.line}:${location.column}")
+            val fileInfo = location.file.let { if (it.isNotEmpty()) "$it:" else "" }
+            sb.append(" at $fileInfo${location.startLine}:${location.startCol}")
         }
         sb.appendLine()
         sb.appendLine("━".repeat(50))

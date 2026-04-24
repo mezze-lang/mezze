@@ -1,25 +1,25 @@
 package com.mezze.language.typechecker
 
-import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.Loc
 
 /**
  * Exception thrown when type checking fails.
  *
  * @param message The error message
- * @param sourceLocation Optional source location where the error occurred
+ * @param loc Optional source location where the error occurred
  * @param errorType Optional error type categorization
  * @param metadata Optional additional metadata about the error
  */
 class TypeCheckError(
     override val message: String,
-    val sourceLocation: SourceLocation? = null,
+    val loc: Loc? = null,
     val errorType: ErrorType = ErrorType.GENERAL,
     val metadata: Map<String, Any> = emptyMap()
 ) : Exception(message) {
 
     override fun toString(): String {
-        return if (sourceLocation != null) {
-            "TypeCheckError at $sourceLocation: $message"
+        return if (loc != null) {
+            "TypeCheckError at $loc: $message"
         } else {
             "TypeCheckError: $message"
         }

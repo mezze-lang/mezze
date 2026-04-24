@@ -1,9 +1,11 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.PrimitiveTypes
+
 
 /**
  * Validates ability declarations and implementations.
@@ -28,7 +30,7 @@ object AbilityValidator {
      * @throws TypeCheckError if validation fails
      */
     fun validateAbilityDeclaration(ability: com.mezze.language.parsedast.ParsedAbilityDecl) {
-        val sourceLocation = SourceLocation(ability.loc.startLine, ability.loc.startCol, ability.loc.file)
+        val sourceLocation = ability.loc
         if (ability.constraints.isNotEmpty() || ability.dependencies.isNotEmpty()) {
             val constraintsList = (ability.constraints.map { "${it.abilityName} ${it.typeParam}" } +
                                    ability.dependencies.map { dep ->
@@ -97,7 +99,7 @@ object AbilityValidator {
         abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
     ) {
-        val sourceLocation = SourceLocation(impl.loc.startLine, impl.loc.startCol, impl.loc.file)
+        val sourceLocation = impl.loc
 
         // Rule 0: Check impl method names don't conflict with target type's record fields.
         validateNoFieldMethodConflict(impl, typeDeclarations, sourceLocation)
@@ -199,7 +201,7 @@ object AbilityValidator {
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
             val extraOpLoc = impl.operations.find { it.name in extraOps }?.loc
-            val extraOpLocation = extraOpLoc?.let { SourceLocation(it.startLine, it.startCol, it.file) }
+            val extraOpLocation = extraOpLoc
             throw TypeCheckError(
                 "Implementation of '${abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
                 "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
@@ -218,7 +220,7 @@ object AbilityValidator {
     private fun validateOperationSignatures(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         abilityDeclaration: com.mezze.language.parsedast.ParsedAbilityDecl,
-        implSourceLocation: SourceLocation
+        implSourceLocation: com.mezze.language.parsedast.Loc
     ) {
         // Build type parameter substitution map
         // e.g., for impl Show for Int: 'a -> Int
@@ -228,7 +230,7 @@ object AbilityValidator {
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
                 ?: continue  // Already caught by missing/extra operation checks
 
-            val opSourceLocation = SourceLocation(implOp.loc.startLine, implOp.loc.startCol, implOp.loc.file)
+            val opSourceLocation = implOp.loc
 
             // Rule 8a: Operation implementation must be a lambda
             if (implOp.implementation !is com.mezze.language.parsedast.ParsedLambda) {
@@ -247,7 +249,7 @@ object AbilityValidator {
                     "using record syntax: {it: ${parsedTypeAnnotationToString(declOp.paramType)}} -> ${parsedTypeAnnotationToString(declOp.returnType)}. " +
                     "Bare type '${parsedTypeAnnotationToString(declOp.paramType)} -> ...' is not supported — " +
                     "Mezze uses record-based calling convention.",
-                    SourceLocation(declOp.loc.startLine, declOp.loc.startCol, declOp.loc.file)
+                    declOp.loc
                 )
             }
 
@@ -259,7 +261,7 @@ object AbilityValidator {
             val actualParamType = implOp.paramType ?: expectedParamType
             val actualReturnType = implOp.returnType ?: expectedReturnType
 
-            val sourceLocation = SourceLocation(implOp.loc.startLine, implOp.loc.startCol, implOp.loc.file)
+            val sourceLocation = implOp.loc
 
             // Check for type variables in concrete implementations
             val allowedTypeVars = impl.abilityTypeArgs
@@ -478,7 +480,7 @@ object AbilityValidator {
         importedAbilityNames: Set<String>,
         importedTypeNames: Set<String>
     ) {
-        val sourceLocation = SourceLocation(impl.loc.startLine, impl.loc.startCol, impl.loc.file)
+        val sourceLocation = impl.loc
 
         // Inherent impls: target type must be defined locally
         if (impl.isInherent) {
@@ -697,7 +699,7 @@ object AbilityValidator {
     private fun validateInherentImplTargetType(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        sourceLocation: SourceLocation
+        sourceLocation: com.mezze.language.parsedast.Loc
     ) {
         for (targetType in impl.targetTypes) {
             val typeName = getTypeNameFromParsedAnnotation(targetType)
@@ -725,7 +727,7 @@ object AbilityValidator {
     private fun validateInherentImplLocality(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         localTypeNames: Set<String>,
-        sourceLocation: SourceLocation
+        sourceLocation: com.mezze.language.parsedast.Loc
     ) {
         for (targetType in impl.targetTypes) {
             val typeName = getTypeNameFromParsedAnnotation(targetType)
@@ -747,7 +749,7 @@ object AbilityValidator {
     private fun validateNoFieldMethodConflict(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        sourceLocation: SourceLocation
+        sourceLocation: com.mezze.language.parsedast.Loc
     ) {
         if (typeDeclarations.isEmpty()) return
 

@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker.scope
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedPerformerOp
 import com.mezze.language.parsedast.ParsedRecordType
 import com.mezze.language.parsedast.ParsedTypeAnnotation
@@ -61,11 +61,11 @@ fun detectScopedEffectMembers(operations: List<ParsedPerformerOp>): ScopedEffect
  */
 sealed class ScopedEffectValidationError {
     abstract val message: String
-    abstract val sourceLocation: SourceLocation?
+    abstract val loc: Loc?
 
     data class InitializeScopeWrongParams(
         val actualParams: ParsedTypeAnnotation?,
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "initialize_scope has wrong signature: expected {} -> { ... }, " +
@@ -75,7 +75,7 @@ sealed class ScopedEffectValidationError {
 
     data class InitializeScopeMustReturnRecord(
         val actualReturnType: ParsedTypeAnnotation?,
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "initialize_scope must return a record type like { field1 = value1, ... }. " +
@@ -84,7 +84,7 @@ sealed class ScopedEffectValidationError {
 
     data class FinalizeScopeWrongParams(
         val actualParams: ParsedTypeAnnotation?,
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "finalize_scope has wrong signature: expected {} -> {}, " +
@@ -94,7 +94,7 @@ sealed class ScopedEffectValidationError {
 
     data class FinalizeScopeMustReturnUnit(
         val actualReturnType: ParsedTypeAnnotation?,
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "finalize_scope must return {} (unit). " +
@@ -102,7 +102,7 @@ sealed class ScopedEffectValidationError {
     }
 
     data class FinalizeScopeWithoutInitialize(
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "finalize_scope requires initialize_scope. " +
@@ -110,7 +110,7 @@ sealed class ScopedEffectValidationError {
     }
 
     data class InitializeScopeWithoutFinalize(
-        override val sourceLocation: SourceLocation?
+        override val loc: Loc?
     ) : ScopedEffectValidationError() {
         override val message: String
             get() = "initialize_scope requires finalize_scope for resource safety. " +
@@ -124,8 +124,7 @@ fun validateInitializeScopeSignature(
     inferredReturnType: MezzeType? = null
 ): List<ScopedEffectValidationError> {
     val errors = mutableListOf<ScopedEffectValidationError>()
-    val loc = operation.loc
-    val location = SourceLocation(line = loc.startLine, column = loc.startCol, file = loc.file)
+    val location = operation.loc
 
     if (!hasFinalizeScope) {
         errors.add(ScopedEffectValidationError.InitializeScopeWithoutFinalize(location))
@@ -155,8 +154,7 @@ fun validateFinalizeScopeSignature(
     hasInitializeScope: Boolean
 ): List<ScopedEffectValidationError> {
     val errors = mutableListOf<ScopedEffectValidationError>()
-    val loc = operation.loc
-    val location = SourceLocation(line = loc.startLine, column = loc.startCol, file = loc.file)
+    val location = operation.loc
 
     if (!hasInitializeScope) {
         errors.add(ScopedEffectValidationError.FinalizeScopeWithoutInitialize(location))

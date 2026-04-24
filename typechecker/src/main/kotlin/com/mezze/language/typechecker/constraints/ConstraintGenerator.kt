@@ -12,8 +12,6 @@ import com.mezze.language.typechecker.scope.ScopedEffectConstants
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.ast.Keywords
 
-/** Convert Loc to SourceLocation for error reporting */
-private fun Loc.toSL(): SourceLocation? = SourceLocation(startLine, startCol, file)
 
 /**
  * Constraint generator - orchestrator for constraint-based type inference.
@@ -151,7 +149,7 @@ class ConstraintGenerator(
                         item.pattern,
                         result.type,
                         constraintContext,
-                        item.value.loc.toSL()
+                        item.value.loc
                     )
 
                     // Check for duplicate bindings BEFORE extending context
@@ -161,7 +159,7 @@ class ConstraintGenerator(
                         .map { name ->
                             ConstraintResult.DuplicateBinding(
                                 name = name,
-                                sourceLocation = null  // TODO: Track source locations for patterns
+                                loc = null  // TODO: Track source locations for patterns
                             )
                         }
 
@@ -268,7 +266,7 @@ class ConstraintGenerator(
                                         preConvertedAnnotationType,
                                         substitution,
                                         varName,
-                                        item.value.loc.toSL(),
+                                        item.value.loc,
                                         abilityConstrainedVars
                                     )
                                 }
@@ -284,7 +282,7 @@ class ConstraintGenerator(
                                         preConvertedAnnotationType,
                                         inferredTypeWithAbilities,
                                         varName,
-                                        item.value.loc.toSL()
+                                        item.value.loc
                                     )
                                 }
 
@@ -308,7 +306,7 @@ class ConstraintGenerator(
                                         resolvedAbilityConstraints,
                                         varName,
                                         substitution,
-                                        item.value.loc.toSL()
+                                        item.value.loc
                                     )
                                 }
                             }
@@ -794,7 +792,7 @@ class ConstraintGenerator(
             binding.pattern,
             bindingType,
             constraintContext,
-            binding.value.loc.toSL()
+            binding.value.loc
         )
 
         // Combine expression constraints with pattern constraints
@@ -896,9 +894,9 @@ class ConstraintGenerator(
         pattern: ParsedPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
-        return patternGenerator.generate(pattern, scrutineeType, context, sourceLocation)
+        return patternGenerator.generate(pattern, scrutineeType, context, sourceLoc)
     }
 
     /**
@@ -1438,14 +1436,14 @@ class ConstraintGenerator(
             throw com.mezze.language.typechecker.TypeCheckError(
                 "initialize_scope requires finalize_scope for resource safety. " +
                 "Add 'finalize_scope = {} -> {}' to clean up resources when the perform block exits.",
-                initializeScope!!.loc.toSL()
+                initializeScope!!.loc
             )
         }
         if (hasFinalizer && !isScopedEffect) {
             throw com.mezze.language.typechecker.TypeCheckError(
                 "finalize_scope requires initialize_scope. " +
                 "Add initialize_scope to create the scope that finalize_scope cleans up.",
-                finalizeScope!!.loc.toSL()
+                finalizeScope!!.loc
             )
         }
 
@@ -1457,7 +1455,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "initialize_scope must return a record type like { field1 = value1, ... }. " +
                         "The returned record becomes the 'scope' variable available in operations.",
-                        initializeScope.loc.toSL()
+                        initializeScope.loc
                     )
                 }
             }
@@ -1467,7 +1465,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "finalize_scope must return {} (unit). " +
                         "It's for cleanup side effects only, not for returning values.",
-                        finalizeScope.loc.toSL()
+                        finalizeScope.loc
                     )
                 }
             }
@@ -1508,7 +1506,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "The 'scope' variable is not available in initialize_scope. " +
                         "The scope is being created here and will only be available in operations and finalize_scope.",
-                        scopeUndefined.sourceLocation
+                        scopeUndefined.loc
                     )
                 }
 
@@ -1636,7 +1634,7 @@ class ConstraintGenerator(
                         "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr. " +
                         "Parameter names and types must match exactly.",
-                        implOp.implementation.loc.toSL()
+                        implOp.implementation.loc
                     )
                 }
             }
@@ -1660,7 +1658,7 @@ class ConstraintGenerator(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong return type: " +
                         "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr.",
-                        implOp.implementation.loc.toSL()
+                        implOp.implementation.loc
                     )
                 }
             }
@@ -1677,7 +1675,7 @@ class ConstraintGenerator(
                     "the same effect '${effectRef.localName}' it is implementing. " +
                     "The impl should handle the effect, not propagate it. " +
                     "Either remove '${effectRef.localName}' from the effect annotation or transform it to a different effect.",
-                    implOp.implementation.loc.toSL()
+                    implOp.implementation.loc
                 )
             }
 
@@ -1771,7 +1769,7 @@ class ConstraintGenerator(
                         }
                         throw com.mezze.language.typechecker.TypeCheckError(
                             errorMessage,
-                            scopeUndefined.sourceLocation
+                            scopeUndefined.loc
                         )
                     }
                     // Skip validation for other undefined variables - let the normal type-checking catch errors later
@@ -1805,7 +1803,7 @@ class ConstraintGenerator(
                                         "Cannot call non-function type as function in impl '${impl.performerName}' " +
                                         "operation '${implOp.name}': type '${com.mezze.language.ast.prettyPrintType(nonFunctionType)}' " +
                                         "is not a function",
-                                        firstError.constraint.sourceLocation ?: implOp.implementation.loc.toSL()
+                                        firstError.constraint.loc ?: implOp.implementation.loc
                                     )
                                 }
                             }
@@ -1826,7 +1824,7 @@ class ConstraintGenerator(
                             if (isClearTypeMismatch) {
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
-                                    firstError.constraint.sourceLocation ?: implOp.implementation.loc.toSL()
+                                    firstError.constraint.loc ?: implOp.implementation.loc
                                 )
                             }
                         }
@@ -1997,7 +1995,7 @@ class ConstraintGenerator(
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
                             "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
-                            expression.loc.toSL()
+                            expression.loc
                         )
                     }
                 }
@@ -2008,7 +2006,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
                         "required by ${if (isOpen) "open" else "closed"} record type { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }}${if (isOpen) ", ..." else ""} }",
-                        expression.loc.toSL()
+                        expression.loc
                     )
                 }
             }
@@ -2036,7 +2034,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
                     "but lambda has $actualParamCount parameter(s)",
-                    expression.loc.toSL()
+                    expression.loc
                 )
             }
         }
@@ -2061,7 +2059,7 @@ class ConstraintGenerator(
         annotationType: MezzeType,
         substitution: com.mezze.language.typechecker.solving.Substitution,
         varName: String,
-        sourceLocation: SourceLocation? = null,
+        sourceLoc: Loc? = null,
         abilityConstrainedTypeVars: Set<TypeVar> = emptySet()
     ) {
         // Collect all type variables from the annotation
@@ -2088,7 +2086,7 @@ class ConstraintGenerator(
                         "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
                         "but implementation forces it to concrete type '${com.mezze.language.ast.prettyPrintType(substituted)}'. " +
                         "The implementation must work for all types, not just specific ones.",
-                        sourceLocation
+                        sourceLoc
                     )
                 }
             }
@@ -2219,7 +2217,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
                     "which are not declared in the annotation.",
-                    expression.loc.toSL()
+                    expression.loc
                 )
             }
 
@@ -2229,7 +2227,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
-                    expression.loc.toSL()
+                    expression.loc
                 )
             }
         }
@@ -2249,7 +2247,7 @@ class ConstraintGenerator(
         annotationType: MezzeType,
         inferredType: MezzeType,
         varName: String,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ) {
         if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
             val annotatedEffects = annotationType.effects?.effects ?: emptySet()
@@ -2261,7 +2259,7 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
-                    sourceLocation
+                    sourceLoc
                 )
             }
         }
@@ -2280,7 +2278,7 @@ class ConstraintGenerator(
         inferredAbilityConstraints: List<Constraint.AbilityRequired>,
         varName: String,
         substitution: com.mezze.language.typechecker.solving.Substitution,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ) {
         if (annotationType !is MezzeType.FunctionType) return
 
@@ -2345,7 +2343,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
                         "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
-                        sourceLocation
+                        sourceLoc
                     )
                 }
             } else {
@@ -2358,7 +2356,7 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
                         "but the annotation does not declare this constraint.",
-                        sourceLocation
+                        sourceLoc
                     )
                 }
             }
@@ -2411,7 +2409,7 @@ class ConstraintGenerator(
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
                                     "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'.",
-                                    expression.loc.toSL()
+                                    expression.loc
                                 )
                             }
                         }
@@ -2435,7 +2433,7 @@ class ConstraintGenerator(
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
                             "which is not used in the implementation.",
-                            expression.loc.toSL()
+                            expression.loc
                         )
                     }
                 }
@@ -2561,5 +2559,5 @@ data class PatternConstraintResult(
     val bindings: Map<String, MezzeType>,
     val constraints: List<Constraint>,
     val warnings: List<String> = emptyList(),
-    val bindingLocations: Map<String, SourceLocation> = emptyMap()
+    val bindingLocations: Map<String, Loc> = emptyMap()
 )

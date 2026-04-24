@@ -25,7 +25,6 @@ import com.mezze.language.typechecker.ErrorType
  */
 class PatternConstraintGenerator {
 
-    private fun Loc.toSL(): SourceLocation? = SourceLocation(startLine, startCol, file)
 
     /**
      * Generate constraints for a pattern.
@@ -33,23 +32,23 @@ class PatternConstraintGenerator {
      * @param pattern The pattern to analyze
      * @param scrutineeType The type of the value being matched
      * @param context The constraint generation context
-     * @param sourceLocation Optional source location for error reporting (from scrutinee expression)
+     * @param sourceLoc Optional source location for error reporting (from scrutinee expression)
      * @return Bindings introduced + constraints on scrutinee
      */
     fun generate(
         pattern: ParsedPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         return when (pattern) {
             is ParsedWildcardPattern -> generateWildcard(pattern, scrutineeType, context)
             is ParsedVariablePattern -> generateVariable(pattern, scrutineeType, context)
-            is ParsedConstructorPattern -> generateConstructor(pattern, scrutineeType, context, sourceLocation)
-            is ParsedRecordPattern -> generateRecord(pattern, scrutineeType, context, sourceLocation)
-            is ParsedLiteralPattern -> generateLiteral(pattern, scrutineeType, context, sourceLocation)
-            is ParsedSeqPattern -> generateSeq(pattern, scrutineeType, context, sourceLocation)
-            is ParsedStringInterpPattern -> generateStringInterpolation(pattern, scrutineeType, context, sourceLocation)
+            is ParsedConstructorPattern -> generateConstructor(pattern, scrutineeType, context, sourceLoc)
+            is ParsedRecordPattern -> generateRecord(pattern, scrutineeType, context, sourceLoc)
+            is ParsedLiteralPattern -> generateLiteral(pattern, scrutineeType, context, sourceLoc)
+            is ParsedSeqPattern -> generateSeq(pattern, scrutineeType, context, sourceLoc)
+            is ParsedStringInterpPattern -> generateStringInterpolation(pattern, scrutineeType, context, sourceLoc)
         }
     }
 
@@ -79,7 +78,7 @@ class PatternConstraintGenerator {
         return PatternConstraintResult(
             bindings = mapOf(pattern.name to scrutineeType),
             constraints = emptyList(),
-            bindingLocations = mapOf(pattern.name to pattern.loc.toSL()!!).filterValues { it != null }.mapValues { it.value!! }
+            bindingLocations = mapOf(pattern.name to pattern.loc!!).filterValues { it != null }.mapValues { it.value!! }
         )
     }
 
@@ -87,7 +86,7 @@ class PatternConstraintGenerator {
         pattern: ParsedLiteralPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         // Literal pattern must match the literal type
         // Example: match x { 42 -> ... }
@@ -104,7 +103,7 @@ class PatternConstraintGenerator {
                 "Cannot match variant type [${constructors.joinToString(", ")}] with $literalDesc. " +
                 "Use a constructor pattern like '$firstConstructor' instead, " +
                 "or use a variable pattern to catch all cases.",
-                sourceLocation,
+                sourceLoc,
                 errorType = ErrorType.INVALID_PATTERN
             )
         }
@@ -115,7 +114,7 @@ class PatternConstraintGenerator {
             throw TypeCheckError(
                 "Cannot match type '${scrutineeType.constructor}' with $literalDesc. " +
                 "Use a constructor pattern instead, or use a variable pattern to catch all cases.",
-                sourceLocation,
+                sourceLoc,
                 errorType = ErrorType.INVALID_PATTERN
             )
         }
@@ -127,7 +126,7 @@ class PatternConstraintGenerator {
             is ParsedLiteralValue.NatValue -> MezzeType.NatType
             is ParsedLiteralValue.FloatValue -> {
                 // Warn about float literal patterns - floating point comparison is imprecise
-                val locationInfo = sourceLocation?.let { " at line ${it.line}" } ?: ""
+                val locationInfo = sourceLoc?.let { " at line ${it.startLine}" } ?: ""
                 warnings.add(
                     "Float literal pattern '${literalValue.value}'$locationInfo may not match due to " +
                     "floating-point precision issues. Consider using a range check or rounding instead."
@@ -147,7 +146,7 @@ class PatternConstraintGenerator {
                 left = scrutineeType,
                 right = literalType,
                 context = "Literal pattern must match scrutinee type",
-                sourceLocation = sourceLocation
+                loc = sourceLoc
             )
         )
 
@@ -190,7 +189,7 @@ class PatternConstraintGenerator {
         pattern: ParsedStringInterpPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         val bindings = mutableMapOf<String, MezzeType>()
         val constraints = mutableListOf<Constraint>()
@@ -201,7 +200,7 @@ class PatternConstraintGenerator {
             throw TypeCheckError(
                 "Cannot match variant type [${constructors.joinToString(", ")}] with a string interpolation pattern. " +
                 "Use a constructor pattern like '${constructors.firstOrNull() ?: "ConstructorName"}' instead.",
-                sourceLocation ?: pattern.loc.toSL(),
+                sourceLoc ?: pattern.loc,
                 errorType = ErrorType.INVALID_PATTERN
             )
         }
@@ -211,7 +210,7 @@ class PatternConstraintGenerator {
             throw TypeCheckError(
                 "Cannot match type '${scrutineeType.constructor}' with a string interpolation pattern. " +
                 "String patterns can only match String type values.",
-                sourceLocation ?: pattern.loc.toSL(),
+                sourceLoc ?: pattern.loc,
                 errorType = ErrorType.INVALID_PATTERN
             )
         }
@@ -222,7 +221,7 @@ class PatternConstraintGenerator {
                 left = scrutineeType,
                 right = MezzeType.StringType,
                 context = "String interpolation pattern requires String type",
-                sourceLocation = sourceLocation ?: pattern.loc.toSL()
+                loc = sourceLoc ?: pattern.loc
             )
         )
 
@@ -254,7 +253,7 @@ class PatternConstraintGenerator {
         pattern: ParsedConstructorPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         // Constructor pattern: Some {val = x}
         // Scrutinee must be variant type with this constructor
@@ -270,7 +269,7 @@ class PatternConstraintGenerator {
                     constructorName = pattern.constructor,
                     payloadType = null,
                     context = "Constructor pattern ${pattern.constructor}",
-                    sourceLocation = sourceLocation,
+                    loc = sourceLoc,
                     isPatternContext = true  // This is a pattern context - variant should be closed
                 )
             )
@@ -292,13 +291,13 @@ class PatternConstraintGenerator {
                     constructorName = pattern.constructor,
                     payloadType = payloadType,
                     context = "Constructor pattern ${pattern.constructor}",
-                    sourceLocation = sourceLocation,
+                    loc = sourceLoc,
                     isPatternContext = true  // This is a pattern context - variant should be closed
                 )
             )
 
             // Generate constraints for payload pattern
-            val payloadResult = generate(payload, payloadType, context, sourceLocation)
+            val payloadResult = generate(payload, payloadType, context, sourceLoc)
             constraints.addAll(payloadResult.constraints)
 
             return PatternConstraintResult(
@@ -317,13 +316,13 @@ class PatternConstraintGenerator {
         pattern: ParsedRecordPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         // Record pattern: {x, y = z, ...}
         // Scrutinee must be record type with these fields
 
         val bindings = mutableMapOf<String, MezzeType>()
-        val bindingLocations = mutableMapOf<String, SourceLocation>()
+        val bindingLocations = mutableMapOf<String, Loc>()
         val constraints = mutableListOf<Constraint>()
 
         // STRICT RECORD DESTRUCTURING: If pattern is not open (no ...), all fields must be covered
@@ -343,7 +342,7 @@ class PatternConstraintGenerator {
                     throw TypeCheckError(
                         "Non-exhaustive record pattern: missing field${if (uncoveredFields.size > 1) "s" else ""} $fieldList. " +
                         "Use { ${patternFieldNames.joinToString(", ")}, ... } to ignore extra fields.",
-                        sourceLocation
+                        sourceLoc
                     )
                 }
             } else {
@@ -353,7 +352,7 @@ class PatternConstraintGenerator {
                         recordType = scrutineeType,
                         patternFields = patternFieldNames,
                         context = "Closed record pattern requires all fields to be matched",
-                        sourceLocation = sourceLocation
+                        loc = sourceLoc
                     )
                 )
             }
@@ -369,20 +368,20 @@ class PatternConstraintGenerator {
                     fieldName = entry.name,
                     fieldType = fieldType,
                     context = "Record pattern field ${entry.name}",
-                    sourceLocation = sourceLocation
+                    loc = sourceLoc
                 )
             )
 
             // Generate constraints for the field pattern
             // For punning {n}, entry.pattern is null - use entry's source location
             val fieldPattern = entry.pattern ?: ParsedVariablePattern(entry.name, entry.loc)
-            val fieldResult = generate(fieldPattern, fieldType, context, sourceLocation)
+            val fieldResult = generate(fieldPattern, fieldType, context, sourceLoc)
 
             bindings.putAll(fieldResult.bindings)
             fieldResult.bindingLocations.forEach { (name, loc) -> bindingLocations[name] = loc }
             // For punning patterns, use the entry's source location
             if (entry.pattern == null) {
-                val entryLoc = entry.loc.toSL()
+                val entryLoc = entry.loc
                 if (entryLoc != null) {
                     bindingLocations[entry.name] = entryLoc
                 }
@@ -405,7 +404,7 @@ class PatternConstraintGenerator {
         pattern: ParsedSeqPattern,
         scrutineeType: MezzeType,
         context: ConstraintContext,
-        sourceLocation: SourceLocation? = null
+        sourceLoc: Loc? = null
     ): PatternConstraintResult {
         // Seq pattern: [x, y, z] or [head, ...tail]
         // Scrutinee must be seq type
@@ -420,13 +419,13 @@ class PatternConstraintGenerator {
                 left = scrutineeType,
                 right = MezzeType.SeqType(elementType),
                 context = "Seq pattern requires seq type",
-                sourceLocation = sourceLocation
+                loc = sourceLoc
             )
         )
 
         // Generate constraints for each element pattern
         for (elementPattern in pattern.elements) {
-            val elementResult = generate(elementPattern, elementType, context, sourceLocation)
+            val elementResult = generate(elementPattern, elementType, context, sourceLoc)
             bindings.putAll(elementResult.bindings)
             constraints.addAll(elementResult.constraints)
         }

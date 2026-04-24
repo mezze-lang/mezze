@@ -790,7 +790,7 @@ class StringInterpolationPatternTypeCheckTest {
 
         val error = assertTypeCheckFails(code)
         // Error should have source location
-        assertNotNull(error.sourceLocation, "Error should have source location")
+        assertNotNull(error.loc, "Error should have source location")
         // Error message should mention the variant type
         assertTrue(error.message?.contains("Color") == true || error.message?.contains("variant") == true,
             "Error message should mention Color or variant. Actual: ${error.message}")
@@ -806,6 +806,6 @@ class StringInterpolationPatternTypeCheckTest {
         """.trimIndent()
 
         val error = assertTypeCheckFails(code)
-        assertNotNull(error.sourceLocation, "Error should have source location")
+        assertNotNull(error.loc, "Error should have source location")
     }
 }

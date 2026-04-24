@@ -154,7 +154,7 @@ class TypeChecker(
     data class TypeCheckError(
         val phase: String,
         val message: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     )
 
     /**
@@ -164,7 +164,7 @@ class TypeChecker(
      */
     data class TypeCheckWarning(
         val message: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     )
 
 
@@ -328,7 +328,7 @@ class TypeChecker(
                 TypeCheckError(
                     phase = "Constraint Solving",
                     message = error.message,
-                    sourceLocation = error.constraint.sourceLocation
+                    loc = error.constraint.loc
                 )
             }
             return TypeCheckResult.Failure(errors)
@@ -390,7 +390,7 @@ class TypeChecker(
                 TypeCheckError(
                     phase = "Validation",
                     message = message,
-                    sourceLocation = undefinedVar.sourceLocation
+                    loc = undefinedVar.loc
                 )
             }
             return TypeCheckResult.Failure(errors)
@@ -403,7 +403,7 @@ class TypeChecker(
                 TypeCheckError(
                     phase = "Validation",
                     message = "Duplicate binding: '${duplicate.name}' is already defined in this scope",
-                    sourceLocation = duplicate.sourceLocation
+                    loc = duplicate.loc
                 )
             }
             return TypeCheckResult.Failure(errors)
@@ -413,12 +413,12 @@ class TypeChecker(
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
             TypeCheckWarning(
                 message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
-                sourceLocation = unused.sourceLocation
+                loc = unused.loc
             )
         }
 
         val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
-            TypeCheckWarning(message = warningMsg, sourceLocation = null)
+            TypeCheckWarning(message = warningMsg, loc = null)
         }
 
         val allConstraints = constraintResults.values.flatMap { it.constraints }
@@ -437,7 +437,7 @@ class TypeChecker(
                     TypeCheckError(
                         phase = "Constraint Solving",
                         message = error.message,
-                        sourceLocation = error.constraint.sourceLocation
+                        loc = error.constraint.loc
                     )
                 }
                 return TypeCheckResult.Failure(errors)
@@ -445,7 +445,7 @@ class TypeChecker(
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
                 val warnings = solveResult.warnings.map { msg ->
-                    TypeCheckWarning(message = msg, sourceLocation = null)
+                    TypeCheckWarning(message = msg, loc = null)
                 }.toMutableList()
 
                 warnings.addAll(unusedVarWarnings)
@@ -489,14 +489,14 @@ class TypeChecker(
                             TypeCheckError(
                                 phase = "Validation",
                                 message = error.message(),
-                                sourceLocation = error.location()
+                                loc = error.location()
                             )
                         }
                         return TypeCheckResult.Failure(errors)
                     }
                     is ValidationResult.Success -> {
                         constraintValidation.warnings.forEach { msg ->
-                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                            warnings.add(TypeCheckWarning(message = msg, loc = null))
                         }
                     }
                 }
@@ -651,7 +651,7 @@ class TypeChecker(
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
                     val mapped = v2ValidationResult.errors.map { error ->
-                        TypeCheckError(phase = "Validation", message = error.message(), sourceLocation = error.location())
+                        TypeCheckError(phase = "Validation", message = error.message(), loc = error.location())
                     }
                     return TypeCheckResult.Failure(mapped)
                 }
@@ -662,7 +662,7 @@ class TypeChecker(
                 }
 
                 val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
-                    v2ValidationResult.warnings.map { TypeCheckWarning(message = it, sourceLocation = null) }
+                    v2ValidationResult.warnings.map { TypeCheckWarning(message = it, loc = null) }
                 } else emptyList()
                 return TypeCheckResult.Success(
                     substitution = substitution,
@@ -1047,7 +1047,7 @@ class TypeChecker(
             is TypeCheckResult.Success -> {
                 val resolvedImports = buildResolvedImports(result.importContext)
                 val structuredWarnings = result.warnings.map { warning ->
-                    com.mezze.language.typechecker.TypeCheckWarning(warning.message, warning.sourceLocation)
+                    com.mezze.language.typechecker.TypeCheckWarning(warning.message, warning.loc)
                 }
                 com.mezze.language.typechecker.TypeCheckResult(
                     resolvedImports = resolvedImports,
@@ -1063,7 +1063,7 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
-                throw TypeCheckError(error.message, error.sourceLocation)
+                throw TypeCheckError(error.message, error.loc)
             }
         }
     }
@@ -1114,7 +1114,7 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
-                throw TypeCheckError(error.message, error.sourceLocation)
+                throw TypeCheckError(error.message, error.loc)
             }
         }
     }

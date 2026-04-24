@@ -116,7 +116,7 @@ sealed class ModuleError(override val message: String) : Exception(message) {
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null,
+        val loc: com.mezze.language.parsedast.Loc? = null,
         val availableExports: List<String> = emptyList()
     ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
 
@@ -126,13 +126,13 @@ sealed class ModuleError(override val message: String) : Exception(message) {
     data class PrivateExport(
         val modulePath: String,
         val exportName: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.")
 
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     ) : ModuleError(
         if (fromModule.isEmpty())
             "Cannot access internal module '$toModule' from outside its package"
@@ -172,7 +172,7 @@ sealed class ModuleTypeCheckResult {
         val modulePath: String,
         val phase: String,
         val message: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     )
 }
 
@@ -305,7 +305,7 @@ data class ImportedBinding(
     val modulePath: String,            // Source module path
     val type: MezzeType,               // Type of the binding
     val isQualified: Boolean = false,  // true for qualified imports (module::name)
-    val sourceLocation: SourceLocation? = null,
+    val loc: com.mezze.language.parsedast.Loc? = null,
     val contentHash: String            // Content hash hex string for content-addressed lookup (REQUIRED)
 )
 

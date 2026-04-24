@@ -212,8 +212,8 @@ class MezzeTextDocumentService(
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
                     // Collect warnings
                     result.warnings.forEach { warning ->
-                        val line = warning.sourceLocation?.line?.minus(1) ?: 0
-                        val column = warning.sourceLocation?.column?.minus(1) ?: 0
+                        val line = warning.loc?.startLine?.minus(1) ?: 0
+                        val column = warning.loc?.startCol?.minus(1) ?: 0
                         diagnostics.add(createDiagnostic(
                             message = warning.message,
                             severity = DiagnosticSeverity.Warning,
@@ -231,8 +231,8 @@ class MezzeTextDocumentService(
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
                     result.errors.forEach { error ->
-                        val line = error.sourceLocation?.line?.minus(1) ?: 0
-                        val column = error.sourceLocation?.column?.minus(1) ?: 0
+                        val line = error.loc?.startLine?.minus(1) ?: 0
+                        val column = error.loc?.startCol?.minus(1) ?: 0
                         diagnostics.add(createDiagnostic(
                             message = error.message,
                             severity = DiagnosticSeverity.Error,
@@ -318,12 +318,12 @@ class MezzeTextDocumentService(
      * Create a diagnostic from a recovery error.
      */
     private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
-        val loc = error.sourceLocation
+        val loc = error.loc
         return createDiagnostic(
             message = error.message,
             severity = DiagnosticSeverity.Error,
-            line = (loc?.line ?: 1) - 1,
-            column = (loc?.column ?: 1) - 1,
+            line = (loc?.startLine ?: 1) - 1,
+            column = (loc?.startCol ?: 1) - 1,
             code = error.phase
         )
     }
@@ -339,12 +339,12 @@ class MezzeTextDocumentService(
      * Create a diagnostic from a type error.
      */
     private fun createDiagnosticFromTypeError(error: TypeCheckError): Diagnostic {
-        val loc = error.sourceLocation
+        val loc = error.loc
         return createDiagnostic(
             message = error.message ?: "Type error",
             severity = DiagnosticSeverity.Error,
-            line = (loc?.line ?: 1) - 1,
-            column = (loc?.column ?: 1) - 1,
+            line = (loc?.startLine ?: 1) - 1,
+            column = (loc?.startCol ?: 1) - 1,
             code = error.errorType.name
         )
     }
@@ -1484,11 +1484,10 @@ class MezzeTextDocumentService(
             result.typedModule?.decls
                 ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
                 ?.forEach { decl ->
-                    val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
                     val symbol = createDocumentSymbol(
                         name = decl.name,
                         kind = SymbolKind.Function,
-                        location = loc,
+                        location = decl.loc,
                         detail = prettyPrintType(decl.scheme.type)
                     )
                     if (symbol != null) {
@@ -1498,11 +1497,10 @@ class MezzeTextDocumentService(
 
             // Add effect symbols from parsed module
             state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach { decl ->
-                val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
                 val symbol = createDocumentSymbol(
                     name = decl.name,
                     kind = SymbolKind.Interface,
-                    location = loc
+                    location = decl.loc
                 )
                 if (symbol != null) {
                     symbols.add(Either.forRight(symbol))
@@ -1511,11 +1509,10 @@ class MezzeTextDocumentService(
 
             // Add ability symbols from parsed module
             state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach { decl ->
-                val loc = SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
                 val symbol = createDocumentSymbol(
                     name = decl.name,
                     kind = SymbolKind.Interface,
-                    location = loc
+                    location = decl.loc
                 )
                 if (symbol != null) {
                     symbols.add(Either.forRight(symbol))
@@ -1529,14 +1526,14 @@ class MezzeTextDocumentService(
     private fun createDocumentSymbol(
         name: String,
         kind: SymbolKind,
-        location: SourceLocation?,
+        location: Loc?,
         detail: String? = null
     ): DocumentSymbol? {
         if (location == null) return null
 
         val range = Range(
-            Position(location.line - 1, location.column - 1),
-            Position(location.line - 1, location.column + name.length - 1)
+            Position(location.startLine - 1, location.startCol - 1),
+            Position(location.startLine - 1, location.startCol + name.length - 1)
         )
 
         return DocumentSymbol(name, kind, range, range, detail, emptyList())

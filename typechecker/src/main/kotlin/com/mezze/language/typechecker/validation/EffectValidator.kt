@@ -204,7 +204,7 @@ class EffectValidator(
                     expected = MezzeType.IntType,  // Placeholder
                     actual = MezzeType.IntType,     // Placeholder
                     context = "Operation '$name' is defined $count times in effect '${effectDecl.name}'. Each operation must have a unique name.",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -238,7 +238,7 @@ class EffectValidator(
                     context = "Effect '${implDecl.effect.localName}' declares associated types [$typesList] " +
                             "but implementation '${implDecl.performerName}' does not provide bindings. " +
                             "Use: impl ${implDecl.effect.localName} for ${implDecl.performerName} having ${effectAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -253,7 +253,7 @@ class EffectValidator(
                     context = "Effect '${implDecl.effect.localName}' declares associated types ${effectAssociatedTypes.joinToString(", ")} " +
                             "but implementation '${implDecl.performerName}' is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                             "All associated types must be bound in the implementation.",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -273,7 +273,7 @@ class EffectValidator(
                     context = "Implementation '${implDecl.performerName}' provides bindings for ${extraBindings.joinToString(", ")} " +
                             "but effect '${implDecl.effect.localName}' $declaredPart. " +
                             "Remove the extra bindings or add them to the effect declaration.",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -296,7 +296,7 @@ class EffectValidator(
                     context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "is missing required ${if (missingOps.size == 1) "operation" else "operations"}: $missing. " +
                             "Add: $example = {args} -> ...",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -314,7 +314,7 @@ class EffectValidator(
                     context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "has extra ${if (extraOps.size == 1) "operation" else "operations"} not in effect: $extra. " +
                             "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the effect declaration.",
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }

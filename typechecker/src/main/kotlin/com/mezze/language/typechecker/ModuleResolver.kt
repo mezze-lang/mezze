@@ -214,7 +214,7 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     ) : ModuleError(
         if (fromModule.isEmpty())
             "Cannot access internal module '$toModule' from outside its package"
@@ -225,7 +225,7 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null,
+        val loc: com.mezze.language.parsedast.Loc? = null,
         val availableExports: List<String> = emptyList()
     ) : ModuleError(buildString {
         append("Export '$exportName' not found in module '$modulePath'")
@@ -241,7 +241,7 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class PrivateExport(
         val modulePath: String,
         val exportName: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        val loc: com.mezze.language.parsedast.Loc? = null
     ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.")
 
     data class DeprecatedCoreModule(val modulePath: String, val suggestion: String) :

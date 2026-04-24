@@ -1,7 +1,7 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.SourceLocation
+import com.mezze.language.parsedast.Loc
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.typechecker.util.StringDistance
 
@@ -36,7 +36,7 @@ sealed interface ValidationError {
     /**
      * Get source location if available.
      */
-    fun location(): SourceLocation?
+    fun location(): Loc?
 
     /**
      * Ability constraint not satisfied.
@@ -48,7 +48,7 @@ sealed interface ValidationError {
         val abilityName: String,
         val requiredBy: String? = null,
         val availableAbilities: List<String> = emptyList(),
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             val typeName = formatType(type)
@@ -61,7 +61,7 @@ sealed interface ValidationError {
             append(". To enable this, implement: impl $abilityName for $typeName where { ... }")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
 
         private fun friendlyAbilityName(name: String): String = when (name) {
             "NumAdd" -> "addition (+)"
@@ -87,7 +87,7 @@ sealed interface ValidationError {
         val effectName: String,
         @Deprecated("Unused — was for v1 PerformExpression") val usedBy: Any? = null,
         val availableHandlers: List<String> = emptyList(),
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Effect '$effectName' is not handled")
@@ -100,7 +100,7 @@ sealed interface ValidationError {
             append(". Add a handler or propagate the effect in the function signature.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -112,7 +112,7 @@ sealed interface ValidationError {
         val expression: Any? = null,
         val coveredConstructors: List<String>,
         val missingConstructors: List<String>,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("This match expression doesn't handle all cases")
@@ -123,7 +123,7 @@ sealed interface ValidationError {
             append(". Add the missing patterns or use `_ ->` as a catch-all.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -134,14 +134,14 @@ sealed interface ValidationError {
     data class UnreachablePattern(
         val pattern: Any? = null,
         val reason: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Unreachable pattern")
             append(": $reason")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -153,7 +153,7 @@ sealed interface ValidationError {
         val missingFields: List<String>,
         val pattern: Any? = null,
         val recordType: MezzeType,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Record pattern is missing fields")
@@ -164,7 +164,7 @@ sealed interface ValidationError {
             append(". Either add the missing fields or use `{..}` to ignore extra fields.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -176,13 +176,13 @@ sealed interface ValidationError {
         val constructor: String,
         val expectedArity: Int,
         val actualArity: Int,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String {
             return "Type constructor '$constructor' expects $expectedArity type arguments, but got $actualArity"
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -193,13 +193,13 @@ sealed interface ValidationError {
     data class InvalidRecursiveType(
         val typeName: String,
         val reason: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String {
             return "Invalid recursive type '$typeName': $reason"
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -211,7 +211,7 @@ sealed interface ValidationError {
         val recordType: MezzeType,
         val fieldName: String,
         val availableFields: List<String>,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("'$fieldName' is not a field of this record")
@@ -221,7 +221,7 @@ sealed interface ValidationError {
             }
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -233,7 +233,7 @@ sealed interface ValidationError {
         val variantType: MezzeType,
         val constructorName: String,
         val availableConstructors: List<String>,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("'$constructorName' is not a valid constructor for this type")
@@ -243,7 +243,7 @@ sealed interface ValidationError {
             }
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -254,7 +254,7 @@ sealed interface ValidationError {
     data class VariableNotInScope(
         val variableName: String,
         val similarNames: List<String> = emptyList(),
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("'$variableName' is not defined")
@@ -266,7 +266,7 @@ sealed interface ValidationError {
             }
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -277,7 +277,7 @@ sealed interface ValidationError {
     data class AbilityUsedAsValue(
         val abilityName: String,
         val context: String? = null,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Ability '$abilityName' cannot be used as a value")
@@ -287,7 +287,7 @@ sealed interface ValidationError {
             append(". Did you mean to access a method like $abilityName.method_name?")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -299,7 +299,7 @@ sealed interface ValidationError {
         val expected: MezzeType,
         val actual: MezzeType,
         val context: String? = null,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Type mismatch")
@@ -309,7 +309,7 @@ sealed interface ValidationError {
             append(": expected ${formatType(expected)}, but got ${formatType(actual)}")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -321,7 +321,7 @@ sealed interface ValidationError {
         val bindingName: String,
         val annotatedType: MezzeType,
         val inferredType: MezzeType,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Type annotation for '$bindingName' doesn't match inferred type: ")
@@ -329,7 +329,7 @@ sealed interface ValidationError {
             append("but inferred ${prettyPrintType(inferredType)}")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -339,13 +339,13 @@ sealed interface ValidationError {
      */
     data class CircularDependency(
         val typeNames: List<String>,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String {
             return "Circular dependency in type definitions: ${typeNames.joinToString(" -> ")}"
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -356,14 +356,14 @@ sealed interface ValidationError {
     data class OrphanInstance(
         val abilityName: String,
         val typeName: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String {
             return "Orphan instance: implementing ability '$abilityName' for type '$typeName' from different module. " +
                    "Implement in the module that defines either the ability or the type."
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -374,8 +374,8 @@ sealed interface ValidationError {
     data class OverlappingInstance(
         val abilityName: String,
         val typeName: String,
-        val existingLocation: SourceLocation? = null,
-        val sourceLocation: SourceLocation? = null
+        val existingLocation: Loc? = null,
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Overlapping instance: ability '$abilityName' already implemented for type '$typeName'")
@@ -384,7 +384,7 @@ sealed interface ValidationError {
             }
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -396,7 +396,7 @@ sealed interface ValidationError {
         val abilityName: String,
         val typeName: String,
         val context: String? = null,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("No implementation found for ability '$abilityName' with type '$typeName'")
@@ -406,7 +406,7 @@ sealed interface ValidationError {
             append(". You need to define: impl $abilityName for $typeName where { ... }")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -419,7 +419,7 @@ sealed interface ValidationError {
         val effectName: String,
         val expectedType: MezzeType,
         val actualType: MezzeType,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Handler type mismatch for effect '$effectName':\n")
@@ -429,7 +429,7 @@ sealed interface ValidationError {
             append("throw calls in the expression throw values of type ${formatType(expectedType)}")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -440,13 +440,13 @@ sealed interface ValidationError {
     data class UnitVariantPayloadMismatch(
         val constructorName: String,
         val variantType: MezzeType,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Constructor '$constructorName' has no payload, but pattern attempts to destructure it")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -460,7 +460,7 @@ sealed interface ValidationError {
     data class TopLevelPerformedEffects(
         val bindingName: String,
         val effectRow: MezzeType.EffectRow,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Top-level value '$bindingName' cannot have performed effects <*>. ")
@@ -468,7 +468,7 @@ sealed interface ValidationError {
             append("Consider wrapping this in a function: let $bindingName = {} -> ...")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -481,7 +481,7 @@ sealed interface ValidationError {
      */
     data class TopLevelExpressionPerformedEffects(
         val effectRow: MezzeType.EffectRow,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Bare expression with performed effects <*> is not allowed at module level. ")
@@ -489,7 +489,7 @@ sealed interface ValidationError {
             append("Move this expression inside a function body.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -504,7 +504,7 @@ sealed interface ValidationError {
     data class MainFunctionTypeError(
         val actualType: MezzeType,
         val reason: String,
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("'main' must have type {} -> {} <*>, but ")
@@ -512,7 +512,7 @@ sealed interface ValidationError {
             append(". The main function should perform all effects using 'perform'.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 
     /**
@@ -526,14 +526,14 @@ sealed interface ValidationError {
     data class MissingContentHash(
         val identifierName: String,
         val kind: String,  // "identifier", "ability call", "effect handler", etc.
-        val sourceLocation: SourceLocation? = null
+        val loc: Loc? = null
     ) : ValidationError {
         override fun message(): String = buildString {
             append("Internal error: $kind '$identifierName' has no content hash. ")
             append("This is a bug in the typechecker - content hashes should be populated for all top-level/imported bindings.")
         }
 
-        override fun location() = sourceLocation
+        override fun location() = loc
     }
 }
 

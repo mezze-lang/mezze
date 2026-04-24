@@ -45,7 +45,7 @@ class TypedAstBuilder(
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, String>,
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
-    private val tailCallLocations: Set<SourceLocation>,
+    private val tailCallLocations: Set<com.mezze.language.parsedast.Loc>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
     private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap()
 ) {
@@ -1325,11 +1325,8 @@ class TypedAstBuilder(
      * Check if a source location is a tail call site.
      */
     private fun isTailCallLocation(loc: Loc): Boolean {
-        // Match against v1 SourceLocation in tailCallLocations
-        // TODO: Migrate tailCallLocations to use Loc directly
-        return tailCallLocations.any { tl ->
-            tl.line == loc.startLine && tl.column == loc.startCol &&
-                (tl.file == null || tl.file == loc.file)
+        return tailCallLocations.contains(loc) || tailCallLocations.any { tl ->
+            tl.startLine == loc.startLine && tl.startCol == loc.startCol && tl.file == loc.file
         }
     }
 

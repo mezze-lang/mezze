@@ -86,7 +86,7 @@ class TypeValidator(
                         ValidationError.VariableNotInScope(
                             variableName = undefinedVar.name,
                             similarNames = similarNames,
-                            sourceLocation = undefinedVar.sourceLocation
+                            loc = undefinedVar.loc
                         )
                     )
                 }
@@ -399,7 +399,7 @@ class TypeValidator(
                                 type = type,
                                 abilityName = constraint.abilityName,
                                 requiredBy = constraint.context,
-                                sourceLocation = constraint.sourceLocation
+                                loc = constraint.loc
                             )
                         )
                     }
@@ -452,7 +452,7 @@ class TypeValidator(
                                     variantType = variantType,
                                     constructorName = constraint.constructorName,
                                     availableConstructors = validConstructors,
-                                    sourceLocation = constraint.sourceLocation
+                                    loc = constraint.loc
                                 )
                             )
                         }
@@ -920,7 +920,7 @@ class TypeValidator(
                             effectName = effect,
                             usedBy = null,
                             availableHandlers = allowedEffects.toList(),
-                            sourceLocation = null
+                            loc = null
                         )
                     )
                 }
@@ -958,7 +958,7 @@ class TypeValidator(
                     bindingName = bindingName,
                     annotatedType = annotatedType,
                     inferredType = finalType,
-                    sourceLocation = null
+                    loc = null
                 )
             )
         }
@@ -992,11 +992,7 @@ class TypeValidator(
                         ValidationError.TopLevelPerformedEffects(
                             bindingName = decl.variableName,
                             effectRow = finalType.effects,
-                            sourceLocation = SourceLocation(
-                                file = decl.loc.file,
-                                line = decl.loc.startLine,
-                                column = decl.loc.startCol
-                            )
+                            loc = decl.loc
                         )
                     )
                 }
@@ -1018,13 +1014,13 @@ class TypeValidator(
     /**
      * Validate that main has the correct type: {} -> {} <*>
      */
-    fun validateMainType(type: MezzeType, sourceLocation: SourceLocation? = null): ValidationError? {
+    fun validateMainType(type: MezzeType, mainLoc: com.mezze.language.parsedast.Loc? = null): ValidationError? {
         // main must be a function
         if (type !is MezzeType.FunctionType) {
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "it is not a function (got ${prettyPrintType(type)})",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1034,7 +1030,7 @@ class TypeValidator(
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "parameter type is ${prettyPrintType(paramType)}, expected {}",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1044,7 +1040,7 @@ class TypeValidator(
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "return type is ${prettyPrintType(returnType)}, expected {}",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1054,7 +1050,7 @@ class TypeValidator(
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "it is pure (no effects). main should perform effects using 'perform'",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1064,7 +1060,7 @@ class TypeValidator(
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "it has unhandled effects <$unhandledEffects>. Use 'perform' to handle all effects in main",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1074,7 +1070,7 @@ class TypeValidator(
             return ValidationError.MainFunctionTypeError(
                 actualType = type,
                 reason = "it has unhandled effects <$unhandledEffects, *>. All effects must be handled in main",
-                sourceLocation = sourceLocation
+                loc = mainLoc
             )
         }
 
@@ -1332,7 +1328,7 @@ class TypeValidator(
                         ValidationError.AbilityUsedAsValue(
                             abilityName = constructorName,
                             context = context,
-                            sourceLocation = null
+                            loc = null
                         )
                     )
                 }
@@ -1379,7 +1375,7 @@ class TypeValidator(
                             errors.add(ValidationError.UnitVariantPayloadMismatch(
                                 constructorName = pattern.constructor,
                                 variantType = expandedType,
-                                sourceLocation = SourceLocation(case.body.loc.startLine, case.body.loc.startCol, case.body.loc.file)
+                                loc = case.body.loc
                             ))
                         }
                     }
@@ -1409,7 +1405,7 @@ class TypeValidator(
                 errors.add(ValidationError.NonExhaustiveMatch(
                     coveredConstructors = coveredConstructors.toList(),
                     missingConstructors = listOf("_ (wildcard required for open variant)"),
-                    sourceLocation = SourceLocation(matchExpr.loc.startLine, matchExpr.loc.startCol, matchExpr.loc.file)
+                    loc = matchExpr.loc
                 ))
             }
         } else {
@@ -1417,7 +1413,7 @@ class TypeValidator(
                 errors.add(ValidationError.NonExhaustiveMatch(
                     coveredConstructors = coveredConstructors.toList(),
                     missingConstructors = uncoveredConstructors.toList(),
-                    sourceLocation = SourceLocation(matchExpr.loc.startLine, matchExpr.loc.startCol, matchExpr.loc.file)
+                    loc = matchExpr.loc
                 ))
             }
             if (hasWildcard && uncoveredConstructors.isEmpty()) {
@@ -1429,7 +1425,7 @@ class TypeValidator(
                             errors.add(ValidationError.UnreachablePattern(
                                 reason = "All constructors of this closed variant are already matched: " +
                                     "${allConstructors.sorted().joinToString(", ")}. This pattern will never execute.",
-                                sourceLocation = SourceLocation(case.body.loc.startLine, case.body.loc.startCol, case.body.loc.file)
+                                loc = case.body.loc
                             ))
                         }
                     }
@@ -1458,7 +1454,7 @@ class TypeValidator(
                     ValidationError.UnreachablePattern(
                         pattern = case.patterns.firstOrNull(),
                         reason = "Previous pattern already matches all cases",
-                        sourceLocation = SourceLocation(case.loc.startLine, case.loc.startCol, case.loc.file)
+                        loc = case.loc
                     )
                 )
                 continue
@@ -1537,7 +1533,7 @@ class TypeValidator(
                         constructor = typeApp.constructor,
                         expectedArity = expectedArity,
                         actualArity = typeApp.args.size,
-                        sourceLocation = null
+                        loc = null
                     )
                 )
             )
@@ -1644,7 +1640,7 @@ class TypeValidator(
                     missingFields = missingFields.sorted(),
                     pattern = pattern,
                     recordType = recordType,
-                    sourceLocation = SourceLocation(pattern.loc.startLine, pattern.loc.startCol, pattern.loc.file)
+                    loc = pattern.loc
                 )
             )
         } else {
@@ -2016,7 +2012,7 @@ class TypeValidator(
                             effectName = effectName,
                             expectedType = handlerType,
                             actualType = thrownType,
-                            sourceLocation = SourceLocation(expr.loc.startLine, expr.loc.startCol, expr.loc.file)
+                            loc = expr.loc
                         )
                     )
                 }

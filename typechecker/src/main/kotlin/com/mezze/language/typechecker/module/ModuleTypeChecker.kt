@@ -284,7 +284,7 @@ class ModuleTypeChecker(
                             modulePath = module.modulePath,
                             phase = error.phase,
                             message = error.message,
-                            sourceLocation = error.sourceLocation
+                            loc = error.loc
                         )
                     }
                     ModuleTypeCheckResult.Failure(errors)

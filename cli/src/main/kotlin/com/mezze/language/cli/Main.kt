@@ -693,18 +693,18 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         // Pretty-print internal module access error with source context
         println("❌ Module Error [Internal Module Access]")
         println("━".repeat(50))
-        e.sourceLocation?.let { loc ->
+        e.loc?.let { loc ->
             println()
-            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+            println("   --> ${loc.file.ifEmpty { file.name }}:${loc.startLine}:${loc.startCol}")
             // Show source code snippet
             val lines = source.lines()
-            if (loc.line > 0 && loc.line <= lines.size) {
-                val lineNum = loc.line
+            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                val lineNum = loc.startLine
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = loc.length ?: 1
-                println("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))} here")
+                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                println("    | ${" ".repeat(loc.startCol - 1)}${"^".repeat(maxOf(1, underlineLen))} here")
                 println("    |")
             }
         }
@@ -729,16 +729,16 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         // Pretty-print private export error with source context
         println("❌ Module Error [Private Item]")
         println("━".repeat(50))
-        e.sourceLocation?.let { loc ->
-            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+        e.loc?.let { loc ->
+            println("   --> ${loc.file.ifEmpty { file.name }}:${loc.startLine}:${loc.startCol}")
             val lines = source.lines()
-            if (loc.line > 0 && loc.line <= lines.size) {
-                val lineNum = loc.line
+            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                val lineNum = loc.startLine
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = loc.length ?: 1
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -753,17 +753,17 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         // Pretty-print export not found error with source context
         println("❌ Module Error [Export Not Found]")
         println("━".repeat(50))
-        e.sourceLocation?.let { loc ->
-            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+        e.loc?.let { loc ->
+            println("   --> ${loc.file.ifEmpty { file.name }}:${loc.startLine}:${loc.startCol}")
             // Show source code snippet
             val lines = source.lines()
-            if (loc.line > 0 && loc.line <= lines.size) {
-                val lineNum = loc.line
+            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                val lineNum = loc.startLine
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = loc.length ?: 1
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -1135,9 +1135,9 @@ private fun handleExecCommand(args: List<String>) {
         val formattedError = SourceContext.formatError(
             errorType = "Type Error",
             message = e.message ?: "Unknown error",
-            location = e.sourceLocation?.let { loc ->
-                if (loc.file == null && fileName != null) {
-                    com.mezze.language.ast.SourceLocation(loc.line, loc.column, fileName)
+            location = e.loc?.let { loc ->
+                if (loc.file.isEmpty() && fileName != null) {
+                    com.mezze.language.parsedast.Loc(fileName, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
                 } else {
                     loc
                 }
@@ -1150,16 +1150,16 @@ private fun handleExecCommand(args: List<String>) {
         // Pretty-print private export error with source context
         println("❌ Module Error [Private Item]")
         println("━".repeat(50))
-        e.sourceLocation?.let { loc ->
-            println("   --> ${loc.file ?: fileName}:${loc.line}:${loc.column}")
+        e.loc?.let { loc ->
+            println("   --> ${loc.file.ifEmpty { fileName ?: "<input>" }}:${loc.startLine}:${loc.startCol}")
             val lines = source.lines()
-            if (loc.line > 0 && loc.line <= lines.size) {
-                val lineNum = loc.line
+            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                val lineNum = loc.startLine
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = loc.length ?: 1
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -1174,17 +1174,17 @@ private fun handleExecCommand(args: List<String>) {
         // Pretty-print export not found error with source context
         println("❌ Module Error [Export Not Found]")
         println("━".repeat(50))
-        e.sourceLocation?.let { loc ->
-            println("   --> ${loc.file ?: fileName}:${loc.line}:${loc.column}")
+        e.loc?.let { loc ->
+            println("   --> ${loc.file.ifEmpty { fileName ?: "<input>" }}:${loc.startLine}:${loc.startCol}")
             // Show source code snippet
             val lines = source.lines()
-            if (loc.line > 0 && loc.line <= lines.size) {
-                val lineNum = loc.line
+            if (loc.startLine > 0 && loc.startLine <= lines.size) {
+                val lineNum = loc.startLine
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = loc.length ?: 1
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
+                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -1914,9 +1914,9 @@ private fun printTypeError(error: TypeCheckError) {
     println("━".repeat(50))
     
     // Print location if available
-    if (error.sourceLocation != null) {
-        val loc = error.sourceLocation!!
-        println("📍 Location: line ${loc.line}, column ${loc.column}")
+    if (error.loc != null) {
+        val loc = error.loc!!
+        println("📍 Location: line ${loc.startLine}, column ${loc.startCol}")
         println()
     }
     

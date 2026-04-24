@@ -39,10 +39,10 @@ let z = x + y
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
-        assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation")
-        assertEquals(3, error.sourceLocation?.line, "Error should be on line 3")
+        assertNotNull(error.loc, "TypeCheckError should have loc")
+        assertEquals(3, error.loc?.startLine, "Error should be on line 3")
         // The error is at the binary operation (x + y)
-        assertTrue(error.sourceLocation?.column in 9..13, "Error column should be around the binary operation")
+        assertTrue(error.loc?.startCol in 9..13, "Error column should be around the binary operation")
     }
 
     @Test
@@ -58,8 +58,8 @@ let y = x + unknown_var
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
 
-        assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation for undefined variable")
-        assertEquals(2, error.sourceLocation?.line, "Error should be on line 2")
+        assertNotNull(error.loc, "TypeCheckError should have loc for undefined variable")
+        assertEquals(2, error.loc?.startLine, "Error should be on line 2")
     }
 
     @Test
@@ -79,7 +79,7 @@ let z = x + y
             // The error message should include location info
             val message = e.message ?: ""
             assertTrue(
-                message.contains("line") || e.sourceLocation != null,
+                message.contains("line") || e.loc != null,
                 "Error should have location information"
             )
         }
@@ -101,8 +101,8 @@ let e = a + "string"
             typeChecker.typeCheck(parsedModule, Paths.get("."))
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
-            assertNotNull(e.sourceLocation, "Error should have source location")
-            assertEquals(5, e.sourceLocation?.line, "Error should be on line 5")
+            assertNotNull(e.loc, "Error should have source location")
+            assertEquals(5, e.loc?.startLine, "Error should be on line 5")
         }
     }
 

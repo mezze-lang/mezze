@@ -15,8 +15,6 @@ import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.ast.Keywords
 
-/** Convert ParsedAST Loc to SourceLocation for error reporting */
-private fun Loc.toSL(): SourceLocation? = SourceLocation(startLine, startCol, file)
 
 /**
  * Expression constraint generator - generates constraints for all expression types.
@@ -205,7 +203,7 @@ class ExpressionConstraintGenerator {
                             left = exprResult.type,
                             right = MezzeType.StringType,
                             context = "String interpolation requires String type",
-                            sourceLocation = part.expr.loc.toSL(),
+                            loc = part.expr.loc,
                             errorContext = ErrorContext.StringInterpolation(interpolationIndex)
                         )
                     )
@@ -261,7 +259,7 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = elementType,
                             context = "Seq elements must have same type",
-                            sourceLocation = element.expr.loc.toSL(),
+                            loc = element.expr.loc,
                             errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
@@ -281,7 +279,7 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = MezzeType.SeqType(elementType),
                             context = "Spread element must be a seq",
-                            sourceLocation = element.expr.loc.toSL(),
+                            loc = element.expr.loc,
                             errorContext = ErrorContext.SeqElement(elementIndex)
                         )
                     )
@@ -352,7 +350,7 @@ class ExpressionConstraintGenerator {
                                 abilityHash = abilityHash,
                                 typeArgs = freshConstraint.typeArgs,
                                 context = "Polymorphic instantiation of '${lookupKeyString}'",
-                                sourceLocation = expr.loc.toSL()
+                                loc = expr.loc
                             )
                         }
 
@@ -404,7 +402,7 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = lookupKeyString,
-                                sourceLocation = expr.loc.toSL(),
+                                loc = expr.loc,
                                 qualifier = expr.qualifier?.let { ModulePath(it.segments) },
                                 isQualified = expr.isQualified
                             )
@@ -441,7 +439,7 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = lookupKeyString,
-                                sourceLocation = expr.loc.toSL(),
+                                loc = expr.loc,
                                 qualifier = expr.qualifier?.let { ModulePath(it.segments) },
                                 isQualified = expr.isQualified
                             )
@@ -459,7 +457,7 @@ class ExpressionConstraintGenerator {
             "'@' can only be used inside a pipe expression (|>).\n\n" +
             "  hint: Use '@' to refer to the piped value:\n" +
             "        value |> func { arg = @ }",
-            expr.loc.toSL()
+            expr.loc
         )
     }
 
@@ -469,7 +467,7 @@ class ExpressionConstraintGenerator {
         throw com.mezze.language.typechecker.TypeCheckError(
             "Internal error: PipeExpression was not desugared before type checking. " +
             "This is a compiler bug.",
-            expr.loc.toSL()
+            expr.loc
         )
     }
 
@@ -647,7 +645,7 @@ class ExpressionConstraintGenerator {
                     throw TypeCheckError(
                         message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
                                 "Expected fields: ${resolvedType.fields.keys.sorted().joinToString(", ")}",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
                             "missingFields" to missingFields.toList(),
@@ -665,7 +663,7 @@ class ExpressionConstraintGenerator {
                         throw TypeCheckError(
                             message = "Record has extra ${if (extraFields.size == 1) "field" else "fields"}: $extraList. " +
                                     "Remove ${if (extraFields.size == 1) "it" else "them"}. Expected fields: $expectedList",
-                            sourceLocation = expr.loc.toSL(),
+                            loc = expr.loc,
                             errorType = ErrorType.TYPE_MISMATCH,
                             metadata = mapOf(
                                 "extraFields" to extraFields.toList(),
@@ -736,7 +734,7 @@ class ExpressionConstraintGenerator {
                             abilityHash = context.abilityDeclarations[receiverName]?.contentHash,
                             typeArgs = emptyList(),
                             context = "Direct ability call: ${receiverName}.${expr.member}",
-                            sourceLocation = expr.loc.toSL()
+                            loc = expr.loc
                         )),
                         associatedTypeConstraints = emptyList(),
                         undefinedVariables = emptyList(),
@@ -749,7 +747,7 @@ class ExpressionConstraintGenerator {
                     val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
                     throw TypeCheckError(
                         message = "Method '${expr.member}' not found in ability '$receiverName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.MISSING_FIELD
                     )
                 }
@@ -761,7 +759,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
                         "Use 'value.${expr.member} { args }' or '${receiverName}.${expr.member} { it = value, ... }' instead.",
-                    sourceLocation = expr.loc.toSL(),
+                    loc = expr.loc,
                     errorType = ErrorType.MISSING_FIELD
                 )
             }
@@ -816,7 +814,7 @@ class ExpressionConstraintGenerator {
 
                     throw TypeCheckError(
                         message = "'$receiverName' is not defined. Cannot access method '${expr.member}' on undefined ability or effect.$suggestion",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.UNDEFINED_VARIABLE
                     )
                 }
@@ -872,7 +870,7 @@ class ExpressionConstraintGenerator {
                     // Closed record - field must exist, throw error
                     throw TypeCheckError(
                         message = "Field '${expr.member}' not found in record.$didYouMean Available fields: ${fieldNames.joinToString()}",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
                             "field" to expr.member,
@@ -884,7 +882,7 @@ class ExpressionConstraintGenerator {
                     // OldTypeChecker validates this too (line 6285-6300)
                     throw TypeCheckError(
                         message = "Field '${expr.member}' not found in open record.$didYouMean Explicitly declared fields: ${fieldNames.joinToString()}",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
                             "field" to expr.member,
@@ -1065,7 +1063,7 @@ class ExpressionConstraintGenerator {
                 abilityHash = context.abilityDeclarations[abilityName]?.contentHash,
                 typeArgs = emptyList(),
                 context = "Method call: $methodName",
-                sourceLocation = expr.loc.toSL()
+                loc = expr.loc
             ))
         } else if (filteredMatchingAbilities.isNotEmpty()) {
             // User-defined ability
@@ -1136,7 +1134,7 @@ class ExpressionConstraintGenerator {
                     abilityHash = abilityDecl?.contentHash,
                     typeArgs = typeArgs,
                     context = "Method call: $methodName",
-                    sourceLocation = expr.loc.toSL()
+                    loc = expr.loc
                 ))
 
                 // Build associated type vars map and add AssociatedTypeResolution constraint
@@ -1154,7 +1152,7 @@ class ExpressionConstraintGenerator {
                             primaryTypeVar = abilityTypeVars.first(),
                             associatedTypeVars = associatedTypeVarsMap,
                             context = "Associated type resolution for $abilityName.$methodName",
-                            sourceLocation = expr.loc.toSL()
+                            loc = expr.loc
                         ))
                     }
                 }
@@ -1179,7 +1177,7 @@ class ExpressionConstraintGenerator {
                             abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                             typeArgs = constraint.typeArgs.drop(1),
                             context = "Method-level constraint: ${constraint.abilityName} on $abilityName.$methodName",
-                            sourceLocation = expr.loc.toSL()
+                            loc = expr.loc
                         ))
                     }
                 }
@@ -1223,7 +1221,7 @@ class ExpressionConstraintGenerator {
             left = receiverType,
             right = receiverConstraintType,
             context = "Method call receiver binds ${Keywords.IT}",
-            sourceLocation = expr.loc.toSL()
+            loc = expr.loc
         ))
 
         // Constrain: explicit args = stripped method's param type
@@ -1231,7 +1229,7 @@ class ExpressionConstraintGenerator {
             left = argumentResult.type,
             right = strippedMethodType.paramType,
             context = "Method call arguments for $methodName",
-            sourceLocation = expr.loc.toSL()
+            loc = expr.loc
         ))
 
         // Constrain: result type = method's return type
@@ -1239,7 +1237,7 @@ class ExpressionConstraintGenerator {
             left = resultType,
             right = strippedMethodType.returnType,
             context = "Method call return type",
-            sourceLocation = expr.loc.toSL()
+            loc = expr.loc
         ))
 
         // Store method call resolution for the TypedAstBuilder
@@ -1335,7 +1333,7 @@ class ExpressionConstraintGenerator {
                     left = argumentResult.type,
                     right = strippedParamType,
                     context = "Inherent method call arguments for $methodName",
-                    sourceLocation = expr.loc.toSL()
+                    loc = expr.loc
                 ))
 
                 // Constrain return type
@@ -1343,7 +1341,7 @@ class ExpressionConstraintGenerator {
                     left = resultType,
                     right = freshMethodType.returnType,
                     context = "Inherent method call return type",
-                    sourceLocation = expr.loc.toSL()
+                    loc = expr.loc
                 ))
             }
         }
@@ -1446,7 +1444,7 @@ class ExpressionConstraintGenerator {
             val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
-                sourceLocation = expr.loc.toSL(),
+                loc = expr.loc,
                 errorType = ErrorType.MISSING_FIELD
             )
         }
@@ -2247,7 +2245,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Cannot construct newtype '${expr.constructor}' — its constructor is private to the defining module. " +
                         "Use a public constructor function from the module instead.",
-                    sourceLocation = expr.loc.toSL(),
+                    loc = expr.loc,
                     errorType = ErrorType.MISSING_FIELD
                 )
             }
@@ -2269,7 +2267,7 @@ class ExpressionConstraintGenerator {
                 undefinedVariables = listOf(
                     ConstraintResult.UndefinedVariable(
                         name = expr.constructor,
-                        sourceLocation = expr.loc.toSL()
+                        loc = expr.loc
                     )
                 )
             )
@@ -2322,7 +2320,7 @@ class ExpressionConstraintGenerator {
                                     throw TypeCheckError(
                                         message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
-                                        sourceLocation = expr.loc.toSL(),
+                                        loc = expr.loc,
                                         errorType = ErrorType.TYPE_MISMATCH
                                     )
                                 }
@@ -2333,7 +2331,7 @@ class ExpressionConstraintGenerator {
                                     throw TypeCheckError(
                                         message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
-                                        sourceLocation = expr.loc.toSL(),
+                                        loc = expr.loc,
                                         errorType = ErrorType.MISSING_FIELD
                                     )
                                 }
@@ -2762,7 +2760,7 @@ class ExpressionConstraintGenerator {
                     message = "cannot use spread-only records in function call to '$functionName'. " +
                             "Spread variable: '$spreadVarName'. " +
                             "Use explicit named arguments instead, e.g., { x = $spreadVarName.x, y = $spreadVarName.y }",
-                    sourceLocation = expr.loc.toSL(),
+                    loc = expr.loc,
                     errorType = ErrorType.TYPE_MISMATCH,
                     metadata = mapOf(
                         "functionName" to functionName,
@@ -2829,7 +2827,7 @@ class ExpressionConstraintGenerator {
             (expr.function as ParsedIdentifier).localName == context.enclosingFunctionName
 
         // Track tail call location if detected
-        val tailCallLocation = if (isSelfTailCall) expr.loc.toSL() else null
+        val tailCallLocation = if (isSelfTailCall) expr.loc else null
 
         // PARTIAL APPLICATION DETECTION
         // If function type is known AND argument is a record, check for partial application
@@ -2855,7 +2853,7 @@ class ExpressionConstraintGenerator {
                     throw TypeCheckError(
                         message = "Extra field(s) '${extraFields.joinToString(", ")}' in call to '$functionName'. " +
                                 "Function expects fields: ${expectedFields.sorted().joinToString(", ")}",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.TYPE_MISMATCH
                     )
                 }
@@ -2877,7 +2875,7 @@ class ExpressionConstraintGenerator {
                                     left = providedType,
                                     right = expectedType,
                                     context = "Partial application field $fieldName",
-                                    sourceLocation = expr.loc.toSL()
+                                    loc = expr.loc
                                 )
                             )
                         }
@@ -2949,7 +2947,7 @@ class ExpressionConstraintGenerator {
                         left = argumentResult.type,
                         right = functionType.paramType,
                         context = "Function application argument",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorContext = ErrorContext.FunctionArgument(
                             functionName = functionName,
                             argumentName = extractArgumentName(expr.arguments),
@@ -2989,7 +2987,7 @@ class ExpressionConstraintGenerator {
                                 abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                                 context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
-                                sourceLocation = expr.loc.toSL()
+                                loc = expr.loc
                             )
                         } else null
                     }
@@ -3054,7 +3052,7 @@ class ExpressionConstraintGenerator {
                 ),
                 right = functionResult.type,
                 context = "Function application",
-                sourceLocation = expr.loc.toSL(),
+                loc = expr.loc,
                 errorContext = ErrorContext.FunctionArgument(
                     functionName = functionName,
                     argumentName = extractArgumentName(expr.arguments),
@@ -3089,7 +3087,7 @@ class ExpressionConstraintGenerator {
                             abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                             typeArgs = constraint.typeArgs.drop(1),  // Additional type args after the constrained type
                             context = "Method-level constraint: ${constraint.abilityName} on ${constrainedType.variable.name}",
-                            sourceLocation = expr.loc.toSL()
+                            loc = expr.loc
                         )
                     } else null
                 }
@@ -3151,7 +3149,7 @@ class ExpressionConstraintGenerator {
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         duplicateBindings.addAll(scrutineeResult.duplicateBindings)
         // TCO: Track tail calls from case bodies
-        val tailCalls = mutableSetOf<SourceLocation>()
+        val tailCalls = mutableSetOf<Loc>()
         tailCalls.addAll(scrutineeResult.tailCalls)
         // Track unused pattern bindings (warnings)
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
@@ -3195,7 +3193,7 @@ class ExpressionConstraintGenerator {
 
             // Process first pattern to get bindings
             val firstPattern = matchCase.patterns.first()
-            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.loc.toSL())
+            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.loc)
             constraints.addAll(patternResult.constraints)
             patternWarnings.addAll(patternResult.warnings)
 
@@ -3203,7 +3201,7 @@ class ExpressionConstraintGenerator {
             // and add constraints (bindings must match first pattern's)
             val firstPatternBindings = patternResult.bindings.keys
             for (pattern in matchCase.patterns.drop(1)) {
-                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc.toSL())
+                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc)
                 constraints.addAll(orPatternResult.constraints)
                 patternWarnings.addAll(orPatternResult.warnings)
 
@@ -3221,7 +3219,7 @@ class ExpressionConstraintGenerator {
                     }
                     throw TypeCheckError(
                         "Or-pattern alternatives must bind the same variables. ${errorParts.joinToString("; ")}",
-                        expr.loc.toSL()
+                        expr.loc
                     )
                 }
 
@@ -3295,7 +3293,7 @@ class ExpressionConstraintGenerator {
                     ifLetBinding.pattern,
                     bindingExprResult.type,
                     caseContext,
-                    ifLetBinding.loc.toSL()
+                    ifLetBinding.loc
                 )
                 constraints.addAll(ifLetPatternResult.constraints)
                 patternWarnings.addAll(ifLetPatternResult.warnings)
@@ -3330,12 +3328,12 @@ class ExpressionConstraintGenerator {
                     // Use the binding's source location from the pattern
                     // Fall back to case body location if not available
                     val patternLocation = patternResult.bindingLocations[varName]
-                        ?: matchCase.body.loc.toSL()
-                        ?: expr.loc.toSL()
+                        ?: matchCase.body.loc
+                        ?: expr.loc
                     unusedVars.add(
                         ConstraintResult.UnusedVariable(
                             name = varName,
-                            sourceLocation = patternLocation
+                            loc = patternLocation
                         )
                     )
                 }
@@ -3403,7 +3401,7 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         // TCO: Track tail calls from result expression (statements are not in tail position)
-        val tailCalls = mutableSetOf<SourceLocation>()
+        val tailCalls = mutableSetOf<Loc>()
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         // Track used variables for unused variable warnings
@@ -3452,7 +3450,7 @@ class ExpressionConstraintGenerator {
                                 left = exprResult.type,
                                 right = annotatedType,
                                 context = "Type annotation on let binding in do block",
-                                sourceLocation = stmt.value.loc.toSL()
+                                loc = stmt.value.loc
                             )
                         )
                     }
@@ -3479,7 +3477,7 @@ class ExpressionConstraintGenerator {
                         stmt.pattern,
                         bindingType,
                         currentContext,
-                        stmt.value.loc.toSL()
+                        stmt.value.loc
                     )
                     constraints.addAll(patternResult.constraints)
 
@@ -3668,7 +3666,7 @@ class ExpressionConstraintGenerator {
                     // Not in performerToEffect and not in context - truly unknown
                     throw TypeCheckError(
                         message = "Unknown performer '${handlerName}'. Performer has not been defined with 'impl Effect for ${handlerName}'.",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.UNDEFINED_VARIABLE
                     )
                 }
@@ -3683,7 +3681,7 @@ class ExpressionConstraintGenerator {
                 val handlerNames = handlers.map { it.first }.joinToString(", ")
                 throw TypeCheckError(
                     message = "Multiple handlers for the same effect '$effect': $handlerNames. Each effect can only be handled by one performer.",
-                    sourceLocation = expr.loc.toSL(),
+                    loc = expr.loc,
                     errorType = ErrorType.CONSTRAINT_VIOLATION
                 )
             }
@@ -3733,7 +3731,7 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Expression is pure (has no effects), but handlers were provided: $handlerNames. " +
                         "Remove the perform block or use an expression that actually uses effects.",
-                    sourceLocation = expr.loc.toSL(),
+                    loc = expr.loc,
                     errorType = ErrorType.CONSTRAINT_VIOLATION
                 )
             }
@@ -3751,7 +3749,7 @@ class ExpressionConstraintGenerator {
                         message = "None of the provided handlers handle effects used by the expression. " +
                             "Expression uses: ${allEffects.joinToString(", ")}. " +
                             "Handlers provided: $handlersList",
-                        sourceLocation = expr.loc.toSL(),
+                        loc = expr.loc,
                         errorType = ErrorType.CONSTRAINT_VIOLATION
                     )
                 }
@@ -3770,7 +3768,7 @@ class ExpressionConstraintGenerator {
                             message = "Handler '$handlerName' handles effect '$effectName', but the expression doesn't use this effect. " +
                                 "Expression uses: ${allEffects.joinToString(", ")}. " +
                                 "Remove the unnecessary handler.",
-                            sourceLocation = expr.loc.toSL(),
+                            loc = expr.loc,
                             errorType = ErrorType.CONSTRAINT_VIOLATION
                         )
                     }
@@ -3825,7 +3823,7 @@ class ExpressionConstraintGenerator {
                             left = actualParamsType,
                             right = performerFields,
                             context = "Handler parameters must match performer field types",
-                            sourceLocation = handlerParams.loc.toSL()
+                            loc = handlerParams.loc
                         )
                     )
                 }
@@ -3913,7 +3911,7 @@ class ExpressionConstraintGenerator {
                         left = performResultType,
                         right = resolvedSuspensionType,
                         context = "perform body must return the same type that handler '${handler.performer.localName}' produces (e.g., wrap with Ok/Some)",
-                        sourceLocation = expr.loc.toSL()
+                        loc = expr.loc
                     )
                 )
 
@@ -4130,7 +4128,7 @@ class ExpressionConstraintGenerator {
                 type = MezzeType.VarType(TypeVar.fresh()),
                 constraints = emptyList(),
                 effects = setOf(effectName),
-                undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.loc.toSL()))
+                undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.loc))
             )
         }
 
@@ -4147,7 +4145,7 @@ class ExpressionConstraintGenerator {
             val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
-                sourceLocation = expr.loc.toSL(),
+                loc = expr.loc,
                 errorType = ErrorType.MISSING_FIELD
             )
         }
@@ -4216,7 +4214,7 @@ class ExpressionConstraintGenerator {
                 left = argResult.type,
                 right = instantiatedOperationType.paramType,
                 context = "Effect operation argument type",
-                sourceLocation = expr.loc.toSL()
+                loc = expr.loc
             )
             instantiatedOperationType.returnType to listOf(paramConstraint)
         } else {

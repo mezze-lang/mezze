@@ -286,10 +286,10 @@ class AbilityEffectErrorsTest {
         }
 
         // Error should have source location pointing to line 3
-        assertNotNull(exception.sourceLocation,
+        assertNotNull(exception.loc,
             "Error should have source location: ${exception.message}")
-        assertEquals(3, exception.sourceLocation?.line,
-            "Error should point to line 3: ${exception.sourceLocation}")
+        assertEquals(3, exception.loc?.startLine,
+            "Error should point to line 3: ${exception.loc}")
     }
 
     // ========================================================================

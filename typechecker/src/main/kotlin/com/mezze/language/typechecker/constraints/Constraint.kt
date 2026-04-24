@@ -2,9 +2,8 @@ package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePath
-import com.mezze.language.ast.SourceLocation
-import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.Loc
+import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.ParsedPerform
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
@@ -81,14 +80,14 @@ sealed class ErrorContext {
  * Sealed interface ensures exhaustive pattern matching.
  * No catch-all else clauses!
  *
- * All constraints have a sourceLocation for error reporting.
+ * All constraints have a loc for error reporting.
  */
 sealed interface Constraint {
     /**
      * The source location where this constraint was generated (if available).
      * Used for error reporting to show the user where a type error occurred.
      */
-    val sourceLocation: SourceLocation?
+    val loc: Loc?
 
     /**
      * Equality constraint: t1 must equal t2
@@ -103,7 +102,7 @@ sealed interface Constraint {
         val left: MezzeType,
         val right: MezzeType,
         val context: String? = null,  // For error messages (backwards compat)
-        override val sourceLocation: SourceLocation? = null,
+        override val loc: Loc? = null,
         /** True if this constraint was generated from a match case (allows variant merging) */
         val isMatchCaseContext: Boolean = false,
         /** Structured error context for better error messages */
@@ -124,7 +123,7 @@ sealed interface Constraint {
         val abilityHash: String? = null,  // Content hash — preferred for impl resolution
         val typeArgs: List<MezzeType> = emptyList(),
         val context: String? = null,  // For error messages
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 
     /**
@@ -145,7 +144,7 @@ sealed interface Constraint {
         val primaryTypeVar: TypeVar,
         val associatedTypeVars: Map<String, TypeVar>,  // Associated type name -> type variable to unify
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 
     /**
@@ -159,7 +158,7 @@ sealed interface Constraint {
     data class EffectUsed(
         val effect: String,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 
     /**
@@ -173,7 +172,7 @@ sealed interface Constraint {
         val general: MezzeType,
         val specific: MezzeType,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 
     /**
@@ -189,7 +188,7 @@ sealed interface Constraint {
         val fieldName: String,
         val fieldType: MezzeType,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null,
+        override val loc: Loc? = null,
         /** If true, disallow field accumulation - field must exist exactly. Used for record literal field access. */
         val strictFieldCheck: Boolean = false
     ) : Constraint
@@ -199,7 +198,7 @@ sealed interface Constraint {
         val constructorName: String,
         val payloadType: MezzeType?,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null,
+        override val loc: Loc? = null,
         /** True if this constraint came from pattern matching (should create closed variant) */
         val isPatternContext: Boolean = false
     ) : Constraint
@@ -219,7 +218,7 @@ sealed interface Constraint {
         val type: MezzeType,
         val bindingName: String? = null,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 
     /**
@@ -236,7 +235,7 @@ sealed interface Constraint {
         val recordType: MezzeType,
         val patternFields: Set<String>,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val loc: Loc? = null
     ) : Constraint
 }
 
@@ -258,7 +257,7 @@ data class ConstraintResult(
     val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> = emptyList(),  // Associated type resolution constraints
     val undefinedVariables: List<UndefinedVariable> = emptyList(),  // Undefined variables found during constraint generation
     val duplicateBindings: List<DuplicateBinding> = emptyList(),  // Duplicate bindings found during constraint generation
-    val tailCalls: Set<SourceLocation> = emptySet(),  // TCO: Source locations of self-recursive tail calls
+    val tailCalls: Set<Loc> = emptySet(),  // TCO: Source locations of self-recursive tail calls
     val usedVariables: Set<String> = emptySet(),  // Variables that were referenced in this expression
     val unusedVariables: List<UnusedVariable> = emptyList(),  // Unused pattern bindings (warnings)
     val patternWarnings: List<String> = emptyList(),  // Warnings from pattern analysis (e.g., float literal patterns)
@@ -287,7 +286,7 @@ data class ConstraintResult(
      */
     data class UndefinedVariable(
         val name: String,
-        val sourceLocation: SourceLocation?,
+        val loc: Loc?,
         val qualifier: ModulePath? = null,  // Structured module qualifier (if any)
         val isQualified: Boolean = false    // True if this was a qualified reference like module::name
     )
@@ -297,7 +296,7 @@ data class ConstraintResult(
      */
     data class DuplicateBinding(
         val name: String,
-        val sourceLocation: SourceLocation?
+        val loc: Loc?
     )
 
     /**
@@ -305,7 +304,7 @@ data class ConstraintResult(
      */
     data class UnusedVariable(
         val name: String,
-        val sourceLocation: SourceLocation?
+        val loc: Loc?
     )
     companion object {
         /**
@@ -386,7 +385,7 @@ data class ConstraintResult(
          * TCO: Add a tail call location to a result
          */
         fun ConstraintResult.withTailCall(
-            location: SourceLocation
+            location: Loc
         ): ConstraintResult {
             return copy(tailCalls = tailCalls + location)
         }

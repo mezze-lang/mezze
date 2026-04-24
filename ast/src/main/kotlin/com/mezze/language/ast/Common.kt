@@ -12,8 +12,7 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * This file contains:
  * - TypeVar: Type variables for polymorphism
  * - RowVar: Row variables for extensible records/variants
- * - SourceLocation: Source code location tracking
- * - SyntaxMetadata: Operator desugaring metadata
+ * - SyntaxMetadata: Operator desugaring metadata (uses Loc from parsedast)
  * - Visibility: PUBLIC/PRIVATE visibility modifiers
  * - UsePath: Module system import paths
  */
@@ -157,29 +156,12 @@ data class RowVar(val name: String) {
 
 
 /**
- * Source location for error reporting.
- *
- * Tracks the location of AST nodes in the original source code for precise error messages.
- * The length field indicates the span of the token/construct for underlining in error messages.
- */
-@Serializable
-data class SourceLocation(
-    val line: Int,
-    val column: Int,
-    val file: String? = null,
-    val length: Int? = null
-) {
-    override fun toString(): String = if (file != null) "$file:$line:$column" else "$line:$column"
-}
-
-
-/**
  * Thread-local metadata tracking desugared operator syntax for better error messages.
  * NOT part of the AST or content hash.
  */
 object SyntaxMetadata {
     // Each thread gets its own metadata map - prevents race conditions
-    private val operatorMetadata = ThreadLocal.withInitial<MutableMap<SourceLocation, String>> {
+    private val operatorMetadata = ThreadLocal.withInitial<MutableMap<com.mezze.language.parsedast.Loc, String>> {
         mutableMapOf()
     }
 
@@ -188,7 +170,7 @@ object SyntaxMetadata {
      * @param location Source location of the expression
      * @param operatorSyntax The operator that was desugared (e.g., "-", "+", "!")
      */
-    fun markAsOperator(location: SourceLocation, operatorSyntax: String) {
+    fun markAsOperator(location: com.mezze.language.parsedast.Loc, operatorSyntax: String) {
         operatorMetadata.get()[location] = operatorSyntax
     }
 
@@ -197,7 +179,7 @@ object SyntaxMetadata {
      * @param location Source location of the expression
      * @return The operator syntax, or null if not from an operator
      */
-    fun getOperatorSyntax(location: SourceLocation): String? {
+    fun getOperatorSyntax(location: com.mezze.language.parsedast.Loc): String? {
         return operatorMetadata.get()[location]
     }
 

@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.Loc
+
 
 /**
  * Import resolver - resolves imports and builds module import context.
@@ -72,11 +74,11 @@ class ImportResolver(
             val (usePath, alias, isPublic, loc) = when (decl) {
                 is com.mezze.language.parsedast.ParsedUseDecl -> UseInfo(
                     parsedUsePathToV1(decl.path), decl.alias, false,
-                    SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                    decl.loc
                 )
                 is com.mezze.language.parsedast.ParsedPubUseDecl -> UseInfo(
                     parsedUsePathToV1(decl.path), decl.alias, true,
-                    SourceLocation(decl.loc.startLine, decl.loc.startCol, decl.loc.file)
+                    decl.loc
                 )
                 else -> continue
             }
@@ -102,7 +104,7 @@ class ImportResolver(
         val path: UsePath,
         val alias: String?,
         val isPublic: Boolean,
-        val sourceLocation: SourceLocation?
+        val loc: Loc?
     )
 
     /** Convert v2 ParsedUsePath to UsePath */
@@ -129,16 +131,16 @@ class ImportResolver(
         usePath: UsePath,
         alias: String?,
         isPublic: Boolean,
-        sourceLocation: SourceLocation?
+        sourceLoc: Loc?
     ): ProcessResult {
         return when (usePath) {
             is ModulePath -> {
                 // Import all exports: use module
-                processModulePath(usePath, alias, isPublic, sourceLocation)
+                processModulePath(usePath, alias, isPublic, sourceLoc)
             }
             is SelectivePath -> {
                 // Import specific items: use module::{foo, bar}
-                processSelectivePath(usePath, isPublic, sourceLocation)
+                processSelectivePath(usePath, isPublic, sourceLoc)
             }
         }
     }
@@ -155,13 +157,13 @@ class ImportResolver(
         path: ModulePath,
         alias: String?,
         isPublic: Boolean,
-        sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        sourceLoc: Loc? = null
     ): ProcessResult {
         // Check for internal module access using structured path
         // Top-level imports (fromModule = null) cannot access internal modules
         if (!loader.getResolver().canAccessInternal(null, path)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", path.fullPath, sourceLocation))
+                listOf(ModuleError.InternalModuleAccess("", path.fullPath, sourceLoc))
             )
         }
 
@@ -230,7 +232,7 @@ class ImportResolver(
     private fun processSelectivePath(
         path: SelectivePath,
         isPublic: Boolean,
-        sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        sourceLoc: Loc? = null
     ): ProcessResult {
         // Convert to structured ModulePath
         val structuredPath = ModulePath(path.module)
@@ -239,7 +241,7 @@ class ImportResolver(
         // Top-level imports (fromModule = null) cannot access internal modules
         if (!loader.getResolver().canAccessInternal(null, structuredPath)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", structuredPath.fullPath, sourceLocation))
+                listOf(ModuleError.InternalModuleAccess("", structuredPath.fullPath, sourceLoc))
             )
         }
 
@@ -295,14 +297,14 @@ class ImportResolver(
                             errors.add(ModuleError.PrivateExport(
                                 modulePath = modulePath,
                                 exportName = item.name,
-                                sourceLocation = sourceLocation
+                                loc = sourceLoc
                             ))
                         } else {
                             val availableExports = module.exports.keys.toList().sorted()
                             errors.add(ModuleError.ExportNotFound(
                                 modulePath = modulePath,
                                 exportName = item.name,
-                                sourceLocation = sourceLocation,
+                                loc = sourceLoc,
                                 availableExports = availableExports
                             ))
                         }

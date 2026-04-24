@@ -2343,8 +2343,7 @@ internal fun MezzeParser.desugarBinaryOperatorParsed(
     )
 
     // Mark this expression as coming from operator syntax for better error messages
-    val sourceLoc = com.mezze.language.ast.SourceLocation(loc.startLine, loc.startCol, loc.file)
-    SyntaxMetadata.markAsOperator(sourceLoc, operator)
+    SyntaxMetadata.markAsOperator(loc, operator)
 
     return desugared
 }
@@ -2373,8 +2372,7 @@ internal fun MezzeParser.desugarUnaryOperatorParsed(
     )
 
     // Mark this expression as coming from operator syntax for better error messages
-    val sourceLoc = com.mezze.language.ast.SourceLocation(loc.startLine, loc.startCol, loc.file)
-    SyntaxMetadata.markAsOperator(sourceLoc, operator)
+    SyntaxMetadata.markAsOperator(loc, operator)
 
     return desugared
 }
