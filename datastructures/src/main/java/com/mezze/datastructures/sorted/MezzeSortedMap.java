@@ -32,7 +32,13 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     private final Object[] values;
 
     @CompilationFinal
+    private final int length;  // logical size (may be < keys.length with spare capacity)
+
+    @CompilationFinal
     private final Comparator<Object> comparator;
+
+    /** COW ownership token for O(1) amortized insert chains. */
+    private final Object[] ownerToken;
 
     /**
      * Key-value entry.
@@ -48,9 +54,33 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     private MezzeSortedMap(Object[] keys, Object[] values, Comparator<?> comparator) {
         this.keys = keys;
         this.values = values;
+        this.length = keys.length;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
+        this.ownerToken = null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private MezzeSortedMap(Object[] keys, Object[] values, int length,
+                           Comparator<?> comparator, Object[] ownerToken) {
+        this.keys = keys;
+        this.values = values;
+        this.length = length;
+        this.comparator = comparator != null
+                ? (Comparator<Object>) comparator
+                : (a, b) -> ((Comparable<Object>) a).compareTo(b);
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
+        }
     }
 
     // ===== CONSTRUCTION =====
@@ -118,14 +148,14 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns the number of entries.
      */
     public int size() {
-        return keys.length;
+        return length;
     }
 
     /**
      * Returns true if empty.
      */
     public boolean isEmpty() {
-        return keys.length == 0;
+        return length == 0;
     }
 
     /**
@@ -133,6 +163,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {
+        revokeOwnership();
         int idx = binarySearch(key);
         return idx >= 0 ? (V) values[idx] : null;
     }
@@ -144,6 +175,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @TruffleBoundary
     @SuppressWarnings("unchecked")
     public Object getObject(Object key) {
+        revokeOwnership();
         int idx = binarySearchObject(key);
         return idx >= 0 ? values[idx] : null;
     }
@@ -160,6 +192,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns true if the key is present.
      */
     public boolean containsKey(K key) {
+        revokeOwnership();
         return binarySearch(key) >= 0;
     }
 
@@ -169,6 +202,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      */
     @TruffleBoundary
     public boolean containsKeyObject(Object key) {
+        revokeOwnership();
         return binarySearchObject(key) >= 0;
     }
 
@@ -186,7 +220,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @TruffleBoundary
     private int binarySearchObject(Object key) {
         int low = 0;
-        int high = keys.length - 1;
+        int high = length - 1;
 
         while (low <= high) {
             int mid = (low + high) >>> 1;
@@ -220,7 +254,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @SuppressWarnings("unchecked")
     public K maxKey() {
         if (isEmpty()) throw new NoSuchElementException("Empty map");
-        return (K) keys[keys.length - 1];
+        return (K) keys[length - 1];
     }
 
     /**
@@ -238,7 +272,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @SuppressWarnings("unchecked")
     public V maxValue() {
         if (isEmpty()) throw new NoSuchElementException("Empty map");
-        return (V) values[values.length - 1];
+        return (V) values[length - 1];
     }
 
     // ===== UPDATE =====
@@ -261,26 +295,57 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         int idx = binarySearchObject(key);
 
         if (idx >= 0) {
-            // Update existing
-            Object[] newValues = values.clone();
+            // Update existing — only clone values array
+            Object[] newValues = Arrays.copyOf(values, length);
             newValues[idx] = value;
-            return new MezzeSortedMap<>(keys, newValues, comparator);
+            return new MezzeSortedMap<>(Arrays.copyOf(keys, length), newValues, comparator);
         }
 
         // Insert new
         int insertPos = -(idx + 1);
-        Object[] newKeys = new Object[keys.length + 1];
-        Object[] newValues = new Object[values.length + 1];
+
+        if (isOwner() && length < keys.length && insertPos == length) {
+            // O(1) fast path: appending at end with spare capacity (sorted ascending insert)
+            keys[length] = key;
+            values[length] = value;
+            Object[] token = ownerToken;
+            @SuppressWarnings("unchecked")
+            MezzeSortedMap<K, V> result = new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
+            token[0] = result;
+            return result;
+        }
+
+        if (isOwner() && length < keys.length) {
+            // Spare capacity but inserting in middle — shift in-place
+            System.arraycopy(keys, insertPos, keys, insertPos + 1, length - insertPos);
+            System.arraycopy(values, insertPos, values, insertPos + 1, length - insertPos);
+            keys[insertPos] = key;
+            values[insertPos] = value;
+            Object[] token = ownerToken;
+            @SuppressWarnings("unchecked")
+            MezzeSortedMap<K, V> result = new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
+            token[0] = result;
+            return result;
+        }
+
+        // Allocate with spare capacity
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newKeys = new Object[newCapacity];
+        Object[] newValues = new Object[newCapacity];
 
         System.arraycopy(keys, 0, newKeys, 0, insertPos);
         newKeys[insertPos] = key;
-        System.arraycopy(keys, insertPos, newKeys, insertPos + 1, keys.length - insertPos);
+        System.arraycopy(keys, insertPos, newKeys, insertPos + 1, length - insertPos);
 
         System.arraycopy(values, 0, newValues, 0, insertPos);
         newValues[insertPos] = value;
-        System.arraycopy(values, insertPos, newValues, insertPos + 1, values.length - insertPos);
+        System.arraycopy(values, insertPos, newValues, insertPos + 1, length - insertPos);
 
-        return new MezzeSortedMap<>(newKeys, newValues, comparator);
+        Object[] token = new Object[1];
+        @SuppressWarnings("unchecked")
+        MezzeSortedMap<K, V> result = new MezzeSortedMap<>(newKeys, newValues, length + 1, comparator, token);
+        token[0] = result;
+        return result;
     }
 
     /**
@@ -298,19 +363,20 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSortedMap<K, V> removeObject(Object key) {
+        revokeOwnership();
         int idx = binarySearchObject(key);
         if (idx < 0) return this;
 
-        if (keys.length == 1) return empty();
+        if (length == 1) return empty();
 
-        Object[] newKeys = new Object[keys.length - 1];
-        Object[] newValues = new Object[values.length - 1];
+        Object[] newKeys = new Object[length - 1];
+        Object[] newValues = new Object[length - 1];
 
         System.arraycopy(keys, 0, newKeys, 0, idx);
-        System.arraycopy(keys, idx + 1, newKeys, idx, keys.length - idx - 1);
+        System.arraycopy(keys, idx + 1, newKeys, idx, length - idx - 1);
 
         System.arraycopy(values, 0, newValues, 0, idx);
-        System.arraycopy(values, idx + 1, newValues, idx, values.length - idx - 1);
+        System.arraycopy(values, idx + 1, newValues, idx, length - idx - 1);
 
         return new MezzeSortedMap<>(newKeys, newValues, comparator);
     }
@@ -349,11 +415,11 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         int idx = binarySearch(fromKey);
         if (idx < 0) idx = -(idx + 1);
 
-        if (idx >= keys.length) return empty();
+        if (idx >= length) return empty();
 
         return new MezzeSortedMap<>(
-                Arrays.copyOfRange(keys, idx, keys.length),
-                Arrays.copyOfRange(values, idx, values.length),
+                Arrays.copyOfRange(keys, idx, length),
+                Arrays.copyOfRange(values, idx, length),
                 comparator
         );
     }
@@ -407,7 +473,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
             return new Entry<>((K) keys[idx], (V) values[idx]);
         }
         int insertPos = -(idx + 1);
-        if (insertPos >= keys.length) return null;
+        if (insertPos >= length) return null;
         return new Entry<>((K) keys[insertPos], (V) values[insertPos]);
     }
 
@@ -417,14 +483,14 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns all keys.
      */
     public Object[] keys() {
-        return keys.clone();
+        return Arrays.copyOf(keys, length);
     }
 
     /**
      * Returns all values.
      */
     public Object[] values() {
-        return values.clone();
+        return Arrays.copyOf(values, length);
     }
 
     // ===== ITERATION =====
@@ -436,7 +502,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
 
             @Override
             public boolean hasNext() {
-                return index < keys.length;
+                return index < length;
             }
 
             @Override
@@ -459,7 +525,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
 
             @Override
             public boolean hasNext() {
-                return index < keys.length;
+                return index < length;
             }
 
             @Override
@@ -545,7 +611,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SortedMap(");
-        for (int i = 0; i < keys.length; i++) {
+        for (int i = 0; i < length; i++) {
             if (i > 0) sb.append(", ");
             sb.append(keys[i]).append(" -> ").append(values[i]);
         }
@@ -557,12 +623,12 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeSortedMap<?, ?> other)) return false;
-        return Arrays.equals(keys, other.keys) && Arrays.equals(values, other.values);
+        return Arrays.equals(keys(), other.keys()) && Arrays.equals(values(), other.values());
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(keys) ^ Arrays.hashCode(values);
+        return Arrays.hashCode(keys()) ^ Arrays.hashCode(values());
     }
 
     // ===== INTEROP LIBRARY =====
@@ -574,7 +640,7 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
 
     @ExportMessage
     long getHashSize() {
-        return keys.length;
+        return length;
     }
 
     @ExportMessage
