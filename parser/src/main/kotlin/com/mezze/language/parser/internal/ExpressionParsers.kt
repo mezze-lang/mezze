@@ -5,74 +5,6 @@ import com.mezze.language.parser.*
 import com.mezze.language.ast.SyntaxMetadata
 
 import com.mezze.language.parser.internal.lib.*
-/**
- * Expression parsers for all expression constructs.
- *
- * This file contains internal parsers for:
- * - Lambda expressions ({ x } -> body)
- * - Record literals ({ x = 1, y = 2 })
- * - Array literals ([1, 2, 3])
- * - Primary expressions (literals, identifiers, parenthesized)
- * - If expressions (if cond then branch else branch)
- * - Perform expressions (effect calls and handlers)
- * - Do expressions (sequencing statements)
- * - Match expressions (pattern matching)
- * - Operator expressions (binary, unary, pipe, postfix)
- *
- * All parsers return ParsedExpr (sealed interface from parsedast).
- * All functions are internal - only used within the parser module.
- *
- * Part of the refactored parser module - previously in MezzeParser.kt.
- */
-
-// ===== LAMBDA VS RECORD DISAMBIGUATION =====
-
-/**
- * Lookahead function to check if a brace starts a record literal.
- * A record literal has the pattern: { identifier = expr, ... } or { identifier, ... } (punning)
- * or empty record: {}
- *
- * This helps distinguish between:
- * - Function call: foo {args}  (should error if on different line)
- * - Record literal: {x = 1, y = 2}  (valid standalone expression)
- */
-internal fun MezzeParser.lookAheadForRecordLiteral(stream: TokenStream): Boolean {
-    var pos = stream.position
-    val tokens = stream.tokens
-
-    if (pos >= tokens.size || tokens[pos].type != TokenType.LBRACE) return false
-    pos++  // Skip LBRACE
-
-    // Skip newlines after LBRACE
-    while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
-        pos++
-    }
-
-    // Empty record {} is a record literal
-    if (pos < tokens.size && tokens[pos].type == TokenType.RBRACE) {
-        return true
-    }
-
-    // Check for identifier followed by = (record field) or , or } (punning)
-    if (pos < tokens.size && tokens[pos].type == TokenType.IDENTIFIER) {
-        pos++
-        // Skip newlines
-        while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
-            pos++
-        }
-        if (pos < tokens.size) {
-            val nextType = tokens[pos].type
-            // { identifier = ... } is a record literal
-            // { identifier, ... } is a record literal with punning
-            // { identifier } is a record literal with punning
-            if (nextType == TokenType.ASSIGN || nextType == TokenType.COMMA || nextType == TokenType.RBRACE) {
-                return true
-            }
-        }
-    }
-
-    return false
-}
 
 /**
  * Lookahead function to check if there's an arrow after the closing brace.
@@ -240,7 +172,6 @@ internal val MezzeParser.lambdaOrRecordExpression: Parser<ParsedExpr>
         }
     }
 
-// ===== LAMBDA EXPRESSION =====
 
 internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
     get() = parser@{ stream ->
@@ -433,7 +364,6 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
         }
     }
 
-// ===== RECORD LITERAL =====
 
 internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
     get() = { stream ->
@@ -551,7 +481,6 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
         }
     }
 
-// ===== SEQ LITERAL =====
 
 internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
     get() = { stream ->
@@ -676,7 +605,6 @@ internal val MezzeParser.arrayElementParser: Parser<ParsedSeqElement>
         }
     }
 
-// ===== PRIMARY EXPRESSION =====
 
 internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
     get() = { stream ->
@@ -725,7 +653,6 @@ internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
         }
     }
 
-// ===== IF EXPRESSION =====
 
 internal val MezzeParser.ifExpression: Parser<ParsedExpr>
     get() = parser@{ stream ->
@@ -784,23 +711,11 @@ internal val MezzeParser.ifExpression: Parser<ParsedExpr>
         }
     }
 
-// TO BE CONTINUED...
 
-// ===== PERFORM EXPRESSION =====
 
-/**
- * Parse a qualified identifier for handler names in perform expressions.
- * Supports both simple names (Console) and qualified names (log::Console).
- * Returns the fully qualified name as a string (e.g., "log::Console").
- */
 /**
  * Parses a qualified reference like "module::Name" or just "Name".
  * Returns a ParsedQualifiedRef with structured qualifier and localName.
- *
- * Examples:
- * - "Console" -> ParsedQualifiedRef(localName="Console", qualifier=null)
- * - "log::Console" -> ParsedQualifiedRef(localName="Console", qualifier=ParsedModulePath(["log"]))
- * - "std::effects::log::Console" -> ParsedQualifiedRef(localName="Console", qualifier=ParsedModulePath(["std", "effects", "log"]))
  */
 internal fun MezzeParser.parseQualifiedRef(stream: TokenStream): ParseResult<ParsedQualifiedRef> {
     val file = currentFile ?: "<unknown>"
@@ -954,7 +869,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
         }
     }
 
-    // ===== DO EXPRESSION =====
 
 internal val MezzeParser.doExpression: Parser<ParsedExpr>
     get() = { stream ->
@@ -1141,7 +1055,6 @@ Example:
         }
     }
 
-    // ===== MATCH EXPRESSION =====
 
 internal val MezzeParser.matchExpression: Parser<ParsedExpr>
     get() = { stream ->
@@ -2205,7 +2118,6 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
         result
     }
 
-    // ===== BASIC PARSERS =====
 
 
     // @ placeholder for pipe operator - creates ParsedPipePlaceholder AST node
@@ -2408,9 +2320,6 @@ internal val MezzeParser.parenExpression: Parser<ParsedExpr>
         }
     }
 
-// ============================================================================
-// DESUGARING - PARSED OPERATORS
-// ============================================================================
 
 /**
  * Desugar a binary operator into a ParsedExpr method call.
@@ -2468,6 +2377,67 @@ internal fun MezzeParser.desugarUnaryOperatorParsed(
     SyntaxMetadata.markAsOperator(sourceLoc, operator)
 
     return desugared
+}
+
+/**
+ * Parse an interpolated string into ParsedStringLit with parts.
+ */
+internal fun MezzeParser.parseParsedInterpolatedString(
+    content: String,
+    remaining: TokenStream,
+    loc: Loc
+): ParseResult<ParsedExpr> {
+    val parts = mutableListOf<ParsedStringPart>()
+    var i = 0
+    val sb = StringBuilder()
+
+    while (i < content.length) {
+        if (i + 1 < content.length && content[i] == '$' && content[i + 1] == '(') {
+            // Flush literal text
+            if (sb.isNotEmpty()) {
+                parts.add(ParsedStringPart.Literal(processEscapeSequences(sb.toString())))
+                sb.clear()
+            }
+            // Find matching close paren
+            var depth = 1
+            var j = i + 2
+            while (j < content.length && depth > 0) {
+                if (content[j] == '(') depth++
+                if (content[j] == ')') depth--
+                j++
+            }
+            val exprText = content.substring(i + 2, j - 1)
+            // Parse the expression inside $(...)
+            val exprResult = try {
+                val lexer = Lexer(exprText)
+                val tokens = lexer.tokenize()
+                val exprStream = TokenStream(tokens)
+                expression(exprStream)
+            } catch (e: Exception) {
+                return remaining.failure("Failed to parse interpolated expression: $exprText")
+            }
+            when (exprResult) {
+                is ParseResult.Success -> {
+                    parts.add(ParsedStringPart.Interpolation(exprResult.value))
+                }
+                is ParseResult.Failure -> {
+                    return remaining.failure("Failed to parse interpolated expression: ${exprResult.message}")
+                }
+            }
+            i = j
+        } else if (content[i] == '\\' && i + 1 < content.length && content[i + 1] == '$') {
+            sb.append('$')
+            i += 2
+        } else {
+            sb.append(content[i])
+            i++
+        }
+    }
+    if (sb.isNotEmpty()) {
+        parts.add(ParsedStringPart.Literal(processEscapeSequences(sb.toString())))
+    }
+
+    return ParseResult.Success(ParsedStringLit(parts, loc), remaining)
 }
 
 // Helper function for keyword parsing

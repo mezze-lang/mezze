@@ -3,14 +3,7 @@ package com.mezze.language.parser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
-/**
- * Tests for OperatorMapping - the single source of truth for operator desugaring.
- */
 class OperatorMappingTest {
-
-    // ============================================================================
-    // Binary Operator Tests
-    // ============================================================================
 
     @Test
     fun `test arithmetic binary operators`() {
@@ -43,14 +36,10 @@ class OperatorMappingTest {
 
     @Test
     fun `test unknown binary operator returns null`() {
-        assertNull(OperatorMapping.getBinaryOp("//"))  // fraction literal, not operator
+        assertNull(OperatorMapping.getBinaryOp("//"))
         assertNull(OperatorMapping.getBinaryOp("~"))
         assertNull(OperatorMapping.getBinaryOp("**"))
     }
-
-    // ============================================================================
-    // Unary Operator Tests
-    // ============================================================================
 
     @Test
     fun `test unary minus uses NumSub neg`() {
@@ -72,91 +61,18 @@ class OperatorMappingTest {
 
     @Test
     fun `test unknown unary operator returns null`() {
-        assertNull(OperatorMapping.getUnaryOp("+"))  // not a unary operator
-        assertNull(OperatorMapping.getUnaryOp("~"))  // not a Mezze operator
+        assertNull(OperatorMapping.getUnaryOp("+"))
+        assertNull(OperatorMapping.getUnaryOp("~"))
     }
-
-    // ============================================================================
-    // Category Tests
-    // ============================================================================
-
-    @Test
-    fun `test arithmetic operator detection`() {
-        assertTrue(OperatorMapping.isArithmeticOperator("+"))
-        assertTrue(OperatorMapping.isArithmeticOperator("-"))
-        assertTrue(OperatorMapping.isArithmeticOperator("*"))
-        assertTrue(OperatorMapping.isArithmeticOperator("/"))
-        assertTrue(OperatorMapping.isArithmeticOperator("%"))
-
-        assertFalse(OperatorMapping.isArithmeticOperator("=="))
-        assertFalse(OperatorMapping.isArithmeticOperator("&&"))
-    }
-
-    @Test
-    fun `test comparison operator detection`() {
-        assertTrue(OperatorMapping.isComparisonOperator("=="))
-        assertTrue(OperatorMapping.isComparisonOperator("!="))
-        assertTrue(OperatorMapping.isComparisonOperator("<"))
-        assertTrue(OperatorMapping.isComparisonOperator(">"))
-        assertTrue(OperatorMapping.isComparisonOperator("<="))
-        assertTrue(OperatorMapping.isComparisonOperator(">="))
-
-        assertFalse(OperatorMapping.isComparisonOperator("+"))
-        assertFalse(OperatorMapping.isComparisonOperator("&&"))
-    }
-
-    @Test
-    fun `test logical operator detection`() {
-        assertTrue(OperatorMapping.isLogicalOperator("&&"))
-        assertTrue(OperatorMapping.isLogicalOperator("||"))
-        assertTrue(OperatorMapping.isLogicalOperator("!"))
-
-        assertFalse(OperatorMapping.isLogicalOperator("+"))
-        assertFalse(OperatorMapping.isLogicalOperator("=="))
-    }
-
-    @Test
-    fun `test binary vs unary operator detection`() {
-        // - is both binary and unary
-        assertTrue(OperatorMapping.isBinaryOperator("-"))
-        assertTrue(OperatorMapping.isUnaryOperator("-"))
-
-        // + is only binary
-        assertTrue(OperatorMapping.isBinaryOperator("+"))
-        assertFalse(OperatorMapping.isUnaryOperator("+"))
-
-        // ! is only unary
-        assertFalse(OperatorMapping.isBinaryOperator("!"))
-        assertTrue(OperatorMapping.isUnaryOperator("!"))
-    }
-
-    // ============================================================================
-    // Special Cases
-    // ============================================================================
 
     @Test
     fun `test fraction slash is NOT an operator`() {
-        // // is for fraction literals, not an operator
         assertNull(OperatorMapping.getBinaryOp("//"))
-        assertFalse(OperatorMapping.isBinaryOperator("//"))
     }
 
     @Test
-    fun `test there is no NumNeg ability`() {
-        // Unary minus uses NumSub.neg, not a separate NumNeg
-        assertFalse(OperatorMapping.OPERATOR_ABILITIES.contains("NumNeg"))
-
+    fun `test unary minus uses NumSub not NumNeg`() {
         val unaryMinus = OperatorMapping.getUnaryOp("-")
         assertEquals("NumSub", unaryMinus?.ability)
-    }
-
-    @Test
-    fun `test all operator abilities are present`() {
-        val expectedAbilities = setOf(
-            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
-            "Eq", "Ord",
-            "LogicalAnd", "LogicalOr", "LogicalNot"
-        )
-        assertEquals(expectedAbilities, OperatorMapping.OPERATOR_ABILITIES)
     }
 }

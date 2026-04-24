@@ -189,16 +189,6 @@ class MezzeTextDocumentService(
             ))
         }
 
-        // Collect parse warnings
-        parseResult.warnings.forEach { w ->
-            diagnostics.add(createDiagnostic(
-                message = w.message,
-                severity = DiagnosticSeverity.Warning,
-                line = w.location.line - 1,
-                column = w.location.column - 1
-            ))
-        }
-
         // If there are parse errors, still try to type check the partial AST
         // This allows showing both parse errors and any type errors in successfully parsed code
 

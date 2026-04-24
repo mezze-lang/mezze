@@ -5,26 +5,57 @@ import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parser.*
 import com.mezze.language.parser.internal.lib.*
 
-/**
- * Declaration parsers for module-level constructs.
- *
- * This file contains internal extension functions for MezzeParser that handle:
- * - Let bindings (let x = ...)
- * - Constrained lambdas (function types with ability constraints)
- * - Effect declarations (effect Name where { ... })
- * - Type declarations (type/newtype)
- * - Impl declarations (impl Type for Ability { ... })
- * - Ability declarations (ability Name { ... })
- * - Impl ability declarations (impl ability Name for Type { ... })
- * - Use/import declarations (use path::to::module)
- *
- * All parsers return ParsedDecl (sealed interface from parsedast).
- * All functions are internal - only used within the parser module.
- *
- * Extracted from MezzeParser.kt as part of parser refactoring (Task 13).
- */
 
-// ===== LET BINDING =====
+/**
+ * Parse comma-separated operations with trailing comma support.
+ * Returns a ParseResult wrapping a Pair of (operations list, remaining stream).
+ */
+internal fun <T> MezzeParser.parseCommaSeparatedOps(
+    stream: TokenStream,
+    opParser: Parser<T>,
+    missingCommaMessage: String
+): ParseResult<Pair<List<T>, TokenStream>> {
+    val operations = mutableListOf<T>()
+    var currentStream = stream
+
+    when (val firstOp = opParser(currentStream)) {
+        is ParseResult.Success -> {
+            operations.add(firstOp.value)
+            currentStream = skipNewlines(firstOp.remaining)
+
+            while (true) {
+                when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                    is ParseResult.Success -> {
+                        currentStream = skipNewlines(comma.remaining)
+                        if (currentStream.current()?.type == TokenType.RBRACE) {
+                            break
+                        }
+                        when (val op = opParser(currentStream)) {
+                            is ParseResult.Success -> {
+                                operations.add(op.value)
+                                currentStream = skipNewlines(op.remaining)
+                            }
+                            is ParseResult.Failure -> {
+                                return op as ParseResult.Failure
+                            }
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        val next = currentStream.current()
+                        if (next?.type == TokenType.IDENTIFIER) {
+                            return currentStream.failure(missingCommaMessage)
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        is ParseResult.Failure -> {
+            // No operations -- empty block
+        }
+    }
+    return ParseResult.Success(Pair(operations, currentStream), currentStream)
+}
 
 internal fun MezzeParser.parseLetBinding(stream: TokenStream): ParseResult<ParsedDecl> {
     return parseLetBindingWithVisibility(stream, Visibility.PRIVATE)
@@ -120,8 +151,6 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
     // Parser for irrefutable patterns in let bindings
     // Supports: variable, wildcard, record pattern (with nested irrefutable patterns)
 
-    // ===== CONSTRAINED LAMBDA =====
-    // Parse: { params } -> ReturnType with Constraint1 'a, Constraint2 'b = { params } -> body
 internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResult<ParsedDecl> {
         // Only try if we see a { (record type parameter)
         if (stream.current()?.type != TokenType.LBRACE) {
@@ -185,7 +214,6 @@ internal fun MezzeParser.parseConstrainedLambda(stream: TokenStream): ParseResul
         }
     }
 
-    // ===== EFFECT DECLARATION =====
 
 internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse: effect Name [having 'state] where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
@@ -274,56 +302,17 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
                                 when (lbrace) {
                                     is ParseResult.Success -> {
                                         val stream4 = skipNewlines(lbrace.remaining)
-                                        // Parse operations separated by commas (trailing comma allowed)
-                                        val operations = mutableListOf<ParsedEffectOp>()
-                                        var currentStream = stream4
-
-                                        // Parse first operation (if any)
-                                        when (val firstOp = effectOperationParser(currentStream)) {
-                                            is ParseResult.Success -> {
-                                                operations.add(firstOp.value)
-                                                currentStream = skipNewlines(firstOp.remaining)
-
-                                                // Parse remaining operations, each preceded by comma
-                                                while (true) {
-                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
-                                                        is ParseResult.Success -> {
-                                                            currentStream = skipNewlines(comma.remaining)
-                                                            // Check if this is a trailing comma (next token is })
-                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
-                                                                break  // Trailing comma, done
-                                                            }
-                                                            // Parse next operation
-                                                            when (val op = effectOperationParser(currentStream)) {
-                                                                is ParseResult.Success -> {
-                                                                    operations.add(op.value)
-                                                                    currentStream = skipNewlines(op.remaining)
-                                                                }
-                                                                is ParseResult.Failure -> {
-                                                                    return op  // Return error from operation parsing
-                                                                }
-                                                            }
-                                                        }
-                                                        is ParseResult.Failure -> {
-                                                            // No comma - check if there's another operation (error) or }
-                                                            val next = currentStream.current()
-                                                            if (next?.type == TokenType.IDENTIFIER) {
-                                                                return currentStream.failure(
-                                                                    "Missing ',' between effect operations. " +
-                                                                    "Effect operations must be comma-separated."
-                                                                )
-                                                            }
-                                                            break  // No comma and no identifier, done
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            is ParseResult.Failure -> {
-                                                // No operations, that's fine - empty effect
-                                            }
+                                        val opsResult = parseCommaSeparatedOps(
+                                            stream4, effectOperationParser,
+                                            "Missing ',' between effect operations. Effect operations must be comma-separated."
+                                        )
+                                        when (opsResult) {
+                                            is ParseResult.Failure -> return opsResult
+                                            is ParseResult.Success -> {}
                                         }
+                                        val (operations, opsStream) = (opsResult as ParseResult.Success).value
 
-                                        val stream5 = skipNewlines(currentStream)
+                                        val stream5 = skipNewlines(opsStream)
                                         val rbrace = tok(TokenType.RBRACE)(stream5)
 
                                         when (rbrace) {
@@ -426,7 +415,6 @@ internal val MezzeParser.effectOperationParser: Parser<ParsedEffectOp> get() = {
         }
     }
 
-    // ===== TYPE DECLARATIONS =====
 
 internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         val typeToken = tok(TokenType.TYPE)(stream)
@@ -721,7 +709,6 @@ internal val MezzeParser.recordTypeParser: Parser<ParsedTypeDef> get() = { strea
         }
     }
 
-    // ===== IMPL DECLARATIONS =====
 
 internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         val implToken = tok(TokenType.IMPL)(stream)
@@ -781,56 +768,17 @@ internal fun MezzeParser.parseImplDeclaration(stream: TokenStream): ParseResult<
                                                 when (lbrace) {
                                                     is ParseResult.Success -> {
                                                         val stream7 = skipNewlines(lbrace.remaining)
-                                                        // Parse operations separated by commas (trailing comma allowed)
-                                                        val operations = mutableListOf<ParsedPerformerOp>()
-                                                        var currentStream2 = stream7
-
-                                                        // Parse first operation (if any)
-                                                        when (val firstOp = performerOperationParser(currentStream2)) {
-                                                            is ParseResult.Success -> {
-                                                                operations.add(firstOp.value)
-                                                                currentStream2 = skipNewlines(firstOp.remaining)
-
-                                                                // Parse remaining operations, each preceded by comma
-                                                                while (true) {
-                                                                    when (val comma = tok(TokenType.COMMA)(currentStream2)) {
-                                                                        is ParseResult.Success -> {
-                                                                            currentStream2 = skipNewlines(comma.remaining)
-                                                                            // Check if this is a trailing comma (next token is })
-                                                                            if (currentStream2.current()?.type == TokenType.RBRACE) {
-                                                                                break  // Trailing comma, done
-                                                                            }
-                                                                            // Parse next operation
-                                                                            when (val op = performerOperationParser(currentStream2)) {
-                                                                                is ParseResult.Success -> {
-                                                                                    operations.add(op.value)
-                                                                                    currentStream2 = skipNewlines(op.remaining)
-                                                                                }
-                                                                                is ParseResult.Failure -> {
-                                                                                    return op  // Return error from operation parsing
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                        is ParseResult.Failure -> {
-                                                                            // No comma - check if there's another operation (error) or }
-                                                                            val next = currentStream2.current()
-                                                                            if (next?.type == TokenType.IDENTIFIER) {
-                                                                                return currentStream2.failure(
-                                                                                    "Missing ',' between effect impl operations. " +
-                                                                                    "Operations must be comma-separated."
-                                                                                )
-                                                                            }
-                                                                            break  // No comma and no identifier, done
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                            is ParseResult.Failure -> {
-                                                                // No operations, that's fine - empty impl
-                                                            }
+                                                        val perfOpsResult = parseCommaSeparatedOps(
+                                                            stream7, performerOperationParser,
+                                                            "Missing ',' between effect impl operations. Operations must be comma-separated."
+                                                        )
+                                                        when (perfOpsResult) {
+                                                            is ParseResult.Failure -> return perfOpsResult
+                                                            is ParseResult.Success -> {}
                                                         }
+                                                        val (operations, perfOpsStream) = (perfOpsResult as ParseResult.Success).value
 
-                                                        val stream8 = skipNewlines(currentStream2)
+                                                        val stream8 = skipNewlines(perfOpsStream)
                                                         val rbrace = tok(TokenType.RBRACE)(stream8)
 
                                                         when (rbrace) {
@@ -1030,7 +978,6 @@ internal val MezzeParser.performerOperationParser: Parser<ParsedPerformerOp> get
         }
     }
 
-    // ===== ABILITY DECLARATION =====
 
 internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse: ability Show for 'a where { operations }
@@ -1219,56 +1166,17 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                 when (lbrace) {
                                     is ParseResult.Success -> {
                                         val stream5 = skipNewlines(lbrace.remaining)
-                                        // Parse operations separated by commas (trailing comma allowed)
-                                        val operations = mutableListOf<ParsedAbilityOp>()
-                                        var currentStream2 = stream5
-
-                                        // Parse first operation (if any)
-                                        when (val firstOp = abilityOperationParser(currentStream2)) {
-                                            is ParseResult.Success -> {
-                                                operations.add(firstOp.value)
-                                                currentStream2 = skipNewlines(firstOp.remaining)
-
-                                                // Parse remaining operations, each preceded by comma
-                                                while (true) {
-                                                    when (val comma = tok(TokenType.COMMA)(currentStream2)) {
-                                                        is ParseResult.Success -> {
-                                                            currentStream2 = skipNewlines(comma.remaining)
-                                                            // Check if this is a trailing comma (next token is })
-                                                            if (currentStream2.current()?.type == TokenType.RBRACE) {
-                                                                break  // Trailing comma, done
-                                                            }
-                                                            // Parse next operation
-                                                            when (val op = abilityOperationParser(currentStream2)) {
-                                                                is ParseResult.Success -> {
-                                                                    operations.add(op.value)
-                                                                    currentStream2 = skipNewlines(op.remaining)
-                                                                }
-                                                                is ParseResult.Failure -> {
-                                                                    return op  // Return error from operation parsing
-                                                                }
-                                                            }
-                                                        }
-                                                        is ParseResult.Failure -> {
-                                                            // No comma - check if there's another operation (error) or }
-                                                            val next = currentStream2.current()
-                                                            if (next?.type == TokenType.IDENTIFIER) {
-                                                                return currentStream2.failure(
-                                                                    "Missing ',' between ability methods. " +
-                                                                    "Ability methods must be comma-separated."
-                                                                )
-                                                            }
-                                                            break  // No comma and no identifier, done
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            is ParseResult.Failure -> {
-                                                // No operations, that's fine - empty ability
-                                            }
+                                        val abilityOpsResult = parseCommaSeparatedOps(
+                                            stream5, abilityOperationParser,
+                                            "Missing ',' between ability methods. Ability methods must be comma-separated."
+                                        )
+                                        when (abilityOpsResult) {
+                                            is ParseResult.Failure -> return abilityOpsResult
+                                            is ParseResult.Success -> {}
                                         }
+                                        val (operations, abilityOpsStream) = (abilityOpsResult as ParseResult.Success).value
 
-                                        val stream6 = skipNewlines(currentStream2)
+                                        val stream6 = skipNewlines(abilityOpsStream)
                                         val rbrace = tok(TokenType.RBRACE)(stream6)
 
                                         when (rbrace) {
@@ -1362,7 +1270,6 @@ internal val MezzeParser.abilityOperationParser: Parser<ParsedAbilityOp> get() =
         }
     }
 
-    // ===== IMPL ABILITY DECLARATION =====
 
 internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ParsedDecl> {
         // Parse named: impl Show for Int where { operations }
@@ -1560,53 +1467,17 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
             is ParseResult.Success -> {
                 val stream5 = skipNewlines(lbrace.remaining)
 
-                // Parse operations separated by commas (trailing comma allowed)
-                val operations = mutableListOf<ParsedImplOp>()
-                var opStream = stream5
-
-                // Parse first operation (if any)
-                when (val firstOp = implAbilityOperationParser(opStream)) {
-                    is ParseResult.Success -> {
-                        operations.add(firstOp.value)
-                        opStream = skipNewlines(firstOp.remaining)
-
-                        // Parse remaining operations, each preceded by comma
-                        while (true) {
-                            when (val comma = tok(TokenType.COMMA)(opStream)) {
-                                is ParseResult.Success -> {
-                                    opStream = skipNewlines(comma.remaining)
-                                    if (opStream.current()?.type == TokenType.RBRACE) {
-                                        break  // Trailing comma, done
-                                    }
-                                    when (val op = implAbilityOperationParser(opStream)) {
-                                        is ParseResult.Success -> {
-                                            operations.add(op.value)
-                                            opStream = skipNewlines(op.remaining)
-                                        }
-                                        is ParseResult.Failure -> {
-                                            return op
-                                        }
-                                    }
-                                }
-                                is ParseResult.Failure -> {
-                                    val next = opStream.current()
-                                    if (next?.type == TokenType.IDENTIFIER) {
-                                        return opStream.failure(
-                                            "Missing ',' between ability impl methods. " +
-                                            "Methods must be comma-separated."
-                                        )
-                                    }
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    is ParseResult.Failure -> {
-                        // No operations, that's fine - empty impl
-                    }
+                val implOpsResult = parseCommaSeparatedOps(
+                    stream5, implAbilityOperationParser,
+                    "Missing ',' between ability impl methods. Methods must be comma-separated."
+                )
+                when (implOpsResult) {
+                    is ParseResult.Failure -> return implOpsResult
+                    is ParseResult.Success -> {}
                 }
+                val (operations, implOpsStream) = (implOpsResult as ParseResult.Success).value
 
-                val stream6 = skipNewlines(opStream)
+                val stream6 = skipNewlines(implOpsStream)
                 val rbrace = tok(TokenType.RBRACE)(stream6)
 
                 when (rbrace) {
@@ -1788,7 +1659,6 @@ internal val MezzeParser.implAbilityOperationParser: Parser<ParsedImplOp> get() 
         }
     }
 
-    // ===== USE DECLARATION =====
 
 internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ParsedDecl> {
         // Parse: use std::math::basic

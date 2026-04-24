@@ -1,6 +1,5 @@
 package com.mezze.language.parser
 
-import com.mezze.language.ast.Comment
 import com.mezze.language.ast.SourceLocation
 import com.mezze.language.ast.SyntaxMetadata
 import com.mezze.language.parsedast.*
@@ -10,83 +9,16 @@ import com.mezze.language.parser.internal.lib.*
 /**
  * Mezze language parser using parser combinators.
  *
- * This parser explicitly handles the ambiguity between:
- * - Lambda expressions: {x} -> body
- * - Record literals: {x} or {x = value}
+ * Disambiguates lambda expressions ({x} -> body) from record literals ({x = value})
+ * using explicit lookahead for the arrow token.
  *
- * By using explicit lookahead for the arrow token.
- *
- * ## Thread Safety
- *
- * **THREAD-SAFE FOR PARALLEL FILE PARSING**: Each parser instance maintains mutable state
- * during parsing, but global state (SyntaxMetadata) uses ThreadLocal storage.
- *
- * ### Safe Usage Patterns:
- *
- * ✅ **SAFE - Multiple threads, separate parser instances**:
- * ```kotlin
- * // Parse multiple files in parallel - SAFE!
- * files.parallelStream().map { file ->
- *     MezzeParser().parseParsedModule(File(file).readText(), file = file)
- * }.toList()
- * ```
- *
- * ✅ **SAFE - Sequential parsing with same instance**:
- * ```kotlin
- * val parser = MezzeParser()
- * val mod1 = parser.parseParsedModule(source1)  // OK
- * val mod2 = parser.parseParsedModule(source2)  // OK - sequential
- * ```
- *
- * ❌ **UNSAFE - Concurrent parsing with same instance**:
- * ```kotlin
- * val parser = MezzeParser()
- * thread1 { parser.parseParsedModule(source1) }  // Race on currentSource/currentFile!
- * thread2 { parser.parseParsedModule(source2) }  // Race on warnings!
- * ```
- *
- * **Recommendation**: Use fresh `MezzeParser()` instance per thread for parallel parsing.
- *
- * ## Warnings
- *
- * Collects non-fatal warnings. Access them via `getWarnings()` after parsing.
+ * Not thread-safe for concurrent use of the same instance. Use a fresh MezzeParser()
+ * per thread for parallel parsing.
  */
-class MezzeParser(
-    private val warningConfig: ParserWarningConfig = ParserWarningConfig()
-) {
+class MezzeParser {
     // Store source and file during parsing for better error messages
     internal var currentSource: String?? = null
     internal var currentFile: String?? = null
-
-    // Collect warnings during parsing
-    private val warnings = mutableListOf<ParseWarning>()
-
-    // Collect comments during parsing (for formatter)
-    private val comments = mutableListOf<Comment>()
-
-    /**
-     * Get all warnings collected during the last parse() call.
-     */
-    fun getWarnings(): List<ParseWarning> = warnings.toList()
-
-    /**
-     * Add a warning during parsing (internal use).
-     */
-    internal fun addWarning(
-        message: String,
-        location: SourceLocation,
-        severity: WarningSeverity,
-        category: WarningCategory,
-        suggestion: String? = null,
-        autoFixable: Boolean = false
-    ) {
-        if (warnings.size >= warningConfig.maxWarnings) return
-        if (!warningConfig.shouldWarn(category)) return
-
-        warnings.add(ParseWarning(
-            message, location, severity, category, suggestion, autoFixable
-        ))
-    }
 
     companion object {
         /** Convert Loc → SourceLocation */
@@ -103,10 +35,6 @@ class MezzeParser(
         // Store for error reporting in nested parser methods
         currentSource = source
         currentFile = file
-
-        // Clear warnings and comments from previous parse
-        warnings.clear()
-        comments.clear()
 
         // Clear syntax metadata from previous parses
         SyntaxMetadata.clear()
@@ -138,8 +66,7 @@ class MezzeParser(
      */
     data class ParseResultWithRecovery(
         val module: ParsedModule,
-        val errors: List<ParseException>,
-        val warnings: List<ParseWarning>
+        val errors: List<ParseException>
     ) {
         val hasErrors: Boolean get() = errors.isNotEmpty()
         val isSuccess: Boolean get() = errors.isEmpty()
@@ -154,8 +81,6 @@ class MezzeParser(
     fun parseWithRecovery(source: String, file: String? = null): ParseResultWithRecovery {
         currentSource = source
         currentFile = file
-        warnings.clear()
-        comments.clear()
         SyntaxMetadata.clear()
 
         val errors = mutableListOf<ParseException>()
@@ -195,7 +120,7 @@ class MezzeParser(
 
             val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls))
 
-            return ParseResultWithRecovery(parsedModule, errors, warnings.toList())
+            return ParseResultWithRecovery(parsedModule, errors)
         } finally {
             currentSource = null
             currentFile = null
@@ -251,7 +176,6 @@ class MezzeParser(
         )
     }
 
-    // ===== TOP LEVEL =====
 
     private val parsedModuleParser: Parser<ParsedModule> = { stream ->
         // Skip leading newlines
@@ -292,7 +216,6 @@ class MezzeParser(
     private lateinit var parsedTopLevelExpression: Parser<ParsedDecl>
     private lateinit var parsedTopLevelItem: Parser<ParsedDecl>
 
-    // ===== LET BINDING (defined before init block) =====
 
     init {
         // Initialize parsers after all properties are available
@@ -389,7 +312,6 @@ class MezzeParser(
         return s.current()?.text ?: "..."
     }
 
-    // ===== HELPERS =====
 
     internal fun skipNewlines(stream: TokenStream): TokenStream {
         var current = stream
@@ -397,45 +319,12 @@ class MezzeParser(
             val token = current.current() ?: break
             when (token.type) {
                 TokenType.NEWLINE -> current = current.advance()
-                TokenType.COMMENT -> {
-                    // Collect comment for formatter
-                    // Determine if trailing: check if previous non-comment token was on same line
-                    val isTrailing = isTrailingComment(current)
-                    comments.add(Comment(
-                        text = token.text,
-                        line = token.line,
-                        column = token.column,
-                        isTrailing = isTrailing
-                    ))
-                    current = current.advance()
-                }
+                TokenType.COMMENT -> current = current.advance()
                 else -> break
             }
         }
         return current
     }
-
-    /**
-     * Determine if a comment at the current position is a trailing comment
-     * (on the same line as code) or a leading comment (on its own line).
-     */
-    private fun isTrailingComment(stream: TokenStream): Boolean {
-        // Look back at previous tokens to see if there's code on the same line
-        val commentToken = stream.current() ?: return false
-        val commentLine = commentToken.line
-
-        // Check previous position in token stream
-        if (stream.position > 0) {
-            val prevToken = stream.tokens.getOrNull(stream.position - 1)
-            if (prevToken != null && prevToken.type != TokenType.NEWLINE && prevToken.type != TokenType.COMMENT) {
-                // Previous token is code - check if on same line
-                return prevToken.line == commentLine
-            }
-        }
-        return false
-    }
-
-    // Note: newlineParser was removed - it was unused. Use skipNewlines() instead.
 
     internal fun tok(type: TokenType): Parser<Token> =
         Parsers.token({ it.type == type }, tokenDescription(type))
@@ -557,7 +446,6 @@ class MezzeParser(
     }
 
 
-    // ===== STRING INTERPOLATION HELPERS =====
 
     /**
      * Check if a string contains unescaped $( for interpolation.
@@ -727,12 +615,6 @@ class MezzeParser(
     }
 }
 
-/**
- * Enhanced parse exception with detailed location and source context.
- *
- * Includes structured error types for programmatic handling and
- * recovery hints to help users fix errors quickly.
- */
 class ParseException(
     val errorMessage: String,
     val position: Int,
@@ -740,43 +622,28 @@ class ParseException(
     val column: Int = 0,
     val sourceCode: String? = null,
     val file: String? = null,
-    val errorType: ParseErrorType = ParseErrorType.GenericError(errorMessage),
-    val hints: List<ParseHint> = emptyList(),
     val length: Int = 1
-) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, hints, length)) {
-
-    /**
-     * Check if this error is of a specific type.
-     */
-    inline fun <reified T : ParseErrorType> isType(): Boolean = errorType is T
-
-    /**
-     * Get typed error details if matches type, null otherwise.
-     */
-    inline fun <reified T : ParseErrorType> getTyped(): T? = errorType as? T
+) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, length)) {
 
     companion object {
         private fun formatParseError(
             message: String,
-            @Suppress("UNUSED_PARAMETER") position: Int,  // Kept for API consistency
+            @Suppress("UNUSED_PARAMETER") position: Int,
             line: Int,
             column: Int,
             sourceCode: String?,
             file: String?,
-            hints: List<ParseHint> = emptyList(),
             length: Int = 1
         ): String {
             val sb = StringBuilder()
 
             sb.appendLine("Parse error: $message")
 
-            // Add location info
             if (line > 0) {
                 val fileInfo = file ?: "<input>"
                 sb.appendLine("   --> $fileInfo:$line:$column")
             }
 
-            // Add code snippet if available
             if (sourceCode != null && line > 0) {
                 val lines = sourceCode.lines()
                 if (line in 1..lines.size) {
@@ -787,34 +654,9 @@ class ParseException(
                     sb.appendLine("$padding |")
                     sb.appendLine("$lineNumStr | $errorLineContent")
 
-                    // Show error pointer
                     val pointer = " ".repeat(maxOf(0, column - 1)) + "^".repeat(maxOf(1, length))
                     sb.appendLine("$padding | $pointer")
                     sb.appendLine("$padding |")
-                }
-            }
-
-            // Add hints if available
-            if (hints.isNotEmpty()) {
-                sb.appendLine()
-                sb.appendLine("💡 Hints:")
-                hints.forEach { hint ->
-                    val icon = when (hint.severity) {
-                        HintSeverity.INFO -> "ℹ️"
-                        HintSeverity.SUGGESTION -> "💡"
-                        HintSeverity.WARNING -> "⚠️"
-                        HintSeverity.TIP -> "✨"
-                    }
-                    sb.appendLine("   $icon ${hint.message}")
-                    if (hint.code != null) {
-                        val codeLines = hint.code.lines()
-                        codeLines.forEach { codeLine ->
-                            sb.appendLine("      $codeLine")
-                        }
-                    }
-                    if (hint.docUrl != null) {
-                        sb.appendLine("      📖 See: ${hint.docUrl}")
-                    }
                 }
             }
 
