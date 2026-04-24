@@ -58,7 +58,13 @@ public final class MezzeDoubleCons implements MezzeList<Double> {
     @Override
     public int size() {
         if (cachedSize < 0) {
-            cachedSize = 1 + tailList.size();
+            int count = 0;
+            MezzeList<?> current = this;
+            while (!current.isEmpty()) {
+                count++;
+                current = current.tail();
+            }
+            cachedSize = count;
         }
         return cachedSize;
     }

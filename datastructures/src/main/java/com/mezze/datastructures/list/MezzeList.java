@@ -138,60 +138,100 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
 
     /**
      * Appends an element (O(n) - builds new list).
+     * Iterative to avoid stack overflow on large lists.
      */
     default MezzeList<A> append(A element) {
         if (isEmpty()) {
             return of(element);
         }
-        return cons(head(), tail().append(element));
+        // Reverse this, prepend element, reverse back
+        return reverse().prepend(element).reverse();
     }
 
     /**
      * Concatenates another list (O(n) where n is this.size()).
+     * Iterative to avoid stack overflow on large lists.
      */
     default MezzeList<A> concat(MezzeList<A> other) {
         if (isEmpty()) {
             return other;
         }
-        return cons(head(), tail().concat(other));
+        if (other.isEmpty()) {
+            return this;
+        }
+        // Reverse this, prepend each element onto other
+        MezzeList<A> reversed = this.reverse();
+        MezzeList<A> result = other;
+        while (!reversed.isEmpty()) {
+            result = cons(reversed.head(), result);
+            reversed = reversed.tail();
+        }
+        return result;
     }
 
     // ===== TRANSFORM =====
 
     /**
      * Maps a function over the list.
+     * Iterative to avoid stack overflow on large lists.
      */
     default <B> MezzeList<B> map(Function<A, B> fn) {
         if (isEmpty()) {
             return empty();
         }
-        return cons(fn.apply(head()), tail().map(fn));
+        // Build reversed result, then reverse
+        MezzeList<B> acc = empty();
+        MezzeList<A> current = this;
+        while (!current.isEmpty()) {
+            acc = cons(fn.apply(current.head()), acc);
+            current = current.tail();
+        }
+        return acc.reverse();
     }
 
     /**
      * Flat maps a function over the list.
+     * Iterative to avoid stack overflow on large lists.
      */
     default <B> MezzeList<B> flatMap(Function<A, MezzeList<B>> fn) {
         if (isEmpty()) {
             return empty();
         }
-        return fn.apply(head()).concat(tail().flatMap(fn));
+        // Collect all mapped lists in reverse, then concat in order
+        MezzeList<MezzeList<B>> chunks = empty();
+        MezzeList<A> current = this;
+        while (!current.isEmpty()) {
+            chunks = cons(fn.apply(current.head()), chunks);
+            current = current.tail();
+        }
+        // chunks is reversed — fold from left to build result
+        MezzeList<B> result = empty();
+        while (!chunks.isEmpty()) {
+            result = chunks.head().concat(result);
+            chunks = chunks.tail();
+        }
+        return result;
     }
 
     /**
      * Filters elements by predicate.
+     * Iterative to avoid stack overflow on large lists.
      */
     default MezzeList<A> filter(Predicate<A> p) {
         if (isEmpty()) {
             return this;
         }
-        A h = head();
-        MezzeList<A> t = tail().filter(p);
-        if (p.test(h)) {
-            return cons(h, t);
-        } else {
-            return t;
+        // Build reversed filtered list, then reverse
+        MezzeList<A> acc = empty();
+        MezzeList<A> current = this;
+        while (!current.isEmpty()) {
+            A h = current.head();
+            if (p.test(h)) {
+                acc = cons(h, acc);
+            }
+            current = current.tail();
         }
+        return acc.reverse();
     }
 
     /**
@@ -218,12 +258,10 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
 
     /**
      * Right fold.
+     * Iterative: reverses first, then left-folds with flipped function.
      */
     default <B> B foldRight(B init, BiFunction<A, B, B> fn) {
-        if (isEmpty()) {
-            return init;
-        }
-        return fn.apply(head(), tail().foldRight(init, fn));
+        return reverse().fold(init, (acc, elem) -> fn.apply(elem, acc));
     }
 
     /**
@@ -305,12 +343,19 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
 
     /**
      * Take first n elements.
+     * Iterative to avoid stack overflow on large lists.
      */
     default MezzeList<A> take(int n) {
         if (n <= 0 || isEmpty()) {
             return empty();
         }
-        return cons(head(), tail().take(n - 1));
+        MezzeList<A> acc = empty();
+        MezzeList<A> current = this;
+        for (int i = 0; i < n && !current.isEmpty(); i++) {
+            acc = cons(current.head(), acc);
+            current = current.tail();
+        }
+        return acc.reverse();
     }
 
     /**
@@ -326,16 +371,21 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
 
     /**
      * Take elements while predicate is true.
+     * Iterative to avoid stack overflow on large lists.
      */
     default MezzeList<A> takeWhile(Predicate<A> p) {
         if (isEmpty()) {
             return this;
         }
-        A h = head();
-        if (p.test(h)) {
-            return cons(h, tail().takeWhile(p));
+        MezzeList<A> acc = empty();
+        MezzeList<A> current = this;
+        while (!current.isEmpty()) {
+            A h = current.head();
+            if (!p.test(h)) break;
+            acc = cons(h, acc);
+            current = current.tail();
         }
-        return empty();
+        return acc.reverse();
     }
 
     /**
@@ -368,7 +418,14 @@ public sealed interface MezzeList<A> extends TruffleObject, Iterable<A>
         if (tail().isEmpty()) {
             return empty();
         }
-        return cons(head(), tail().init());
+        // Build reversed (without last), then reverse back
+        MezzeList<A> acc = empty();
+        MezzeList<A> current = this;
+        while (!current.tail().isEmpty()) {
+            acc = cons(current.head(), acc);
+            current = current.tail();
+        }
+        return acc.reverse();
     }
 
     /**
