@@ -6,9 +6,8 @@ import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typechecker.ResolvedImport
 import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.parsedast.*
-import com.mezze.language.codebase.CodebaseManager
-import com.mezze.language.codebase.CodebasePopulator
-import com.mezze.language.codebase.Codebase
+import com.mezze.language.codebase.MezzeStore
+import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
@@ -51,8 +50,8 @@ class MezzeTextDocumentService(
     // Last successful type check result per document (survives parse errors for dot-completion)
     private val lastSuccessfulResult = ConcurrentHashMap<String, TypeCheckResult>()
 
-    // Codebase for project mode
-    private var projectCodebase: Codebase? = null
+    // Store for project mode (will be rebuilt in LSP task #106)
+    private var projectStore: MezzeStore? = null
 
     /**
      * State for an open document.
@@ -81,12 +80,13 @@ class MezzeTextDocumentService(
             server.logInfo("Root file exists: ${rootFile.exists()}, isDirectory: ${rootFile.isDirectory}")
             server.logInfo("Looking for Mezze.toml at: ${File(rootFile, "Mezze.toml").absolutePath}")
             server.logInfo("Mezze.toml exists: ${File(rootFile, "Mezze.toml").exists()}")
-            if (CodebaseManager.isInProject(rootFile)) {
+            val projectRoot = SQLiteMezzeStore.findProjectRoot(rootFile)
+            if (projectRoot != null) {
                 try {
-                    projectCodebase = CodebaseManager.forProjectRoot(rootFile)
-                    server.logInfo("Using project codebase at ${CodebaseManager.getCodebasePath(rootFile)}")
+                    projectStore = SQLiteMezzeStore.forProject(projectRoot)
+                    server.logInfo("Using project store at ${projectRoot}/.mz/cache.sqlite")
                 } catch (e: Exception) {
-                    server.logError("Failed to create codebase: ${e.message}")
+                    server.logError("Failed to create store: ${e.message}")
                     e.printStackTrace()
                 }
             } else {
@@ -99,7 +99,7 @@ class MezzeTextDocumentService(
      * Shutdown and cleanup resources.
      */
     fun shutdown() {
-        projectCodebase?.close()
+        projectStore?.close()
         documents.clear()
     }
 

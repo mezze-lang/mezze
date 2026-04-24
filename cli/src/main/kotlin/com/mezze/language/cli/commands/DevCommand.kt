@@ -2,7 +2,7 @@ package com.mezze.language.cli.commands
 
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
-import com.mezze.language.cli.CodebaseHelper
+
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
@@ -120,12 +120,7 @@ class DevCommand {
             kotlin.system.exitProcess(1)
         }
 
-        // Populate codebase in project mode
-        CodebaseHelper.populateIfInProject(
-            projectRoot = currentDir,
-            typeCheckResult = typeCheckResult,
-            modulePath = manifest.`package`.name
-        )
+        // TODO: Populate MezzeStore from typecheck result (#99)
 
         // Check if program has a 'main' function and auto-call it
         val mainBinding = typeCheckResult.typedModule?.decls

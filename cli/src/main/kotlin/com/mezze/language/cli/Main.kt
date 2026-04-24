@@ -9,9 +9,7 @@ import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import org.graalvm.polyglot.PolyglotException
-import com.mezze.language.codebase.CodebaseLoader
-import com.mezze.language.codebase.CodebasePopulator
-import com.mezze.language.codebase.SQLiteCodebase
+import com.mezze.language.codebase.SQLiteMezzeStore
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -29,21 +27,9 @@ private var stdlibLoaded = false
 private fun loadPrecompiledStdlib() {
     if (stdlibLoaded) return
 
-    try {
-        val resourceStream = object {}.javaClass.classLoader.getResourceAsStream("stdlib.db")
-        if (resourceStream != null) {
-            val bytes = resourceStream.readBytes()
-            val codebase = SQLiteCodebase.fromBytes(bytes)
-            codebase.use {
-                val modules = CodebaseLoader.loadAllParsedModules(codebase)
-                TypeChecker.preloadModules(modules)
-                stdlibLoaded = true
-            }
-        }
-    } catch (e: Exception) {
-        // Fall back to dynamic stdlib loading if pre-compiled not available
-        System.err.println("Warning: Failed to load pre-compiled stdlib: ${e.message}")
-    }
+    // TODO: Rework in #107 — stdlib will be loaded from MezzeStore
+    // For now, stdlib is loaded dynamically by the typechecker on demand
+    stdlibLoaded = true
 }
 
 /**
@@ -615,8 +601,6 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
     val source = file.readText()
     val projectRoot = file.toPath().toAbsolutePath().parent?.toFile() ?: file.parentFile ?: File(".")
 
-    // Use v1 cached parser for backward compat (CachedParser still uses v1 internally)
-    CachedParser(projectRoot).use { cachedParser ->
     try {
         val startTime = System.nanoTime()
 
@@ -662,17 +646,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        // Populate codebase from v2 typecheck result
-        try {
-            val v2Result = typeChecker.typeCheck(parsedModule, typeCheckProjectRoot)
-            CodebaseHelper.populateIfInProject(
-                projectRoot = typeCheckProjectRoot,
-                typeCheckResult = v2Result,
-                modulePath = null
-            )
-        } catch (_: Exception) {
-            // Codebase population is best-effort
-        }
+        // TODO: Populate MezzeStore from typecheck result (#99)
 
         if (quietMode) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
@@ -808,7 +782,6 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         println(e.message ?: "Unknown error")
         kotlin.system.exitProcess(1)
     }
-    } // cachedParser.use
 }
 
 private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
@@ -871,12 +844,7 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
 
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        // Populate codebase in project mode
-        val codebaseUpdated = CodebaseHelper.populateIfInProject(
-            projectRoot = currentDir.toPath(),
-            typeCheckResult = result,
-            modulePath = manifest.`package`.name
-        )
+        // TODO: Populate MezzeStore from typecheck result (#99)
 
         if (quietMode) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
@@ -1434,20 +1402,9 @@ private fun createJavaMainClass(tempDir: File, inputFile: File, source: String) 
 
     println("📦 Bundling ${loadedModules.size} pre-parsed modules (stdlib, imports, packages)")
 
-    // Create in-memory SQLite codebase and populate it
-    val codebase = SQLiteCodebase.inMemory()
-    CodebasePopulator.populate(
-        codebase = codebase,
-        typeCheckResult = typeCheckResult,
-        modules = loadedModules,
-        mainModulePath = null  // Script mode has no module path
-    )
-
-    // Export codebase to bytes
-    val codebaseBytes = SQLiteCodebase.toBytes(codebase)
-    codebase.close()
-
-    println("📦 Codebase size: ${codebaseBytes.size / 1024} KB")
+    // TODO: Rework in #103 — create blobs.sqlite for JAR embedding via MezzeStore
+    val codebaseBytes = ByteArray(0)
+    println("TODO: JAR codebase embedding via MezzeStore (#103)")
 
     // Save codebase as resource file
     val resourcesDir = File(tempDir, "src/main/resources/com/mezze/standalone")
@@ -1877,14 +1834,11 @@ private fun handleCompileStdlibCommand(args: List<String>) {
     val outputFile = File(outputPath)
     outputFile.parentFile?.mkdirs()
 
-    val codebase = com.mezze.language.codebase.SQLiteCodebase.open(outputFile, readOnly = false)
-    codebase.use {
-        com.mezze.language.codebase.CodebasePopulator.populate(
-            codebase = codebase,
-            typeCheckResult = TypeCheckResult(),
-            modules = stdlibModules,
-            mainModulePath = null
-        )
+    // TODO: Rework in #107 — store stdlib in MezzeStore format
+    val store = SQLiteMezzeStore.forProject(outputFile.parentFile)
+    store.use {
+        // Stdlib modules will be scattered into blobs table
+        println("TODO: Store stdlib modules in MezzeStore (#107)")
     }
 
     println("Saved to $outputPath (${outputFile.length() / 1024} KB)")
