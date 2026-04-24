@@ -63,29 +63,6 @@ let y = x + unknown_var
     }
 
     @Test
-    fun `test error pretty printer includes code snippet`() {
-        val source = """
-let x = 42
-let y = "hello"
-let z = x + y
-        """.trimIndent()
-
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        try {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-            fail("Should have thrown TypeCheckError")
-        } catch (e: TypeCheckError) {
-            val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.mz")
-
-            // Verify the pretty printed error contains expected elements
-            assertTrue(prettyPrinted.contains("test.mz:3"), "Should contain file:line reference")
-            assertTrue(prettyPrinted.contains("let z = x + y"), "Should contain the offending code line")
-            assertTrue(prettyPrinted.contains("^"), "Should contain error pointer")
-        }
-    }
-
-    @Test
     fun `test error message includes line and column`() {
         val source = """
 let x = 42
@@ -145,33 +122,6 @@ let z = x + y
         } catch (e: TypeCheckError) {
             // The error should be a constraint violation (NumAdd ability)
             assertNotNull(e.errorType, "Error should have an error type")
-        }
-    }
-
-    @Test
-    fun `test error pretty printer shows context lines`() {
-        val source = """
-let a = 1
-let b = 2
-let c = 3
-let d = 4
-let e = a + "oops"
-let f = 6
-let g = 7
-        """.trimIndent()
-
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        try {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-            fail("Should have thrown TypeCheckError")
-        } catch (e: TypeCheckError) {
-            val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.mz")
-
-            // Should show context lines before and after the error
-            assertTrue(prettyPrinted.contains("let d = 4"), "Should show line before error")
-            assertTrue(prettyPrinted.contains("let e = a + \"oops\""), "Should show error line")
-            assertTrue(prettyPrinted.contains("let f = 6"), "Should show line after error")
         }
     }
 

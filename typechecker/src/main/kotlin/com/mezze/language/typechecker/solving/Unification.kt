@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.util.StringDistance
@@ -109,12 +110,12 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
     // BoolType (primitive) can unify with VariantType([True, False])
     // This allows pattern matching on True/False while keeping Bool as a primitive
     if (type1 is MezzeType.BoolType && type2 is MezzeType.VariantType) {
-        if (isBoolVariant(type2)) {
+        if (BuiltInAbilities.isBoolVariant(type2)) {
             return UnificationResult.Success(Substitution.empty)
         }
     }
     if (type1 is MezzeType.VariantType && type2 is MezzeType.BoolType) {
-        if (isBoolVariant(type1)) {
+        if (BuiltInAbilities.isBoolVariant(type1)) {
             return UnificationResult.Success(Substitution.empty)
         }
     }
@@ -1122,34 +1123,6 @@ private fun formatType(type: MezzeType): String {
     return prettyPrintType(type)
 }
 
-// Keep original implementation for internal use if needed
-private fun formatTypeRaw(type: MezzeType): String {
-    // Use centralized registry for primitive types
-    PrimitiveTypes.toName(type)?.let { return it }
-
-    return when (type) {
-        is MezzeType.VarType -> type.variable.name
-        is MezzeType.FunctionType -> "{...} -> ..."
-        is MezzeType.RecordType -> "{${type.fields.entries.take(3).joinToString { "${it.key}: ${formatType(it.value)}" }}${if (type.fields.size > 3) ", ..." else ""}}"
-        is MezzeType.VariantType -> {
-            val constructorStrs = type.constructors.entries.take(3).map { (name, payload) ->
-                if (payload != null) "$name ${formatType(payload)}" else name
-            }
-            "| ${constructorStrs.joinToString(", ")}${if (type.constructors.size > 3) ", ..." else ""} |"
-        }
-        is MezzeType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ${type.args.joinToString(" ") { formatType(it) }}" else ""}"
-        is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
-        is MezzeType.ListType -> "List ${formatType(type.elementType)}"
-        is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
-        is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
-        is MezzeType.SortedSetType -> "SortedSet ${formatType(type.elementType)}"
-        is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
-        is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
-        is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}${if (type.effects.size > 3) ", ..." else ""}>"
-        else -> type.toString()
-    }
-}
-
 /**
  * Expand a TypeApplication to a RecordType.
  *
@@ -1437,18 +1410,6 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
 }
 
 /**
- * Check if a variant type is the Bool variant: | True, False |
- */
-private fun isBoolVariant(variant: MezzeType.VariantType): Boolean {
-    // Bool variant must have exactly 2 constructors: True and False, both with no payloads
-    return variant.constructors.size == 2 &&
-           variant.constructors.containsKey("True") &&
-           variant.constructors.containsKey("False") &&
-           variant.constructors["True"] == null &&
-           variant.constructors["False"] == null
-}
-
-/**
  * Result of expanding a TypeApplication to its underlying type.
  *
  * Rather than trying RecordType first then VariantType, this sealed class
@@ -1471,31 +1432,6 @@ sealed class TypeExpansionResult {
 
     /** TypeApplication could not be expanded (unknown type) */
     object NotFound : TypeExpansionResult()
-}
-
-/**
- * Get the definition kind of a TypeApplication without expanding.
- *
- * This is a fast check that only looks up the TypeDeclaration and
- * checks its definition type, without doing full type parameter substitution.
- */
-enum class TypeDefinitionKind {
-    RECORD,
-    VARIANT,
-    NEWTYPE,
-    UNKNOWN
-}
-
-internal fun getTypeDefinitionKind(
-    typeApp: MezzeType.TypeApplication,
-    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
-): TypeDefinitionKind {
-    val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeDefinitionKind.UNKNOWN
-    return when (typeDecl.definition) {
-        is com.mezze.language.parsedast.ParsedRecordDef -> TypeDefinitionKind.RECORD
-        is com.mezze.language.parsedast.ParsedVariantDef -> TypeDefinitionKind.VARIANT
-        is com.mezze.language.parsedast.ParsedNewtypeDef -> TypeDefinitionKind.NEWTYPE
-    }
 }
 
 /**

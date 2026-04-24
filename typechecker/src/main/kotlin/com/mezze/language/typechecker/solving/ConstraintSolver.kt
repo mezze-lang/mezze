@@ -139,10 +139,6 @@ class ConstraintSolver(
      */
     private val patternBasedRowVars = mutableSetOf<RowVar>()
 
-    // ========================================================================
-    // OPTIMIZATION: Constructor-to-Variant Index for O(1) lookup
-    // ========================================================================
-
     /**
      * Index from constructor name to (ParsedTypeDecl, ParsedVariantDef) pairs.
      * Built lazily on first use of findVariantWithConstructors.
@@ -169,10 +165,6 @@ class ConstraintSolver(
         return index
     }
 
-    // ========================================================================
-    // OPTIMIZATION: typeMatchesAnnotation memoization cache
-    // ========================================================================
-
     /**
      * Cache for typeMatchesAnnotation results.
      * Key: Pair of type hashCode and annotation hashCode
@@ -184,19 +176,9 @@ class ConstraintSolver(
     private val typeMatchesAnnotationCache = mutableMapOf<Pair<Int, Int>, Boolean>()
 
     /**
-     * Get the set of type variables that must remain open (have row variables).
-     */
-    fun getMustBeOpenTypes(): Set<TypeVar> = mustBeOpenTypes.toSet()
-
-    /**
      * Get the set of row variables that must remain open.
      */
     fun getMustBeOpenRowVars(): Set<RowVar> = mustBeOpenRowVars.toSet()
-
-    /**
-     * Get the set of binding names that must have open variants.
-     */
-    fun getMustBeOpenBindings(): Set<String> = mustBeOpenBindings.toSet()
 
     /**
      * Result of solving constraints.
@@ -2074,7 +2056,7 @@ class ConstraintSolver(
 
             // Eq: VarType pass-through + derivation for composite types
             WellKnownHashes.isEq(abilityHash) -> {
-                unwrappedType is MezzeType.VarType || isBoolVariant(unwrappedType) ||
+                unwrappedType is MezzeType.VarType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
                 (unwrappedType is MezzeType.ListType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash)) ||
@@ -2092,7 +2074,7 @@ class ConstraintSolver(
 
             // Logical operators only work on Bool
             abilityName == "LogicalAnd" || abilityName == "LogicalOr" || abilityName == "LogicalNot" -> {
-                unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType) ||
+                unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }
 
@@ -2193,10 +2175,6 @@ class ConstraintSolver(
             }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }"
         }
-    }
-
-    private fun isBoolVariant(type: MezzeType): Boolean {
-        return BuiltInAbilities.isBoolVariant(type)
     }
 
     /** Matches partial Bool variants (e.g., just {True} or just {False}) during constraint solving. */

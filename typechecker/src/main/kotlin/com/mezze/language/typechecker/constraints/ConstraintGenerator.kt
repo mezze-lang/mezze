@@ -40,13 +40,6 @@ data class ProgramConstraintResult(
     val perBindingSolveErrors: List<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList(),  // Errors from per-binding solving
     val perBindingSubstitution: com.mezze.language.typechecker.solving.Substitution = com.mezze.language.typechecker.solving.Substitution.empty  // Accumulated substitution from per-binding solving (for bidirectional inference)
 ) {
-    /**
-     * Get all referenced bindings for each binding name.
-     * Used for building the dependency graph.
-     */
-    fun getReferencedBindingsPerBinding(): Map<String, Set<com.mezze.language.typechecker.dependencies.DefinitionRef.ByName>> {
-        return constraintResults.mapValues { (_, result) -> result.referencedBindings }
-    }
 }
 
 class ConstraintGenerator(

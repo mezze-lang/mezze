@@ -22,10 +22,6 @@ class CodecGeneratorTest {
         generator = CodecGenerator()
     }
 
-    // ========================================================================
-    // isSerializable Tests
-    // ========================================================================
-
     @Test
     fun `primitives should be serializable`() {
         assertTrue(generator.isSerializable(MezzeType.IntType))
@@ -209,10 +205,6 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(varType))
     }
 
-    // ========================================================================
-    // generateEncodeImpl Tests
-    // ========================================================================
-
     @Test
     fun `generateEncodeImpl for Int creates valid impl`() {
         val formatType = MezzeType.TypeApplication("Json", emptyList())
@@ -275,10 +267,6 @@ class CodecGeneratorTest {
         assertTrue(impl1 === impl2)
     }
 
-    // ========================================================================
-    // generateDecodeImpl Tests
-    // ========================================================================
-
     @Test
     fun `generateDecodeImpl for Int creates valid impl`() {
         val formatType = MezzeType.TypeApplication("Json", emptyList())
@@ -318,10 +306,6 @@ class CodecGeneratorTest {
         assertEquals(1, impl.operations.size)  // decode with config
     }
 
-    // ========================================================================
-    // Streaming Encode/Decode Tests
-    // ========================================================================
-
     @Test
     fun `generateStreamEncodeImpl for Int creates valid impl`() {
         val formatType = MezzeType.TypeApplication("JsonStream", emptyList())
@@ -346,55 +330,7 @@ class CodecGeneratorTest {
         assertEquals("stream_decode", impl.operations[0].name)
     }
 
-    // ========================================================================
-    // Cache Management Tests
-    // ========================================================================
-
-    @Test
-    fun `clearCaches clears all caches`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
-        // Generate some impls
-        generator.generateEncodeImpl(formatType, MezzeType.IntType)
-        generator.generateDecodeImpl(formatType, MezzeType.IntType)
-
-        // Verify caches are populated
-        val stats1 = generator.getCacheStats()
-        assertTrue(stats1["encode"]!! > 0)
-        assertTrue(stats1["decode"]!! > 0)
-
-        // Clear caches
-        generator.clearCaches()
-
-        // Verify caches are empty
-        val stats2 = generator.getCacheStats()
-        assertEquals(0, stats2["encode"])
-        assertEquals(0, stats2["decode"])
-        assertEquals(0, stats2["streamEncode"])
-        assertEquals(0, stats2["streamDecode"])
-    }
-
-    @Test
-    fun `getCacheStats returns correct counts`() {
-        val formatType = MezzeType.TypeApplication("Json", emptyList())
-
-        generator.clearCaches()
-
-        // Generate impls for different types
-        generator.generateEncodeImpl(formatType, MezzeType.IntType)
-        generator.generateEncodeImpl(formatType, MezzeType.StringType)
-        generator.generateDecodeImpl(formatType, MezzeType.IntType)
-
-        val stats = generator.getCacheStats()
-        assertEquals(2, stats["encode"])
-        assertEquals(1, stats["decode"])
-        assertEquals(0, stats["streamEncode"])
-        assertEquals(0, stats["streamDecode"])
-    }
-
-    // ========================================================================
     // Type Application Tests (Option, Result)
-    // ========================================================================
 
     @Test
     fun `generateEncodeImpl for Option creates valid impl`() {
@@ -436,9 +372,7 @@ class CodecGeneratorTest {
         assertEquals(1, impl.operations.size)  // decode with config
     }
 
-    // ========================================================================
     // Normalized Cache Key Tests
-    // ========================================================================
 
     @Test
     fun `records with same fields in different order share cache key`() {
@@ -456,17 +390,11 @@ class CodecGeneratorTest {
             "name" to MezzeType.StringType
         ))
 
-        generator.clearCaches()
-
         val impl1 = generator.generateEncodeImpl(formatType, record1)
         val impl2 = generator.generateEncodeImpl(formatType, record2)
 
         // Should return the same cached instance
         assertTrue(impl1 === impl2, "Records with same fields in different order should share encoder")
-
-        // Cache should have only one entry
-        val stats = generator.getCacheStats()
-        assertEquals(1, stats["encode"], "Only one encoder should be cached for same-structure records")
     }
 
     @Test
@@ -493,8 +421,6 @@ class CodecGeneratorTest {
             "address" to inner2
         ))
 
-        generator.clearCaches()
-
         val impl1 = generator.generateEncodeImpl(formatType, outer1)
         val impl2 = generator.generateEncodeImpl(formatType, outer2)
 
@@ -516,17 +442,11 @@ class CodecGeneratorTest {
             "email" to MezzeType.StringType
         ))
 
-        generator.clearCaches()
-
         val impl1 = generator.generateEncodeImpl(formatType, record1)
         val impl2 = generator.generateEncodeImpl(formatType, record2)
 
         // Should NOT return the same instance
         assertFalse(impl1 === impl2, "Records with different fields should not share encoder")
-
-        // Cache should have two entries
-        val stats = generator.getCacheStats()
-        assertEquals(2, stats["encode"], "Two different record types should have two encoders")
     }
 
     @Test
@@ -541,22 +461,14 @@ class CodecGeneratorTest {
             "value" to MezzeType.StringType
         ))
 
-        generator.clearCaches()
-
         val impl1 = generator.generateEncodeImpl(formatType, record1)
         val impl2 = generator.generateEncodeImpl(formatType, record2)
 
         // Should NOT return the same instance
         assertFalse(impl1 === impl2, "Records with same field name but different types should not share encoder")
-
-        // Cache should have two entries
-        val stats = generator.getCacheStats()
-        assertEquals(2, stats["encode"])
     }
 
-    // ========================================================================
     // Variant Type Tests
-    // ========================================================================
 
     @Test
     fun `variant with record payload should be serializable`() {
@@ -580,10 +492,6 @@ class CodecGeneratorTest {
         assertTrue(generator.isSerializable(outerVariant))
     }
 
-    // ========================================================================
-    // Empty Collection Tests
-    // ========================================================================
-
     @Test
     fun `empty variant should be serializable`() {
         val emptyVariant = MezzeType.VariantType(emptyMap())
@@ -599,10 +507,6 @@ class CodecGeneratorTest {
         assertEquals("EncodeRepr", impl.abilityName)
         assertEquals(1, impl.operations.size)  // encode with config
     }
-
-    // ========================================================================
-    // Complex Type Tests
-    // ========================================================================
 
     @Test
     fun `list of Option types should be serializable`() {

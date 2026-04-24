@@ -73,8 +73,9 @@ object BuiltInAbilities {
                     }
                     result[decl.name] = methods
                 }
-            } catch (e: Exception) {
-                System.err.println("[BuiltInAbilities] Failed to parse $embeddedPath: ${e.message}")
+            } catch (_: Exception) {
+                // Parse failures for built-in ability definitions are silently ignored;
+                // the ability will be absent and the typechecker will report missing impls.
             }
         }
 
@@ -148,14 +149,7 @@ object BuiltInAbilities {
     /**
      * Check if a variant type is the Bool variant: | True, False |
      */
-    fun isBoolVariant(type: MezzeType): Boolean {
-        return type is MezzeType.VariantType &&
-               type.constructors.size == 2 &&
-               type.constructors.containsKey("True") &&
-               type.constructors.containsKey("False") &&
-               type.constructors["True"] == null &&
-               type.constructors["False"] == null
-    }
+    fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
 
     /**
      * Get the canonical Bool type.

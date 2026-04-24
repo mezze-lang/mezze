@@ -555,8 +555,8 @@ class TypeChecker(
                                     else -> continue
                                 }
                                 builder.buildCodecImpl(parsedImpl, extraImpls)
-                            } catch (codecEx: Exception) {
-                                try { java.io.File("/tmp/codec-error.txt").appendText("[CODEC-ERROR] ${ci.abilityName}: ${codecEx::class.simpleName}: ${codecEx.message}\n${codecEx.stackTraceToString().take(500)}\n") } catch (_: Exception) {}
+                            } catch (_: Exception) {
+                                // Codec generation errors are non-fatal; the impl will be missing at runtime.
                             }
                         }
                         if (extraImpls.isNotEmpty()) {
@@ -568,8 +568,9 @@ class TypeChecker(
                     } else {
                         emittedTypedModule = typed
                     }
-                } catch (emitEx: Exception) {
-                    System.err.println("V2 TypedAstBuilder (${currentModulePath}): ${emitEx::class.simpleName}: ${emitEx.message}")
+                } catch (_: Exception) {
+                    // TypedAstBuilder errors are non-fatal for type checking; the typed module
+                    // will be null and the pipeline will skip lowering.
                 }
 
                 // Phase 2: Mono -> Resolve -> Lower (entry module only)
@@ -641,8 +642,8 @@ class TypeChecker(
                         }
                         arr.toTypedArray()
                     }
-                } catch (pipelineEx: Exception) {
-                    System.err.println("V2 pipeline (TypedASTCompiler): ${pipelineEx::class.simpleName}: ${pipelineEx.message}")
+                } catch (_: Exception) {
+                    // TypedASTCompiler errors are non-fatal for type checking.
                 }
 
                 // V2 validation skipped — TypedASTCompiler doesn't produce MonoAST
@@ -678,10 +679,6 @@ class TypeChecker(
             }
         }
     }
-
-    // ========================================================================
-    // HELPER METHODS
-    // ========================================================================
 
     /**
      * Check if a ParsedModule has import declarations.
@@ -941,10 +938,6 @@ class TypeChecker(
         return context
     }
 
-
-    // ========================================================================
-    // COMPATIBILITY API - Instance Methods
-    // ========================================================================
 
     // Cached type aliases from the last type check
     private var cachedTypeAliases: Map<String, TypeAliasInfo> = emptyMap()
@@ -1278,10 +1271,6 @@ class TypeChecker(
             return TypeChecker(context)
         }
 
-        // ====================================================================
-        // COMPATIBILITY API - Module Cache Methods
-        // ====================================================================
-
         /**
          * Clear the module cache (compatibility API).
          * Clears the ModuleResolver's global cache.
@@ -1353,21 +1342,7 @@ class TypeChecker(
         }
     }
 
-    private fun debugTypeNTC(type: MezzeType?, depth: Int = 0): String {
-        if (type == null) return "null"
-        if (depth > 3) return "..."
-        return when (type) {
-            is MezzeType.FunctionType -> "FunctionType(param=${debugTypeNTC(type.paramType, depth + 1)}, return=${debugTypeNTC(type.returnType, depth + 1)})"
-            is MezzeType.RecordType -> "RecordType(fields={${type.fields.map { (k, v) -> "$k: ${debugTypeNTC(v, depth + 1)}" }.joinToString(", ")}}, rowVar=${type.rowVar})"
-            is MezzeType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
-            is MezzeType.VarType -> "VarType(${type.variable})"
-            else -> type::class.simpleName ?: type.toString()
-        }
-    }
-
-    // =========================================================================
     // PIPE EXPRESSION DESUGARING
-    // =========================================================================
 
     /**
      * Desugar pipe expressions in a ParsedModule (v2 pipeline).

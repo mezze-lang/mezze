@@ -905,13 +905,7 @@ class TypeValidator(
         }
     }
 
-    /**
-     * Check if type is the Bool variant type.
-     */
-    private fun isBoolVariant(type: MezzeType): Boolean {
-        return type is MezzeType.VariantType &&
-               type.constructors.keys == setOf("True", "False")
-    }
+    private fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
 
     /**
      * Get type name for ability implementation lookup.
@@ -1363,114 +1357,6 @@ class TypeValidator(
             }
             // One has payload, other doesn't
             else if (payload1 != null || payload2 != null) {
-                return false
-            }
-        }
-
-        return true
-    }
-
-    /**
-     * Check if two function types are compatible.
-     *
-     * Note: MezzeType.FunctionType has paramType (which is a RecordType) not a list of params.
-     */
-    private fun functionTypesCompatible(annotated: MezzeType.FunctionType, inferred: MezzeType.FunctionType): Boolean {
-        // Check parameter type (which is a RecordType)
-        if (!typesCompatible(annotated.paramType, inferred.paramType)) {
-            return false
-        }
-
-        // Check return type
-        if (!typesCompatible(annotated.returnType, inferred.returnType)) {
-            return false
-        }
-
-        // Check effects if annotated type has effects
-        val annotatedEffects = annotated.effects
-        if (annotatedEffects != null) {
-            val inferredEffects = inferred.effects?.effects ?: emptySet()
-            // Annotated effects must match inferred effects exactly
-            if (annotatedEffects.effects != inferredEffects) {
-                return false
-            }
-        }
-
-        // Check ability constraints if annotated type has them
-        if (annotated.abilityConstraints.isNotEmpty() || inferred.abilityConstraints.isNotEmpty()) {
-            // Check that both have same number of constraints
-            if (annotated.abilityConstraints.size != inferred.abilityConstraints.size) {
-                return false
-            }
-
-            // Check that all annotated constraints exist in inferred constraints
-            // This is a simplified check - we just match by ability name
-            // A full check would need to match type arguments too
-            val annotatedAbilities = annotated.abilityConstraints.map { it.abilityName }.toSet()
-            val inferredAbilities = inferred.abilityConstraints.map { it.abilityName }.toSet()
-
-            if (annotatedAbilities != inferredAbilities) {
-                return false
-            }
-        }
-
-        return true
-    }
-
-    /**
-     * Check if two record types are compatible.
-     */
-    private fun recordTypesCompatible(annotated: MezzeType.RecordType, inferred: MezzeType.RecordType): Boolean {
-        // Check that all annotated fields exist in inferred type
-        for ((fieldName, annotatedFieldType) in annotated.fields) {
-            val inferredFieldType = inferred.fields[fieldName] ?: return false
-            if (!typesCompatible(annotatedFieldType, inferredFieldType)) {
-                return false
-            }
-        }
-
-        // Check that inferred type doesn't have extra fields (unless annotated is open)
-        // isOpen is a property, not a method
-        if (!annotated.isOpen) {
-            if (annotated.fields.size != inferred.fields.size) {
-                return false
-            }
-        }
-
-        return true
-    }
-
-    /**
-     * Check if two variant types are compatible.
-     */
-    private fun variantTypesCompatible(annotated: MezzeType.VariantType, inferred: MezzeType.VariantType): Boolean {
-        // Check that all annotated constructors exist in inferred type
-        for ((constructorName, annotatedPayload) in annotated.constructors) {
-            // Key must exist in inferred type
-            if (!inferred.constructors.containsKey(constructorName)) {
-                return false
-            }
-            val inferredPayload = inferred.constructors[constructorName]
-
-            // Both have payload - check compatibility
-            if (annotatedPayload != null && inferredPayload != null) {
-                if (!typesCompatible(annotatedPayload, inferredPayload)) {
-                    return false
-                }
-            }
-            // Annotated has payload but inferred doesn't - mismatch
-            else if (annotatedPayload != null && inferredPayload == null) {
-                return false
-            }
-            // Inferred has payload but annotated doesn't - mismatch
-            else if (annotatedPayload == null && inferredPayload != null) {
-                return false
-            }
-        }
-
-        // Check that inferred type doesn't have extra constructors (unless annotated is open)
-        if (annotated.rowVar == null) {  // closed variant
-            if (annotated.constructors.size != inferred.constructors.size) {
                 return false
             }
         }
@@ -2028,12 +1914,8 @@ class TypeValidator(
         return errors
     }
 
-    // ========================================================================
-    // PERFORM EXPRESSION VALIDATION (v2 native — works on ParsedExpr)
-    // ========================================================================
-
     /**
-     * Validate perform expressions in an expression tree (v2 native — works on ParsedExpr).
+     * Validate perform expressions in an expression tree (v2 native -- works on ParsedExpr).
      *
      * This checks that handler associated types match what the expression throws.
      */
@@ -2580,12 +2462,7 @@ class TypeValidator(
         return handlerType == exprType
     }
 
-    /**
-     * Check if a variant type is the Bool variant: | True, False |
-     */
-    private fun isBoolVariant(type: MezzeType.VariantType): Boolean {
-        return type.constructors.keys == setOf("True", "False")
-    }
+    private fun isBoolVariant(type: MezzeType.VariantType): Boolean = PrimitiveTypes.isBoolVariant(type)
 
     /**
      * Check if a concrete MezzeType matches a TypeAnnotation structurally.

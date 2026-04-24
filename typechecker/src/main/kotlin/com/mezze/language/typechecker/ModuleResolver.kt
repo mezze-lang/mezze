@@ -632,9 +632,6 @@ class ModuleResolver(
 
                 // Extract exports from ParsedModule (v2 path)
                 val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
-                if (parsedExports.isEmpty() && parsedModule.decls.isNotEmpty()) {
-                    java.io.File("/tmp/empty_exports.txt").appendText("Module $modulePath: ${parsedModule.decls.size} decls but 0 exports. Decl types: ${parsedModule.decls.map { it::class.simpleName }}\n")
-                }
 
                 // Extract dependencies from ParsedModule (v2 path)
                 val dependencies = extractDependenciesFromParsedModule(parsedModule)

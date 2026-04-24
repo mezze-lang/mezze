@@ -146,10 +146,9 @@ object PrecompiledStdlib {
                 for (fn in result.functions) {
                     preFunctions.putIfAbsent(fn.hash.hex, fn)
                 }
-            } catch (e: Exception) {
-                try { java.io.FileWriter("/tmp/precompile_errors.txt", true).use { fw ->
-                    fw.write("ERROR compiling ${v2Module.path}: ${e::class.simpleName}: ${e.message}\n")
-                } } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Compilation errors during stdlib precompilation are non-fatal;
+                // the module will be compiled on demand if needed.
             }
         }
 

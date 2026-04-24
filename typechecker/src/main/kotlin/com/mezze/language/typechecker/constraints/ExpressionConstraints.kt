@@ -66,14 +66,6 @@ class ExpressionConstraintGenerator {
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
 
     /**
-     * Clear all internal caches. Call this between type-checking different modules
-     * to prevent stale data and memory growth.
-     */
-    fun clearCaches() {
-        typeVarMappingCache.clear()
-    }
-
-    /**
      * Generate constraints for an expression.
      *
      * This is the main entry point - exhaustive when on all ParsedExpr types.
@@ -4072,72 +4064,6 @@ class ExpressionConstraintGenerator {
             is MezzeType.ByteBufferType,
             is MezzeType.NewtypeType -> false
         }
-    }
-
-    /**
-     * Extract Continuation type parameters from a type.
-     *
-     * Continuation 'suspend 'resume 'result is a type alias that expands to a record type.
-     * This function detects if a type is a Continuation and extracts its type parameters.
-     *
-     * At the constraint generation phase, Continuation types appear as TypeApplication,
-     * e.g., TypeApplication("Continuation", ['suspend, 'resume, 'result])
-     *
-     * Returns Triple(suspendType, resumeType, resultType) if the type is a Continuation,
-     * null otherwise.
-     */
-    private fun extractContinuationType(type: MezzeType): Triple<MezzeType, MezzeType, MezzeType>? {
-        // Handle TypeApplication case - this is how Continuation appears before expansion
-        // TypeApplication("Continuation", [suspendType, resumeType, resultType])
-        if (type is MezzeType.TypeApplication) {
-            // Check if it's a Continuation type (handle both qualified and unqualified names)
-            // Use structured path comparison instead of string endsWith
-            val constructorPath = ModulePath.parse(type.constructor)
-            val continuationPath = ModulePath(listOf("Continuation"))
-            val isContinuation = constructorPath == continuationPath ||
-                constructorPath.endsWith(continuationPath)
-
-            if (isContinuation && type.args.size == 3) {
-                // Args order: 'suspend, 'resume, 'result
-                return Triple(type.args[0], type.args[1], type.args[2])
-            }
-            return null
-        }
-
-        // Handle expanded RecordType case - for cases where the type alias was already expanded
-        if (type !is MezzeType.RecordType) return null
-
-        // Look for suspend_with field - this is the key field that tells us about 'suspend
-        // Continuation is defined as:
-        // type Continuation 'suspend 'resume 'result = {
-        //     suspend_with: { value: 'suspend } -> 'result,
-        //     ...
-        // }
-        val suspendWithField = type.fields["suspend_with"]
-        if (suspendWithField !is MezzeType.FunctionType) return null
-
-        // suspend_with: { value: 'suspend } -> 'result
-        val paramType = suspendWithField.paramType
-        if (paramType !is MezzeType.RecordType) return null
-
-        val valueField = paramType.fields["value"]
-        if (valueField == null) return null
-
-        // Extract 'suspend from the value field
-        val suspendType = valueField
-
-        // Extract 'result from the return type
-        val resultType = suspendWithField.returnType
-
-        // Try to extract 'resume from the suspend field: {} -> 'resume
-        val suspendField = type.fields["suspend"]
-        val resumeType = if (suspendField is MezzeType.FunctionType) {
-            suspendField.returnType
-        } else {
-            MezzeType.VarType(TypeVar.fresh())  // Fallback if not found
-        }
-
-        return Triple(suspendType, resumeType, resultType)
     }
 
     /**

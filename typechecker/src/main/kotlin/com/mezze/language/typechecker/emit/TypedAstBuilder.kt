@@ -96,18 +96,10 @@ class TypedAstBuilder(
     /** Cache for ParsedTypeAnnotation → MezzeType conversion (type var cache) */
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
-    // ========================================================================
-    // Helpers — types shared only within this file
-    // ========================================================================
-
     private data class AbilityImplIndexEntry(
         val contentHash: String,
         val targetTypes: List<String>
     )
-
-    // ========================================================================
-    // Main entry point
-    // ========================================================================
 
     /**
      * Pre-compute content hashes for all let declarations in the module.
@@ -206,10 +198,6 @@ class TypedAstBuilder(
             dependencies = emptyList() // TODO: compute from imports
         )
     }
-
-    // ========================================================================
-    // Declaration building
-    // ========================================================================
 
     private fun buildLetDecl(
         decl: ParsedLetDecl,
@@ -496,10 +484,6 @@ class TypedAstBuilder(
             loc = loc
         ))
     }
-
-    // ========================================================================
-    // Expression building — the core of TypedAstBuilder
-    // ========================================================================
 
     /**
      * Convert a ParsedExpr to a TypedExpr.
@@ -1011,10 +995,6 @@ class TypedAstBuilder(
         }
     }
 
-    // ========================================================================
-    // Pattern building
-    // ========================================================================
-
     private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {
         val patterns = case.patterns.map { buildPattern(it, file) }
         val bindingNames = case.patterns.flatMap { p -> p.extractBindings() }.toMutableList()
@@ -1105,10 +1085,6 @@ class TypedAstBuilder(
                 )
         }
     }
-
-    // ========================================================================
-    // Lambda parameter building
-    // ========================================================================
 
     /**
      * Collect captures from a typed expression body.
@@ -1212,10 +1188,6 @@ class TypedAstBuilder(
         }
     }
 
-    // ========================================================================
-    // Handler ref building
-    // ========================================================================
-
     private fun buildHandlerRef(
         handler: ParsedPerformHandler,
         file: String,
@@ -1256,10 +1228,6 @@ class TypedAstBuilder(
             loc = loc
         )
     }
-
-    // ========================================================================
-    // Type resolution helpers
-    // ========================================================================
 
     /**
      * Resolve the type of an identifier.
@@ -1393,10 +1361,6 @@ class TypedAstBuilder(
         return null
     }
 
-    // ========================================================================
-    // Type annotation conversion — ParsedTypeAnnotation → MezzeType
-    // ========================================================================
-
     /**
      * Convert a ParsedTypeAnnotation to MezzeType.
      *
@@ -1475,10 +1439,6 @@ class TypedAstBuilder(
     }
 
 
-    // ========================================================================
-    // Import building
-    // ========================================================================
-
     private fun buildImports(file: String): List<TypedImport> {
         val ctx = importContext ?: return emptyList()
         return ctx.importedBindings.map { (_, binding) ->
@@ -1492,10 +1452,6 @@ class TypedAstBuilder(
             )
         }
     }
-
-    // ========================================================================
-    // Record destructure helpers
-    // ========================================================================
 
     /**
      * Emit let-bindings for record destructuring entries in a do-block.
@@ -1616,10 +1572,6 @@ class TypedAstBuilder(
             }
         }
     }
-
-    // ========================================================================
-    // Hashing utilities
-    // ========================================================================
 
     /** Stable string representation of a type annotation for hashing (no location info). */
     private fun typeAnnotationToString(ann: ParsedTypeAnnotation): String = when (ann) {

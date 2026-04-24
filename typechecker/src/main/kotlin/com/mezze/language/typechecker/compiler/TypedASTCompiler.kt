@@ -65,10 +65,6 @@ class TypedASTCompiler(
     /** File table for source info */
     private val files = mutableSetOf<String>()
 
-    // ========================================================================
-    // Dictionary passing state
-    // ========================================================================
-
     /**
      * Pre-scanned: function hash → set of ability method names that need dictionary params.
      * Populated by scanForDictMethods() before compilation begins.
@@ -95,10 +91,6 @@ class TypedASTCompiler(
             }
         }
     }
-
-    // ========================================================================
-    // Dictionary passing — pre-scan
-    // ========================================================================
 
     /**
      * Pre-scan all declarations (including ability impl operation bodies) to find
@@ -371,10 +363,6 @@ class TypedASTCompiler(
         }
     }
 
-    // ========================================================================
-    // Public API
-    // ========================================================================
-
     data class CompileResult(
         val functions: List<FunctionIR>,
         val performerRecords: List<PerformerRecord>
@@ -454,10 +442,6 @@ class TypedASTCompiler(
 
         return CompileResult(functions, performerRecords.toList())
     }
-
-    // ========================================================================
-    // Declaration compilation
-    // ========================================================================
 
     private fun compileLetDecl(decl: TypedLetDecl): FunctionIR {
         files.add(decl.loc.file)
@@ -734,10 +718,6 @@ class TypedASTCompiler(
         }
     }
 
-    // ========================================================================
-    // Expression compilation
-    // ========================================================================
-
     private fun compileExpr(expr: TypedExpr): NodeIR {
         val src = locToSourceInfo(expr.loc)
         return when (expr) {
@@ -834,10 +814,6 @@ class TypedASTCompiler(
             }
         }
     }
-
-    // ========================================================================
-    // Variable compilation
-    // ========================================================================
 
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
@@ -939,10 +915,6 @@ class TypedASTCompiler(
             is BindingRef.Native -> CallNativeIR(binding.name, UnitLitIR(src), src)
         }
     }
-
-    // ========================================================================
-    // Call compilation (with method resolution)
-    // ========================================================================
 
     /** Compile a receiver expression for a method call. Global ByHash references
      *  are auto-called (thunk evaluation) since top-level values like `trig::pi`
@@ -1129,10 +1101,6 @@ class TypedASTCompiler(
         return CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
     }
 
-    // ========================================================================
-    // Dictionary passing — call site injection
-    // ========================================================================
-
     /**
      * Inject __dict_<method> fields into an argument record for dictionary passing.
      *
@@ -1214,10 +1182,6 @@ class TypedASTCompiler(
         }
         return null
     }
-
-    // ========================================================================
-    // Dictionary wrapping — function values passed to higher-order functions
-    // ========================================================================
 
     /**
      * Compile a call argument, wrapping any dict-needing function references in
@@ -1427,10 +1391,6 @@ class TypedASTCompiler(
         }
     }
 
-    // ========================================================================
-    // Lambda compilation
-    // ========================================================================
-
     private fun compileLambda(expr: TypedLambda, src: SourceInfo): NodeIR {
         // Save parent's capture info BEFORE overwriting for the child.
         // This is needed to resolve captures from grandparent scope:
@@ -1500,10 +1460,6 @@ class TypedASTCompiler(
         return MakeLambdaIR(lambdaHash, captures, src)
     }
 
-    // ========================================================================
-    // Block compilation
-    // ========================================================================
-
     private fun compileBlock(expr: TypedBlock, src: SourceInfo): NodeIR {
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
@@ -1545,10 +1501,6 @@ class TypedASTCompiler(
         }
         return BlockIR(stmts, compileExpr(expr.result), src)
     }
-
-    // ========================================================================
-    // Match compilation
-    // ========================================================================
 
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
         val scrutineeIR = compileExpr(expr.scrutinee)
@@ -1929,10 +1881,6 @@ class TypedASTCompiler(
         }
     }
 
-    // ========================================================================
-    // Inline ops for primitives
-    // ========================================================================
-
     private val inlineableOps = setOf(
         "add", "sub", "mul", "div", "mod",
         "eq", "neq", "lt", "le", "gt", "ge",
@@ -1978,10 +1926,6 @@ class TypedASTCompiler(
         }
         return InlineBinaryOpIR(op, receiverIR, rightIR, src)
     }
-
-    // ========================================================================
-    // Ability method resolution
-    // ========================================================================
 
     private fun tryResolveAbilityOp(methodName: String, receiverType: MezzeType): Hash? {
         val candidates = abilityOpIndex[methodName] ?: return null
@@ -2059,10 +2003,6 @@ class TypedASTCompiler(
         }
     }
 
-    // ========================================================================
-    // Helpers
-    // ========================================================================
-
     /** Resolve a local variable to its frame slot using depth + name */
     private fun resolveLocalSlot(name: String, depth: Int): Int {
         // Check scope stack with depth
@@ -2136,66 +2076,6 @@ class TypedASTCompiler(
     private fun locToSourceInfo(loc: Loc): SourceInfo {
         val fileIndex = files.indexOf(loc.file).let { if (it >= 0) it else { files.add(loc.file); files.size - 1 } }
         return SourceInfo(fileIndex, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
-    }
-
-    private fun dumpNodeIR(fw: java.io.FileWriter, node: NodeIR, indent: String) {
-        when (node) {
-            is CallDirectIR -> { fw.write("${indent}CallDirect(${node.targetHash.hex.take(16)} tail=${node.isTailCall})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
-            is CallIndirectIR -> { fw.write("${indent}CallIndirect\n"); dumpNodeIR(fw, node.function, "$indent  fn: "); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
-            is CallNativeIR -> { fw.write("${indent}CallNative(${node.name})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
-            is CallLocalIR -> fw.write("${indent}CallLocal(slot=${node.slot})\n")
-            is ReadLocalIR -> fw.write("${indent}ReadLocal(slot=${node.slot})\n")
-            is ReadCaptureIR -> fw.write("${indent}ReadCapture(idx=${node.index})\n")
-            is WriteLocalIR -> { fw.write("${indent}WriteLocal(slot=${node.slot})\n"); dumpNodeIR(fw, node.value, "$indent  ") }
-            is ReadContextIR -> fw.write("${indent}ReadContext(${node.name})\n")
-            is LongLitIR -> fw.write("${indent}Long(${node.value})\n")
-            is DoubleLitIR -> fw.write("${indent}Double(${node.value})\n")
-            is BoolLitIR -> fw.write("${indent}Bool(${node.value})\n")
-            is StringLitIR -> fw.write("${indent}String(\"${node.value}\")\n")
-            is UnitLitIR -> fw.write("${indent}Unit\n")
-            is MakeRecordIR -> { fw.write("${indent}MakeRecord(${node.fields.map { it.name }})\n"); for (f in node.fields) dumpNodeIR(fw, f.value, "$indent  ${f.name}: ") }
-            is MakeLambdaIR -> fw.write("${indent}MakeLambda(fnHash=${node.functionHash.hex.take(16)} captures=${node.captures.size})\n")
-            is MakeVariantIR -> { fw.write("${indent}MakeVariant(${node.tagName})\n"); node.payload?.let { dumpNodeIR(fw, it, "$indent  payload: ") } }
-            is InlineBinaryOpIR -> { fw.write("${indent}InlineOp(${node.op})\n"); dumpNodeIR(fw, node.left, "$indent  L: "); dumpNodeIR(fw, node.right, "$indent  R: ") }
-            is PerformOpIR -> { fw.write("${indent}PerformOp(${node.operationName} effect=${node.effectHash.hex.take(16)})\n"); dumpNodeIR(fw, node.arg, "$indent  arg: ") }
-            is HandleIR -> { fw.write("${indent}Handle(${node.handlers.map { "${it.performerName}:perf=${it.handlerHash.hex.take(16)},eff=${it.effectHash.hex.take(16)}" }})\n"); dumpNodeIR(fw, node.body, "$indent  body: ") }
-            is MatchIR -> { fw.write("${indent}Match\n"); dumpNodeIR(fw, node.scrutinee, "$indent  scrut: ") }
-            is IfIR -> { fw.write("${indent}If\n"); dumpNodeIR(fw, node.cond, "$indent  cond: "); dumpNodeIR(fw, node.thenBr, "$indent  then: "); dumpNodeIR(fw, node.elseBr, "$indent  else: ") }
-            is BlockIR -> { fw.write("${indent}Block(${node.stmts.size} stmts)\n"); for (s in node.stmts) { when (s) { is StmtIR.Let -> { fw.write("$indent  let slot=${s.slot} ${s.name}\n"); dumpNodeIR(fw, s.value, "$indent    ") }; is StmtIR.Expr -> dumpNodeIR(fw, s.node, "$indent  ") } }; dumpNodeIR(fw, node.result, "$indent  result: ") }
-            is InterpolatedStringIR -> fw.write("${indent}InterpolatedString(${node.parts.size} parts)\n")
-            is ReadFieldIR -> { fw.write("${indent}ReadField(${node.fieldName})\n"); dumpNodeIR(fw, node.record, "$indent  ") }
-            else -> fw.write("${indent}${node::class.simpleName}\n")
-        }
-    }
-
-    private fun dumpNodeIRFull(fw: java.io.FileWriter, node: NodeIR, indent: String) {
-        when (node) {
-            is MatchIR -> {
-                fw.write("${indent}Match\n")
-                dumpNodeIRFull(fw, node.scrutinee, "$indent  scrut: ")
-                for ((i, c) in node.cases.withIndex()) {
-                    fw.write("$indent  case[$i]: pattern=${c.pattern} bindings=${c.bindings.map { "slot=${it.slot}" }}\n")
-                    c.guard?.let { dumpNodeIRFull(fw, it, "$indent    guard: ") }
-                    dumpNodeIRFull(fw, c.body, "$indent    body: ")
-                }
-            }
-            is CallDirectIR -> { fw.write("${indent}CallDirect(${node.targetHash.hex.take(16)} tail=${node.isTailCall})\n"); dumpNodeIRFull(fw, node.arg, "$indent  arg: ") }
-            is CallIndirectIR -> { fw.write("${indent}CallIndirect\n"); dumpNodeIRFull(fw, node.function, "$indent  fn: "); dumpNodeIRFull(fw, node.arg, "$indent  arg: ") }
-            is CallNativeIR -> { fw.write("${indent}CallNative(${node.name})\n"); dumpNodeIRFull(fw, node.arg, "$indent  arg: ") }
-            is ReadLocalIR -> fw.write("${indent}ReadLocal(slot=${node.slot} kind=${node.kind})\n")
-            is WriteLocalIR -> { fw.write("${indent}WriteLocal(slot=${node.slot})\n"); dumpNodeIRFull(fw, node.value, "$indent  ") }
-            is MakeRecordIR -> { fw.write("${indent}MakeRecord(${node.fields.map { it.name }})\n"); for (f in node.fields) dumpNodeIRFull(fw, f.value, "$indent  ${f.name}: ") }
-            is MakeVariantIR -> { fw.write("${indent}MakeVariant(${node.tagName})\n"); node.payload?.let { dumpNodeIRFull(fw, it, "$indent  payload: ") } }
-            is InlineBinaryOpIR -> { fw.write("${indent}InlineOp(${node.op})\n"); dumpNodeIRFull(fw, node.left, "$indent  L: "); dumpNodeIRFull(fw, node.right, "$indent  R: ") }
-            is IfIR -> { fw.write("${indent}If\n"); dumpNodeIRFull(fw, node.cond, "$indent  cond: "); dumpNodeIRFull(fw, node.thenBr, "$indent  then: "); dumpNodeIRFull(fw, node.elseBr, "$indent  else: ") }
-            is BlockIR -> { fw.write("${indent}Block\n"); for (s in node.stmts) when (s) { is StmtIR.Let -> { fw.write("$indent  let slot=${s.slot} ${s.name}\n"); dumpNodeIRFull(fw, s.value, "$indent    ") }; is StmtIR.Expr -> dumpNodeIRFull(fw, s.node, "$indent  ") }; dumpNodeIRFull(fw, node.result, "$indent  result: ") }
-            is LongLitIR -> fw.write("${indent}Long(${node.value})\n")
-            is StringLitIR -> fw.write("${indent}String(\"${node.value}\")\n")
-            is UnitLitIR -> fw.write("${indent}Unit\n")
-            is MakeLambdaIR -> fw.write("${indent}MakeLambda(fn=${node.functionHash.hex.take(16)} captures=${node.captures.size})\n")
-            is PerformOpIR -> { fw.write("${indent}PerformOp(${node.operationName})\n"); dumpNodeIRFull(fw, node.arg, "$indent  arg: ") }
-            else -> fw.write("${indent}${node::class.simpleName}\n")
-        }
     }
 
     /** Find a TypedLetDecl by hash — used to determine if a ByHash ref is a function */

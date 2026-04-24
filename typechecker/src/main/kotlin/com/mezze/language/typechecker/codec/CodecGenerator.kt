@@ -136,15 +136,7 @@ class CodecGenerator {
         return impl
     }
 
-    /**
-     * Check if a type is the Bool variant pattern: | True, False |
-     */
-    private fun isBoolVariant(type: MezzeType): Boolean {
-        return type is MezzeType.VariantType &&
-               type.constructors.keys == setOf("True", "False") &&
-               type.constructors["True"] == null &&
-               type.constructors["False"] == null
-    }
+    private fun isBoolVariant(type: MezzeType): Boolean = PrimitiveTypes.isBoolVariant(type)
 
     /**
      * Generate encode for Bool (which is internally a variant | True, False |).
@@ -205,10 +197,6 @@ class CodecGenerator {
             rowVar = null
         ), body)
     }
-
-    // ========================================================================
-    // HELPER FUNCTIONS FOR AST CONSTRUCTION
-    // ========================================================================
 
     /** Create a record literal with field entries */
     private fun record(vararg fields: Pair<String, ParsedExpr>): ParsedRecordLit {
@@ -369,15 +357,6 @@ class CodecGenerator {
         return constructorPat("None", null)
     }
 
-    /** Get the format name from a format type */
-    private fun getFormatName(formatType: MezzeType): String {
-        return when (formatType) {
-            is MezzeType.TypeApplication -> formatType.constructor
-            is MezzeType.VarType -> formatType.variable.name
-            else -> formatType.toString()
-        }
-    }
-
     /**
      * Get the Format ability identifier.
      */
@@ -448,10 +427,6 @@ class CodecGenerator {
             )
         )
     }
-
-    // ========================================================================
-    // ENCODE GENERATORS
-    // ========================================================================
 
     /**
      * Generate encode for primitive types (Int, Float, String, Bool, Frac).
@@ -1226,10 +1201,6 @@ class CodecGenerator {
         return createEncodeImpl(formatType, typeApp, body)
     }
 
-    // ========================================================================
-    // DECODE GENERATORS
-    // ========================================================================
-
     /**
      * Generate decode for primitive types.
      */
@@ -1845,10 +1816,6 @@ class CodecGenerator {
         return createDecodeImpl(formatType, typeApp, body)
     }
 
-    // ========================================================================
-    // IMPL CREATION HELPERS
-    // ========================================================================
-
     /**
      * Convert MezzeType to ParsedTypeAnnotation for use in ParsedImplAbilityDecl.
      */
@@ -1954,10 +1921,6 @@ class CodecGenerator {
         )
     }
 
-    // ========================================================================
-    // STREAMING ENCODE/DECODE GENERATORS (Tier 2)
-    // ========================================================================
-
     /**
      * Generate a StreamEncode implementation for the given format and data type.
      */
@@ -2011,10 +1974,6 @@ class CodecGenerator {
         streamDecodeCache[cacheKey] = impl
         return impl
     }
-
-    // ========================================================================
-    // STREAMING ENCODE GENERATORS
-    // ========================================================================
 
     private fun generatePrimitiveStreamEncode(
         formatType: MezzeType,
@@ -2288,10 +2247,6 @@ class CodecGenerator {
         )
         return createStreamEncodeImpl(formatType, typeApp, body)
     }
-
-    // ========================================================================
-    // STREAMING DECODE GENERATORS
-    // ========================================================================
 
     private fun generatePrimitiveStreamDecode(
         formatType: MezzeType,
@@ -2636,10 +2591,6 @@ class CodecGenerator {
         return createStreamDecodeImpl(formatType, typeApp, body)
     }
 
-    // ========================================================================
-    // STREAMING IMPL CREATION HELPERS
-    // ========================================================================
-
     /**
      * Create a StreamEncode impl declaration.
      */
@@ -2680,29 +2631,4 @@ class CodecGenerator {
         )
     }
 
-    // ========================================================================
-    // CACHE MANAGEMENT
-    // ========================================================================
-
-    /**
-     * Clear all caches.
-     */
-    fun clearCaches() {
-        encodeCache.clear()
-        decodeCache.clear()
-        streamEncodeCache.clear()
-        streamDecodeCache.clear()
-    }
-
-    /**
-     * Get statistics about cached implementations.
-     */
-    fun getCacheStats(): Map<String, Int> {
-        return mapOf(
-            "encode" to encodeCache.size,
-            "decode" to decodeCache.size,
-            "streamEncode" to streamEncodeCache.size,
-            "streamDecode" to streamDecodeCache.size
-        )
-    }
 }

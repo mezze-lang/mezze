@@ -378,10 +378,6 @@ class AbilityResolver(
         }
     }
 
-    // ========================================
-    // Helper Functions
-    // ========================================
-
     /**
      * Get the type name for ability implementation lookup.
      *
