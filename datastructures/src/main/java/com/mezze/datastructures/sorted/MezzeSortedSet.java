@@ -711,12 +711,20 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeSortedSet<?> other)) return false;
-        return Arrays.equals(toArray(), other.toArray());
+        if (this.length != other.length) return false;
+        for (int i = 0; i < length; i++) {
+            if (!java.util.Objects.equals(elements[i], other.elements[i])) return false;
+        }
+        return true;
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(toArray());
+        int h = 1;
+        for (int i = 0; i < length; i++) {
+            h = 31 * h + java.util.Objects.hashCode(elements[i]);
+        }
+        return h;
     }
 
     // ===== INTEROP LIBRARY =====
