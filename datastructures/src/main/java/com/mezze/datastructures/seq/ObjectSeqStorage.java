@@ -16,13 +16,35 @@ public final class ObjectSeqStorage implements SeqStorage {
     @CompilationFinal(dimensions = 1)
     private final Object[] data;
 
+    @CompilationFinal
+    private final int length;
+
+    private final Object[] ownerToken;
+
     public ObjectSeqStorage(Object[] data) {
         this.data = data;
+        this.length = data.length;
+        this.ownerToken = null;
+    }
+
+    private ObjectSeqStorage(Object[] data, int length, Object[] ownerToken) {
+        this.data = data;
+        this.length = length;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private Object[] trimmedData() {
+        if (length == data.length) return data;
+        return Arrays.copyOf(data, length);
     }
 
     @Override
     public int size() {
-        return data.length;
+        return length;
     }
 
     @Override
@@ -32,35 +54,46 @@ public final class ObjectSeqStorage implements SeqStorage {
 
     @Override
     public SeqStorage update(int index, Object value) {
-        Object[] newData = data.clone();
+        Object[] newData = Arrays.copyOf(data, length);
         newData[index] = value;
         return new ObjectSeqStorage(newData);
     }
 
     @Override
     public SeqStorage append(Object value) {
-        Object[] newData = Arrays.copyOf(data, data.length + 1);
-        newData[data.length] = value;
-        return new ObjectSeqStorage(newData);
+        if (isOwner() && length < data.length) {
+            data[length] = value;
+            var result = new ObjectSeqStorage(data, length + 1, ownerToken);
+            ownerToken[0] = result;
+            return result;
+        }
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newData = new Object[newCapacity];
+        System.arraycopy(data, 0, newData, 0, length);
+        newData[length] = value;
+        Object[] token = new Object[1];
+        var result = new ObjectSeqStorage(newData, length + 1, token);
+        token[0] = result;
+        return result;
     }
 
     @Override
     public SeqStorage prepend(Object value) {
-        Object[] newData = new Object[data.length + 1];
+        Object[] newData = new Object[length + 1];
         newData[0] = value;
-        System.arraycopy(data, 0, newData, 1, data.length);
+        System.arraycopy(data, 0, newData, 1, length);
         return new ObjectSeqStorage(newData);
     }
 
     @Override
     public SeqStorage slice(int start, int end) {
-        if (start < 0 || end > data.length || start > end) {
+        if (start < 0 || end > length || start > end) {
             throw new IndexOutOfBoundsException("Invalid slice range: " + start + " to " + end);
         }
         if (start == end) {
             return EmptySeqStorage.INSTANCE;
         }
-        if (start == 0 && end == data.length) {
+        if (start == 0 && end == length) {
             return this;
         }
         return new ObjectSeqStorage(Arrays.copyOfRange(data, start, end));
@@ -85,9 +118,9 @@ public final class ObjectSeqStorage implements SeqStorage {
             throw new IllegalStateException("Unknown storage type: " + other.getClass());
         }
 
-        Object[] newData = new Object[data.length + otherData.length];
-        System.arraycopy(data, 0, newData, 0, data.length);
-        System.arraycopy(otherData, 0, newData, data.length, otherData.length);
+        Object[] newData = new Object[length + otherData.length];
+        System.arraycopy(data, 0, newData, 0, length);
+        System.arraycopy(otherData, 0, newData, length, otherData.length);
         return new ObjectSeqStorage(newData);
     }
 
@@ -100,7 +133,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Returns the underlying array.
      */
     public Object[] getArray() {
-        return data;
+        return trimmedData();
     }
 
     // ===== Search operations =====
@@ -109,7 +142,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Find index of element using equals(), or -1 if not found.
      */
     public int indexOf(Object value) {
-        for (int i = 0; i < data.length; i++) {
+        for (int i = 0; i < length; i++) {
             if (Objects.equals(data[i], value)) {
                 return i;
             }
@@ -121,7 +154,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Find last index of element, or -1 if not found.
      */
     public int lastIndexOf(Object value) {
-        for (int i = data.length - 1; i >= 0; i--) {
+        for (int i = length - 1; i >= 0; i--) {
             if (Objects.equals(data[i], value)) {
                 return i;
             }
@@ -140,9 +173,9 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Reverse the sequence.
      */
     public ObjectSeqStorage reverse() {
-        Object[] newData = new Object[data.length];
-        for (int i = 0; i < data.length; i++) {
-            newData[i] = data[data.length - 1 - i];
+        Object[] newData = new Object[length];
+        for (int i = 0; i < length; i++) {
+            newData[i] = data[length - 1 - i];
         }
         return new ObjectSeqStorage(newData);
     }
@@ -153,7 +186,7 @@ public final class ObjectSeqStorage implements SeqStorage {
     @TruffleBoundary
     @SuppressWarnings("unchecked")
     public ObjectSeqStorage sort() {
-        Object[] newData = data.clone();
+        Object[] newData = Arrays.copyOf(data, length);
         Arrays.sort(newData, (a, b) -> ((Comparable<Object>) a).compareTo(b));
         return new ObjectSeqStorage(newData);
     }
@@ -163,7 +196,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public ObjectSeqStorage sortWith(Comparator<Object> comparator) {
-        Object[] newData = data.clone();
+        Object[] newData = Arrays.copyOf(data, length);
         Arrays.sort(newData, comparator);
         return new ObjectSeqStorage(newData);
     }
@@ -212,19 +245,19 @@ public final class ObjectSeqStorage implements SeqStorage {
     @Override
     @TruffleBoundary
     public String toString() {
-        return "ObjectSeqStorage" + Arrays.toString(data);
+        return "ObjectSeqStorage" + Arrays.toString(trimmedData());
     }
 
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof ObjectSeqStorage other)) return false;
-        return Arrays.equals(data, other.data);
+        return Arrays.equals(trimmedData(), other.trimmedData());
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(data);
+        return Arrays.hashCode(trimmedData());
     }
 
     // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
@@ -234,7 +267,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Used by to_mut to get a fresh copy that can be mutated.
      */
     public ObjectSeqStorage copyToMutable() {
-        return new ObjectSeqStorage(data.clone());
+        return new ObjectSeqStorage(Arrays.copyOf(data, length));
     }
 
     /**
@@ -261,7 +294,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      */
     public void mutReverse() {
         int left = 0;
-        int right = data.length - 1;
+        int right = length - 1;
         while (left < right) {
             Object tmp = data[left];
             data[left] = data[right];
@@ -276,7 +309,7 @@ public final class ObjectSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFill(Object value) {
-        Arrays.fill(data, value);
+        Arrays.fill(data, 0, length, value);
     }
 
     /**
@@ -293,6 +326,6 @@ public final class ObjectSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public void mutSortWith(Comparator<Object> comparator) {
-        Arrays.sort(data, comparator);
+        Arrays.sort(data, 0, length, comparator);
     }
 }

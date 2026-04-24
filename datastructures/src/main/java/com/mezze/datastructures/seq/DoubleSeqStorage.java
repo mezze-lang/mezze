@@ -24,9 +24,27 @@ public final class DoubleSeqStorage implements SeqStorage {
     @CompilationFinal
     private final int length;
 
+    private final Object[] ownerToken;
+
     public DoubleSeqStorage(double[] data) {
         this.data = data;
         this.length = data.length;
+        this.ownerToken = null;
+    }
+
+    private DoubleSeqStorage(double[] data, int length, Object[] ownerToken) {
+        this.data = data;
+        this.length = length;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private double[] trimmedData() {
+        if (length == data.length) return data;
+        return Arrays.copyOf(data, length);
     }
 
     @Override
@@ -75,9 +93,20 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Unboxed append.
      */
     public DoubleSeqStorage appendDouble(double value) {
-        double[] newData = Arrays.copyOf(data, length + 1);
+        if (isOwner() && length < data.length) {
+            data[length] = value;
+            var result = new DoubleSeqStorage(data, length + 1, ownerToken);
+            ownerToken[0] = result;
+            return result;
+        }
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        double[] newData = new double[newCapacity];
+        System.arraycopy(data, 0, newData, 0, length);
         newData[length] = value;
-        return new DoubleSeqStorage(newData);
+        Object[] token = new Object[1];
+        var result = new DoubleSeqStorage(newData, length + 1, token);
+        token[0] = result;
+        return result;
     }
 
     @Override
@@ -142,7 +171,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Returns the underlying array for SIMD operations.
      */
     public double[] getArray() {
-        return data;
+        return trimmedData();
     }
 
     // ===== SIMD-optimized numeric operations =====
@@ -152,7 +181,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public double sum() {
-        return VectorOps.sumDouble(data);
+        return VectorOps.sumDouble(trimmedData());
     }
 
     /**
@@ -172,7 +201,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public double product() {
-        return VectorOps.productDouble(data);
+        return VectorOps.productDouble(trimmedData());
     }
 
     /**
@@ -183,7 +212,7 @@ public final class DoubleSeqStorage implements SeqStorage {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no minimum");
         }
-        return VectorOps.minDouble(data);
+        return VectorOps.minDouble(trimmedData());
     }
 
     /**
@@ -194,7 +223,7 @@ public final class DoubleSeqStorage implements SeqStorage {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no maximum");
         }
-        return VectorOps.maxDouble(data);
+        return VectorOps.maxDouble(trimmedData());
     }
 
     /**
@@ -205,7 +234,7 @@ public final class DoubleSeqStorage implements SeqStorage {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no average");
         }
-        return VectorOps.sumDouble(data) / length;
+        return VectorOps.sumDouble(trimmedData()) / length;
     }
 
     /**
@@ -213,7 +242,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public double dotProduct(DoubleSeqStorage other) {
-        return VectorOps.dotProduct(data, other.data);
+        return VectorOps.dotProduct(trimmedData(), other.trimmedData());
     }
 
     /**
@@ -221,7 +250,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public DoubleSeqStorage add(DoubleSeqStorage other) {
-        return new DoubleSeqStorage(VectorOps.addDouble(data, other.data));
+        return new DoubleSeqStorage(VectorOps.addDouble(trimmedData(), other.trimmedData()));
     }
 
     /**
@@ -229,7 +258,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public DoubleSeqStorage scale(double factor) {
-        return new DoubleSeqStorage(VectorOps.scaleDouble(data, factor));
+        return new DoubleSeqStorage(VectorOps.scaleDouble(trimmedData(), factor));
     }
 
     /**
@@ -237,7 +266,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public DoubleSeqStorage fma(DoubleSeqStorage other, DoubleSeqStorage addend) {
-        return new DoubleSeqStorage(VectorOps.fmaDouble(data, other.data, addend.data));
+        return new DoubleSeqStorage(VectorOps.fmaDouble(trimmedData(), other.trimmedData(), addend.trimmedData()));
     }
 
     /**
@@ -311,19 +340,19 @@ public final class DoubleSeqStorage implements SeqStorage {
     @Override
     @TruffleBoundary
     public String toString() {
-        return "DoubleSeqStorage" + Arrays.toString(data);
+        return "DoubleSeqStorage" + Arrays.toString(trimmedData());
     }
 
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof DoubleSeqStorage other)) return false;
-        return Arrays.equals(data, other.data);
+        return Arrays.equals(trimmedData(), other.trimmedData());
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(data);
+        return Arrays.hashCode(trimmedData());
     }
 
     // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
@@ -368,7 +397,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public void mutSort() {
-        Arrays.sort(data);
+        Arrays.sort(data, 0, length);
     }
 
     /**
@@ -392,7 +421,7 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFill(double value) {
-        Arrays.fill(data, value);
+        Arrays.fill(data, 0, length, value);
     }
 
     /**
