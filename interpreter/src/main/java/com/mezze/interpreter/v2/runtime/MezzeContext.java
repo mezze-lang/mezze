@@ -1,6 +1,5 @@
 package com.mezze.interpreter.v2.runtime;
 
-import com.mezze.interpreter.v2.cache.CompiledNodeCache;
 import com.mezze.interpreter.v2.effects.EffectRegistry;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
@@ -11,8 +10,6 @@ import com.oracle.truffle.api.nodes.Node;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,12 +35,6 @@ public final class MezzeContext {
     // Content hash → compiled CallTarget (for caching)
     private final ConcurrentHashMap<String, CallTarget> callTargetCache = new ConcurrentHashMap<>();
 
-    // Content hashes marked for eager compilation (from warmup hints)
-    private final java.util.Set<String> eagerCompilationHints = ConcurrentHashMap.newKeySet();
-
-    // Persistent compiled node cache with disk backing
-    private final CompiledNodeCache compiledNodeCache;
-
     // Per-context closure cache — replaces the static evaluatedClosureCache in HashModuleLoaderNode.
     // Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers)
     private final ConcurrentHashMap<String, Object> closureCache = new ConcurrentHashMap<>();
@@ -62,7 +53,6 @@ public final class MezzeContext {
     public MezzeContext(MezzeLanguage language, Env env) {
         this.language = language;
         this.env = env;
-        this.compiledNodeCache = new CompiledNodeCache();
     }
 
     /**
@@ -177,61 +167,6 @@ public final class MezzeContext {
     @TruffleBoundary
     public CallTarget getOrCacheCallTarget(String contentHash, java.util.function.Supplier<CallTarget> supplier) {
         return callTargetCache.computeIfAbsent(contentHash, k -> supplier.get());
-    }
-
-    // ========================
-    // Compiled node cache
-    // ========================
-
-    /**
-     * Get the persistent compiled node cache.
-     */
-    public CompiledNodeCache getCompiledNodeCache() {
-        return compiledNodeCache;
-    }
-
-    /**
-     * Get or compute a CallTarget using the persistent cache.
-     * This checks both in-memory and disk cache hints.
-     */
-    @TruffleBoundary
-    public CallTarget getOrComputeCached(String contentHash, java.util.function.Supplier<CallTarget> supplier) {
-        // Try the persistent cache first (which includes in-memory)
-        CallTarget cached = compiledNodeCache.get(contentHash);
-        if (cached != null) {
-            return cached;
-        }
-
-        // Compute and cache
-        CallTarget computed = supplier.get();
-        compiledNodeCache.put(contentHash, computed);
-        return computed;
-    }
-
-    /**
-     * Check if a function was previously compiled in any session.
-     * Useful for warmup prioritization.
-     */
-    @TruffleBoundary
-    public boolean wasPreviouslyCompiled(String contentHash) {
-        return compiledNodeCache.wasPreviouslyCompiled(contentHash);
-    }
-
-    /**
-     * Mark a content hash for eager compilation when encountered.
-     * Used by warmup hints from previous sessions.
-     */
-    @TruffleBoundary
-    public void markForEagerCompilation(String contentHash) {
-        eagerCompilationHints.add(contentHash);
-    }
-
-    /**
-     * Check if a content hash should be eagerly compiled.
-     */
-    @TruffleBoundary
-    public boolean shouldEagerlyCompile(String contentHash) {
-        return eagerCompilationHints.contains(contentHash);
     }
 
     // ========================

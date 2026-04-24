@@ -16,7 +16,6 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -175,29 +174,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
     @Override
     protected MezzeContext createContext(Env env) {
-        MezzeContext context = new MezzeContext(this, env);
-        // Trigger background warmup for previously compiled functions
-        triggerWarmupHints(context);
-        return context;
-    }
-
-    /**
-     * Use CompiledNodeCache warmup hints to prioritize frequently-used functions.
-     * This checks disk cache for previously compiled hashes and preloads metadata.
-     */
-    @CompilerDirectives.TruffleBoundary
-    private void triggerWarmupHints(MezzeContext context) {
-        try {
-            Set<String> previouslyCompiled = context.getCompiledNodeCache().getPreviouslyCompiledHashes();
-            // Store hints in context for future use during compilation
-            // The actual CallTargets can't be restored from disk, but we can
-            // prioritize these for eager compilation when they're encountered
-            for (String hash : previouslyCompiled) {
-                context.markForEagerCompilation(hash);
-            }
-        } catch (Exception e) {
-            // Warmup is best-effort, don't fail on errors
-        }
+        return new MezzeContext(this, env);
     }
 
     @Override
@@ -265,30 +242,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         throw new RuntimeException("TruffleIR not produced by typechecker. loweredFunctions is " +
             (loweredFunctions == null ? "null" : "empty (" + loweredFunctions.size() + ")") +
             ". typedModule is " + (typeCheckResult.getTypedModule() == null ? "null" : "present"));
-    }
-
-    /**
-     * V2 pipeline: compile source through all 5 stages to Truffle nodes.
-     *
-     * source → ParsedModule → TypedModule → MonoModule → ResolvedModule → TruffleIR → Truffle nodes
-     *
-     * This is the new compilation path that uses content-hash addressing throughout.
-     * Enable with system property: -Dmezze.pipeline=v2
-     *
-     * Delegates to Kotlin V2PipelineRunner to avoid inline class interop issues.
-     */
-    /**
-     * Compile from pre-lowered TruffleIR (FunctionIR list).
-     * This is the new path: typechecker produces TruffleIR directly.
-     * All modules are already included in the FunctionIR list — no import extraction needed.
-     */
-    private CallTarget compileFunctionIR(
-            List<FunctionIR> functions,
-            Path projectRoot) {
-        // All dependency modules are already monomorphized and included in FunctionIR list
-        return com.mezze.interpreter.v2.compiler.V2PipelineRunner.compileFromIR(
-            this, functions, Collections.emptyList(), projectRoot
-        );
     }
 
     /**

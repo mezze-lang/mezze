@@ -258,7 +258,6 @@ class EffectImplStorageNode(
     @TruffleBoundary
     private fun storeInContext(value: Any) {
         val context = MezzeContext.get(this)
-        try { java.io.FileWriter("/tmp/v2_debug.txt", true).use { it.append("[EffectImplStorage] performer=$performerName effect=$effectName implHash=${implContentHash.take(20)} value=$value\n") } } catch (_: Exception) {}
         context.defineGlobal(implContentHash, value)
         context.defineLocal(performerName, value)
         if (effectContentHash != null && effectContentHash.isNotEmpty() && effectContentHash != implContentHash) {

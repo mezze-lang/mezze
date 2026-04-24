@@ -160,8 +160,6 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
         modulesLoaded = true;
         } catch (Exception e) {
-            System.err.println("HashModuleLoaderNode.loadModules FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            e.printStackTrace(System.err);
             modulesLoaded = true;
         }
     }
