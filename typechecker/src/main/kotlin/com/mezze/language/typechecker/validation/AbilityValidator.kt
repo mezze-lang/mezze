@@ -228,6 +228,29 @@ object AbilityValidator {
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
                 ?: continue  // Already caught by missing/extra operation checks
 
+            val opSourceLocation = SourceLocation(implOp.loc.startLine, implOp.loc.startCol, implOp.loc.file)
+
+            // Rule 8a: Operation implementation must be a lambda
+            if (implOp.implementation !is com.mezze.language.parsedast.ParsedLambda) {
+                throw TypeCheckError(
+                    "Operation '${implOp.name}' in impl ${impl.abilityName} must be a function (lambda), " +
+                    "but got ${implOp.implementation::class.simpleName}. " +
+                    "Use: ${implOp.name} = {${if (declOp.paramType is com.mezze.language.parsedast.ParsedRecordType) (declOp.paramType as com.mezze.language.parsedast.ParsedRecordType).entries.joinToString(", ") { it.name } else "it"}} -> ...",
+                    opSourceLocation
+                )
+            }
+
+            // Rule 8b: Ability operation declaration must use record param type
+            if (declOp.paramType !is com.mezze.language.parsedast.ParsedRecordType) {
+                throw TypeCheckError(
+                    "Ability operation '${declOp.name}' in '${abilityDeclaration.name}' must declare parameters " +
+                    "using record syntax: {it: ${parsedTypeAnnotationToString(declOp.paramType)}} -> ${parsedTypeAnnotationToString(declOp.returnType)}. " +
+                    "Bare type '${parsedTypeAnnotationToString(declOp.paramType)} -> ...' is not supported — " +
+                    "Mezze uses record-based calling convention.",
+                    SourceLocation(declOp.loc.startLine, declOp.loc.startCol, declOp.loc.file)
+                )
+            }
+
             // Substitute type parameters in declaration types
             val expectedParamType = substituteTypeParameters(declOp.paramType, substitution)
             val expectedReturnType = substituteTypeParameters(declOp.returnType, substitution)
