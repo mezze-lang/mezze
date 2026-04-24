@@ -23,16 +23,35 @@ public final class HashSetStorage implements SetStorage {
     @CompilationFinal
     private final int capacity;
 
+    /** COW ownership token. token[0] == this means we own the table. */
+    private final Object[] ownerToken;
+
     public HashSetStorage() {
         this.capacity = MIN_CAPACITY;
         this.table = new Object[capacity];
         this.size = 0;
+        this.ownerToken = new Object[]{this};
     }
 
     private HashSetStorage(Object[] table, int size, int capacity) {
+        this(table, size, capacity, null);
+    }
+
+    private HashSetStorage(Object[] table, int size, int capacity, Object[] ownerToken) {
         this.table = table;
         this.size = size;
         this.capacity = capacity;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
+        }
     }
 
     /**
@@ -56,7 +75,9 @@ public final class HashSetStorage implements SetStorage {
             insertInto(table, capacity, elem);
         }
 
-        return new HashSetStorage(table, size, capacity);
+        var result = new HashSetStorage(table, size, capacity, new Object[1]);
+        result.ownerToken[0] = result;
+        return result;
     }
 
     @Override
@@ -67,6 +88,7 @@ public final class HashSetStorage implements SetStorage {
     @Override
     @TruffleBoundary
     public boolean contains(Object elem) {
+        revokeOwnership();
         int hash = hash(elem);
         int index = hash & (capacity - 1);
 
@@ -87,7 +109,7 @@ public final class HashSetStorage implements SetStorage {
     @Override
     @TruffleBoundary
     public SetStorage add(Object elem) {
-        if (contains(elem)) {
+        if (containsInternal(elem)) {
             return this;
         }
 
@@ -95,21 +117,47 @@ public final class HashSetStorage implements SetStorage {
             return grow().add(elem);
         }
 
-        Object[] newTable = table.clone();
+        // COW: reuse table if owned, clone otherwise
+        Object[] workTable;
+        Object[] token;
+        if (isOwner()) {
+            workTable = table;
+            token = ownerToken;
+        } else {
+            workTable = table.clone();
+            token = new Object[1];
+        }
+
         int hash = hash(elem);
         int index = hash & (capacity - 1);
 
-        while (newTable[index] != null && newTable[index] != DELETED) {
+        while (workTable[index] != null && workTable[index] != DELETED) {
             index = (index + 1) & (capacity - 1);
         }
 
-        newTable[index] = elem;
-        return new HashSetStorage(newTable, size + 1, capacity);
+        workTable[index] = elem;
+        var result = new HashSetStorage(workTable, size + 1, capacity, token);
+        token[0] = result;
+        return result;
+    }
+
+    /** Internal contains check that does NOT revoke ownership. */
+    private boolean containsInternal(Object elem) {
+        int hash = hash(elem);
+        int index = hash & (capacity - 1);
+        for (int i = 0; i < capacity; i++) {
+            Object e = table[index];
+            if (e == null) return false;
+            if (e != DELETED && Objects.equals(e, elem)) return true;
+            index = (index + 1) & (capacity - 1);
+        }
+        return false;
     }
 
     @Override
     @TruffleBoundary
     public SetStorage remove(Object elem) {
+        revokeOwnership();
         int hash = hash(elem);
         int index = hash & (capacity - 1);
 
@@ -119,16 +167,14 @@ public final class HashSetStorage implements SetStorage {
                 return this;  // Not found
             }
             if (e != DELETED && Objects.equals(e, elem)) {
-                // Found - mark as deleted
-                Object[] newTable = table.clone();
-                newTable[index] = DELETED;
-
                 int newSize = size - 1;
                 if (newSize == 0) {
                     return EmptySetStorage.INSTANCE;
                 }
 
-                // Shrink if too sparse
+                Object[] newTable = table.clone();
+                newTable[index] = DELETED;
+
                 if (newSize < capacity / 4 && capacity > MIN_CAPACITY) {
                     return shrink(newTable, newSize);
                 }
@@ -144,6 +190,7 @@ public final class HashSetStorage implements SetStorage {
     @Override
     @TruffleBoundary
     public Object[] toArray() {
+        revokeOwnership();
         Object[] result = new Object[size];
         int j = 0;
         for (int i = 0; i < table.length; i++) {
@@ -167,6 +214,7 @@ public final class HashSetStorage implements SetStorage {
     @Override
     @TruffleBoundary
     public void forEach(java.util.function.Consumer<Object> consumer) {
+        revokeOwnership();
         for (int i = 0; i < table.length; i++) {
             Object e = table[i];
             if (e != null && e != DELETED) {
@@ -202,7 +250,9 @@ public final class HashSetStorage implements SetStorage {
             }
         }
 
-        return new HashSetStorage(newTable, size, newCapacity);
+        var result = new HashSetStorage(newTable, size, newCapacity, new Object[1]);
+        result.ownerToken[0] = result;
+        return result;
     }
 
     @TruffleBoundary

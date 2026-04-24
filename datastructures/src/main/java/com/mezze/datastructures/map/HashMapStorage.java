@@ -25,16 +25,49 @@ public final class HashMapStorage implements MapStorage {
     @CompilationFinal
     private final int capacity;
 
+    /**
+     * Copy-on-write ownership token.
+     * A map owns its table if ownerToken is non-null and ownerToken[0] == this.
+     * On put/remove, ownership transfers to the new map by setting ownerToken[0] = newMap.
+     * The old map's ownership check fails (ownerToken[0] != this), so it will clone.
+     *
+     * In a chain like: m = m.put(a, 1).put(b, 2).put(c, 3)
+     * Each intermediate map is discarded, so the token keeps pointing at the latest.
+     * Only 1 clone (on first put if not owned) instead of 3.
+     */
+    private final Object[] ownerToken;  // null = not owned, [0] == this = owned
+
     public HashMapStorage() {
         this.capacity = MIN_CAPACITY;
         this.table = new Object[capacity * 2];
         this.size = 0;
+        this.ownerToken = new Object[]{this};
     }
 
-    private HashMapStorage(Object[] table, int size, int capacity) {
+    private HashMapStorage(Object[] table, int size, int capacity, Object[] ownerToken) {
         this.table = table;
         this.size = size;
         this.capacity = capacity;
+        this.ownerToken = ownerToken;
+    }
+
+    /** Legacy constructor — no ownership */
+    private HashMapStorage(Object[] table, int size, int capacity) {
+        this(table, size, capacity, (Object[]) null);
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    /**
+     * Revoke ownership so the table can never be mutated through this map.
+     * Called before any read operation to ensure safety.
+     */
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
+        }
     }
 
     /**
@@ -58,7 +91,9 @@ public final class HashMapStorage implements MapStorage {
             insertInto(table, capacity, entry.getKey(), entry.getValue());
         }
 
-        return new HashMapStorage(table, size, capacity);
+        var result = new HashMapStorage(table, size, capacity, new Object[1]);
+        result.ownerToken[0] = result;
+        return result;
     }
 
     @Override
@@ -69,6 +104,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public Object get(Object key) {
+        revokeOwnership();
         int hash = hash(key);
         int index = (hash & (capacity - 1)) * 2;
 
@@ -89,6 +125,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public boolean containsKey(Object key) {
+        revokeOwnership();
         return get(key) != null;
     }
 
@@ -100,36 +137,52 @@ public final class HashMapStorage implements MapStorage {
             return grow().put(key, value);
         }
 
-        Object[] newTable = table.clone();
+        // COW: if we own the table, mutate in-place; otherwise clone first
+        Object[] workTable;
+        Object[] token;
+        if (isOwner()) {
+            workTable = table;
+            token = ownerToken;  // reuse token, will transfer below
+        } else {
+            workTable = table.clone();
+            token = new Object[1]; // new token for the new map
+        }
+
         int hash = hash(key);
         int index = (hash & (capacity - 1)) * 2;
         int insertIndex = -1;
 
         for (int i = 0; i < capacity; i++) {
-            Object k = newTable[index];
+            Object k = workTable[index];
             if (k == null || k == DELETED) {
                 if (insertIndex < 0) {
                     insertIndex = index;
                 }
                 if (k == null) {
                     // Key not found, insert at first available slot
-                    newTable[insertIndex] = key;
-                    newTable[insertIndex + 1] = value;
-                    return new HashMapStorage(newTable, size + 1, capacity);
+                    workTable[insertIndex] = key;
+                    workTable[insertIndex + 1] = value;
+                    var result = new HashMapStorage(workTable, size + 1, capacity, token);
+                    token[0] = result;
+                    return result;
                 }
             } else if (Objects.equals(k, key)) {
                 // Update existing
-                newTable[index + 1] = value;
-                return new HashMapStorage(newTable, size, capacity);
+                workTable[index + 1] = value;
+                var result = new HashMapStorage(workTable, size, capacity, token);
+                token[0] = result;
+                return result;
             }
             index = (index + 2) & ((capacity * 2) - 1);
         }
 
         // Should not reach here if load factor is maintained
         if (insertIndex >= 0) {
-            newTable[insertIndex] = key;
-            newTable[insertIndex + 1] = value;
-            return new HashMapStorage(newTable, size + 1, capacity);
+            workTable[insertIndex] = key;
+            workTable[insertIndex + 1] = value;
+            var result = new HashMapStorage(workTable, size + 1, capacity, token);
+            token[0] = result;
+            return result;
         }
 
         throw new IllegalStateException("Hash table full");
@@ -138,6 +191,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public MapStorage remove(Object key) {
+        revokeOwnership();
         int hash = hash(key);
         int index = (hash & (capacity - 1)) * 2;
 
@@ -147,22 +201,22 @@ public final class HashMapStorage implements MapStorage {
                 return this;  // Not found
             }
             if (k != DELETED && Objects.equals(k, key)) {
-                // Found - mark as deleted
-                Object[] newTable = table.clone();
-                newTable[index] = DELETED;
-                newTable[index + 1] = null;
-
                 int newSize = size - 1;
                 if (newSize == 0) {
                     return EmptyMapStorage.INSTANCE;
                 }
 
+                // Always clone on remove — remove is not a hot-path chain pattern
+                Object[] workTable = table.clone();
+                workTable[index] = DELETED;
+                workTable[index + 1] = null;
+
                 // Shrink if too sparse
                 if (newSize < capacity / 4 && capacity > MIN_CAPACITY) {
-                    return shrink(newTable, newSize);
+                    return shrink(workTable, newSize);
                 }
 
-                return new HashMapStorage(newTable, newSize, capacity);
+                return new HashMapStorage(workTable, newSize, capacity);
             }
             index = (index + 2) & ((capacity * 2) - 1);
         }
@@ -173,6 +227,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public Object[] keys() {
+        revokeOwnership();
         Object[] result = new Object[size];
         int j = 0;
         for (int i = 0; i < table.length; i += 2) {
@@ -187,6 +242,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public Object[] values() {
+        revokeOwnership();
         Object[] result = new Object[size];
         int j = 0;
         for (int i = 0; i < table.length; i += 2) {
@@ -210,6 +266,7 @@ public final class HashMapStorage implements MapStorage {
     @Override
     @TruffleBoundary
     public void forEach(java.util.function.BiConsumer<Object, Object> consumer) {
+        revokeOwnership();
         for (int i = 0; i < table.length; i += 2) {
             Object k = table[i];
             if (k != null && k != DELETED) {
@@ -246,7 +303,9 @@ public final class HashMapStorage implements MapStorage {
             }
         }
 
-        return new HashMapStorage(newTable, size, newCapacity);
+        var result = new HashMapStorage(newTable, size, newCapacity, new Object[1]);
+        result.ownerToken[0] = result;
+        return result;
     }
 
     @TruffleBoundary
