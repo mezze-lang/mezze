@@ -4,9 +4,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
 /**
- * Tests for ability typechecker validation bugs.
- * These test cases should fail at typecheck time — the typechecker should
- * reject invalid ability impls before any code runs.
+ * Comprehensive tests for ability declaration and implementation validation.
+ *
+ * The typechecker must reject invalid code at the definition point —
+ * NOT wait until a call site to fail.
  */
 class AbilityValidationBugTest {
 
@@ -17,62 +18,23 @@ class AbilityValidationBugTest {
             eval(source)
             fail("Expected type error for: $description — but it ran successfully")
         } catch (e: Exception) {
-            // Check it's a TYPE error, not a runtime error
             val msg = e.message ?: ""
-            println("[$description] Error: ${e::class.simpleName}: $msg")
             assertTrue(
                 msg.contains("type") || msg.contains("Type") || msg.contains("annotation") ||
-                msg.contains("mismatch") || msg.contains("TypeCheck") ||
+                msg.contains("mismatch") || msg.contains("TypeCheck") || msg.contains("must be") ||
+                msg.contains("must declare") || msg.contains("record syntax") ||
                 e::class.simpleName?.contains("TypeCheck") == true,
-                "Expected TYPE error but got runtime error: ${e::class.simpleName}: $msg"
+                "Expected TYPE error but got runtime error for: $description\n${e::class.simpleName}: $msg"
             )
         }
     }
 
-    @Test
-    fun `show = it should fail — impl op must be a lambda`() {
-        shouldTypeError("""
-            ability Show for 'a where {
-              show: 'a -> 'a
-            }
-            impl Show for Int where {
-              show = it
-            }
-            42.show {}
-        """.trimIndent(), "show = it (bare identifier, not a lambda)")
-    }
+    // ========================================================================
+    // GOOD: Valid ability declarations and implementations
+    // ========================================================================
 
     @Test
-    fun `correct ability with record params should work`() {
-        val result = eval("""
-            ability Show for 'a where {
-              show: {it: 'a} -> Str
-            }
-            impl Show for Int where {
-              show = {it} -> "number"
-            }
-            42.show {}
-        """.trimIndent())
-        assertEquals("number", result)
-    }
-
-    @Test
-    fun `ability op type annotation should use record syntax`() {
-        // The operation type should be {it: 'a} -> Str, not 'a -> Str
-        val result = eval("""
-            ability Describe for 'a where {
-              describe: {it: 'a} -> Str
-            }
-            impl Describe for Int where {
-              describe = {it} -> "int"
-            }
-            42.describe {}
-        """.trimIndent())
-        assertEquals("int", result)
-    }
-
-    @Test
-    fun `show with correct record param syntax should work`() {
+    fun `valid ability with single param`() {
         val result = eval("""
             ability Show for 'a where {
               show: {it: 'a} -> Str
@@ -80,30 +42,42 @@ class AbilityValidationBugTest {
             impl Show for Int where {
               show = {it} -> "int"
             }
-            5.show {}
+            42.show {}
         """.trimIndent())
         assertEquals("int", result)
     }
 
     @Test
-    fun `bare type annotation should fail — Mezze uses record params`() {
-        // ability declares show: 'a -> Str (bare type, not {it: 'a} -> Str)
-        // This should fail because Mezze's calling convention is record-based:
-        // 5.show {} passes {it = 5}, which doesn't match bare 'a parameter
-        shouldTypeError("""
+    fun `valid ability with multiple params`() {
+        val result = eval("""
+            ability Add for 'a where {
+              add: {it: 'a, r: 'a} -> 'a
+            }
+            impl Add for Int where {
+              add = {it, r} -> it + r
+            }
+            3.add {r = 4}
+        """.trimIndent())
+        assertEquals(7L, result)
+    }
+
+    @Test
+    fun `valid ability with stdlib call in body`() {
+        val result = eval("""
             use std::int
             ability Show for 'a where {
-              show: 'a -> Str
+              show: {it: 'a} -> Str
             }
             impl Show for Int where {
               show = {it} -> int::to_str {n = it}
             }
             5.show {}
-        """.trimIndent(), "bare type annotation (should use {it: 'a} -> Str)")
+        """.trimIndent())
+        assertEquals("5", result)
     }
 
     @Test
-    fun `show in main with perform should work`() {
+    fun `valid ability used inside perform block`() {
         val result = eval("""
             use std::effects::log::{Console, println}
             use std::int
@@ -122,7 +96,7 @@ class AbilityValidationBugTest {
     }
 
     @Test
-    fun `polymorphic show via dictionary passing`() {
+    fun `valid polymorphic function with ability constraint`() {
         val result = eval("""
             ability Describe for 'a where {
               describe: {it: 'a} -> Str
@@ -134,5 +108,93 @@ class AbilityValidationBugTest {
             show {x = 42}
         """.trimIndent())
         assertEquals("int", result)
+    }
+
+    @Test
+    fun `valid ability with return type matching receiver type`() {
+        val result = eval("""
+            ability Double for 'a where {
+              double: {it: 'a} -> 'a
+            }
+            impl Double for Int where {
+              double = {it} -> it + it
+            }
+            21.double {}
+        """.trimIndent())
+        assertEquals(42L, result)
+    }
+
+    // ========================================================================
+    // BAD: Invalid ability declarations (should be rejected)
+    // ========================================================================
+
+    @Test
+    fun `reject bare type in ability op declaration`() {
+        shouldTypeError("""
+            ability Show for 'a where {
+              show: 'a -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> "int"
+            }
+            42.show {}
+        """.trimIndent(), "bare type 'a -> Str instead of {it: 'a} -> Str")
+    }
+
+    // ========================================================================
+    // BAD: Invalid ability implementations (should be rejected)
+    // ========================================================================
+
+    @Test
+    fun `reject impl op as bare identifier`() {
+        shouldTypeError("""
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = it
+            }
+            42.show {}
+        """.trimIndent(), "show = it (bare identifier, not a lambda)")
+    }
+
+    @Test
+    fun `reject impl op as literal`() {
+        shouldTypeError("""
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = "always this"
+            }
+            42.show {}
+        """.trimIndent(), "show = literal (not a lambda)")
+    }
+
+    @Test
+    fun `reject impl op as function call`() {
+        shouldTypeError("""
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            let helper = {x} -> "hi"
+            impl Show for Int where {
+              show = helper {x = 1}
+            }
+            42.show {}
+        """.trimIndent(), "show = function call (not a lambda)")
+    }
+
+    @Test
+    fun `reject impl op as record literal`() {
+        shouldTypeError("""
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {name = "bad"}
+            }
+            42.show {}
+        """.trimIndent(), "show = record literal (not a lambda)")
     }
 }
