@@ -1,5 +1,6 @@
 package com.mezze.datastructures.benchmark;
 
+import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.datastructures.set.MezzeSet;
@@ -233,6 +234,89 @@ public class ScalingBenchmark {
             });
         }
         System.out.println();
+    }
+
+    // ==================== LIST SCALING ====================
+
+    @org.junit.jupiter.api.Test
+    public void scalingListPrepend() {
+        printHeader("List: Incremental Build via cons/prepend (should be O(n) total)");
+
+        int[] sizes = {100, 1000, 10000, 100000};
+        for (int n : sizes) {
+            scalingBenchmark("prepend n=" + n, WARMUP, () -> {
+                MezzeList<Long> l = MezzeList.empty();
+                for (int i = 0; i < n; i++) {
+                    l = MezzeList.cons((long) i, l);
+                }
+                return l.size();
+            });
+        }
+        System.out.println();
+    }
+
+    @org.junit.jupiter.api.Test
+    public void scalingListMap() {
+        printHeader("List: map (accumulate + reverse, should be O(n))");
+
+        int[] sizes = {100, 1000, 10000, 100000};
+        for (int n : sizes) {
+            MezzeList<Long> list = buildListOfSize(n);
+            scalingBenchmark("map n=" + n, WARMUP, () -> {
+                return list.map(x -> x * 2).size();
+            });
+        }
+        System.out.println();
+    }
+
+    @org.junit.jupiter.api.Test
+    public void scalingListFilter() {
+        printHeader("List: filter (accumulate + reverse, should be O(n))");
+
+        int[] sizes = {100, 1000, 10000, 100000};
+        for (int n : sizes) {
+            MezzeList<Long> list = buildListOfSize(n);
+            scalingBenchmark("filter n=" + n, WARMUP, () -> {
+                return list.filter(x -> x % 2 == 0).size();
+            });
+        }
+        System.out.println();
+    }
+
+    @org.junit.jupiter.api.Test
+    public void scalingListFold() {
+        printHeader("List: fold (iterative, should be O(n))");
+
+        int[] sizes = {100, 1000, 10000, 100000};
+        for (int n : sizes) {
+            MezzeList<Long> list = buildListOfSize(n);
+            scalingBenchmark("fold n=" + n, WARMUP, () -> {
+                return list.fold(0L, Long::sum);
+            });
+        }
+        System.out.println();
+    }
+
+    @org.junit.jupiter.api.Test
+    public void scalingListReverse() {
+        printHeader("List: reverse (via fold, should be O(n))");
+
+        int[] sizes = {100, 1000, 10000, 100000};
+        for (int n : sizes) {
+            MezzeList<Long> list = buildListOfSize(n);
+            scalingBenchmark("reverse n=" + n, WARMUP, () -> {
+                return list.reverse().size();
+            });
+        }
+        System.out.println();
+    }
+
+    private static MezzeList<Long> buildListOfSize(int n) {
+        MezzeList<Long> list = MezzeList.empty();
+        for (int i = n - 1; i >= 0; i--) {
+            list = MezzeList.cons((long) i, list);
+        }
+        return list;
     }
 
     // ==================== HELPERS ====================
