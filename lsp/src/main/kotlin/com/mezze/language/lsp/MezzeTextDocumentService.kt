@@ -2,6 +2,9 @@ package com.mezze.language.lsp
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
+import com.mezze.language.typechecker.TypeCheckResult
+import com.mezze.language.typechecker.ResolvedImport
+import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.parsedast.*
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.CodebasePopulator

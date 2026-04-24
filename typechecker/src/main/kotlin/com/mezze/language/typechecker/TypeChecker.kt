@@ -1036,7 +1036,7 @@ class TypeChecker(
      * @throws TypeCheckError if type checking fails
      */
     @JvmOverloads
-    fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.ast.TypeCheckResult {
+    fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.typechecker.TypeCheckResult {
         // Reset type variable counter for consistent naming (old behavior)
         com.mezze.language.ast.TypeVar.resetCounter()
 
@@ -1047,9 +1047,9 @@ class TypeChecker(
             is TypeCheckResult.Success -> {
                 val resolvedImports = buildResolvedImports(result.importContext)
                 val structuredWarnings = result.warnings.map { warning ->
-                    com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
+                    com.mezze.language.typechecker.TypeCheckWarning(warning.message, warning.sourceLocation)
                 }
-                com.mezze.language.ast.TypeCheckResult(
+                com.mezze.language.typechecker.TypeCheckResult(
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
@@ -1122,53 +1122,53 @@ class TypeChecker(
     /**
      * Build resolved imports from import context for IDE support.
      */
-    private fun buildResolvedImports(importContext: ModuleImportContext?): List<com.mezze.language.ast.ResolvedImport> {
+    private fun buildResolvedImports(importContext: ModuleImportContext?): List<com.mezze.language.typechecker.ResolvedImport> {
         if (importContext == null) return emptyList()
 
-        val imports = mutableListOf<com.mezze.language.ast.ResolvedImport>()
+        val imports = mutableListOf<com.mezze.language.typechecker.ResolvedImport>()
 
         // Add imported bindings (functions/values)
         for ((name, binding) in importContext.importedBindings) {
-            imports.add(com.mezze.language.ast.ResolvedImport(
+            imports.add(com.mezze.language.typechecker.ResolvedImport(
                 localName = name,
                 originalName = binding.originalName,
                 modulePath = binding.modulePath,
                 type = binding.type,
-                kind = com.mezze.language.ast.ImportKind.FUNCTION
+                kind = com.mezze.language.typechecker.ImportKind.FUNCTION
             ))
         }
 
         // Add imported types - use TypeApplication for type representation
         for ((name, typeDecl) in importContext.importedTypes) {
             val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar(it)) }
-            imports.add(com.mezze.language.ast.ResolvedImport(
+            imports.add(com.mezze.language.typechecker.ResolvedImport(
                 localName = name,
                 originalName = name,
                 modulePath = "",  // TypeDeclaration doesn't track module path
                 type = MezzeType.TypeApplication(name, typeParams),
-                kind = com.mezze.language.ast.ImportKind.TYPE
+                kind = com.mezze.language.typechecker.ImportKind.TYPE
             ))
         }
 
         // Add imported abilities - use simple type application for representation
         for ((name, _) in importContext.importedAbilities) {
-            imports.add(com.mezze.language.ast.ResolvedImport(
+            imports.add(com.mezze.language.typechecker.ResolvedImport(
                 localName = name,
                 originalName = name,
                 modulePath = "",
                 type = MezzeType.TypeApplication(name, emptyList()),
-                kind = com.mezze.language.ast.ImportKind.ABILITY
+                kind = com.mezze.language.typechecker.ImportKind.ABILITY
             ))
         }
 
         // Add imported effects - use simple type application for representation
         for ((name, _) in importContext.importedEffects) {
-            imports.add(com.mezze.language.ast.ResolvedImport(
+            imports.add(com.mezze.language.typechecker.ResolvedImport(
                 localName = name,
                 originalName = name,
                 modulePath = "",
                 type = MezzeType.TypeApplication(name, emptyList()),
-                kind = com.mezze.language.ast.ImportKind.EFFECT
+                kind = com.mezze.language.typechecker.ImportKind.EFFECT
             ))
         }
 

@@ -34,12 +34,12 @@ class PolymorphicInstantiationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
+    private fun parseAndTypeCheck(source: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
-    private fun getBindingType(result: com.mezze.language.ast.TypeCheckResult, name: String): MezzeType? {
+    private fun getBindingType(result: TypeCheckResult, name: String): MezzeType? {
         return result.getVariableType(name)
     }
 

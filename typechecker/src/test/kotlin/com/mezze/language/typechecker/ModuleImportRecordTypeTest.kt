@@ -27,7 +27,7 @@ class ModuleImportRecordTypeTest {
         TestUtils.setupProjectRoot()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
+    private fun parseAndTypeCheck(source: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }

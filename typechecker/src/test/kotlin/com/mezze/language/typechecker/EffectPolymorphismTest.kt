@@ -29,7 +29,7 @@ class EffectPolymorphismTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
+    private fun typeCheck(code: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(code, "test.mz")
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }

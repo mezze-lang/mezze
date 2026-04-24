@@ -81,14 +81,14 @@ public final class MezzeTestHelper {
     /**
      * Parse and type-check source code, returning the TypeCheckResult.
      */
-    public static com.mezze.language.ast.TypeCheckResult typeCheck(String sourceCode) {
+    public static com.mezze.language.typechecker.TypeCheckResult typeCheck(String sourceCode) {
         return typeCheck(sourceCode, null);
     }
 
     /**
      * Parse and type-check source code with custom project root.
      */
-    public static com.mezze.language.ast.TypeCheckResult typeCheck(String sourceCode, Path projectRoot) {
+    public static com.mezze.language.typechecker.TypeCheckResult typeCheck(String sourceCode, Path projectRoot) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));

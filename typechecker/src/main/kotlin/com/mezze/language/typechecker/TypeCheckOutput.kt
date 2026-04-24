@@ -1,0 +1,49 @@
+package com.mezze.language.typechecker
+
+import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.SourceLocation
+import kotlinx.serialization.Serializable
+
+/**
+ * Public output types from the typechecker.
+ * These are the results of type checking — consumed by the interpreter, CLI, and LSP.
+ */
+
+@Serializable
+data class TypeCheckResult(
+    val resolvedImports: List<ResolvedImport> = emptyList(),
+    val warnings: List<TypeCheckWarning> = emptyList(),
+    val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
+    val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
+    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
+    val typedModule: com.mezze.language.typedast.TypedModule? = null,
+    val performerRecords: List<Array<String>> = emptyList(),
+    val loadedModules: Map<String, com.mezze.language.typedast.TypedModule> = emptyMap()
+) {
+    fun getVariableType(name: String): MezzeType? {
+        return typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == name }
+            ?.scheme?.type
+    }
+}
+
+@Serializable
+data class TypeCheckWarning(
+    val message: String,
+    val sourceLocation: SourceLocation? = null
+)
+
+@Serializable
+data class ResolvedImport(
+    val localName: String,
+    val originalName: String,
+    val modulePath: String,
+    val type: MezzeType,
+    val kind: ImportKind
+)
+
+@Serializable
+enum class ImportKind {
+    FUNCTION, TYPE, EFFECT, ABILITY, PERFORMER
+}

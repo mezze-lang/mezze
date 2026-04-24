@@ -38,7 +38,7 @@ class ConstructorResolutionTest {
         return parsedModule
     }
 
-    private fun typeCheckAndGetResult(source: String): com.mezze.language.ast.TypeCheckResult {
+    private fun typeCheckAndGetResult(source: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }

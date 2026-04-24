@@ -36,7 +36,7 @@ class TypeApplicationExpansionTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String): com.mezze.language.ast.TypeCheckResult {
+    private fun parseAndTypeCheck(code: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(code, "test.mz")
         return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }

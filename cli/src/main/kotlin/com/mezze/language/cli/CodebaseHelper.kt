@@ -1,6 +1,6 @@
 package com.mezze.language.cli
 
-import com.mezze.language.ast.TypeCheckResult
+import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.typechecker.cache.TypeCheckCache

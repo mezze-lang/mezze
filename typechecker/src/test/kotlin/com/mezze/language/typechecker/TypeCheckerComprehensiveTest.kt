@@ -28,7 +28,7 @@ class TypeCheckerComprehensiveTest {
         return File(path).readText()
     }
 
-    private fun parseAndTypeCheck(source: String): com.mezze.language.ast.TypeCheckResult {
+    private fun parseAndTypeCheck(source: String): TypeCheckResult {
         // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
