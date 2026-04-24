@@ -111,6 +111,32 @@ class AbilityValidationBugTest {
     }
 
     @Test
+    fun `polymorphic function should stay generic not specialize to first call site`() {
+        // my_func should have type {x: 'a} -> Str with Show 'a
+        // NOT specialized to {x: Int} -> Str
+        val result = eval("""
+            use std::int
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> int::to_str {n = it}
+            }
+            impl Show for Str where {
+              show = {it} -> it
+            }
+            let my_func = {x} -> x.show {}
+
+            # Call with Int
+            let r1 = my_func {x = 5}
+            # Call with Str — should work if my_func is truly polymorphic
+            let r2 = my_func {x = "hello"}
+            r1
+        """.trimIndent())
+        assertEquals("5", result)
+    }
+
+    @Test
     fun `valid ability with return type matching receiver type`() {
         val result = eval("""
             ability Double for 'a where {
