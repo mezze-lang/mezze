@@ -110,10 +110,12 @@ class AbilityValidationBugTest {
         assertEquals("int", result)
     }
 
+    // ========================================================================
+    // BUG 3: Let-generalization — polymorphic functions must stay generic
+    // ========================================================================
+
     @Test
-    fun `polymorphic function should stay generic not specialize to first call site`() {
-        // my_func should have type {x: 'a} -> Str with Show 'a
-        // NOT specialized to {x: Int} -> Str
+    fun `polymorphic function called with two different types`() {
         val result = eval("""
             use std::int
             ability Show for 'a where {
@@ -127,13 +129,94 @@ class AbilityValidationBugTest {
             }
             let my_func = {x} -> x.show {}
 
-            # Call with Int
             let r1 = my_func {x = 5}
-            # Call with Str — should work if my_func is truly polymorphic
             let r2 = my_func {x = "hello"}
             r1
         """.trimIndent())
         assertEquals("5", result)
+    }
+
+    @Test
+    fun `polymorphic function second call site returns correct value`() {
+        val result = eval("""
+            use std::int
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> int::to_str {n = it}
+            }
+            impl Show for Str where {
+              show = {it} -> it
+            }
+            let my_func = {x} -> x.show {}
+
+            let r1 = my_func {x = 5}
+            let r2 = my_func {x = "hello"}
+            r2
+        """.trimIndent())
+        assertEquals("hello", result)
+    }
+
+    @Test
+    fun `polymorphic function called with Str first then Int`() {
+        // Order shouldn't matter — both should work regardless of which is first
+        val result = eval("""
+            use std::int
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> int::to_str {n = it}
+            }
+            impl Show for Str where {
+              show = {it} -> it
+            }
+            let my_func = {x} -> x.show {}
+
+            let r1 = my_func {x = "world"}
+            let r2 = my_func {x = 42}
+            r2
+        """.trimIndent())
+        assertEquals("42", result)
+    }
+
+    @Test
+    fun `polymorphic function with multiple ability constraints`() {
+        val result = eval("""
+            ability Describe for 'a where {
+              describe: {it: 'a} -> Str
+            }
+            impl Describe for Int where {
+              describe = {it} -> "int"
+            }
+            impl Describe for Bool where {
+              describe = {it} -> "bool"
+            }
+            let show_type = {x} -> x.describe {}
+
+            let r1 = show_type {x = 42}
+            let r2 = show_type {x = True}
+            r2
+        """.trimIndent())
+        assertEquals("bool", result)
+    }
+
+    @Test
+    fun `value binding with ability should NOT generalize`() {
+        // let x = some_ability_call should stay monomorphic
+        // This is the case the original restriction was designed for
+        val result = eval("""
+            ability Double for 'a where {
+              double: {it: 'a} -> 'a
+            }
+            impl Double for Int where {
+              double = {it} -> it + it
+            }
+            let x = 5.double {}
+            x
+        """.trimIndent())
+        assertEquals(10L, result)
     }
 
     @Test
