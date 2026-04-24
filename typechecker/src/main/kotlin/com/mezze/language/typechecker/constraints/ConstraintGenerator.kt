@@ -419,8 +419,15 @@ class ConstraintGenerator(
                                     else -> false
                                 }
 
-                                val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints) {
-                                    // User explicitly declared ability constraints - allow generalization
+                                // Lambda bindings (functions) should ALWAYS allow generalization
+                                // with ability constraints. Only VALUE bindings (let x = Parse.decode ...)
+                                // should block generalization, because their type variable represents
+                                // a single concrete type to be inferred from usage context.
+                                val isLambdaBinding = item.value is com.mezze.language.parsedast.ParsedLambda
+
+                                val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints || isLambdaBinding) {
+                                    // User explicitly declared ability constraints OR binding is a function
+                                    // — allow generalization (function is polymorphic over its constraint)
                                     false
                                 } else {
                                     result.abilityConstraints.any { constraint ->
