@@ -72,6 +72,56 @@ class AbilityValidationBugTest {
     }
 
     @Test
+    fun `show with correct record param syntax should work`() {
+        val result = eval("""
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> "int"
+            }
+            5.show {}
+        """.trimIndent())
+        assertEquals("int", result)
+    }
+
+    @Test
+    fun `bare type annotation should fail — Mezze uses record params`() {
+        // ability declares show: 'a -> Str (bare type, not {it: 'a} -> Str)
+        // This should fail because Mezze's calling convention is record-based:
+        // 5.show {} passes {it = 5}, which doesn't match bare 'a parameter
+        shouldTypeError("""
+            use std::int
+            ability Show for 'a where {
+              show: 'a -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> int::to_str {n = it}
+            }
+            5.show {}
+        """.trimIndent(), "bare type annotation (should use {it: 'a} -> Str)")
+    }
+
+    @Test
+    fun `show in main with perform should work`() {
+        val result = eval("""
+            use std::effects::log::{Console, println}
+            use std::int
+            ability Show for 'a where {
+              show: {it: 'a} -> Str
+            }
+            impl Show for Int where {
+              show = {it} -> int::to_str {n = it}
+            }
+            perform Console in do
+              let x = 5.show {}
+              println {msg = x}
+              x
+        """.trimIndent())
+        assertEquals("5", result)
+    }
+
+    @Test
     fun `polymorphic show via dictionary passing`() {
         val result = eval("""
             ability Describe for 'a where {
